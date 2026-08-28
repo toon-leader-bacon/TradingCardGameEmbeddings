@@ -1,0 +1,3 @@
+raw_data_location,metrics_class,metrics_file_location,dojo_class,label_kind
+data/raw/17lands/draft_data/,AveragePickNumberMetric,data/final/metrics/17lands/draft/,AveragePickNumberDojo,count
+data/raw/17lands/draft_data/,PickSideboardRateMetric,data/final/metrics/17lands/draft/,PickSideboardRateDojo,probability

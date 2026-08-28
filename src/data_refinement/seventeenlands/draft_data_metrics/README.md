@@ -72,7 +72,14 @@ actually needs it.
   `accumulate_over_chunks()`, and `../metric_writer.py`'s
   `write_metric_results()`, shared identically with `MetricScanner`
   and `ReplayMetricScanner` (see `game_data_metrics/README.md`'s
-  "Shared machinery" note for why).
+  "Shared machinery" note for why). `DEFAULT_OUTPUT_DIR`/
+  `DEFAULT_OUTPUT_NAME` and the `default_output_path(expansion,
+  format_code)` staticmethod name this pipeline's conventional output
+  location (a recommended default, not a requirement — `output_path`
+  stays a required constructor parameter regardless); the two thin
+  per-metric `Dojo`s under `src/dojos/metric_regression/`
+  (`AveragePickNumberDojo`, `PickSideboardRateDojo`) default their own
+  `metrics_path` through this exact method.
 - `metrics/` — one file per concrete `DraftMetric` (renamed from
   `jobs/`), same per-file convention as `game_data_metrics/metrics/`.
   `average_pick_number.py` (`AveragePickNumberMetric`) and

@@ -34,9 +34,7 @@ class _FakeMetric:
         self.rows_seen = 0
         self.chunks_seen = 0
 
-    def accumulate(
-        self, chunk: pd.DataFrame, card_columns: list[CardColumnSet]
-    ) -> None:
+    def accumulate(self, chunk: pd.DataFrame, card_columns: list[CardColumnSet]) -> None:
         self.rows_seen += len(chunk)
         self.chunks_seen += 1
 
@@ -70,9 +68,7 @@ class _RaisingAfterNChunksMetric(_FakeMetric):
         super().__init__()
         self._raise_after_chunks = raise_after_chunks
 
-    def accumulate(
-        self, chunk: pd.DataFrame, card_columns: list[CardColumnSet]
-    ) -> None:
+    def accumulate(self, chunk: pd.DataFrame, card_columns: list[CardColumnSet]) -> None:
         if self.chunks_seen >= self._raise_after_chunks:
             raise RuntimeError("simulated crash")
         super().accumulate(chunk, card_columns)
@@ -158,9 +154,7 @@ class TestScan:
 
         assert result.unresolved_column_names == ["Bolt"]
 
-    def test_empty_results_still_write_a_correctly_typed_parquet_file(
-        self, tmp_path: Path
-    ) -> None:
+    def test_empty_results_still_write_a_correctly_typed_parquet_file(self, tmp_path: Path) -> None:
         # Regression test for a bug the file-critic caught: when every
         # metric produces zero MetricResults (here, no metrics at
         # all), pd.DataFrame([], columns=[...]) has nothing to infer
@@ -213,9 +207,7 @@ class TestScan:
         assert df.iloc[0]["sample_size"] == 4
         assert df.iloc[0]["value"] == 0.5
 
-    def test_resumes_from_checkpoint_without_reprocessing_rows(
-        self, tmp_path: Path
-    ) -> None:
+    def test_resumes_from_checkpoint_without_reprocessing_rows(self, tmp_path: Path) -> None:
         registry = CardBinder()
         registry.add(_card("Bolt"))
         csv_path = tmp_path / "game_data.csv"
@@ -280,9 +272,7 @@ class TestScan:
         assert result_df.iloc[0]["sample_size"] == expected.sample_size
         assert result_df.iloc[0]["value"] == pytest.approx(expected.value)
 
-    def test_checkpoint_written_periodically_reflects_cumulative_rows(
-        self, tmp_path: Path
-    ) -> None:
+    def test_checkpoint_written_periodically_reflects_cumulative_rows(self, tmp_path: Path) -> None:
         # MetricScanner's internal chunk size is 100_000 rows, so this
         # fixture needs to exceed that to actually exercise a second
         # chunk — a smaller file would always be exactly one chunk,
@@ -338,3 +328,14 @@ class TestFindCardColumns:
 # MetricCheckpoint (see metric_checkpoint.py) — its own dedicated tests
 # are in tests/data_refinement/seventeenlands/test_metric_checkpoint.py,
 # not duplicated here.
+
+
+class TestDefaultOutputPath:
+    def test_matches_default_output_dir_and_name(self) -> None:
+        expected = MetricScanner.DEFAULT_OUTPUT_DIR / "MSH.PremierDraft.parquet"
+        assert MetricScanner.default_output_path("MSH", "PremierDraft") == expected
+
+    def test_varies_by_expansion_and_format(self) -> None:
+        assert MetricScanner.default_output_path(
+            "MSH", "PremierDraft"
+        ) != MetricScanner.default_output_path("MSH", "TradDraft")

@@ -41,6 +41,11 @@ different (RL environment) shape if one is ever added.
 - `game_classification/` — `GameClassificationDojo`, the first
   concrete dojo: predicts a card's `GameId` from its own embedding.
   See `game_classification/README.md`.
+- `metric_regression/` — `MetricRegressionDojo`, a second concrete
+  dojo: regresses a card's embedding against a numeric per-card
+  17lands draft metric (`average_pick_number`, `pick_sideboard_rate`),
+  read from that metric's own `MetricResult` parquet output. See
+  `metric_regression/README.md`.
 
 ## How it works
 

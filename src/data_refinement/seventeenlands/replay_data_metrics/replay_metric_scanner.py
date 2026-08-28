@@ -31,6 +31,7 @@ scan()'s docstring below for exactly how that closure works.
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.seventeenlands.metric_checkpoint import MetricCheckpoint
@@ -84,6 +85,9 @@ class ReplayMetricScanner:
     instance.
     """
 
+    DEFAULT_OUTPUT_DIR: ClassVar[Path] = Path("data/final/metrics/17lands/replay")
+    DEFAULT_OUTPUT_NAME: ClassVar[str] = "{expansion}.{format_code}.parquet"
+
     def __init__(
         self,
         raw_csv_path: Path,
@@ -125,6 +129,36 @@ class ReplayMetricScanner:
         self.checkpoint_path = checkpoint_path
         self.source_game = source_game
         self.checkpoint_every_n_chunks = checkpoint_every_n_chunks
+
+    @staticmethod
+    def default_output_path(expansion: str, format_code: str) -> Path:
+        """The conventional output_path for one (expansion, format_code) scan.
+
+        A recommended default, not an enforced requirement —
+        output_path stays a required constructor parameter; this
+        exists so a caller can compute the same conventional path this
+        project already uses elsewhere, instead of re-typing the
+        string.
+
+        Inputs:
+            expansion: 17lands expansion code.
+            format_code: 17lands format code.
+        Output: DEFAULT_OUTPUT_DIR / DEFAULT_OUTPUT_NAME, formatted
+            with expansion/format_code (e.g.
+            data/final/metrics/17lands/replay/MSH.PremierDraft.parquet).
+        Side effects: none — purely a path computation.
+        Exceptions: none.
+
+        Example:
+            >>> ReplayMetricScanner.default_output_path("MSH", "PremierDraft")
+            PosixPath('data/final/metrics/17lands/replay/MSH.PremierDraft.parquet')
+        """
+        return (
+            ReplayMetricScanner.DEFAULT_OUTPUT_DIR
+            / ReplayMetricScanner.DEFAULT_OUTPUT_NAME.format(
+                expansion=expansion, format_code=format_code
+            )
+        )
 
     def scan(self) -> ReplayMetricScanResult:
         """Stream the CSV, resolving hands and checkpointing, then write results.
@@ -190,8 +224,8 @@ class ReplayMetricScanner:
             ...     Path("data/raw/17lands/replay_data/MSH.PremierDraft.csv"),
             ...     card_binder,
             ...     [OpeningHandWinRateMetric(expansion="MSH", format_code="PremierDraft")],
-            ...     Path("data/final/metrics/17lands/MSH.PremierDraft.replay.parquet"),
-            ...     Path("data/final/metrics/17lands/MSH.PremierDraft.replay.checkpoint.json"),
+            ...     Path("data/final/metrics/17lands/replay/MSH.PremierDraft.parquet"),
+            ...     Path("data/final/metrics/17lands/replay/MSH.PremierDraft.checkpoint.json"),
             ...     GameId.MTG,
             ... )
             >>> result = scanner.scan()

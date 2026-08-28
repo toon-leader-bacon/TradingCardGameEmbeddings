@@ -21,7 +21,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Iterable
+from typing import ClassVar, Iterable
 from uuid import UUID
 
 from src.data_refinement.card_binder.alias_ledger import AliasLedger
@@ -69,6 +69,9 @@ class CardBinder:
     Construction is always empty (__init__ takes no
     arguments); load() is the sole populated-construction entry point.
     """
+
+    DEFAULT_OUTPUT_DIR: ClassVar[Path] = Path("data/final/cards")
+    DEFAULT_OUTPUT_NAME: ClassVar[str] = "{game}.jsonl"
 
     def __init__(self) -> None:
         """Construct an empty binder, with an empty owned AliasLedger.
@@ -302,9 +305,7 @@ class CardBinder:
             >>> binder.register_alias(GameId.MTG, DataSource.ARENA, "76497", nocab_uuid)
         """
         if nocab_uuid not in self._cards_by_uuid:
-            raise ValueError(
-                f"register_alias: {nocab_uuid} is not a card this binder holds"
-            )
+            raise ValueError(f"register_alias: {nocab_uuid} is not a card this binder holds")
         self._alias_ledger.register(source_game, data_source, source_id, nocab_uuid)
 
     @staticmethod
@@ -362,9 +363,7 @@ class CardBinder:
                         provenance=Provenance(
                             data_source=DataSource(row["provenance"]["data_source"]),
                             source_id=row["provenance"]["source_id"],
-                            fetched_at=datetime.fromisoformat(
-                                row["provenance"]["fetched_at"]
-                            ),
+                            fetched_at=datetime.fromisoformat(row["provenance"]["fetched_at"]),
                         ),
                     )
                     result = binder.add(card)
@@ -386,6 +385,31 @@ class CardBinder:
                             stored_card.nocab_uuid,
                         )
         return binder
+
+    @staticmethod
+    def default_output_path(source_game: GameId) -> Path:
+        """The conventional save() path for one game's binder file.
+
+        A recommended default, not an enforced requirement — callers
+        remain free to save() to any path; this exists so a caller
+        (e.g. a Dojo defaulting its own metrics_path/binder location)
+        can compute the same conventional path this project already
+        uses elsewhere, instead of re-typing the string.
+
+        Inputs:
+            source_game: which game's conventional path to compute.
+        Output: DEFAULT_OUTPUT_DIR / DEFAULT_OUTPUT_NAME, formatted
+            with source_game (e.g. data/final/cards/mtg.jsonl).
+        Side effects: none — purely a path computation.
+        Exceptions: none.
+
+        Example:
+            >>> CardBinder.default_output_path(GameId.MTG)
+            PosixPath('data/final/cards/mtg.jsonl')
+        """
+        return CardBinder.DEFAULT_OUTPUT_DIR / CardBinder.DEFAULT_OUTPUT_NAME.format(
+            game=source_game.value
+        )
 
     def save(self, path: Path, source_game: GameId) -> None:
         """Write this binder's cards for one game to path, as JSONL.
@@ -430,9 +454,7 @@ class CardBinder:
 
         self._alias_ledger.save(self._alias_ledger_path(path), source_game)
 
-    def _find_existing_by_name(
-        self, source_game: GameId, name: str
-    ) -> GenericCard | None:
+    def _find_existing_by_name(self, source_game: GameId, name: str) -> GenericCard | None:
         """Look up the currently-stored card for (source_game, name), if any.
 
         Private helper — single consumer is add(). Ported unchanged from the

@@ -22,6 +22,7 @@ game_data_metrics/metrics/average_copies_when_included.py's identical
 reasoning for its own non-extraction) — this is only "rule of two."
 """
 
+from typing import ClassVar
 from uuid import UUID
 
 import pandas as pd
@@ -40,7 +41,7 @@ class PickSideboardRateMetric:
     that same scan).
     """
 
-    name: str = _METRIC_NAME
+    name: ClassVar[str] = _METRIC_NAME
 
     def __init__(self, expansion: str, format_code: str) -> None:
         """
@@ -91,16 +92,12 @@ class PickSideboardRateMetric:
         for uuid in resolved_picks.dropna().unique():
             mask = resolved_picks == uuid
             pick_count_this_chunk = int(mask.sum())
-            sideboard_rate_sum_this_chunk = float(
-                chunk.loc[mask, "pick_sideboard_in_rate"].sum()
-            )
+            sideboard_rate_sum_this_chunk = float(chunk.loc[mask, "pick_sideboard_in_rate"].sum())
 
             self._sideboard_rate_sum[uuid] = (
                 self._sideboard_rate_sum.get(uuid, 0.0) + sideboard_rate_sum_this_chunk
             )
-            self._pick_count[uuid] = (
-                self._pick_count.get(uuid, 0) + pick_count_this_chunk
-            )
+            self._pick_count[uuid] = self._pick_count.get(uuid, 0) + pick_count_this_chunk
 
     def finalize(self) -> dict[UUID, MetricResult]:
         """Turn accumulated sideboard-rate sums/counts into MetricResult rows.
@@ -141,9 +138,7 @@ class PickSideboardRateMetric:
             "sideboard_rate_sum": {
                 str(uuid): value for uuid, value in self._sideboard_rate_sum.items()
             },
-            "pick_count": {
-                str(uuid): count for uuid, count in self._pick_count.items()
-            },
+            "pick_count": {str(uuid): count for uuid, count in self._pick_count.items()},
         }
 
     def load_state(self, state: dict) -> None:
@@ -159,8 +154,7 @@ class PickSideboardRateMetric:
             have produced.
         """
         self._sideboard_rate_sum = {
-            UUID(uuid_str): value
-            for uuid_str, value in state["sideboard_rate_sum"].items()
+            UUID(uuid_str): value for uuid_str, value in state["sideboard_rate_sum"].items()
         }
         self._pick_count = {
             UUID(uuid_str): count for uuid_str, count in state["pick_count"].items()

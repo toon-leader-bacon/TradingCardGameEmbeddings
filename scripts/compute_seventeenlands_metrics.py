@@ -22,8 +22,8 @@ already been run at least once to produce --binder-path. Rerunning is
 safe: the metric scan always overwrites its own output.
 
 Writes:
-    data/final/metrics/17lands/<expansion>.<format_code>.parquet
-    data/final/metrics/17lands/<expansion>.<format_code>.checkpoint.json (transient)
+    data/final/metrics/17lands/game/<expansion>.<format_code>.parquet
+    data/final/metrics/17lands/game/<expansion>.<format_code>.checkpoint.json (transient)
 
 To run:
   cd /Users/nocab/Projects/Personal/MTG_AI_2
@@ -107,12 +107,8 @@ def print_win_rate_leaderboard(
 
 def main() -> None:
     args = parse_args()
-    output_path = Path(
-        f"data/final/metrics/17lands/{args.expansion}.{args.format_code}.parquet"
-    )
-    checkpoint_path = Path(
-        f"data/final/metrics/17lands/{args.expansion}.{args.format_code}.checkpoint.json"
-    )
+    output_path = MetricScanner.default_output_path(args.expansion, args.format_code)
+    checkpoint_path = output_path.with_name(f"{output_path.stem}.checkpoint.json")
 
     print(f"Loading CardBinder from {args.binder_path}")
     binder = CardBinder.load([args.binder_path])

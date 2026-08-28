@@ -30,3 +30,6 @@ class DataSource(str, Enum):
     # multiverse_ids field) — added during CardBinder implementation,
     # not present in the original skeleton's enum members; same
     # extensibility story as the other members.
+    POKEMON_TCG = "pokemon_tcg"  # pokemon-tcg-data community GitHub
+    # repo (see src/data_retrieval/pokemon_tcg/downloader.py and
+    # src/data_refinement/card_binder/pokemon_tcg/ingestion_stage.py).

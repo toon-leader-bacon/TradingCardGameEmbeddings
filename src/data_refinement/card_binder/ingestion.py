@@ -80,9 +80,14 @@ class CardIngestionStage(Protocol):
         """Parse raw_path into one IngestedCandidate per raw record.
 
         Inputs:
-            raw_path: path to a raw source file (e.g. a Scryfall
-                oracle-cards .jsonl — see
-                scryfall/ingestion_stage.py's ScryfallCardIngestionStage).
+            raw_path: path to a raw source file, or a directory of raw
+                source files — interpretation is each implementation's
+                own concern (e.g. a single Scryfall oracle-cards
+                .jsonl file for ScryfallCardIngestionStage, vs. a
+                directory of per-set .json files for
+                PokemonTcgCardIngestionStage — see
+                scryfall/ingestion_stage.py and
+                pokemon_tcg/ingestion_stage.py).
             source_game: which game these cards belong to.
         Output: one IngestedCandidate per raw record found in raw_path,
             each card with its own freshly minted nocab_uuid. No

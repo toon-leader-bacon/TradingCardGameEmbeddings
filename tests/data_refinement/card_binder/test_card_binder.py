@@ -331,8 +331,7 @@ class TestLoad:
         path.write_text(
             '{"nocab_uuid": "%s", "source_game": "mtg", "name": "Bolt", '
             '"raw_content": {"a": 1}, "provenance": {"data_source": "scryfall", '
-            '"source_id": "src-1", "fetched_at": "2026-01-01T00:00:00+00:00"}}\n'
-            % card.nocab_uuid
+            '"source_id": "src-1", "fetched_at": "2026-01-01T00:00:00+00:00"}}\n' % card.nocab_uuid
         )
 
         binder = CardBinder.load([path])
@@ -351,12 +350,10 @@ class TestLoad:
         loaded = CardBinder.load([path])
 
         assert (
-            loaded.get_by_alias(GameId.MTG, DataSource.ARENA, "76497").nocab_uuid
-            == card.nocab_uuid
+            loaded.get_by_alias(GameId.MTG, DataSource.ARENA, "76497").nocab_uuid == card.nocab_uuid
         )
         assert (
-            loaded.get_by_alias(GameId.MTG, DataSource.MTGO, "88685").nocab_uuid
-            == card.nocab_uuid
+            loaded.get_by_alias(GameId.MTG, DataSource.MTGO, "88685").nocab_uuid == card.nocab_uuid
         )
 
 
@@ -410,3 +407,15 @@ class TestSave:
         binder.save(path, GameId.MTG)
 
         assert (tmp_path / "mtg.alias_ledger.jsonl").exists()
+
+
+class TestDefaultOutputPath:
+    def test_matches_default_output_dir_and_name(self) -> None:
+        assert CardBinder.default_output_path(GameId.MTG) == CardBinder.DEFAULT_OUTPUT_DIR / (
+            "mtg.jsonl"
+        )
+
+    def test_varies_by_game(self) -> None:
+        assert CardBinder.default_output_path(GameId.MTG) != CardBinder.default_output_path(
+            GameId.POKEMON
+        )

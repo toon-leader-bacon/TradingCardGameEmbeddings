@@ -38,6 +38,7 @@ before.
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.seventeenlands.draft_data_metrics.draft_metric import (
@@ -75,6 +76,9 @@ class DraftMetricScanner:
     different set of active metrics gets its own DraftMetricScanner
     instance.
     """
+
+    DEFAULT_OUTPUT_DIR: ClassVar[Path] = Path("data/final/metrics/17lands/draft")
+    DEFAULT_OUTPUT_NAME: ClassVar[str] = "{expansion}.{format_code}.parquet"
 
     def __init__(
         self,
@@ -116,6 +120,37 @@ class DraftMetricScanner:
         self.checkpoint_path = checkpoint_path
         self.source_game = source_game
         self.checkpoint_every_n_chunks = checkpoint_every_n_chunks
+
+    @staticmethod
+    def default_output_path(expansion: str, format_code: str) -> Path:
+        """The conventional output_path for one (expansion, format_code) scan.
+
+        A recommended default, not an enforced requirement —
+        output_path stays a required constructor parameter; this
+        exists so a caller (e.g. AveragePickNumberDojo/
+        PickSideboardRateDojo defaulting their own metrics_path) can
+        compute the same conventional path this project already uses
+        elsewhere, instead of re-typing the string.
+
+        Inputs:
+            expansion: 17lands expansion code.
+            format_code: 17lands format code.
+        Output: DEFAULT_OUTPUT_DIR / DEFAULT_OUTPUT_NAME, formatted
+            with expansion/format_code (e.g.
+            data/final/metrics/17lands/draft/MSH.PremierDraft.parquet).
+        Side effects: none — purely a path computation.
+        Exceptions: none.
+
+        Example:
+            >>> DraftMetricScanner.default_output_path("MSH", "PremierDraft")
+            PosixPath('data/final/metrics/17lands/draft/MSH.PremierDraft.parquet')
+        """
+        return (
+            DraftMetricScanner.DEFAULT_OUTPUT_DIR
+            / DraftMetricScanner.DEFAULT_OUTPUT_NAME.format(
+                expansion=expansion, format_code=format_code
+            )
+        )
 
     def scan(self) -> DraftMetricScanResult:
         """Stream the CSV, resolving picks per chunk, checkpointing, and

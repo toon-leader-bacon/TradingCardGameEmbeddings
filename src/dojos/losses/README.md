@@ -16,6 +16,9 @@ internal to whichever dojo composed it into its own `compute_loss`.
   `Loss[torch.Tensor, int]`: standard cross-entropy over per-class
   logits, with configurable label smoothing, delegating to
   `torch.nn.CrossEntropyLoss` internally.
+- `mse_loss.py` — `MSELoss`, a `Loss[torch.Tensor, float]`: standard
+  mean-squared error over scalar predictions, delegating to
+  `torch.nn.MSELoss` internally. No constructor parameters.
 
 ## How to run
 
@@ -24,4 +27,11 @@ from src.dojos.losses.cross_entropy_loss import CrossEntropyLoss
 
 loss = CrossEntropyLoss(label_smoothing=0.1)
 loss.compute(predictions, labels)  # predictions: (batch, num_classes) logits
+```
+
+```python
+from src.dojos.losses.mse_loss import MSELoss
+
+loss = MSELoss()
+loss.compute(predictions, labels)  # predictions: (batch,) scalars
 ```

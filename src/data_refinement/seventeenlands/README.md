@@ -55,13 +55,18 @@ logic, not duplicated per pipeline):
   still bare placeholders. See
   [`replay_data_metrics/README.md`](replay_data_metrics/README.md).
 
-**Known, unresolved inconsistency:** the three pipelines use three
-different output-path conventions for the same kind of distinction —
-`game_data_metrics` by bare filename
-(`data/final/metrics/17lands/<expansion>.<format>.parquet`),
-`replay_data_metrics` by filename suffix
-(`data/final/metrics/17lands/<expansion>.<format>.replay.parquet`),
-and `draft_data_metrics` by subdirectory
-(`data/final/metrics/17lands/draft/<expansion>.<format>.parquet`).
-Not resolved — worth deciding one convention next time any of the
-three pipelines' output path is touched.
+**Output-path convention:** all three pipelines now write under their
+own subdirectory of `data/final/metrics/17lands/` —
+`game_data_metrics` → `.../game/<expansion>.<format>.parquet`,
+`draft_data_metrics` → `.../draft/<expansion>.<format>.parquet`,
+`replay_data_metrics` → `.../replay/<expansion>.<format>.parquet` —
+resolving the three-different-conventions inconsistency this section
+used to document (bare filename / filename suffix / subdirectory).
+Each `*MetricScanner` names its own convention as a
+`DEFAULT_OUTPUT_DIR`/`DEFAULT_OUTPUT_NAME` pair plus a
+`default_output_path(...)` staticmethod (see each pipeline's own
+README) — a recommended default any caller may use, not an enforced
+requirement; `output_path` stays a required constructor parameter on
+every scanner regardless, and a future pipeline is free to organize
+its own output differently as long as its own consumer understands
+that convention.

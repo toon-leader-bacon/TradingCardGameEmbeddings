@@ -94,7 +94,13 @@ rather than defining its own narrower one.
   `get_by_alias()`, `all_uuids()`, `add()`, `register_alias()`,
   `load()`/`save()`. `AddOutcome`/`AddResult` (the three possible
   outcomes of one `add()` call: `INSERTED`, `CONTENT_UPDATED`,
-  `KEPT_EXISTING`) also live here.
+  `KEPT_EXISTING`) also live here. `DEFAULT_OUTPUT_DIR`/
+  `DEFAULT_OUTPUT_NAME` and the `default_output_path(source_game)`
+  staticmethod (e.g. `CardBinder.default_output_path(GameId.MTG) ==
+  Path("data/final/cards/mtg.jsonl")`) name this project's
+  conventional per-game save location — a recommended default any
+  caller may use, not an enforced requirement; `save()`'s own `path`
+  parameter stays required regardless.
 - `card_lookup.py` — `CardLookup`, described above.
 - `alias_ledger.py` — `AliasLedger`, described above. Has no opinion
   about which source wins a naming collision — that's entirely
@@ -114,15 +120,33 @@ rather than defining its own narrower one.
   candidate, save, return a tallied `IngestSummary`. A plain function,
   not an orchestrator class — matches the "thin runnable snippet"
   pattern `src/data_retrieval/README.md`'s own examples use.
-- `scryfall/ingestion_stage.py` — `ScryfallCardIngestionStage`, the one
-  current `CardIngestionStage` implementation. Keys off Scryfall's
-  `oracle_id` (not the printing-specific `id` field — the oracle-cards
-  bulk dump is already deduplicated to one row per `oracle_id`) and
-  extracts `arena_id`/`mtgo_id`/`mtgo_foil_id`/each `multiverse_ids`
-  entry as aliases, whichever are present on a given row (presence is
+- `scryfall/ingestion_stage.py` — `ScryfallCardIngestionStage`, one
+  `CardIngestionStage` implementation, reading a single Scryfall
+  oracle-cards `.jsonl` file. Keys off Scryfall's `oracle_id` (not the
+  printing-specific `id` field — the oracle-cards bulk dump is already
+  deduplicated to one row per `oracle_id`) and extracts
+  `arena_id`/`mtgo_id`/`mtgo_foil_id`/each `multiverse_ids` entry as
+  aliases, whichever are present on a given row (presence is
   per-row-optional — e.g. an Arena-illegal card has no `arena_id`).
   All Scryfall-specific identity-extraction knowledge lives here, not
   in `CardBinder`/`AliasLedger`, which stay source-agnostic.
+- `pokemon_tcg/ingestion_stage.py` — `PokemonTcgCardIngestionStage`,
+  the second `CardIngestionStage` implementation. Unlike Scryfall's
+  stage, `raw_path` here is a *directory* of pokemon-tcg-data's
+  per-set `.json` files (each a JSON array, not JSONL) — every
+  `*.json` file directly under `raw_path` is read and every array
+  element across all of them becomes one `IngestedCandidate`
+  (`CardIngestionStage.ingest`'s docstring documents `raw_path` as
+  file-or-directory precisely because of this). Keys off the row's
+  `id` field (printing-specific — pokemon-tcg-data has no
+  oracle_id-equivalent, so distinct printings sharing a name are
+  expected and left for `CardBinder.add()`'s existing richness
+  comparison to collapse) as `Provenance.source_id`, under
+  `DataSource.POKEMON_TCG`. Always returns an empty `aliases` list —
+  no secondary identifier system exists in this data comparable to
+  Scryfall's; `nationalPokedexNumbers` is deliberately excluded since
+  it identifies a Pokémon species, not a printing, and would collide
+  across many distinct cards if registered as an alias.
 
 ## How it works
 

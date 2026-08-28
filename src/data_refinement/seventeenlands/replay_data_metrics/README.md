@@ -7,7 +7,9 @@ game, ~18 metadata columns (`won`, `num_mulligans`, `expansion`, etc.)
 plus `candidate_hand_1..7`/`opening_hand`, then ~2500 columns of
 per-turn telemetry (`user_turn_N_*`, `oppo_turn_N_*`) — files run
 2.5GB+, so this container never loads one whole into memory. Output
-lands in `data/final/metrics/17lands/<expansion>.<format>.replay.parquet`,
+lands in `data/final/metrics/17lands/replay/<expansion>.<format>.parquet`
+(`ReplayMetricScanner.DEFAULT_OUTPUT_DIR`/`default_output_path()` —
+see below),
 one row per `(card, metric)` pair.
 
 Most of the ~2500 turn-telemetry columns (33 stat families × 30 turns
@@ -86,6 +88,11 @@ under `metrics/` for the shape of that remaining work.
   anywhere in the scan — a set rather than a list, since checkpoint
   resume unions it across restarts and a set costs nothing extra,
   bounded by distinct-card-count rather than row-count).
+  `DEFAULT_OUTPUT_DIR`/`DEFAULT_OUTPUT_NAME` and the
+  `default_output_path(expansion, format_code)` staticmethod name this
+  pipeline's conventional output location (a recommended default, not
+  a requirement — `output_path` stays a required constructor
+  parameter regardless).
 - `cast_event_scanner.py` — `Side` (enum), `CastEvent` (one cast
   instance: side, turn, resolved card), and `CastEventScanner`
   (cache-first Arena-ID resolution across the ~240 turn-indexed cast
@@ -158,7 +165,7 @@ flowchart TD
     Q -- yes --> K
     Q -- no --> R["every metric.finalize()\n-> dict[UUID, MetricResult]"]
 
-    R --> S["write_metric_results()\nwrites data/final/metrics/17lands/\n<expansion>.<format>.replay.parquet"]
+    R --> S["write_metric_results()\nwrites data/final/metrics/17lands/replay/\n<expansion>.<format>.parquet"]
     S --> T["checkpoint.delete()\n(nothing left to resume)"]
     T --> U["ReplayMetricScanResult\n(output_path, final unresolved_arena_ids)"]
 ```
@@ -182,8 +189,8 @@ scanner = ReplayMetricScanner(
         OpeningHandWinRateMetric(expansion="MSH", format_code="PremierDraft"),
         CandidateHandMulliganRateMetric(expansion="MSH", format_code="PremierDraft"),
     ],
-    output_path=Path("data/final/metrics/17lands/MSH.PremierDraft.replay.parquet"),
-    checkpoint_path=Path("data/final/metrics/17lands/MSH.PremierDraft.replay.checkpoint.json"),
+    output_path=Path("data/final/metrics/17lands/replay/MSH.PremierDraft.parquet"),
+    checkpoint_path=Path("data/final/metrics/17lands/replay/MSH.PremierDraft.checkpoint.json"),
     source_game=GameId.MTG,
 )
 result = scanner.scan()

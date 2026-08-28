@@ -26,6 +26,7 @@ game_data_metrics/metrics/average_copies_when_included.py's identical
 reasoning for its own non-extraction) — this is only "rule of two."
 """
 
+from typing import ClassVar
 from uuid import UUID
 
 import pandas as pd
@@ -44,7 +45,7 @@ class AveragePickNumberMetric:
     that same scan).
     """
 
-    name: str = _METRIC_NAME
+    name: ClassVar[str] = _METRIC_NAME
 
     def __init__(self, expansion: str, format_code: str) -> None:
         """
@@ -102,9 +103,7 @@ class AveragePickNumberMetric:
             self._pick_number_sum[uuid] = (
                 self._pick_number_sum.get(uuid, 0) + pick_number_sum_this_chunk
             )
-            self._pick_count[uuid] = (
-                self._pick_count.get(uuid, 0) + pick_count_this_chunk
-            )
+            self._pick_count[uuid] = self._pick_count.get(uuid, 0) + pick_count_this_chunk
 
     def finalize(self) -> dict[UUID, MetricResult]:
         """Turn accumulated pick_number sums/counts into MetricResult rows.
@@ -142,12 +141,8 @@ class AveragePickNumberMetric:
         Exceptions: none.
         """
         return {
-            "pick_number_sum": {
-                str(uuid): count for uuid, count in self._pick_number_sum.items()
-            },
-            "pick_count": {
-                str(uuid): count for uuid, count in self._pick_count.items()
-            },
+            "pick_number_sum": {str(uuid): count for uuid, count in self._pick_number_sum.items()},
+            "pick_count": {str(uuid): count for uuid, count in self._pick_count.items()},
         }
 
     def load_state(self, state: dict) -> None:
@@ -163,8 +158,7 @@ class AveragePickNumberMetric:
             have produced.
         """
         self._pick_number_sum = {
-            UUID(uuid_str): count
-            for uuid_str, count in state["pick_number_sum"].items()
+            UUID(uuid_str): count for uuid_str, count in state["pick_number_sum"].items()
         }
         self._pick_count = {
             UUID(uuid_str): count for uuid_str, count in state["pick_count"].items()

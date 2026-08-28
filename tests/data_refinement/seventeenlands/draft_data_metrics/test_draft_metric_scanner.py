@@ -152,9 +152,7 @@ class TestScan:
 
         assert result.unresolved_pick_names == ["Bolt"]
 
-    def test_empty_results_still_write_a_correctly_typed_parquet_file(
-        self, tmp_path: Path
-    ) -> None:
+    def test_empty_results_still_write_a_correctly_typed_parquet_file(self, tmp_path: Path) -> None:
         # Regression test mirroring game_data_metrics/test_metric_scanner.py's
         # own dtype regression test: with no metrics at all,
         # pd.DataFrame([], columns=[...]) has nothing to infer dtypes
@@ -206,9 +204,7 @@ class TestScan:
         # pick_number values for 4 rows: 0, 1, 2, 3 -> mean 1.5
         assert df.iloc[0]["value"] == 1.5
 
-    def test_resumes_from_checkpoint_without_reprocessing_rows(
-        self, tmp_path: Path
-    ) -> None:
+    def test_resumes_from_checkpoint_without_reprocessing_rows(self, tmp_path: Path) -> None:
         registry = CardBinder()
         registry.add(_card("Bolt"))
         csv_path = tmp_path / "draft_data.csv"
@@ -223,9 +219,7 @@ class TestScan:
         # what a real crash mid-stream would leave behind, then confirm
         # a fresh scan resumes from exactly that point rather than
         # reprocessing from row 0.
-        partial_metric = AveragePickNumberMetric(
-            expansion="MSH", format_code="PremierDraft"
-        )
+        partial_metric = AveragePickNumberMetric(expansion="MSH", format_code="PremierDraft")
         partial_chunk = pd.read_csv(csv_path, nrows=15)
         bolt_uuid = registry.get_by_name(GameId.MTG, "Bolt").nocab_uuid
         resolved_picks = pd.Series([bolt_uuid] * len(partial_chunk))
@@ -241,9 +235,7 @@ class TestScan:
         )
 
         # Second scan: fresh metric instance, resumes from the checkpoint.
-        resumed_metric = AveragePickNumberMetric(
-            expansion="MSH", format_code="PremierDraft"
-        )
+        resumed_metric = AveragePickNumberMetric(expansion="MSH", format_code="PremierDraft")
         scanner = DraftMetricScanner(
             raw_csv_path=csv_path,
             card_binder=registry,
@@ -259,9 +251,7 @@ class TestScan:
         # Compare against a from-scratch single-pass scan over the
         # whole file — the resumed scan must produce identical totals,
         # proving no rows were skipped or double-counted.
-        expected_metric = AveragePickNumberMetric(
-            expansion="MSH", format_code="PremierDraft"
-        )
+        expected_metric = AveragePickNumberMetric(expansion="MSH", format_code="PremierDraft")
         full_df = pd.read_csv(csv_path)
         full_resolved_picks = pd.Series([bolt_uuid] * len(full_df))
         expected_metric.accumulate(full_df, full_resolved_picks)
@@ -271,9 +261,7 @@ class TestScan:
         assert result_df.iloc[0]["sample_size"] == expected.sample_size
         assert result_df.iloc[0]["value"] == pytest.approx(expected.value)
 
-    def test_checkpoint_written_periodically_reflects_cumulative_rows(
-        self, tmp_path: Path
-    ) -> None:
+    def test_checkpoint_written_periodically_reflects_cumulative_rows(self, tmp_path: Path) -> None:
         # DraftMetricScanner's internal chunk size is 100_000 rows, so
         # this fixture needs to exceed that to exercise a second chunk.
         registry = CardBinder()
@@ -306,3 +294,14 @@ class TestScan:
 # MetricCheckpoint (see metric_checkpoint.py) — its own dedicated tests
 # are in tests/data_refinement/seventeenlands/test_metric_checkpoint.py,
 # not duplicated here.
+
+
+class TestDefaultOutputPath:
+    def test_matches_default_output_dir_and_name(self) -> None:
+        expected = DraftMetricScanner.DEFAULT_OUTPUT_DIR / "MSH.PremierDraft.parquet"
+        assert DraftMetricScanner.default_output_path("MSH", "PremierDraft") == expected
+
+    def test_varies_by_expansion_and_format(self) -> None:
+        assert DraftMetricScanner.default_output_path(
+            "MSH", "PremierDraft"
+        ) != DraftMetricScanner.default_output_path("MSH", "TradDraft")

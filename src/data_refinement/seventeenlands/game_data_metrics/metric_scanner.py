@@ -29,6 +29,7 @@ is unchanged — it's the one genuinely pipeline-specific piece.
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar
 
 import pandas as pd
 
@@ -66,6 +67,9 @@ class MetricScanner:
     (raw_csv_path, metrics) combination; a different CSV or a different
     set of active metrics gets its own MetricScanner instance.
     """
+
+    DEFAULT_OUTPUT_DIR: ClassVar[Path] = Path("data/final/metrics/17lands/game")
+    DEFAULT_OUTPUT_NAME: ClassVar[str] = "{expansion}.{format_code}.parquet"
 
     def __init__(
         self,
@@ -110,6 +114,33 @@ class MetricScanner:
         self.source_game = source_game
         self.checkpoint_every_n_chunks = checkpoint_every_n_chunks
 
+    @staticmethod
+    def default_output_path(expansion: str, format_code: str) -> Path:
+        """The conventional output_path for one (expansion, format_code) scan.
+
+        A recommended default, not an enforced requirement — output_path
+        stays a required constructor parameter; this exists so a caller
+        can compute the same conventional path this project already
+        uses elsewhere, instead of re-typing the string (see e.g.
+        scripts/compute_seventeenlands_metrics.py).
+
+        Inputs:
+            expansion: 17lands expansion code.
+            format_code: 17lands format code.
+        Output: DEFAULT_OUTPUT_DIR / DEFAULT_OUTPUT_NAME, formatted
+            with expansion/format_code (e.g.
+            data/final/metrics/17lands/game/MSH.PremierDraft.parquet).
+        Side effects: none — purely a path computation.
+        Exceptions: none.
+
+        Example:
+            >>> MetricScanner.default_output_path("MSH", "PremierDraft")
+            PosixPath('data/final/metrics/17lands/game/MSH.PremierDraft.parquet')
+        """
+        return MetricScanner.DEFAULT_OUTPUT_DIR / MetricScanner.DEFAULT_OUTPUT_NAME.format(
+            expansion=expansion, format_code=format_code
+        )
+
     def scan(self) -> MetricScanResult:
         """Resolve columns, stream the CSV, checkpoint, and write results.
 
@@ -153,8 +184,8 @@ class MetricScanner:
             ...     Path("data/raw/17lands/game_data/MSH.PremierDraft.csv"),
             ...     card_binder,
             ...     [WinRateMetric(expansion="MSH", format_code="PremierDraft")],
-            ...     Path("data/final/metrics/17lands/MSH.PremierDraft.parquet"),
-            ...     Path("data/final/metrics/17lands/MSH.PremierDraft.checkpoint.json"),
+            ...     Path("data/final/metrics/17lands/game/MSH.PremierDraft.parquet"),
+            ...     Path("data/final/metrics/17lands/game/MSH.PremierDraft.checkpoint.json"),
             ...     GameId.MTG,
             ... )
             >>> result = scanner.scan()

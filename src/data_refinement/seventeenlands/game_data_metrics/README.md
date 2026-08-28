@@ -8,7 +8,9 @@ is one row per game, ~18 metadata columns (`won`, `expansion`,
 the set (`opening_hand_<name>`, `drawn_<name>`, `tutored_<name>`,
 `deck_<name>`, `sideboard_<name>`) — files run 1GB+, so this container
 never loads one whole into memory. Output lands in
-`data/final/metrics/17lands/<expansion>.<format>.parquet`, one row per
+`data/final/metrics/17lands/game/<expansion>.<format>.parquet`
+(`MetricScanner.DEFAULT_OUTPUT_DIR`/`default_output_path()` — see
+below), one row per
 `(card, metric)` pair.
 
 The point of "pluggable": adding a new metric (e.g.
@@ -66,7 +68,11 @@ will need to split again later).
   the checkpointed per-chunk scan and reports `MetricScanResult`
   (output path + any unresolved card names, which also lives here).
   Streaming/checkpointing/writing are NOT implemented locally — see
-  "Shared machinery" below.
+  "Shared machinery" below. `DEFAULT_OUTPUT_DIR`/`DEFAULT_OUTPUT_NAME`
+  and the `default_output_path(expansion, format_code)` staticmethod
+  name this pipeline's conventional output location (a recommended
+  default a caller may use, not a requirement — `output_path` stays a
+  required constructor parameter regardless).
 - **Shared machinery** (lives at `../` — the `seventeenlands/` level —
   extracted there once all three sibling pipelines needed the
   identical logic, rather than duplicated per pipeline):
@@ -121,7 +127,7 @@ flowchart TD
     P -- yes --> K
     P -- no --> Q["every metric.finalize()\n-> dict[UUID, MetricResult]"]
 
-    Q --> R["write_metric_results()\nwrites data/final/metrics/17lands/\n<expansion>.<format>.parquet"]
+    Q --> R["write_metric_results()\nwrites data/final/metrics/17lands/game/\n<expansion>.<format>.parquet"]
     R --> S["checkpoint.delete()\n(nothing left to resume)"]
     G --> T["MetricScanResult\n(output_path, unresolved_column_names)"]
     S --> T
@@ -148,8 +154,8 @@ scanner = MetricScanner(
     raw_csv_path=Path("data/raw/17lands/game_data/MSH.PremierDraft.csv"),
     card_binder=binder,
     metrics=[WinRateMetric(expansion="MSH", format_code="PremierDraft")],
-    output_path=Path("data/final/metrics/17lands/MSH.PremierDraft.parquet"),
-    checkpoint_path=Path("data/final/metrics/17lands/MSH.PremierDraft.checkpoint.json"),
+    output_path=Path("data/final/metrics/17lands/game/MSH.PremierDraft.parquet"),
+    checkpoint_path=Path("data/final/metrics/17lands/game/MSH.PremierDraft.checkpoint.json"),
     source_game=GameId.MTG,
 )
 result = scanner.scan()
