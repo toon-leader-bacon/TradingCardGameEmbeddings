@@ -1,0 +1,158 @@
+
+expansions
+HOB"
+MSH"
+SOS"
+Y26SOS"
+TMT"
+ECL"
+Y26ECL"
+TLA"
+OM1"
+EOE"
+"FIN"
+"Y25EOE"
+"TDM"
+"Y25TDM"
+"DFT"
+"Y25DFT"
+"PIO"
+"FDN"
+"DSK"
+"Y25DSK"
+"BLB"
+"Y25BLB"
+"MH3"
+"OTJ"
+"Y24OTJ"
+"MKM"
+"Y24MKM"
+"LCI"
+"Y24LCI"
+"WOE"
+"Y24WOE"
+"LTR"
+"MOM"
+"MAT"
+"SIR"
+"ONE"
+"Y23ONE"
+"BRO"
+"Y23BRO"
+"DMU"
+"Y23DMU"
+"HBG"
+"SNC"
+"Y22SNC"
+"NEO"
+"DBL"
+"VOW"
+"RAVM"
+"MID"
+"AFR"
+"STX"
+"CORE"
+"KHM"
+"KLR"
+"ZNR"
+"AKR"
+"M21"
+"IKO"
+"THB"
+"ELD"
+"Ravnica"
+"M20"
+"WAR"
+"M19"
+"DOM"
+"RIX"
+"GRN"
+"RNA"
+"KTK"
+"XLN"
+"Cube - Planar"
+"Cube - Powered"
+"Cube"
+"Chaos"
+"Remix - Artifacts"
+
+
+Formats:
+"PremierDraft"
+"TradDraft"
+"QuickDraft"
+"PickTwoDraft"
+"Sealed"
+"TradSealed"
+"ArenaDirect_Draft"
+"ArenaDirect_Sealed"
+"BotDraft"
+"CompDraft"
+"ContenderDraft"
+"CubeSealed"
+"DecathlonFinals2022"
+"DecathlonFinals2023"
+"DecathlonQuickDraft"
+"DecathlonTradDraft"
+"DraftChallenge"
+"Emblem_QuickDraft"
+"EsportsQualifierDraft_D1"
+"EsportsQualifierDraft_D2"
+"Esports_Draft"
+"FIAB_Sealed"
+"LimitedChampionshipQualifier_Draft1"
+"LimitedChampionshipQualifier_Draft2"
+"MidWeekQuickDraft"
+"MidWeekSealed"
+"Omniscience_Draft"
+"OpenDraft_D1_Bo1"
+"OpenDraft_D1_Bo3"
+"OpenDraft_D2_Bo3"
+"OpenDraft_D2_Draft1_Bo3"
+"OpenDraft_D2_Draft2B_Bo3"
+"OpenDraft_D2_Draft2_Bo3"
+"OpenSealed_D1_Bo1"
+"OpenSealed_D1_Bo3"
+"OpenSealed_D2_Bo3"
+"OpenSealed_D2_Sealed1_Bo3"
+"OpenSealed_D2_Sealed2_Bo3"
+"PickTwoTradDraft"
+"PremierDraftRemixArtifacts"
+"QualifierPlayInSealed"
+"QualifierPlayInTradSealed"
+"Qualifier_D1_Sealed"
+"Qualifier_D2_Draft"
+"Qualifier_D2_Sealed"
+
+
+Request: 
+GET https://www.17lands.com/api/card_data?expansion=HOB&event_type=PremierDraft&time_period=ALL_TIME
+
+
+Returns: 
+Json blob with key "data" -> list of json dicts. Each dict has the following structure (EXAMPLE):
+name	"Long-Bodied Grey Dog"
+mtga_id	103368
+color	""
+rarity	"common"
+url	"https://cards.scryfall.io/large/front/d/1/d1a1e520-1fe2-4529-8afb-c187bb80da3c.jpg?1785639260"
+url_back	""
+types	[ "Creature - Dog" ]
+layout	"standard"
+seen_count	134064
+avg_seen	7.0958721
+pick_count	15336
+avg_pick	10.542058
+game_count	18328
+pool_count	94804
+play_rate	0.19332517615290495
+win_rate	0.51833261
+opening_hand_game_count	3155
+opening_hand_win_rate	0.52012678
+drawn_game_count	4441
+drawn_win_rate	0.51429858
+ever_drawn_game_count	7596
+ever_drawn_win_rate	0.51671933
+never_drawn_game_count	10731
+never_drawn_win_rate	0.51961607
+drawn_improvement_win_rate	-0.0028967399999999532

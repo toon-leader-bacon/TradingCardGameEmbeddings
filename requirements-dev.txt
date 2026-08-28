@@ -1,0 +1,6 @@
+black
+flake8
+mypy
+types-requests
+types-tqdm
+pandas-stubs
