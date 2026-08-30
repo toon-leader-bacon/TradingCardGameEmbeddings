@@ -25,7 +25,10 @@ rather than duplicated (see tmp/REFACTOR.md §1).
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 from uuid import UUID
+
+import pandas as pd
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.seventeenlands.game_data_metrics.card_column_set import (
@@ -91,6 +94,41 @@ def find_card_columns(
         else:
             resolved.append(_build_card_column_set(name, nocab_uuid))
     return ColumnResolution(resolved=resolved, unresolved_names=unresolved_names)
+
+
+def find_card_columns_in_csv(
+    raw_csv_path: Path, card_binder: CardBinder, source_game: GameId
+) -> ColumnResolution:
+    """Read a game_data CSV's header row and resolve its card columns.
+
+    Thin wrapper around find_card_columns() that also owns the one
+    piece every game_data_metrics scanner needs identically: reading
+    only the header row (never the full file) before resolving it.
+    Extracted here once a second scanner (DeckOutcomeScanner, alongside
+    MetricScanner) needed the exact same header-read-then-resolve
+    sequence — see PRINCIPLES.md section 2/3 on centralizing logic
+    that's genuinely identical across more than one consumer.
+
+    Inputs:
+        raw_csv_path: path to a 17lands game_data CSV.
+        card_binder: registry to resolve card names against.
+        source_game: which game raw_csv_path's cards belong to.
+    Output: same as find_card_columns() — a ColumnResolution splitting
+        the header's card names into resolved CardColumnSets and
+        unresolved names.
+    Side effects: reads raw_csv_path's header row.
+    Exceptions: raises if raw_csv_path doesn't exist or has no
+        readable header row.
+
+    Example:
+        >>> resolution = find_card_columns_in_csv(
+        ...     Path("data/raw/17lands/game_data/MSH.PremierDraft.csv"),
+        ...     registry,
+        ...     GameId.MTG,
+        ... )
+    """
+    header = pd.read_csv(raw_csv_path, nrows=0).columns.tolist()
+    return find_card_columns(header, card_binder, source_game)
 
 
 def _discover_card_names(header: list[str]) -> list[str]:

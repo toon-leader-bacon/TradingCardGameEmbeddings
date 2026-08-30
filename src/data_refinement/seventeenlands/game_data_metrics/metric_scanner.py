@@ -31,12 +31,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
-import pandas as pd
-
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.seventeenlands.game_data_metrics.column_lookup import (
     ColumnResolution,
-    find_card_columns,
+    find_card_columns_in_csv,
 )
 from src.data_refinement.seventeenlands.game_data_metrics.metric import Metric
 from src.data_refinement.seventeenlands.metric_checkpoint import MetricCheckpoint
@@ -215,9 +213,10 @@ class MetricScanner:
     def _find_card_columns(self) -> ColumnResolution:
         """Resolve raw_csv_path's header against card_binder.
 
-        Private helper — single consumer is scan(). Reads only
-        raw_csv_path's header row (never the full file) before
-        delegating to column_lookup.find_card_columns().
+        Private helper — single consumer is scan(). Delegates to
+        column_lookup.find_card_columns_in_csv(), shared with
+        DeckOutcomeScanner's own identical header-read-then-resolve
+        need (deck_outcome_scanner.py).
 
         Inputs: none (uses self.raw_csv_path, self.card_binder,
             self.source_game).
@@ -227,5 +226,4 @@ class MetricScanner:
         Exceptions: raises if raw_csv_path doesn't exist or has no
             readable header row.
         """
-        header = pd.read_csv(self.raw_csv_path, nrows=0).columns.tolist()
-        return find_card_columns(header, self.card_binder, self.source_game)
+        return find_card_columns_in_csv(self.raw_csv_path, self.card_binder, self.source_game)

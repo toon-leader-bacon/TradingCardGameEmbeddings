@@ -1,3 +1,15 @@
 raw_data_location,metrics_class,metrics_file_location,dojo_class,label_kind
 data/raw/17lands/draft_data/,AveragePickNumberMetric,data/final/metrics/17lands/draft/,AveragePickNumberDojo,count
 data/raw/17lands/draft_data/,PickSideboardRateMetric,data/final/metrics/17lands/draft/,PickSideboardRateDojo,probability
+data/raw/17lands/game_data/,WinRateMetric,data/final/metrics/17lands/game/,WinRateDojo,probability
+data/raw/17lands/game_data/,DrawnWinRateMetric,data/final/metrics/17lands/game/,DrawnWinRateDojo,probability
+data/raw/17lands/game_data/,OpeningHandWinRateMetric,data/final/metrics/17lands/game/,OpeningHandWinRateDojo (game_data_dojo),probability
+data/raw/17lands/game_data/,AverageCopiesWhenIncludedMetric,data/final/metrics/17lands/game/,AverageCopiesWhenIncludedDojo,count
+data/raw/17lands/game_data/,OnPlayWinRateDeltaMetric,data/final/metrics/17lands/game/,OnPlayWinRateDeltaDojo,delta
+data/raw/17lands/game_data/,AverageGameLengthWithCardMetric,data/final/metrics/17lands/game/,AverageGameLengthWithCardDojo,count
+data/raw/17lands/game_data/,InclusionRateMetric,data/final/metrics/17lands/game/,InclusionRateDojo,probability
+data/raw/17lands/replay_data/,OpeningHandWinRateMetric,data/final/metrics/17lands/replay/,OpeningHandWinRateDojo (replay_data_dojo),probability
+data/raw/17lands/replay_data/,CandidateHandMulliganRateMetric,data/final/metrics/17lands/replay/,CandidateHandMulliganRateDojo,probability
+data/raw/17lands/replay_data/,AverageTurnCastMetric,data/final/metrics/17lands/replay/,AverageTurnCastDojo,count
+data/raw/17lands/replay_data/,AverageTurnsRemainingPostCastMetric,data/final/metrics/17lands/replay/,AverageTurnsRemainingPostCastDojo,count
+data/raw/17lands/replay_data/,OpponentResponseRateMetric,data/final/metrics/17lands/replay/,OpponentResponseRateDojo,probability

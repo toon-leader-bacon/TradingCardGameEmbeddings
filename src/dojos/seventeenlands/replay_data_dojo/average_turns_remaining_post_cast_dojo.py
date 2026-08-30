@@ -1,37 +1,35 @@
-"""Thin MetricRegressionDojo wrapper for AveragePickNumberMetric.
+"""Thin MetricRegressionDojo wrapper for AverageTurnsRemainingPostCastMetric
+(replay_data_metrics).
 
-See plans/pipeline_conventions.md. This class exists purely for
-discoverability — collection of Dojo/Metric pairings from
-docs/metric_dojo_inventory.csv or dojos/README.md should make it
-obvious which dojo trains against which metric without needing to
-read constructor arguments. It carries no logic of its own beyond
-wiring MetricRegressionDojo's generic constructor to
-AveragePickNumberMetric's own metric_name and this project's
-conventional output path for draft_data_metrics scans.
+See plans/metric_regression_dojo_expansion.md and
+average_pick_number_dojo.py's own docstring for the rationale this
+mirrors exactly — this class exists purely for discoverability, not new
+logic.
 """
 
 from pathlib import Path
 
 import torch
 
-from src.data_refinement.seventeenlands.draft_data_metrics.draft_metric_scanner import (
-    DraftMetricScanner,
+from src.data_refinement.seventeenlands.replay_data_metrics.metrics.cast_event_average.average_turns_remaining_post_cast import (  # noqa: E501 -- module path is one unbreakable dotted identifier
+    AverageTurnsRemainingPostCastMetric,
 )
-from src.data_refinement.seventeenlands.draft_data_metrics.metrics.average_pick_number import (
-    AveragePickNumberMetric,
+from src.data_refinement.seventeenlands.replay_data_metrics.replay_metric_scanner import (
+    ReplayMetricScanner,
 )
 from src.dojos.losses.loss import Loss
 from src.dojos.losses.mse_loss import MSELoss
-from src.dojos.metric_regression.metric_regression_dojo import MetricRegressionDojo
+from src.dojos.seventeenlands.metric_regression_dojo import MetricRegressionDojo
 
 
-class AveragePickNumberDojo(MetricRegressionDojo):
-    """Regresses a card's embedding against its average_pick_number.
+class AverageTurnsRemainingPostCastDojo(MetricRegressionDojo):
+    """Regresses a card's embedding against its
+    average_turns_remaining_post_cast.
 
     Not a new capability — see MetricRegressionDojo, which this class
     delegates every method to unchanged. Only __init__ differs: it
-    fixes metric_name to AveragePickNumberMetric.name (never a
-    re-declared string literal — this pairing can't drift) and
+    fixes metric_name to AverageTurnsRemainingPostCastMetric.name
+    (never a re-declared string literal — this pairing can't drift) and
     resolves a default metrics_path/loss so the common case needs no
     extra wiring.
     """
@@ -47,11 +45,11 @@ class AveragePickNumberDojo(MetricRegressionDojo):
         loss: Loss[torch.Tensor, float] | None = None,
     ) -> None:
         """Construct a dojo that regresses against one (expansion, format_code)'s
-        average_pick_number values.
+        average_turns_remaining_post_cast values.
 
         Inputs:
             expansion: 17lands expansion code this dojo trains
-                against — which specific DraftMetricScanner run's
+                against — which specific ReplayMetricScanner run's
                 output to read.
             format_code: 17lands format code, paired with expansion.
             train_ratio: fraction of eligible cards assigned to the
@@ -61,8 +59,8 @@ class AveragePickNumberDojo(MetricRegressionDojo):
             rng_seed: seed for this dojo's own shuffling/sampling, for
                 reproducible splits and batches.
             metrics_path: which parquet file to read
-                average_pick_number rows from. Defaults to
-                DraftMetricScanner.default_output_path(expansion,
+                average_turns_remaining_post_cast rows from. Defaults
+                to ReplayMetricScanner.default_output_path(expansion,
                 format_code) (this project's conventional location)
                 when not given.
             loss: the injected loss computation this dojo delegates to.
@@ -76,7 +74,7 @@ class AveragePickNumberDojo(MetricRegressionDojo):
             (0, 1) (delegated from MetricRegressionDojo.__init__).
 
         Example:
-            >>> dojo = AveragePickNumberDojo(
+            >>> dojo = AverageTurnsRemainingPostCastDojo(
             ...     expansion="MSH",
             ...     format_code="PremierDraft",
             ...     train_ratio=0.8,
@@ -86,8 +84,8 @@ class AveragePickNumberDojo(MetricRegressionDojo):
         """
         super().__init__(
             metrics_path=metrics_path
-            or DraftMetricScanner.default_output_path(expansion, format_code),
-            metric_name=AveragePickNumberMetric.name,
+            or ReplayMetricScanner.default_output_path(expansion, format_code),
+            metric_name=AverageTurnsRemainingPostCastMetric.name,
             train_ratio=train_ratio,
             validate_ratio=validate_ratio,
             loss=loss or MSELoss(),

@@ -54,6 +54,13 @@ logic, not duplicated per pipeline):
   resolved from pipe-delimited Arena IDs). 5 metrics implemented, 6
   still bare placeholders. See
   [`replay_data_metrics/README.md`](replay_data_metrics/README.md).
+- **`v2/`** *(in progress)* — a second, additive metric-building
+  architecture, living alongside the three pipelines above rather than
+  replacing them. Every metric resolves its own card identity and
+  writes its own output file directly, instead of going through a
+  shared scanner-driven checkpoint/write pipeline. Proven so far by two
+  `game_data_metrics`-sourced metrics; none of the metrics above have
+  been migrated to it yet. See [`v2/README.md`](v2/README.md).
 
 **Output-path convention:** all three pipelines now write under their
 own subdirectory of `data/final/metrics/17lands/` —

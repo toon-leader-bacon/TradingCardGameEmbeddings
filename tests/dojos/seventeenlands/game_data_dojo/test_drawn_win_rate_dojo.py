@@ -6,21 +6,19 @@ import pandas as pd
 import torch
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.seventeenlands.draft_data_metrics.draft_metric_scanner import (
-    DraftMetricScanner,
-)
-from src.data_refinement.seventeenlands.draft_data_metrics.metrics.average_pick_number import (
-    AveragePickNumberMetric,
+from src.data_refinement.seventeenlands.game_data_metrics.metric_scanner import MetricScanner
+from src.data_refinement.seventeenlands.game_data_metrics.metrics.win_rate.drawn_win_rate import (
+    DrawnWinRateMetric,
 )
 from src.dojos.dojo import CardCount, Split
-from src.dojos.metric_regression.average_pick_number_dojo import AveragePickNumberDojo
+from src.dojos.seventeenlands.game_data_dojo.drawn_win_rate_dojo import DrawnWinRateDojo
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 
-# AveragePickNumberDojo only wires MetricRegressionDojo's generic
-# constructor to this one metric — its split/cursor/loss mechanics are
-# already covered by tests/dojos/metric_regression/test_metric_regression_dojo.py.
+# DrawnWinRateDojo only wires MetricRegressionDojo's generic constructor
+# to this one metric — its split/cursor/loss mechanics are already
+# covered by tests/dojos/seventeenlands/test_metric_regression_dojo.py.
 # These tests only cover what's actually new here: metric_name/
 # metrics_path/loss defaulting, plus a smoke test that the wired-up
 # dojo still satisfies the Dojo contract end to end.
@@ -54,7 +52,7 @@ def _write_metrics_parquet(path: Path, rows: list[tuple[UUID, float]]) -> None:
         [
             {
                 "nocab_uuid": str(nocab_uuid),
-                "metric_name": AveragePickNumberMetric.name,
+                "metric_name": DrawnWinRateMetric.name,
                 "value": value,
                 "sample_size": 10,
                 "expansion": "MSH",
@@ -69,7 +67,7 @@ def _write_metrics_parquet(path: Path, rows: list[tuple[UUID, float]]) -> None:
 
 class TestInit:
     def test_defaults_metric_name_to_the_metric_class_own_name(self, tmp_path: Path) -> None:
-        dojo = AveragePickNumberDojo(
+        dojo = DrawnWinRateDojo(
             expansion="MSH",
             format_code="PremierDraft",
             train_ratio=0.5,
@@ -78,10 +76,10 @@ class TestInit:
             metrics_path=tmp_path / "metrics.parquet",
         )
 
-        assert dojo._metric_name == AveragePickNumberMetric.name
+        assert dojo._metric_name == DrawnWinRateMetric.name
 
-    def test_defaults_metrics_path_via_draft_metric_scanner_convention(self) -> None:
-        dojo = AveragePickNumberDojo(
+    def test_defaults_metrics_path_via_metric_scanner_convention(self) -> None:
+        dojo = DrawnWinRateDojo(
             expansion="MSH",
             format_code="PremierDraft",
             train_ratio=0.5,
@@ -89,12 +87,12 @@ class TestInit:
             rng_seed=0,
         )
 
-        assert dojo._metrics_path == DraftMetricScanner.default_output_path("MSH", "PremierDraft")
+        assert dojo._metrics_path == MetricScanner.default_output_path("MSH", "PremierDraft")
 
     def test_explicit_metrics_path_overrides_the_default(self, tmp_path: Path) -> None:
         explicit_path = tmp_path / "somewhere_else.parquet"
 
-        dojo = AveragePickNumberDojo(
+        dojo = DrawnWinRateDojo(
             expansion="MSH",
             format_code="PremierDraft",
             train_ratio=0.5,
@@ -111,7 +109,7 @@ class TestEndToEnd:
         binder, uuids = _binder(10)
         metrics_path = tmp_path / "metrics.parquet"
         _write_metrics_parquet(metrics_path, [(u, float(i)) for i, u in enumerate(uuids)])
-        dojo = AveragePickNumberDojo(
+        dojo = DrawnWinRateDojo(
             expansion="MSH",
             format_code="PremierDraft",
             train_ratio=0.5,

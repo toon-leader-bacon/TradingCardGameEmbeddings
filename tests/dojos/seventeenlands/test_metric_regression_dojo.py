@@ -10,7 +10,7 @@ import torch
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.dojos.dojo import CardCount, Split
 from src.dojos.losses.mse_loss import MSELoss
-from src.dojos.metric_regression.metric_regression_dojo import MetricRegressionDojo
+from src.dojos.seventeenlands.metric_regression_dojo import MetricRegressionDojo
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId

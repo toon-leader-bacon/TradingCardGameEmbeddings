@@ -32,3 +32,28 @@ never touching either flow's raw data directly — see
 [`src/README.md`](src/README.md#how-the-pieces-fit-together) for the
 precise class names and [`src/training/README.md`](src/training/README.md)
 for how a training run is actually assembled.
+
+## Multi-card embedding model
+
+Beyond the single-card model, this project plans to train and offer
+one **ungrouped** multi-card embedding model: given a list of cards
+(a deck, a draft pool, a pack of options — any set, any size), it
+returns one embedding per input card, contextualized by the rest of
+that list, with no built-in concept of "groups" within that list. It
+never learns anything like "these cards are my deck vs. yours" —
+group membership is deliberately kept out of the model itself so it
+stays a general-purpose artifact usable for any task, not one shaped
+around a particular grouped comparison.
+
+We still train on plenty of tasks that *do* have a natural group
+structure — pool vs. pack options, deck vs. deck, and similar. For
+those, the grouping is handled entirely downstream, inside the dojo:
+a dojo takes the plain per-card embeddings this model already
+produces and applies its own architecture for combining and tagging
+them with group identity (concatenation, a learned per-group tag
+vector, a small comparison network, etc.). Different dojos are free
+to demonstrate different consumption patterns for the same underlying
+embeddings — the training signal from those grouped tasks still flows
+back into the shared multi-card model through ordinary
+backpropagation, without the model itself ever needing to know what
+"group" means.

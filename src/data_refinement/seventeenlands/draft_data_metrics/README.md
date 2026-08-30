@@ -77,7 +77,7 @@ actually needs it.
   format_code)` staticmethod name this pipeline's conventional output
   location (a recommended default, not a requirement — `output_path`
   stays a required constructor parameter regardless); the two thin
-  per-metric `Dojo`s under `src/dojos/metric_regression/`
+  per-metric `Dojo`s under `src/dojos/seventeenlands/draft_data_dojo/`
   (`AveragePickNumberDojo`, `PickSideboardRateDojo`) default their own
   `metrics_path` through this exact method.
 - `metrics/` — one file per concrete `DraftMetric` (renamed from
