@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.data_refinement.seventeenlands.v2.metric import Metric
+from src.data_refinement.seventeenlands.metric import Metric
 
 
 class CsvScanner:

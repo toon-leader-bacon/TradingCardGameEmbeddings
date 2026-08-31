@@ -1,17 +1,9 @@
 """The shared "try CardBinder.get_by_name() first, fall back to
 get_by_name_regex() for a multi-faced card, ambiguous match = unresolved"
-policy — the one 17lands-specific by-NAME resolution rule, needed by more
-than one pipeline (game_data_metrics/column_lookup.py's find_card_columns()
-and draft_data_metrics/pick_name_cache.py's PickNameCache both implement
-this identically today; see tmp/REFACTOR.md §1). Lives at this
+policy — the one 17lands-specific by-NAME resolution rule, needed by every
+draft_game_metrics/ metric that resolves a raw card name (e.g.
+AveragePickNumberMetric, PickedVHeldVPackMetric). Lives at this
 seventeenlands/ shared level, not duplicated in each consumer.
-
-Distinct from lookup_cache.py's LookupCache: this module is the POLICY
-(which CardBinder calls to make, in what order, what counts as ambiguous),
-with no caching of its own. column_lookup.py calls it directly per name
-(header resolution runs once, nothing worth caching); pick_name_cache.py's
-PickNameCache wraps it in a LookupCache (a handful of distinct pick names
-recur across millions of rows, so caching pays for itself there).
 """
 
 import re
