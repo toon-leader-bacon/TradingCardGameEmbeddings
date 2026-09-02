@@ -1,5 +1,28 @@
 # nocab_card_embedding
 
+## Quick Start Overview
+
+The goal is to build an effective and general embedding model for a Trading Card Game, for any arbitrary TCG. This is a personal hobby project, so there are a lot of options for scalability here too.
+I've gotten a rough outline of the high level architecture and it is as follows:
+Data retrieval is responsible for collecting raw data from external sources.
+This raw data is 'refined' via the Data Refinement pipline, either to extract new cards (to add to our binder) or to create metrics (training data and true labels)
+Metric data is consumed by a dojo, which is responsible for filtering, transforming, splitting and batching the data.
+The dojo hands each batch to a core TrainingLoop implementation, which is responsible for coordinating the dojo data feed, into the model being trained to generate embeddings.
+Those embeddings are then handed back to the dojo for evaluation and loss calculation (most likely via a shallow decoder head private/ custom to the dojo-metric and evaluated with a loss function there)
+
+There are two types of models I care about to build:
+
+- Singe card embedding model (single card in, single embedding out)
+- Multi card embedding model (multiple cards in, one embedding per card out in the same order)
+
+The single card embedding model can support multi-card workflows (via running it multiple times)
+The multi card embedding model can support single-card workflows (via passing a single card)
+
+Additionally, there is a concept of multi-group tasks like "Here are 4 decks played in a casual commander game, predict who will win".
+This can be modeled as multiple multi-card embedding tasks, that get merged/ consumed by a more complex decoder head on top of it.
+
+## README.md
+
 A personal/portfolio project to build a generic card embedding model
 that represents a card from any trading card game (MTG, Pokemon,
 Yu-Gi-Oh, Hearthstone, etc.) in a shared embedding space, trained via a
