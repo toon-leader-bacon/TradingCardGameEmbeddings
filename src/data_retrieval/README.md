@@ -29,6 +29,8 @@ Implemented today:
   source later, as a separate V2 rather than a rewrite of this one).
 - `hearthstonejson/` — pulls per-build card JSON dumps from
   HearthstoneJSON (api.hearthstonejson.com).
+- `gwent_one/` — pulls raw HTML page fragments from gwent.one's card
+  search AJAX endpoint (no bulk dump exists for Gwent).
 - `rate_limiter.py` — shared politeness pacer (`RateLimiter`).
 - `download_to_file.py` — shared streamed-GET-to-disk helper
   (`download_to_file`), used by any source's plain single-file
@@ -55,7 +57,6 @@ from src.data_retrieval.scryfall.downloader import ScryfallOracleDownloader
 
 downloader = ScryfallOracleDownloader(
     'https://data.scryfall.io/oracle-cards/oracle-cards-20260820090157.jsonl.gz',
-    Path('data/raw/scryfall'),
 )
 print(downloader.fetch())
 "
@@ -70,7 +71,6 @@ from src.data_retrieval.pokemon_tcg.downloader import PokemonTcgDataDownloader
 
 downloader = PokemonTcgDataDownloader(
     'https://api.github.com/repos/PokemonTCG/pokemon-tcg-data/zipball',
-    Path('data/raw/pokemon_tcg'),
 )
 print(downloader.fetch())
 "
@@ -87,10 +87,26 @@ from src.data_retrieval.rate_limiter import RateLimiter
 
 downloader = HearthstoneJsonDownloader(
     'https://api.hearthstonejson.com/v1/',
-    Path('data/raw/hearthstonejson'),
-    RateLimiter(requests_per_minute=12),
+    rate_limiter=RateLimiter(requests_per_minute=12),
 )
 print(downloader.fetch())
+"
+```
+
+**Gwent (gwent.one)** (a single POST to the search AJAX endpoint,
+capped above the live card count, returns every card in one page —
+see `gwent_one/downloader.py`'s module docstring for how that
+endpoint was reverse-engineered):
+
+```bash
+python3 -c "
+from src.data_retrieval.gwent_one.downloader import GwentOneDownloader
+from src.data_retrieval.rate_limiter import RateLimiter
+
+downloader = GwentOneDownloader(
+    rate_limiter=RateLimiter(requests_per_minute=12),
+)
+print(downloader.fetch(result_limit=1300))
 "
 ```
 

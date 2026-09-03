@@ -4,3 +4,4 @@ tqdm
 pandas
 pyarrow
 torch
+beautifulsoup4

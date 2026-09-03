@@ -27,3 +27,4 @@ class GameId(str, Enum):
     POKEMON = "pokemon"
     YUGIOH = "yugioh"
     HEARTHSTONE = "hearthstone"
+    GWENT = "gwent"

@@ -33,3 +33,6 @@ class DataSource(str, Enum):
     POKEMON_TCG = "pokemon_tcg"  # pokemon-tcg-data community GitHub
     # repo (see src/data_retrieval/pokemon_tcg/downloader.py and
     # src/data_refinement/card_binder/pokemon_tcg/ingestion_stage.py).
+    GWENT_ONE = "gwent_one"  # gwent.one's card search AJAX endpoint
+    # (see src/data_retrieval/gwent_one/downloader.py and
+    # src/data_refinement/card_binder/gwent_one/ingestion_stage.py).

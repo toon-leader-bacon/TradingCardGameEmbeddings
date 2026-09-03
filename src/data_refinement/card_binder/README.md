@@ -147,6 +147,23 @@ rather than defining its own narrower one.
   Scryfall's; `nationalPokedexNumbers` is deliberately excluded since
   it identifies a Pokémon species, not a printing, and would collide
   across many distinct cards if registered as an alias.
+- `gwent_one/ingestion_stage.py` — `GwentOneCardIngestionStage`, the
+  third `CardIngestionStage` implementation, and the first reading raw
+  HTML rather than JSON (via `bs4`/BeautifulSoup, `html.parser`
+  backend — see `src/data_retrieval/gwent_one/downloader.py`). Like
+  `PokemonTcgCardIngestionStage`, `raw_path` here is a *directory* (of
+  `page_*.html` files, not per-set `.json` files). Keys off each
+  `card-wrap card-data` div's `data-id` attribute (gwent.one's own
+  per-card identity) as `Provenance.source_id`, under
+  `DataSource.GWENT_ONE`. `raw_content` is a flat dict built from the
+  div's other `data-*` attributes (prefix stripped, kept as strings),
+  plus `name`/`category` (from nested text, `category` empty-string
+  when absent) and `ability_text` — the ability markup's keyword
+  `<span>`s unwrapped to plain text and `<br>` tags turned into `\n`
+  between ability clauses, matching Scryfall's `oracle_text`
+  convention rather than preserving raw HTML. Always returns an empty
+  `aliases` list — no secondary identifier system exists in this data,
+  same reasoning as `PokemonTcgCardIngestionStage`.
 
 ## How it works
 
@@ -204,6 +221,24 @@ from src.schema.game_id import GameId
 binder = CardBinder.load([Path("data/final/cards/mtg.jsonl")])
 binder.get_by_name(GameId.MTG, "Lightning Bolt")
 binder.get_by_alias(GameId.MTG, DataSource.ARENA, "76497")
+```
+
+```python
+# gwent.one: raw_path is a directory of page_*.html files, not a
+# single file (see gwent_one/ingestion_stage.py's module docstring).
+from pathlib import Path
+from src.data_refinement.card_binder.build import build_or_update_card_binder
+from src.data_refinement.card_binder.gwent_one.ingestion_stage import (
+    GwentOneCardIngestionStage,
+)
+from src.schema.game_id import GameId
+
+summary = build_or_update_card_binder(
+    Path("data/raw/gwent_one"),
+    GameId.GWENT,
+    GwentOneCardIngestionStage(),
+    Path("data/final/cards/gwent.jsonl"),
+)
 ```
 
 This file grows as more `CardIngestionStage` implementations (one per
