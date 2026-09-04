@@ -12,11 +12,14 @@ from pathlib import Path
 from typing import Generator, List
 
 import torch
-from pandas.io.parsers.readers import TextFileReader
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.dojos.batch import Batch
-from src.dojos.file_managers.FileManagerCSV import MAX_INT, FileManagerCSV
+from src.dojos.file_managers.FileManagerParquet import (
+    MAX_INT,
+    FileManagerParquet,
+    ParquetChunkReader,
+)
 from src.dojos.loss.mse_loss import MseLoss
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.dojos.seventeenlands.draft_game_metrics.average_pick_number.data_constructor import (
@@ -38,12 +41,11 @@ class AveragePickNumberDojo:
             if rng_seed is not None \
             else random.Random()
 
-        self.file_manager = FileManagerCSV(
+        self.file_manager = FileManagerParquet(
             path_to_training_data,
             output_directory=Path("data/splits"),
             output_file_prefix="average_pick_number_",
             seed=self.rng.randint(0, MAX_INT),
-            header_row=True,
         )
         self.file_iterators = self.file_manager.make_splits(
             split_ratios=[8, 1, 1],
@@ -73,7 +75,7 @@ class AveragePickNumberDojo:
         validation_file_iterator = self.file_iterators[2]
         yield from self._data_iterator(validation_file_iterator, apply_mod_pipeline=False)
 
-    def _data_iterator(self, file_iterator: TextFileReader,
+    def _data_iterator(self, file_iterator: ParquetChunkReader,
                        apply_mod_pipeline: bool = False) -> Generator[Batch, None, None]:
         for chunk in file_iterator:
             data: List[TrainingDatum] = self.data_constructor.build(chunk)

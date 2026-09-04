@@ -20,6 +20,7 @@ unlike a paginated crawl, build ids don't depend on each other.
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar
 
 import requests
 from tqdm import tqdm
@@ -81,15 +82,18 @@ class HearthstoneJsonDownloader:
     source directory depends on this class.
     """
 
+    DEFAULT_RAW_DATA_DIR: ClassVar[Path] = Path("data/raw/hearthstonejson")
+
     def __init__(
-        self, listing_url: str, raw_data_dir: Path, rate_limiter: RateLimiter
+        self, listing_url: str, raw_data_dir: Path | None = None, *, rate_limiter: RateLimiter
     ) -> None:
         """
         Inputs:
             listing_url: root HearthstoneJSON listing page URL (e.g.
                 "https://api.hearthstonejson.com/v1/").
             raw_data_dir: directory each build's cards.json is written
-                into (expected to be a path under data/raw, per
+                into. Defaults to DEFAULT_RAW_DATA_DIR when omitted
+                (expected to be a path under data/raw, per
                 src/README.md — not this class's concern to enforce,
                 just to receive).
             rate_limiter: paces every outgoing request this class
@@ -105,7 +109,7 @@ class HearthstoneJsonDownloader:
         Exceptions: none.
         """
         self.listing_url = listing_url
-        self.raw_data_dir = raw_data_dir
+        self.raw_data_dir = raw_data_dir if raw_data_dir is not None else self.DEFAULT_RAW_DATA_DIR
         self.rate_limiter = rate_limiter
 
     def fetch(self) -> list[BuildDownloadOutcome]:
@@ -135,8 +139,7 @@ class HearthstoneJsonDownloader:
         Example:
             >>> downloader = HearthstoneJsonDownloader(
             ...     "https://api.hearthstonejson.com/v1/",
-            ...     Path("data/raw/hearthstonejson"),
-            ...     RateLimiter(requests_per_minute=12),
+            ...     rate_limiter=RateLimiter(requests_per_minute=12),
             ... )
             >>> outcomes = downloader.fetch()
             >>> failures = [o for o in outcomes if isinstance(o, BuildDownloadFailure)]

@@ -5,8 +5,9 @@ from typing import List
 import pandas as pd
 from pandas.io.parsers.readers import TextFileReader
 
-from src.dojos.dojo import Split
 from src.dojos.file_managers.utils.TTVSplits import TTVSplits
+from src.dojos.file_managers.utils.split_postfix import get_split_file_postfix
+from src.schema.splits import Split
 
 MAX_INT = 2**31 - 1
 
@@ -115,14 +116,13 @@ class FileManagerCSV:
     def shuffle_split_index(self, split_index: int,
                             batch_size: int = 32) -> TextFileReader:
         target_file = self.output_directory / \
-            f"{self.output_file_prefix}_{self._get_file_postfix(split_index)}.csv"
+            f"{self.output_file_prefix}_{get_split_file_postfix(split_index)}.csv"
         file = pd.read_csv(target_file)
         file = file.sample(
             frac=1,
             random_state=self.rng.randint(0, MAX_INT)
         ).reset_index(drop=True)
-        # TODO: Will this overwrite the file? Or append to it?
-        file.to_csv(target_file, index=False)
+        file.to_csv(target_file, mode="w", index=False)
         return pd.read_csv(target_file, iterator=True, chunksize=batch_size)
 
     def _prepare_split_output_files(self, num_splits: int,
@@ -140,13 +140,3 @@ class FileManagerCSV:
         for path in output_paths:
             header_frame.to_csv(path, index=False, header=self.has_header_row)
         return output_paths
-
-    def _get_file_postfix(self, split_index: int) -> str:
-        if split_index == 0:
-            return "train"
-        elif split_index == 1:
-            return "test"
-        elif split_index == 2:
-            return "validation"
-        else:
-            return f"split_{split_index}"

@@ -6,13 +6,12 @@ src/data_refinement/seventeenlands/draft_game_metrics/picked_v_held_v_pack_metri
 resolves every uuid against a CardBinder, and pairs a MultiGroupInput
 (pack cards, pool cards) with the index of the picked card within the pack.
 
-Assumed CSV cell encoding: pack_cards_uuids/pool_cards_uuids are each a
-JSON-encoded list of nocab_uuid strings, same convention used elsewhere in
-this refactor for list-shaped CSV cells (see the old
-ExampleDataConstructor.build_multi_group_example this replaces).
+pack_cards_uuids/pool_cards_uuids arrive as native list<string> parquet
+columns (that's how PickedVHeldVPackMetric.finalize() writes them), so a
+chunk's cell is already a list/array of nocab_uuid strings - no JSON
+decoding needed.
 """
 
-import json
 from typing import List
 from uuid import UUID
 
@@ -40,12 +39,8 @@ class PickPredictionDataConstructor:
         results: List[TrainingDatum] = []
         for _, row in chunk.iterrows():
             picked_card_uuid = row["picked_card_uuid"]
-
-            try:
-                pack_uuid_list = json.loads(row["pack_cards_uuids"])
-                pool_uuid_list = json.loads(row["pool_cards_uuids"])
-            except (TypeError, ValueError):
-                continue
+            pack_uuid_list = list(row["pack_cards_uuids"])
+            pool_uuid_list = list(row["pool_cards_uuids"])
 
             if picked_card_uuid not in pack_uuid_list:
                 # The true label must be one of the pack's own candidates.

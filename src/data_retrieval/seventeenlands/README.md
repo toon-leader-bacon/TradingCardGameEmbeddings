@@ -40,8 +40,8 @@ an extensible metric engine over raw rows, not a client for what
   (`ref`, `path: Path | None`, `error: Exception | None` — exactly one
   of `path`/`error` is meaningful per outcome), and
   `DownloadBatchResult` (`outcomes: list[DownloadOutcome]`).
-  `SeventeenLandsDownloader(raw_data_dir: Path, rate_limiter:
-  RateLimiter)` exposes:
+  `SeventeenLandsDownloader(raw_data_dir: Path | None = None, *,
+  rate_limiter: RateLimiter)` exposes:
   - `download(refs: list[SeventeenLandsFileRef], *, data_types:
     list[DataType] | None = None, expansions: list[str] | None =
     None, formats: list[str] | None = None) -> DownloadBatchResult` —
@@ -78,8 +78,7 @@ from src.data_retrieval.seventeenlands.refs import DataType, SeventeenLandsFileR
 from src.data_retrieval.rate_limiter import RateLimiter
 
 downloader = SeventeenLandsDownloader(
-    Path("data/raw/17lands"),
-    RateLimiter(requests_per_minute=12),
+    rate_limiter=RateLimiter(requests_per_minute=12),
 )
 refs = [SeventeenLandsFileRef.from_known(DataType.GAME, "MSH", "PremierDraft")]
 result = downloader.download(refs)

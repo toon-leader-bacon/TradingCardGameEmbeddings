@@ -9,6 +9,7 @@ import gzip
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar
 from urllib.parse import urlparse
 
 from src.data_retrieval.download_to_file import download_to_file
@@ -35,23 +36,26 @@ class ScryfallOracleDownloader:
     directory depends on this class.
     """
 
-    def __init__(self, source_url: str, raw_data_dir: Path) -> None:
+    DEFAULT_RAW_DATA_DIR: ClassVar[Path] = Path("data/raw/scryfall")
+
+    def __init__(self, source_url: str, raw_data_dir: Path | None = None) -> None:
         """
         Inputs:
             source_url: full URL to a Scryfall oracle-cards
                 .jsonl.gz bulk data file (e.g.
                 "https://data.scryfall.io/oracle-cards/oracle-cards-<ts>.jsonl.gz").
             raw_data_dir: directory both the compressed and extracted
-                files are written into (expected to be a path under
-                data/raw, per src/README.md — not this class's
-                concern to enforce, just to receive).
+                files are written into. Defaults to
+                DEFAULT_RAW_DATA_DIR when omitted (expected to be a
+                path under data/raw, per src/README.md — not this
+                class's concern to enforce, just to receive).
         Output: none (constructor).
         Side effects: none — no I/O happens until fetch()/download()/
             extract() are called.
         Exceptions: none.
         """
         self.source_url = source_url
-        self.raw_data_dir = raw_data_dir
+        self.raw_data_dir = raw_data_dir if raw_data_dir is not None else self.DEFAULT_RAW_DATA_DIR
 
     def fetch(self) -> ScryfallDownloadResult:
         """Entry point: download the bulk file, then extract it.
@@ -68,7 +72,6 @@ class ScryfallOracleDownloader:
         Example:
             >>> downloader = ScryfallOracleDownloader(
             ...     "https://data.scryfall.io/oracle-cards/oracle-cards-20260820090157.jsonl.gz",
-            ...     Path("data/raw/scryfall"),
             ... )
             >>> result = downloader.fetch()
         """

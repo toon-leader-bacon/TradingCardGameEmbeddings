@@ -36,14 +36,27 @@ class Batch:
         return Batch(inputs, labels)
 
     def _determine_structure_type(self):
-        if all(isinstance(input, SingleCardInput) for input in self.inputs):
-            return self.Structure_Type.SINGLE_CARD
-        elif all(isinstance(input, MultiCardInput) for input in self.inputs):
-            return self.Structure_Type.MULTI_CARDS
-        elif all(isinstance(input, MultiGroupInput) for input in self.inputs):
-            return self.Structure_Type.MULTI_GROUP
-        else:
-            raise ValueError(f"Inputs are not a valid structure type: {self.inputs}")
+        # _validate_structure() already confirmed every input shares the
+        # first input's shape, so classifying the first input is enough.
+        if not self.inputs:
+            return self.Structure_Type.SINGLE_CARD  # Empty batch is weird but valid
+        return self._structure_type_of(self.inputs[0])
+
+    @staticmethod
+    def _structure_type_of(input: TrainingInput) -> "Batch.Structure_Type":
+        # TrainingInput's variants (SingleCardInput/MultiCardInput/
+        # MultiGroupInput) are subscripted generics at the type-hint
+        # level, but at runtime a MultiCardInput and a MultiGroupInput
+        # are both plain `list` - isinstance()/issubclass() can't tell
+        # them apart from the generic aliases themselves, so this
+        # inspects actual element shape instead.
+        if isinstance(input, SingleCardInput):
+            return Batch.Structure_Type.SINGLE_CARD
+        if isinstance(input, list) and all(isinstance(item, SingleCardInput) for item in input):
+            return Batch.Structure_Type.MULTI_CARDS
+        if isinstance(input, list) and all(isinstance(item, list) for item in input):
+            return Batch.Structure_Type.MULTI_GROUP
+        raise ValueError(f"Not a valid TrainingInput shape: {input}")
 
     def _validate_structure(self):
         if not len(self.inputs) == len(self.labels):
@@ -58,13 +71,13 @@ class Batch:
             raise ValueError("Labels are not the same type")
 
     def _validate_input_structure(self):
-        # Ensure the first input is a valid type
-        first_input_type = type(self.inputs[0])
-        if not issubclass(first_input_type, TrainingInput):
-            raise ValueError(f"First input is not a valid TrainingInput type: {first_input_type}")
+        # Ensure the first input is a valid shape (raises otherwise).
+        first_structure_type = self._structure_type_of(self.inputs[0])
 
-        # Ensure that all inputs are of the same type as the first input
-        return all(type(input) == first_input_type for input in self.inputs)
+        # Ensure that every input has that same shape.
+        return all(
+            self._structure_type_of(input) == first_structure_type for input in self.inputs
+        )
 
     def _validate_label_structure(self):
         # Labels can be any type, so we don't need to validate the first type

@@ -16,6 +16,7 @@ import gzip
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar
 
 from tqdm import tqdm
 
@@ -66,13 +67,18 @@ class SeventeenLandsDownloader:
     source directory depends on this class.
     """
 
-    def __init__(self, raw_data_dir: Path, rate_limiter: RateLimiter) -> None:
+    DEFAULT_RAW_DATA_DIR: ClassVar[Path] = Path("data/raw/17lands")
+
+    def __init__(
+        self, raw_data_dir: Path | None = None, *, rate_limiter: RateLimiter
+    ) -> None:
         """
         Inputs:
             raw_data_dir: directory downloaded/extracted files are
-                written under (expected to be data/raw/17lands, per
-                this container's README — not this class's concern to enforce,
-                just to receive). Each file lands at
+                written under. Defaults to DEFAULT_RAW_DATA_DIR when
+                omitted (expected to be data/raw/17lands, per this
+                container's README — not this class's concern to
+                enforce, just to receive). Each file lands at
                 raw_data_dir/<data_type>/<expansion>.<format_code>.csv.
             rate_limiter: paces every outgoing download request this
                 class makes. Passed in rather than constructed
@@ -83,7 +89,7 @@ class SeventeenLandsDownloader:
             download_one() is called.
         Exceptions: none.
         """
-        self.raw_data_dir = raw_data_dir
+        self.raw_data_dir = raw_data_dir if raw_data_dir is not None else self.DEFAULT_RAW_DATA_DIR
         self.rate_limiter = rate_limiter
 
     def download(
@@ -127,8 +133,7 @@ class SeventeenLandsDownloader:
 
         Example:
             >>> downloader = SeventeenLandsDownloader(
-            ...     Path("data/raw/17lands"),
-            ...     RateLimiter(requests_per_minute=12),
+            ...     rate_limiter=RateLimiter(requests_per_minute=12),
             ... )
             >>> refs = [SeventeenLandsFileRef.from_known(DataType.GAME, "MSH", "PremierDraft")]
             >>> result = downloader.download(refs)
@@ -210,8 +215,7 @@ class SeventeenLandsDownloader:
 
         Example:
             >>> downloader = SeventeenLandsDownloader(
-            ...     Path("data/raw/17lands"),
-            ...     RateLimiter(requests_per_minute=12),
+            ...     rate_limiter=RateLimiter(requests_per_minute=12),
             ... )
             >>> ref = SeventeenLandsFileRef.from_known(DataType.GAME, "MSH", "PremierDraft")
             >>> downloader.download_one(ref)

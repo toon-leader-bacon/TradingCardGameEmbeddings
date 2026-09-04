@@ -15,6 +15,7 @@ import shutil
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import ClassVar
 
 from src.data_retrieval.download_to_file import download_to_file
 
@@ -45,22 +46,25 @@ class PokemonTcgDataDownloader:
     source directory depends on this class.
     """
 
-    def __init__(self, repo_zip_url: str, raw_data_dir: Path) -> None:
+    DEFAULT_RAW_DATA_DIR: ClassVar[Path] = Path("data/raw/pokemon_tcg")
+
+    def __init__(self, repo_zip_url: str, raw_data_dir: Path | None = None) -> None:
         """
         Inputs:
             repo_zip_url: GitHub zipball URL for the repo (e.g.
                 "https://api.github.com/repos/PokemonTCG/pokemon-tcg-data/zipball").
             raw_data_dir: directory the extracted cards/ and decks/
-                subdirectories are written into (expected to be a path
-                under data/raw, per src/README.md — not this class's
-                concern to enforce, just to receive).
+                subdirectories are written into. Defaults to
+                DEFAULT_RAW_DATA_DIR when omitted (expected to be a
+                path under data/raw, per src/README.md — not this
+                class's concern to enforce, just to receive).
         Output: none (constructor).
         Side effects: none — no I/O happens until fetch()/download()/
             extract() are called.
         Exceptions: none.
         """
         self.repo_zip_url = repo_zip_url
-        self.raw_data_dir = raw_data_dir
+        self.raw_data_dir = raw_data_dir if raw_data_dir is not None else self.DEFAULT_RAW_DATA_DIR
 
     def fetch(self) -> PokemonTcgDataDownloadResult:
         """Entry point: download the repo zip, then extract it.
@@ -78,7 +82,6 @@ class PokemonTcgDataDownloader:
         Example:
             >>> downloader = PokemonTcgDataDownloader(
             ...     "https://api.github.com/repos/PokemonTCG/pokemon-tcg-data/zipball",
-            ...     Path("data/raw/pokemon_tcg"),
             ... )
             >>> result = downloader.fetch()
         """

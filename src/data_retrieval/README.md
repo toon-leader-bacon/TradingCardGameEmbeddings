@@ -31,6 +31,15 @@ Implemented today:
   HearthstoneJSON (api.hearthstonejson.com).
 - `gwent_one/` — pulls raw HTML page fragments from gwent.one's card
   search AJAX endpoint (no bulk dump exists for Gwent).
+- `play_gwent/` — pulls deck guides from playgwent.com, in two phases:
+  `phase_1()` pages through the site's guides-list API to collect
+  every guide id, `phase_2()` fetches each guide's HTML detail page
+  and extracts the deck payload embedded in it (a `data-state` HTML
+  attribute holding HTML-escaped JSON — no separate API endpoint
+  exists for deck details). See
+  [`play_gwent/TODO.md`](play_gwent/TODO.md) for a known,
+  deliberately-deferred naming inconsistency with the other sources
+  in this container.
 - `rate_limiter.py` — shared politeness pacer (`RateLimiter`).
 - `download_to_file.py` — shared streamed-GET-to-disk helper
   (`download_to_file`), used by any source's plain single-file
@@ -107,6 +116,21 @@ downloader = GwentOneDownloader(
     rate_limiter=RateLimiter(requests_per_minute=12),
 )
 print(downloader.fetch(result_limit=1300))
+"
+```
+
+**Play Gwent** (playgwent.com deck guides — two phases, run in order;
+`phase_2()` skips any guide id already recorded in
+`guides_manifest.txt` from a prior run):
+
+```bash
+python3 -c "
+from src.data_retrieval.play_gwent.downloader import PlayGwentDownloader
+from src.data_retrieval.rate_limiter import RateLimiter
+
+downloader = PlayGwentDownloader(RateLimiter(requests_per_minute=12))
+downloader.phase_1()
+print(downloader.phase_2())
 "
 ```
 
