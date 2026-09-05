@@ -48,6 +48,14 @@ Implemented today:
   — one shared file rather than one per run, since this leaderboard is
   only ~1,000 runs, not a bulk historical export. Both phases use the
   shared `download_to_string` helper.
+- `sts2runs/` — `downloader.py` pulls sts2runs.com's monthly gzip-
+  compressed NDJSON dump of community-submitted Slay the Spire 2 runs
+  (a single dated `.json.gz` file, no API/pagination/auth — the
+  current URL must be read off https://sts2runs.com/downloads by
+  hand) and extracts it to a sibling NDJSON file. Structurally mirrors
+  `ScryfallOracleDownloader`'s dated-URL download-then-gzip-extract
+  shape; see the module docstring for why that duplication is left as
+  a deliberate rule-of-three call rather than extracted yet.
 - `play_gwent/` — pulls deck guides from playgwent.com, in two phases:
   `phase_1()` pages through the site's guides-list API to collect
   every guide id, `phase_2()` fetches each guide's HTML detail page
@@ -163,6 +171,20 @@ downloader = GwentOneDownloader(
     rate_limiter=RateLimiter(requests_per_minute=12),
 )
 print(downloader.fetch(result_limit=1300))
+"
+```
+
+**sts2runs** (a single dated `.json.gz` monthly dump — check
+https://sts2runs.com/downloads for the current filename):
+
+```bash
+python3 -c "
+from src.data_retrieval.sts2runs.downloader import STS2RunsDownloader
+
+downloader = STS2RunsDownloader(
+    'https://sts2runs.com/downloads/runs-all-before-2026-06.json.gz',
+)
+print(downloader.fetch())
 "
 ```
 
