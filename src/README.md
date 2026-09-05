@@ -21,12 +21,14 @@ Two data flows run through this project, both landing on disk between
 containers rather than passing objects in memory directly:
 
 1. **Card ingestion:** `data_retrieval/` writes a raw dump to
-   `data/raw/`, a `CardIngestionStage` implementation (e.g.
+   `data/raw/`, and `card_binder/build.py`'s
+   `build_or_update_card_binder()` hands it to a `CardIngestionStage`
+   implementation (e.g.
    `data_refinement/card_binder/scryfall/ScryfallCardIngestionStage`,
-   `.../pokemon_tcg/PokemonTcgCardIngestionStage`) translates it into
-   candidate cards, and `card_binder/build.py`'s
-   `build_or_update_card_binder()` merges them into a `CardBinder`,
-   saved to `data/final/cards/<game>.jsonl`.
+   `.../pokemon_tcg/PokemonTcgCardIngestionStage`), which writes
+   directly into a `CardBinder` (owning its own duplicate-detection
+   and collision-resolution against it), saved to
+   `data/final/cards/<game>.jsonl`.
 2. **Metric → dojo:** `data_retrieval/` writes a raw dump, one of the
    `seventeenlands/*_metrics/` pipelines' `*MetricScanner` streams it
    (resolving card identity through the *same* `CardBinder` file flow

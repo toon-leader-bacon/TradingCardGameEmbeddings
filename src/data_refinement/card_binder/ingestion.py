@@ -1,98 +1,71 @@
 """The shared interface every raw-source ingestion stage implements.
 
-See src/data_refinement/README.md for this container's scope and
+See src/data_refinement/README.md for this container's scope,
 src/data_refinement/card_binder/README.md for the full contract this
-was built against.
+was built against, and plans/card_binder_v2.md's "Component overview"
+for the reasoning behind this design.
 
 CardIngestionStage is a Strategy (PATTERNS.md) — one implementation
 per raw source (e.g. ScryfallCardIngestionStage in ./scryfall/, a
-future PokemonTcgCardIngestionStage in ./pokemon_tcg/, etc.). Deliberately
-a pure, stateless translator: no filtering, no deduplication, and NO
-write access to CardBinder/AliasLedger — a stage only ever returns
-data; CardBinder.add()/register_alias() (driven by build.py's driver)
-are the only things that ever mutate a CardBinder. This keeps every
-stage trivially testable (assert on returned IngestedCandidates, no
-CardBinder to construct or mock) and keeps collision/identity logic
-centralized in one place for every source, not reimplemented per-stage.
+future PokemonTcgCardIngestionStage in ./pokemon_tcg/, etc.). Unlike
+the pre-card_binder_v2 design, a stage is NOT a pure, stateless
+translator anymore: it's handed a live CardBinder and owns its own
+duplicate-detection (however that source's own data supports it — see
+each stage's own module docstring) and collision-resolution (typically
+one of merge_strategies.py's shared policies) directly against it,
+performing create()/update()/replace()/register_alias() calls itself
+as a side effect. CardBinder has no opinion on either — see
+card_binder.py's own module docstring. This is a deliberate reversal
+of the pre-v2 design's centralization: that design kept collision
+logic in one place (CardBinder.add()) at the cost of assuming
+(source_game, name) was always a valid uniqueness key, which doesn't
+hold for every game (Slay the Spire 2's per-character Strike/Defend,
+Pokemon's same-named-but-different reprints) — see
+plans/card_binder_v2.md's "Why".
+
+A stage always ingests exactly one game — SOURCE_GAME is a class
+constant, not an ingest() parameter, so a caller can never construct a
+nonsensical call (e.g. passing GameId.GWENT to a Scryfall stage).
 
 Implemented as a typing.Protocol (structural typing), matching the
 convention already established by Metric elsewhere in this project's
 architecture, rather than an ABC.
 """
 
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import ClassVar, Protocol
+from uuid import UUID
 
-from src.schema.card import GenericCard
-from src.schema.data_source import DataSource
+from src.data_refinement.card_binder.card_binder import CardBinder
 from src.schema.game_id import GameId
 
 
-@dataclass(frozen=True)
-class ExternalIdentifier:
-    """One (data_source, source_id) pair a raw record carries.
-
-    Used for identifiers OTHER than a candidate's own primary
-    Provenance (e.g. a Scryfall row's arena_id alongside its
-    oracle_id) — see IngestedCandidate.aliases.
-
-    Inputs: none (data holder).
-    Output: n/a.
-    Side effects: none.
-    Exceptions: none.
-    """
-
-    data_source: DataSource
-    source_id: str
-
-
-@dataclass(frozen=True)
-class IngestedCandidate:
-    """One raw record translated into a candidate card plus its known aliases.
-
-    aliases holds every identity-bearing field a raw source's row
-    carries BEYOND card.provenance's own (data_source, source_id) —
-    e.g. a Scryfall row's arena_id/mtgo_id/mtgo_foil_id/each
-    multiverse_ids entry, whichever are actually present on that row
-    (presence is per-row-optional — see ScryfallCardIngestionStage).
-
-    Inputs: none (data holder).
-    Output: n/a.
-    Side effects: none.
-    Exceptions: none.
-    """
-
-    card: GenericCard
-    aliases: list[ExternalIdentifier]
-
-
 class CardIngestionStage(Protocol):
-    """Strategy: turn one raw source file into candidate cards + their aliases.
+    """Strategy: parse one raw source and write its cards directly into a CardBinder.
 
-    Implementations do not deduplicate or filter, and never touch
-    CardBinder/AliasLedger directly — see this module's docstring.
     Single-consumer to build_or_update_card_binder() (build.py), which
-    is agnostic to which concrete implementation it receives.
+    is agnostic to which concrete implementation it receives. See
+    src/data_refinement/card_binder/scryfall/ingestion_stage.py for a
+    concrete implementation.
     """
 
-    def ingest(self, raw_path: Path, source_game: GameId) -> list[IngestedCandidate]:
-        """Parse raw_path into one IngestedCandidate per raw record.
+    SOURCE_GAME: ClassVar[GameId]
+
+    def ingest(self, raw_path: Path, binder: CardBinder) -> list[UUID]:
+        """Parse raw_path and create/update/replace cards directly on binder.
 
         Inputs:
             raw_path: path to a raw source file, or a directory of raw
                 source files — interpretation is each implementation's
-                own concern (e.g. a single Scryfall oracle-cards
-                .jsonl file for ScryfallCardIngestionStage, vs. a
-                directory of per-set .json files for
-                PokemonTcgCardIngestionStage — see
-                scryfall/ingestion_stage.py and
-                pokemon_tcg/ingestion_stage.py).
-            source_game: which game these cards belong to.
-        Output: one IngestedCandidate per raw record found in raw_path,
-            each card with its own freshly minted nocab_uuid. No
-            filtering, no deduplication — see this module's docstring.
-        Side effects: none — reads raw_path, no other I/O.
+                own concern.
+            binder: the CardBinder to read from and write to, as a
+                side effect.
+        Output: nocab_uuid of every card this call created or
+            content-changed (via update()/replace()) this run. A card
+            looked up and left untouched (e.g. an exact-duplicate
+            re-fetch) is NOT included.
+        Side effects: reads raw_path; creates/updates cards and
+            registers aliases directly on binder.
         Exceptions: raises if raw_path doesn't exist or isn't
             well-formed for this implementation's expected format.
         """

@@ -4,7 +4,7 @@ import pytest
 
 from src.dojos.file_managers.utils.SplitSampler import SplitSamplerWellOrderedLooping
 
-SAMPLE_METHODS = ["sample_loop", "sample_recur"]
+SAMPLE_METHODS = ["sample"]
 
 
 def _sample(sampler: SplitSamplerWellOrderedLooping, method_name: str, batch_size: int):

@@ -18,8 +18,9 @@ def find_uuid_by_name(
 ) -> UUID | None:
     """Resolve one card name to a nocab_uuid, with a multi-faced-card fallback.
 
-    Tries card_binder.get_by_name(source_game, name) first. On a miss,
-    falls back to card_binder.get_by_name_regex(source_game,
+    Tries card_binder.get_by_name(source_game, name) first — if that
+    returns exactly one card, resolves to it. On zero or more than one
+    match, falls back to card_binder.get_by_name_regex(source_game,
     f"^{re.escape(name)}( //.*)?$") — if that returns exactly one card,
     resolves to it; if it returns zero or more than one (ambiguous),
     this name is unresolved. Ambiguity is treated the same as no match
@@ -39,9 +40,9 @@ def find_uuid_by_name(
     Example:
         >>> find_uuid_by_name(card_binder, GameId.MTG, "Bruce Banner")
     """
-    exact = card_binder.get_by_name(source_game, name)
-    if exact is not None:
-        return exact.nocab_uuid
+    exact_matches = card_binder.get_by_name(source_game, name)
+    if len(exact_matches) == 1:
+        return exact_matches[0].nocab_uuid
 
     fallback_matches = card_binder.get_by_name_regex(
         source_game, f"^{re.escape(name)}( //.*)?$"

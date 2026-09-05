@@ -77,6 +77,9 @@ class SplitSamplerWellOrderedLooping(Generic[T]):
         if shuffle:
             self.rng.shuffle(self.collection)
 
+    def is_done(self) -> bool:
+        return self.next_idx >= self.length
+
     def sample(self, batch_size: int) -> list[T]:
         """Sample `batch_size` elements, reshuffling at each epoch boundary."""
         if batch_size <= 0 or self.length == 0:

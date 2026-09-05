@@ -1,21 +1,14 @@
 import json
 from pathlib import Path
 
+import pytest
+
+from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.scryfall.ingestion_stage import (
     ScryfallCardIngestionStage,
 )
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
-
-_REAL_ROW = {
-    "object": "card",
-    "id": "a471b306-4941-4e46-a0cb-d92895c16f8a",
-    "oracle_id": "00037840-6089-42ec-8c5c-281f9f474504",
-    "name": "Nissa, Worldsoul Speaker",
-    "mana_cost": "{3}{G}",
-    "type_line": "Legendary Creature — Elf Druid",
-    "colors": ["G"],
-}
 
 _ROW_WITH_ALL_ALIASES = {
     "oracle_id": "eca27964-accc-46cc-8aff-a06183e61e9c",
@@ -27,9 +20,6 @@ _ROW_WITH_ALL_ALIASES = {
     "tcgplayer_id": 235846,
     "cardmarket_id": 557248,
     "id": "cfa04897-6438-45e5-a10b-2e8afaf2b9eb",
-    "set_id": "541c3c28-8747-40e5-a231-8e8f33234859",
-    "card_back_id": "0aeebaf5-8c7d-4636-9e82-8c27447861f7",
-    "illustration_id": "94c5ee02-12d3-47e9-9955-e15a80309ba5",
 }
 
 
@@ -37,50 +27,21 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
 
 
-class TestIngest:
-    def test_parses_one_candidate_per_line(self, tmp_path: Path) -> None:
+class TestIngestNewCards:
+    def test_new_card_is_created_and_returned(self, tmp_path: Path) -> None:
         raw_path = tmp_path / "oracle-cards.jsonl"
-        _write_jsonl(
-            raw_path,
-            [
-                {"oracle_id": "id-1", "name": "Lightning Bolt"},
-                {"oracle_id": "id-2", "name": "Counterspell"},
-            ],
-        )
+        _write_jsonl(raw_path, [{"oracle_id": "id-1", "name": "Lightning Bolt"}])
+        binder = CardBinder()
 
-        candidates = ScryfallCardIngestionStage().ingest(raw_path, GameId.MTG)
+        changed = ScryfallCardIngestionStage().ingest(raw_path, binder)
 
-        assert len(candidates) == 2
-        assert [c.card.name for c in candidates] == ["Lightning Bolt", "Counterspell"]
-        assert [c.card.provenance.source_id for c in candidates] == ["id-1", "id-2"]
+        card = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
+        assert card is not None
+        assert card.name == "Lightning Bolt"
+        assert card.source_game == GameId.MTG
+        assert changed == [card.nocab_uuid]
 
-    def test_maps_oracle_id_to_provenance_not_scryfall_id(self, tmp_path: Path) -> None:
-        raw_path = tmp_path / "oracle-cards.jsonl"
-        _write_jsonl(raw_path, [_REAL_ROW])
-
-        candidates = ScryfallCardIngestionStage().ingest(raw_path, GameId.MTG)
-
-        assert candidates[0].card.provenance.source_id == _REAL_ROW["oracle_id"]
-        assert candidates[0].card.provenance.source_id != _REAL_ROW["id"]
-        assert candidates[0].card.provenance.data_source == DataSource.SCRYFALL
-
-    def test_raw_content_is_the_entire_row_unmodified(self, tmp_path: Path) -> None:
-        raw_path = tmp_path / "oracle-cards.jsonl"
-        _write_jsonl(raw_path, [_REAL_ROW])
-
-        candidates = ScryfallCardIngestionStage().ingest(raw_path, GameId.MTG)
-
-        assert candidates[0].card.raw_content == _REAL_ROW
-
-    def test_threads_source_game_through_unchanged(self, tmp_path: Path) -> None:
-        raw_path = tmp_path / "oracle-cards.jsonl"
-        _write_jsonl(raw_path, [{"oracle_id": "id-1", "name": "Bolt"}])
-
-        candidates = ScryfallCardIngestionStage().ingest(raw_path, GameId.MTG)
-
-        assert candidates[0].card.source_game == GameId.MTG
-
-    def test_each_card_gets_a_distinct_uuid(self, tmp_path: Path) -> None:
+    def test_multiple_distinct_rows_all_created_independently(self, tmp_path: Path) -> None:
         raw_path = tmp_path / "oracle-cards.jsonl"
         _write_jsonl(
             raw_path,
@@ -89,46 +50,159 @@ class TestIngest:
                 {"oracle_id": "id-2", "name": "Shock"},
             ],
         )
+        binder = CardBinder()
 
-        candidates = ScryfallCardIngestionStage().ingest(raw_path, GameId.MTG)
+        changed = ScryfallCardIngestionStage().ingest(raw_path, binder)
 
-        assert candidates[0].card.nocab_uuid != candidates[1].card.nocab_uuid
+        bolt = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
+        shock = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-2")
+        assert bolt is not None and shock is not None
+        assert bolt.nocab_uuid != shock.nocab_uuid
+        assert set(changed) == {bolt.nocab_uuid, shock.nocab_uuid}
 
-    def test_does_not_filter_or_deduplicate_by_name(self, tmp_path: Path) -> None:
-        # Two distinct token printings sharing a name — both should
-        # become separate IngestedCandidates; dedup is CardBinder's
-        # job, not this stage's.
+    def test_raises_if_row_missing_oracle_id(self, tmp_path: Path) -> None:
         raw_path = tmp_path / "oracle-cards.jsonl"
-        _write_jsonl(
-            raw_path,
-            [
-                {"oracle_id": "token-1", "name": "Storm Crow", "layout": "token"},
-                {"oracle_id": "token-2", "name": "Storm Crow", "layout": "token"},
-            ],
+        _write_jsonl(raw_path, [{"name": "Bolt"}])
+        binder = CardBinder()
+
+        with pytest.raises(KeyError):
+            ScryfallCardIngestionStage().ingest(raw_path, binder)
+
+    def test_raises_if_row_missing_name(self, tmp_path: Path) -> None:
+        raw_path = tmp_path / "oracle-cards.jsonl"
+        _write_jsonl(raw_path, [{"oracle_id": "id-1"}])
+        binder = CardBinder()
+
+        with pytest.raises(KeyError):
+            ScryfallCardIngestionStage().ingest(raw_path, binder)
+
+
+class TestReIngestDuplicates:
+    def test_unchanged_row_is_a_noop_and_preserves_uuid(self, tmp_path: Path) -> None:
+        raw_path = tmp_path / "oracle-cards.jsonl"
+        row = {"oracle_id": "id-1", "name": "Bolt", "mana_cost": "{R}"}
+        _write_jsonl(raw_path, [row])
+        binder = CardBinder()
+        stage = ScryfallCardIngestionStage()
+        stage.ingest(raw_path, binder)
+        original = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
+        assert original is not None
+
+        second_changed = stage.ingest(raw_path, binder)
+
+        reloaded = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
+        assert reloaded is not None
+        assert reloaded.nocab_uuid == original.nocab_uuid
+        assert second_changed == []
+
+    def test_richer_row_updates_content_in_place(self, tmp_path: Path) -> None:
+        binder = CardBinder()
+        stage = ScryfallCardIngestionStage()
+        sparse_path = tmp_path / "sparse.jsonl"
+        _write_jsonl(sparse_path, [{"oracle_id": "id-1", "name": "Bolt"}])
+        stage.ingest(sparse_path, binder)
+        original = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
+        assert original is not None
+
+        richer_path = tmp_path / "richer.jsonl"
+        richer_row = {
+            "oracle_id": "id-1",
+            "name": "Bolt",
+            "mana_cost": "{R}",
+            "type_line": "Instant",
+        }
+        _write_jsonl(richer_path, [richer_row])
+
+        changed = stage.ingest(richer_path, binder)
+
+        updated = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
+        assert updated is not None
+        assert updated.nocab_uuid == original.nocab_uuid
+        assert updated.raw_content == richer_row
+        assert changed == [original.nocab_uuid]
+
+    def test_less_rich_row_leaves_existing_content_untouched(self, tmp_path: Path) -> None:
+        binder = CardBinder()
+        stage = ScryfallCardIngestionStage()
+        richer_path = tmp_path / "richer.jsonl"
+        richer_row = {
+            "oracle_id": "id-1",
+            "name": "Bolt",
+            "mana_cost": "{R}",
+            "type_line": "Instant",
+        }
+        _write_jsonl(richer_path, [richer_row])
+        stage.ingest(richer_path, binder)
+        original = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
+        assert original is not None
+
+        sparse_path = tmp_path / "sparse.jsonl"
+        _write_jsonl(sparse_path, [{"oracle_id": "id-1", "name": "Bolt"}])
+
+        changed = stage.ingest(sparse_path, binder)
+
+        unchanged = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
+        assert unchanged is not None
+        assert unchanged.nocab_uuid == original.nocab_uuid
+        assert unchanged.raw_content == richer_row
+        assert changed == []
+
+
+class TestAliasRegistration:
+    def test_all_secondary_aliases_resolve_after_create(self, tmp_path: Path) -> None:
+        raw_path = tmp_path / "oracle-cards.jsonl"
+        _write_jsonl(raw_path, [_ROW_WITH_ALL_ALIASES])
+        binder = CardBinder()
+
+        ScryfallCardIngestionStage().ingest(raw_path, binder)
+
+        card = binder.get_by_alias(
+            GameId.MTG, DataSource.SCRYFALL, _ROW_WITH_ALL_ALIASES["oracle_id"]
         )
+        assert card is not None
+        assert binder.get_by_alias(GameId.MTG, DataSource.ARENA, "76497") == card
+        assert binder.get_by_alias(GameId.MTG, DataSource.MTGO, "88685") == card
+        assert binder.get_by_alias(GameId.MTG, DataSource.MTGO, "88686") == card
+        assert binder.get_by_alias(GameId.MTG, DataSource.GATHERER, "513581") == card
+        assert binder.get_by_alias(GameId.MTG, DataSource.GATHERER, "513582") == card
 
-        candidates = ScryfallCardIngestionStage().ingest(raw_path, GameId.MTG)
+    def test_aliases_still_registered_on_noop_duplicate_branch(self, tmp_path: Path) -> None:
+        # Aliases must be re-registered even when content doesn't
+        # change — a losing/no-op row's identifier must never become
+        # a dead end (plans/card_binder_v2.md's "Open risks").
+        binder = CardBinder()
+        stage = ScryfallCardIngestionStage()
+        first_path = tmp_path / "first.jsonl"
+        _write_jsonl(first_path, [{"oracle_id": "id-1", "name": "Bolt", "a": "x" * 50}])
+        stage.ingest(first_path, binder)
 
-        assert len(candidates) == 2
-        assert candidates[0].card.nocab_uuid != candidates[1].card.nocab_uuid
+        second_path = tmp_path / "second.jsonl"
+        _write_jsonl(
+            second_path,
+            [{"oracle_id": "id-1", "name": "Bolt", "arena_id": 76497}],
+        )
+        stage.ingest(second_path, binder)
 
-    def test_empty_file_returns_empty_list(self, tmp_path: Path) -> None:
-        raw_path = tmp_path / "empty.jsonl"
-        raw_path.write_text("")
+        card = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
+        assert binder.get_by_alias(GameId.MTG, DataSource.ARENA, "76497") == card
 
-        candidates = ScryfallCardIngestionStage().ingest(raw_path, GameId.MTG)
+    def test_missing_arena_id_is_tolerated(self, tmp_path: Path) -> None:
+        raw_path = tmp_path / "oracle-cards.jsonl"
+        row = {"oracle_id": "id-1", "name": "Candles of Leng", "mtgo_id": 25639}
+        _write_jsonl(raw_path, [row])
+        binder = CardBinder()
 
-        assert candidates == []
+        ScryfallCardIngestionStage().ingest(raw_path, binder)
+
+        card = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
+        assert binder.get_by_alias(GameId.MTG, DataSource.MTGO, "25639") == card
+        assert binder.get_by_alias(GameId.MTG, DataSource.ARENA, "76497") is None
 
 
 class TestExtractAliases:
-    def test_extracts_every_present_alias_field(self, tmp_path: Path) -> None:
-        raw_path = tmp_path / "oracle-cards.jsonl"
-        _write_jsonl(raw_path, [_ROW_WITH_ALL_ALIASES])
+    def test_extracts_every_present_alias_field(self) -> None:
+        aliases = set(ScryfallCardIngestionStage()._extract_aliases(_ROW_WITH_ALL_ALIASES))
 
-        candidates = ScryfallCardIngestionStage().ingest(raw_path, GameId.MTG)
-
-        aliases = {(a.data_source, a.source_id) for a in candidates[0].aliases}
         assert aliases == {
             (DataSource.ARENA, "76497"),
             (DataSource.MTGO, "88685"),
@@ -137,41 +211,9 @@ class TestExtractAliases:
             (DataSource.GATHERER, "513582"),
         }
 
-    def test_missing_arena_id_is_tolerated(self, tmp_path: Path) -> None:
-        # Confirmed real case: Arena-illegal cards have no arena_id field.
-        raw_path = tmp_path / "oracle-cards.jsonl"
-        row = {"oracle_id": "id-1", "name": "Candles of Leng", "mtgo_id": 25639}
-        _write_jsonl(raw_path, [row])
+    def test_row_with_no_alias_fields_returns_empty_list(self) -> None:
+        aliases = ScryfallCardIngestionStage()._extract_aliases(
+            {"oracle_id": "id-1", "name": "Bolt"}
+        )
 
-        candidates = ScryfallCardIngestionStage().ingest(raw_path, GameId.MTG)
-
-        aliases = {(a.data_source, a.source_id) for a in candidates[0].aliases}
-        assert aliases == {(DataSource.MTGO, "25639")}
-
-    def test_row_with_no_alias_fields_returns_empty_aliases(self, tmp_path: Path) -> None:
-        raw_path = tmp_path / "oracle-cards.jsonl"
-        _write_jsonl(raw_path, [{"oracle_id": "id-1", "name": "Bolt"}])
-
-        candidates = ScryfallCardIngestionStage().ingest(raw_path, GameId.MTG)
-
-        assert candidates[0].aliases == []
-
-    def test_excluded_fields_never_become_aliases(self, tmp_path: Path) -> None:
-        # id/set_id/card_back_id/illustration_id/tcgplayer_id/cardmarket_id
-        # are deliberately not identity-bearing — see this stage's
-        # module docstring.
-        raw_path = tmp_path / "oracle-cards.jsonl"
-        _write_jsonl(raw_path, [_ROW_WITH_ALL_ALIASES])
-
-        candidates = ScryfallCardIngestionStage().ingest(raw_path, GameId.MTG)
-
-        excluded_values = {
-            _ROW_WITH_ALL_ALIASES["id"],
-            _ROW_WITH_ALL_ALIASES["set_id"],
-            _ROW_WITH_ALL_ALIASES["card_back_id"],
-            _ROW_WITH_ALL_ALIASES["illustration_id"],
-            str(_ROW_WITH_ALL_ALIASES["tcgplayer_id"]),
-            str(_ROW_WITH_ALL_ALIASES["cardmarket_id"]),
-        }
-        alias_ids = {a.source_id for a in candidates[0].aliases}
-        assert alias_ids.isdisjoint(excluded_values)
+        assert aliases == []

@@ -36,3 +36,6 @@ class DataSource(str, Enum):
     GWENT_ONE = "gwent_one"  # gwent.one's card search AJAX endpoint
     # (see src/data_retrieval/gwent_one/downloader.py and
     # src/data_refinement/card_binder/gwent_one/ingestion_stage.py).
+    SPIRE_CODEX = "spire_codex"  # spire-codex GitHub repo's cards.json
+    # (see src/data_retrieval/spire_codex/downloader.py and
+    # src/data_refinement/card_binder/spire_codex/ingestion_stage.py).

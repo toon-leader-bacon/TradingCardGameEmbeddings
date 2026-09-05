@@ -29,6 +29,8 @@ Implemented today:
   source later, as a separate V2 rather than a rewrite of this one).
 - `hearthstonejson/` — pulls per-build card JSON dumps from
   HearthstoneJSON (api.hearthstonejson.com).
+- `spire_codex/` — pulls a single static `cards.json` file from the
+  spire-codex GitHub repo's raw-content URL (no API, no pagination).
 - `gwent_one/` — pulls raw HTML page fragments from gwent.one's card
   search AJAX endpoint (no bulk dump exists for Gwent).
 - `play_gwent/` — pulls deck guides from playgwent.com, in two phases:
@@ -98,6 +100,17 @@ downloader = HearthstoneJsonDownloader(
     'https://api.hearthstonejson.com/v1/',
     rate_limiter=RateLimiter(requests_per_minute=12),
 )
+print(downloader.fetch())
+"
+```
+
+**Spire Codex** (a single static file, no rate limiting needed):
+
+```bash
+python3 -c "
+from src.data_retrieval.spire_codex.downloader import SpireCodexDownloader
+
+downloader = SpireCodexDownloader()
 print(downloader.fetch())
 "
 ```

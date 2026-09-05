@@ -26,14 +26,14 @@ class TestFindUuidByName:
     def test_exact_match_resolves(self) -> None:
         registry = CardBinder()
         card = _card("Bolt")
-        registry.add(card)
+        registry.create(card)
 
         assert find_uuid_by_name(registry, GameId.MTG, "Bolt") == card.nocab_uuid
 
     def test_mdfc_fallback_resolves_single_match(self) -> None:
         registry = CardBinder()
         card = _card("Bruce Banner // The Incredible Hulk")
-        registry.add(card)
+        registry.create(card)
 
         assert (
             find_uuid_by_name(registry, GameId.MTG, "Bruce Banner") == card.nocab_uuid
@@ -46,7 +46,7 @@ class TestFindUuidByName:
 
     def test_ambiguous_fallback_match_is_unresolved(self) -> None:
         registry = CardBinder()
-        registry.add(_card("Bolt // Bolt Alpha"))
-        registry.add(_card("Bolt // Bolt Beta"))
+        registry.create(_card("Bolt // Bolt Alpha"))
+        registry.create(_card("Bolt // Bolt Beta"))
 
         assert find_uuid_by_name(registry, GameId.MTG, "Bolt") is None

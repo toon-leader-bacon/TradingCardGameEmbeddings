@@ -28,3 +28,6 @@ class GameId(str, Enum):
     YUGIOH = "yugioh"
     HEARTHSTONE = "hearthstone"
     GWENT = "gwent"
+    SLAY_THE_SPIRE_2 = "slay_the_spire_2"  # Slay the Spire 2 (see
+    # src/data_retrieval/spire_codex/downloader.py and
+    # src/data_refinement/card_binder/spire_codex/ingestion_stage.py).

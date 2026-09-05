@@ -1,10 +1,11 @@
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
-from src.data_refinement.card_binder.card_binder import AddOutcome, CardBinder
+from src.data_refinement.card_binder.card_binder import CardBinder
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
@@ -30,106 +31,160 @@ def _card(
     )
 
 
-class TestAdd:
-    def test_first_candidate_for_a_name_is_inserted(self) -> None:
+class TestCreate:
+    def test_inserts_new_card(self) -> None:
         binder = CardBinder()
-        candidate = _card("Bolt", "src-1", {"a": 1})
+        card = _card("Bolt", "src-1", {"a": 1})
 
-        result = binder.add(candidate)
+        result = binder.create(card)
 
-        assert result.outcome == AddOutcome.INSERTED
-        assert result.stored_card == candidate
+        assert result == card
+        assert binder.get_by_uuid(card.nocab_uuid) == card
 
-    def test_strictly_richer_candidate_updates_content(self) -> None:
+    def test_raises_on_duplicate_uuid(self) -> None:
         binder = CardBinder()
-        first = _card("Bolt", "src-1", {"a": 1})
-        binder.add(first)
-        richer = _card("Bolt", "src-2", {"a": 1, "b": 2})
+        card = _card("Bolt", "src-1", {"a": 1})
+        binder.create(card)
 
-        result = binder.add(richer)
+        with pytest.raises(ValueError):
+            binder.create(card)
 
-        assert result.outcome == AddOutcome.CONTENT_UPDATED
-        assert result.stored_card.raw_content == richer.raw_content
-        assert result.stored_card.provenance == richer.provenance
 
-    def test_content_update_preserves_existing_nocab_uuid(self) -> None:
+class TestUpdate:
+    def test_shallow_merges_raw_content_patch(self) -> None:
         binder = CardBinder()
-        first = _card("Bolt", "src-1", {"a": 1})
-        binder.add(first)
-        richer = _card("Bolt", "src-2", {"a": 1, "b": 2})
+        card = _card("Bolt", "src-1", {"a": 1, "b": 2})
+        binder.create(card)
 
-        result = binder.add(richer)
+        updated = binder.update(card.nocab_uuid, raw_content_patch={"b": 20, "c": 3})
 
-        assert result.stored_card.nocab_uuid == first.nocab_uuid
-        assert result.stored_card.nocab_uuid != richer.nocab_uuid
+        assert updated.raw_content == {"a": 1, "b": 20, "c": 3}
+        assert updated.nocab_uuid == card.nocab_uuid
 
-    def test_less_rich_candidate_keeps_existing(self) -> None:
+    def test_overrides_name_when_given(self) -> None:
         binder = CardBinder()
-        richer = _card("Bolt", "src-1", {"a": 1, "b": 2})
-        binder.add(richer)
-        poorer = _card("Bolt", "src-2", {"a": 1})
+        card = _card("Bolt", "src-1", {"a": 1})
+        binder.create(card)
 
-        result = binder.add(poorer)
+        updated = binder.update(card.nocab_uuid, name="Lightning Bolt")
 
-        assert result.outcome == AddOutcome.KEPT_EXISTING
-        assert result.stored_card.raw_content == richer.raw_content
-        assert result.stored_card.nocab_uuid == richer.nocab_uuid
+        assert updated.name == "Lightning Bolt"
+        assert binder.get_by_name(GameId.MTG, "Bolt") == []
+        assert binder.get_by_name(GameId.MTG, "Lightning Bolt") == [updated]
 
-    def test_exact_tie_keeps_existing(self) -> None:
+    def test_overrides_provenance_when_given(self) -> None:
         binder = CardBinder()
-        first = _card("Bolt", "src-1", {"a": 1, "b": 2})
-        binder.add(first)
-        tied = _card("Bolt", "src-2", {"a": 1, "b": 2})
-
-        result = binder.add(tied)
-
-        assert result.outcome == AddOutcome.KEPT_EXISTING
-        assert result.stored_card.nocab_uuid == first.nocab_uuid
-
-    def test_losing_and_winning_aliases_both_resolve_to_survivor(self) -> None:
-        binder = CardBinder()
-        first = _card("Bolt", "src-1", {"a": 1})
-        binder.add(first)
-        richer = _card("Bolt", "src-2", {"a": 1, "b": 2})
-        binder.add(richer)
-
-        assert (
-            binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "src-1").nocab_uuid
-            == first.nocab_uuid
-        )
-        assert (
-            binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "src-2").nocab_uuid
-            == first.nocab_uuid
+        card = _card("Bolt", "src-1", {"a": 1})
+        binder.create(card)
+        new_provenance = Provenance(
+            data_source=DataSource.ARENA,
+            source_id="76497",
+            fetched_at=datetime.now(timezone.utc),
         )
 
-    def test_different_names_do_not_collide(self) -> None:
+        updated = binder.update(card.nocab_uuid, provenance=new_provenance)
+
+        assert updated.provenance == new_provenance
+
+    def test_leaves_fields_untouched_when_not_given(self) -> None:
         binder = CardBinder()
-        bolt = _card("Bolt", "src-1", {"a": 1})
-        shock = _card("Shock", "src-2", {"a": 1})
+        card = _card("Bolt", "src-1", {"a": 1})
+        binder.create(card)
 
-        binder.add(bolt)
-        result = binder.add(shock)
+        updated = binder.update(card.nocab_uuid)
 
-        assert result.outcome == AddOutcome.INSERTED
-        assert binder.get_by_name(GameId.MTG, "Bolt").nocab_uuid == bolt.nocab_uuid
-        assert binder.get_by_name(GameId.MTG, "Shock").nocab_uuid == shock.nocab_uuid
+        assert updated.raw_content == card.raw_content
+        assert updated.name == card.name
+        assert updated.provenance == card.provenance
 
-    def test_same_name_different_game_does_not_collide(self) -> None:
+    def test_raises_if_uuid_not_stored(self) -> None:
         binder = CardBinder()
-        mtg_card = _card("Boost", "src-1", {"a": 1}, source_game=GameId.MTG)
-        pokemon_card = _card("Boost", "src-2", {"a": 1}, source_game=GameId.POKEMON)
 
-        binder.add(mtg_card)
-        result = binder.add(pokemon_card)
+        with pytest.raises(KeyError):
+            binder.update(uuid4(), raw_content_patch={"a": 1})
 
-        assert result.outcome == AddOutcome.INSERTED
+
+class TestReplace:
+    def test_fully_swaps_content(self) -> None:
+        binder = CardBinder()
+        card = _card("Bolt", "src-1", {"a": 1})
+        binder.create(card)
+        replacement = GenericCard(
+            nocab_uuid=card.nocab_uuid,
+            source_game=GameId.MTG,
+            name="Bolt",
+            raw_content={"z": 9},
+            provenance=Provenance(
+                data_source=DataSource.ARENA,
+                source_id="76497",
+                fetched_at=datetime.now(timezone.utc),
+            ),
+        )
+
+        result = binder.replace(card.nocab_uuid, replacement)
+
+        assert result == replacement
+        assert binder.get_by_uuid(card.nocab_uuid) == replacement
+
+    def test_raises_on_uuid_mismatch(self) -> None:
+        binder = CardBinder()
+        card = _card("Bolt", "src-1", {"a": 1})
+        binder.create(card)
+        mismatched = _card("Bolt", "src-2", {"a": 1})
+
+        with pytest.raises(ValueError):
+            binder.replace(card.nocab_uuid, mismatched)
+
+    def test_raises_if_uuid_not_stored(self) -> None:
+        binder = CardBinder()
+        card = _card("Bolt", "src-1", {"a": 1})
+
+        with pytest.raises(KeyError):
+            binder.replace(card.nocab_uuid, card)
+
+    def test_source_game_change_updates_name_index(self) -> None:
+        binder = CardBinder()
+        card = _card("Boost", "src-1", {"a": 1}, source_game=GameId.MTG)
+        binder.create(card)
+
+        moved = replace(card, source_game=GameId.POKEMON)
+        binder.replace(card.nocab_uuid, moved)
+
+        assert binder.get_by_name(GameId.MTG, "Boost") == []
+        assert binder.get_by_name(GameId.POKEMON, "Boost") == [moved]
+
+
+class TestDelete:
+    def test_removes_card(self) -> None:
+        binder = CardBinder()
+        card = _card("Bolt", "src-1", {"a": 1})
+        binder.create(card)
+
+        binder.delete(card.nocab_uuid)
+
+        assert binder.get_by_uuid(card.nocab_uuid) is None
+
+    def test_removes_card_from_name_index(self) -> None:
+        binder = CardBinder()
+        card = _card("Bolt", "src-1", {"a": 1})
+        binder.create(card)
+
+        binder.delete(card.nocab_uuid)
+
+        assert binder.get_by_name(GameId.MTG, "Bolt") == []
+
+    def test_raises_if_uuid_not_stored(self) -> None:
+        binder = CardBinder()
+
+        with pytest.raises(KeyError):
+            binder.delete(uuid4())
 
 
 class TestGetByUuid:
     def test_found(self) -> None:
         binder = CardBinder()
         card = _card("Bolt", "src-1", {"a": 1})
-        binder.add(card)
+        binder.create(card)
 
         assert binder.get_by_uuid(card.nocab_uuid) == card
 
@@ -139,11 +194,125 @@ class TestGetByUuid:
         assert binder.get_by_uuid(uuid4()) is None
 
 
+class TestGetByName:
+    def test_found(self) -> None:
+        binder = CardBinder()
+        card = _card("Bolt", "src-1", {"a": 1})
+        binder.create(card)
+
+        assert binder.get_by_name(GameId.MTG, "Bolt") == [card]
+
+    def test_not_found_returns_empty_list(self) -> None:
+        binder = CardBinder()
+
+        assert binder.get_by_name(GameId.MTG, "Nonexistent") == []
+
+    def test_multiple_cards_can_share_a_name(self) -> None:
+        binder = CardBinder()
+        strike_ironclad = _card("Strike", "STRIKE_IRONCLAD", {"color": "ironclad"})
+        strike_silent = _card("Strike", "STRIKE_SILENT", {"color": "silent"})
+        binder.create(strike_ironclad)
+        binder.create(strike_silent)
+
+        matches = binder.get_by_name(GameId.MTG, "Strike")
+
+        assert {c.nocab_uuid for c in matches} == {
+            strike_ironclad.nocab_uuid,
+            strike_silent.nocab_uuid,
+        }
+
+    def test_same_name_different_game_does_not_collide(self) -> None:
+        binder = CardBinder()
+        mtg_card = _card("Boost", "src-1", {"a": 1}, source_game=GameId.MTG)
+        pokemon_card = _card("Boost", "src-2", {"a": 1}, source_game=GameId.POKEMON)
+        binder.create(mtg_card)
+        binder.create(pokemon_card)
+
+        assert binder.get_by_name(GameId.MTG, "Boost") == [mtg_card]
+        assert binder.get_by_name(GameId.POKEMON, "Boost") == [pokemon_card]
+
+
+class TestGetByNameSingle:
+    def test_returns_the_one_match(self) -> None:
+        binder = CardBinder()
+        card = _card("Bolt", "src-1", {"a": 1})
+        binder.create(card)
+
+        assert binder.get_by_name_single(GameId.MTG, "Bolt") == card
+
+    def test_returns_none_if_no_match(self) -> None:
+        binder = CardBinder()
+
+        assert binder.get_by_name_single(GameId.MTG, "Nonexistent") is None
+
+    def test_strict_raises_on_ambiguity(self) -> None:
+        binder = CardBinder()
+        binder.create(_card("Strike", "STRIKE_IRONCLAD", {}))
+        binder.create(_card("Strike", "STRIKE_SILENT", {}))
+
+        with pytest.raises(ValueError):
+            binder.get_by_name_single(GameId.MTG, "Strike", strict=True)
+
+    def test_non_strict_returns_one_of_the_matches(self) -> None:
+        binder = CardBinder()
+        ironclad = _card("Strike", "STRIKE_IRONCLAD", {})
+        silent = _card("Strike", "STRIKE_SILENT", {})
+        binder.create(ironclad)
+        binder.create(silent)
+
+        result = binder.get_by_name_single(GameId.MTG, "Strike", strict=False)
+
+        assert result is not None
+        assert result.nocab_uuid in {ironclad.nocab_uuid, silent.nocab_uuid}
+
+
+class TestGetByNameRegex:
+    def test_exact_name_as_pattern_matches(self) -> None:
+        binder = CardBinder()
+        card = _card("Bolt", "src-1", {"a": 1})
+        binder.create(card)
+
+        assert binder.get_by_name_regex(GameId.MTG, "^Bolt$") == [card]
+
+    def test_mdfc_fallback_pattern_matches_combined_name(self) -> None:
+        binder = CardBinder()
+        card = _card("Bruce Banner // The Incredible Hulk", "src-1", {"a": 1})
+        binder.create(card)
+
+        matches = binder.get_by_name_regex(GameId.MTG, "^Bruce Banner( //.*)?$")
+
+        assert matches == [card]
+
+    def test_no_match_returns_empty_list(self) -> None:
+        binder = CardBinder()
+        binder.create(_card("Bolt", "src-1", {"a": 1}))
+
+        assert binder.get_by_name_regex(GameId.MTG, "^Shock$") == []
+
+    def test_multiple_matches_all_returned(self) -> None:
+        binder = CardBinder()
+        bolt = _card("Bolt", "src-1", {"a": 1})
+        bolts = _card("Bolts", "src-2", {"a": 1})
+        binder.create(bolt)
+        binder.create(bolts)
+
+        matches = binder.get_by_name_regex(GameId.MTG, "^Bolt")
+
+        assert {c.nocab_uuid for c in matches} == {bolt.nocab_uuid, bolts.nocab_uuid}
+
+    def test_respects_source_game_filtering(self) -> None:
+        binder = CardBinder()
+        binder.create(_card("Boost", "src-1", {"a": 1}, source_game=GameId.MTG))
+
+        assert binder.get_by_name_regex(GameId.POKEMON, "^Boost$") == []
+
+
 class TestGetByAlias:
     def test_found(self) -> None:
         binder = CardBinder()
         card = _card("Bolt", "src-1", {"a": 1})
-        binder.add(card)
+        binder.create(card)
+        binder.register_alias(GameId.MTG, DataSource.SCRYFALL, "src-1", card.nocab_uuid)
 
         assert binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "src-1") == card
 
@@ -151,27 +320,6 @@ class TestGetByAlias:
         binder = CardBinder()
 
         assert binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "nonexistent") is None
-
-    def test_wrong_game_not_found(self) -> None:
-        binder = CardBinder()
-        binder.add(_card("Bolt", "src-1", {"a": 1}, source_game=GameId.MTG))
-
-        assert binder.get_by_alias(GameId.POKEMON, DataSource.SCRYFALL, "src-1") is None
-
-    def test_wrong_data_source_not_found(self) -> None:
-        binder = CardBinder()
-        binder.add(_card("Bolt", "src-1", {"a": 1}, data_source=DataSource.SCRYFALL))
-
-        assert binder.get_by_alias(GameId.MTG, DataSource.ARENA, "src-1") is None
-
-    def test_extra_alias_resolves_via_register_alias(self) -> None:
-        binder = CardBinder()
-        card = _card("Bolt", "src-1", {"a": 1})
-        binder.add(card)
-
-        binder.register_alias(GameId.MTG, DataSource.ARENA, "76497", card.nocab_uuid)
-
-        assert binder.get_by_alias(GameId.MTG, DataSource.ARENA, "76497") == card
 
 
 class TestRegisterAlias:
@@ -181,148 +329,52 @@ class TestRegisterAlias:
         with pytest.raises(ValueError):
             binder.register_alias(GameId.MTG, DataSource.ARENA, "76497", uuid4())
 
-
-class TestGetByName:
-    def test_found(self) -> None:
+    def test_extra_alias_resolves_to_card(self) -> None:
         binder = CardBinder()
         card = _card("Bolt", "src-1", {"a": 1})
-        binder.add(card)
+        binder.create(card)
 
-        assert binder.get_by_name(GameId.MTG, "Bolt") == card
+        binder.register_alias(GameId.MTG, DataSource.ARENA, "76497", card.nocab_uuid)
 
-    def test_not_found(self) -> None:
+        assert binder.get_by_alias(GameId.MTG, DataSource.ARENA, "76497") == card
+
+
+class TestAllUuids:
+    def test_no_filter_returns_every_uuid(self) -> None:
         binder = CardBinder()
+        mtg_card = _card("Bolt", "src-1", {"a": 1}, source_game=GameId.MTG)
+        pokemon_card = _card("Charmander", "src-2", {"a": 1}, source_game=GameId.POKEMON)
+        binder.create(mtg_card)
+        binder.create(pokemon_card)
 
-        assert binder.get_by_name(GameId.MTG, "Nonexistent") is None
+        assert set(binder.all_uuids()) == {mtg_card.nocab_uuid, pokemon_card.nocab_uuid}
 
-
-class TestGetByNameRegex:
-    def test_exact_name_as_pattern_matches(self) -> None:
+    def test_filter_by_game(self) -> None:
         binder = CardBinder()
-        card = _card("Bolt", "src-1", {"a": 1})
-        binder.add(card)
+        mtg_card = _card("Bolt", "src-1", {"a": 1}, source_game=GameId.MTG)
+        pokemon_card = _card("Charmander", "src-2", {"a": 1}, source_game=GameId.POKEMON)
+        binder.create(mtg_card)
+        binder.create(pokemon_card)
 
-        assert binder.get_by_name_regex(GameId.MTG, "^Bolt$") == [card]
+        assert set(binder.all_uuids(GameId.MTG)) == {mtg_card.nocab_uuid}
 
-    def test_mdfc_fallback_pattern_matches_combined_name(self) -> None:
+
+class TestAllCards:
+    def test_returns_every_card_for_one_game(self) -> None:
         binder = CardBinder()
-        card = _card("Bruce Banner // The Incredible Hulk", "src-1", {"a": 1})
-        binder.add(card)
+        mtg_card = _card("Bolt", "src-1", {"a": 1}, source_game=GameId.MTG)
+        pokemon_card = _card("Charmander", "src-2", {"a": 1}, source_game=GameId.POKEMON)
+        binder.create(mtg_card)
+        binder.create(pokemon_card)
 
-        matches = binder.get_by_name_regex(GameId.MTG, "^Bruce Banner( //.*)?$")
-
-        assert matches == [card]
-
-    def test_no_match_returns_empty_list(self) -> None:
-        binder = CardBinder()
-        binder.add(_card("Bolt", "src-1", {"a": 1}))
-
-        assert binder.get_by_name_regex(GameId.MTG, "^Shock$") == []
-
-    def test_multiple_matches_all_returned(self) -> None:
-        binder = CardBinder()
-        bolt = _card("Bolt", "src-1", {"a": 1})
-        bolts = _card("Bolts", "src-2", {"a": 1})
-        binder.add(bolt)
-        binder.add(bolts)
-
-        matches = binder.get_by_name_regex(GameId.MTG, "^Bolt")
-
-        assert set(c.nocab_uuid for c in matches) == {
-            bolt.nocab_uuid,
-            bolts.nocab_uuid,
-        }
-
-    def test_respects_source_game_filtering(self) -> None:
-        binder = CardBinder()
-        binder.add(_card("Boost", "src-1", {"a": 1}, source_game=GameId.MTG))
-
-        assert binder.get_by_name_regex(GameId.POKEMON, "^Boost$") == []
+        assert list(binder.all_cards(GameId.MTG)) == [mtg_card]
 
 
 class TestLoad:
     def test_empty_list_returns_usable_empty_binder(self) -> None:
         binder = CardBinder.load([])
 
-        assert binder.get_by_name(GameId.MTG, "Bolt") is None
-
-    def test_single_file_round_trips(self, tmp_path: Path) -> None:
-        original = CardBinder()
-        card = _card("Bolt", "src-1", {"a": 1})
-        original.add(card)
-        path = tmp_path / "mtg.jsonl"
-        original.save(path, GameId.MTG)
-
-        loaded = CardBinder.load([path])
-
-        got = loaded.get_by_name(GameId.MTG, "Bolt")
-        assert got == card
-
-    def test_merges_multiple_files_via_add_collision_logic(self, tmp_path: Path) -> None:
-        first_binder = CardBinder()
-        first_card = _card("Bolt", "src-1", {"a": 1})
-        first_binder.add(first_card)
-        first_path = tmp_path / "first.jsonl"
-        first_binder.save(first_path, GameId.MTG)
-
-        second_binder = CardBinder()
-        richer_card = _card("Bolt", "src-2", {"a": 1, "b": 2})
-        second_binder.add(richer_card)
-        second_path = tmp_path / "second.jsonl"
-        second_binder.save(second_path, GameId.MTG)
-
-        merged = CardBinder.load([first_path, second_path])
-
-        got = merged.get_by_name(GameId.MTG, "Bolt")
-        assert got.raw_content == richer_card.raw_content
-        assert got.nocab_uuid == first_card.nocab_uuid
-        assert (
-            merged.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "src-1").nocab_uuid
-            == first_card.nocab_uuid
-        )
-        assert (
-            merged.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "src-2").nocab_uuid
-            == first_card.nocab_uuid
-        )
-
-    def test_aliases_survive_when_their_own_file_loses_a_cross_file_merge(
-        self, tmp_path: Path
-    ) -> None:
-        # first.jsonl is loaded first, so its card's nocab_uuid becomes
-        # canonical for "Bolt" in the merged binder. second.jsonl
-        # already resolved its OWN internal collision before being
-        # saved (two source_ids -> one uuid, a genuine alias pair) —
-        # but that whole card then loses the cross-file merge against
-        # first.jsonl's card, so second.jsonl's own nocab_uuid never
-        # becomes canonical anywhere in the merged binder. Both of its
-        # aliases must still resolve, to the MERGED uuid (first's), not
-        # silently vanish because their file's own uuid no longer
-        # exists as a key anywhere in the merged binder.
-        first_binder = CardBinder()
-        first_card = _card("Bolt", "src-a1", {"a": 1})
-        first_binder.add(first_card)
-        first_path = tmp_path / "first.jsonl"
-        first_binder.save(first_path, GameId.MTG)
-
-        second_binder = CardBinder()
-        second_binder.add(_card("Bolt", "src-b1", {"a": 1, "b": 2}))
-        second_binder.add(_card("Bolt", "src-b2", {"a": 1, "b": 2, "c": 3}))
-        second_path = tmp_path / "second.jsonl"
-        second_binder.save(second_path, GameId.MTG)
-
-        merged = CardBinder.load([first_path, second_path])
-
-        got = merged.get_by_name(GameId.MTG, "Bolt")
-        assert got.nocab_uuid == first_card.nocab_uuid
-        assert got.raw_content == {"a": 1, "b": 2, "c": 3}
-        assert (
-            merged.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "src-b1").nocab_uuid
-            == first_card.nocab_uuid
-        )
-        assert (
-            merged.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "src-b2").nocab_uuid
-            == first_card.nocab_uuid
-        )
+        assert binder.get_by_name(GameId.MTG, "Bolt") == []
 
     def test_missing_alias_ledger_file_is_not_an_error(self, tmp_path: Path) -> None:
         # A hand-written fixture with no sibling .alias_ledger.jsonl file.
@@ -336,63 +388,72 @@ class TestLoad:
 
         binder = CardBinder.load([path])
 
-        assert binder.get_by_name(GameId.MTG, "Bolt").nocab_uuid == card.nocab_uuid
+        assert binder.get_by_uuid(card.nocab_uuid) is not None
 
-    def test_multiple_extra_aliases_all_survive_round_trip(self, tmp_path: Path) -> None:
+    def test_last_path_wins_on_uuid_collision_across_paths(self, tmp_path: Path) -> None:
+        card = _card("Bolt", "src-1", {"a": 1})
+        first_binder = CardBinder()
+        first_binder.create(card)
+        first_path = tmp_path / "first.jsonl"
+        first_binder.save(first_path, GameId.MTG)
+
+        updated_card = replace(card, raw_content={"a": 999})
+        second_binder = CardBinder()
+        second_binder.create(updated_card)
+        second_path = tmp_path / "second.jsonl"
+        second_binder.save(second_path, GameId.MTG)
+
+        merged = CardBinder.load([first_path, second_path])
+
+        assert merged.get_by_uuid(card.nocab_uuid).raw_content == {"a": 999}
+
+
+class TestSaveLoadRoundTrip:
+    def test_nocab_uuid_is_bit_for_bit_identical_after_round_trip(self, tmp_path: Path) -> None:
         binder = CardBinder()
         card = _card("Bolt", "src-1", {"a": 1})
-        binder.add(card)
-        binder.register_alias(GameId.MTG, DataSource.ARENA, "76497", card.nocab_uuid)
-        binder.register_alias(GameId.MTG, DataSource.MTGO, "88685", card.nocab_uuid)
+        binder.create(card)
         path = tmp_path / "mtg.jsonl"
 
         binder.save(path, GameId.MTG)
         loaded = CardBinder.load([path])
 
-        assert (
-            loaded.get_by_alias(GameId.MTG, DataSource.ARENA, "76497").nocab_uuid == card.nocab_uuid
-        )
-        assert (
-            loaded.get_by_alias(GameId.MTG, DataSource.MTGO, "88685").nocab_uuid == card.nocab_uuid
-        )
+        reloaded_card = loaded.get_by_uuid(card.nocab_uuid)
+        assert reloaded_card is not None
+        assert reloaded_card.nocab_uuid == card.nocab_uuid
+        assert str(reloaded_card.nocab_uuid) == str(card.nocab_uuid)
 
-
-class TestSave:
     def test_writes_only_requested_games_subset(self, tmp_path: Path) -> None:
         binder = CardBinder()
-        binder.add(_card("Bolt", "src-1", {"a": 1}, source_game=GameId.MTG))
-        binder.add(_card("Charmander", "src-2", {"a": 1}, source_game=GameId.POKEMON))
+        binder.create(_card("Bolt", "src-1", {"a": 1}, source_game=GameId.MTG))
+        binder.create(_card("Charmander", "src-2", {"a": 1}, source_game=GameId.POKEMON))
         path = tmp_path / "mtg.jsonl"
 
         binder.save(path, GameId.MTG)
 
         loaded = CardBinder.load([path])
-        assert loaded.get_by_name(GameId.MTG, "Bolt") is not None
-        assert loaded.get_by_name(GameId.POKEMON, "Charmander") is None
+        assert loaded.get_by_name(GameId.MTG, "Bolt") != []
+        assert loaded.get_by_name(GameId.POKEMON, "Charmander") == []
 
-    def test_round_trip_preserves_losing_and_winning_aliases(self, tmp_path: Path) -> None:
+    def test_round_trip_preserves_extra_aliases(self, tmp_path: Path) -> None:
         binder = CardBinder()
-        first = _card("Bolt", "src-1", {"a": 1})
-        binder.add(first)
-        richer = _card("Bolt", "src-2", {"a": 1, "b": 2})
-        binder.add(richer)
+        card = _card("Bolt", "src-1", {"a": 1})
+        binder.create(card)
+        binder.register_alias(GameId.MTG, DataSource.SCRYFALL, "src-1", card.nocab_uuid)
+        binder.register_alias(GameId.MTG, DataSource.ARENA, "76497", card.nocab_uuid)
         path = tmp_path / "mtg.jsonl"
 
         binder.save(path, GameId.MTG)
         loaded = CardBinder.load([path])
 
         assert (
-            loaded.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "src-1").nocab_uuid
-            == first.nocab_uuid
-        )
-        assert (
-            loaded.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "src-2").nocab_uuid
-            == first.nocab_uuid
+            loaded.get_by_alias(GameId.MTG, DataSource.ARENA, "76497").nocab_uuid
+            == card.nocab_uuid
         )
 
     def test_creates_parent_directory_if_missing(self, tmp_path: Path) -> None:
         binder = CardBinder()
-        binder.add(_card("Bolt", "src-1", {"a": 1}))
+        binder.create(_card("Bolt", "src-1", {"a": 1}))
         nested_path = tmp_path / "does" / "not" / "exist" / "mtg.jsonl"
 
         binder.save(nested_path, GameId.MTG)
@@ -401,7 +462,9 @@ class TestSave:
 
     def test_writes_alias_ledger_sibling_file(self, tmp_path: Path) -> None:
         binder = CardBinder()
-        binder.add(_card("Bolt", "src-1", {"a": 1}))
+        card = _card("Bolt", "src-1", {"a": 1})
+        binder.create(card)
+        binder.register_alias(GameId.MTG, DataSource.SCRYFALL, "src-1", card.nocab_uuid)
         path = tmp_path / "mtg.jsonl"
 
         binder.save(path, GameId.MTG)

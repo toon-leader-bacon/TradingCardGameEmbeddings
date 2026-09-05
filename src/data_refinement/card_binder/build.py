@@ -1,69 +1,56 @@
-"""Drives one ingestion run: load, ingest, merge, save, summarize.
+"""Drives one ingestion run: load, ingest, save.
 
-See src/data_refinement/README.md for this container's scope.
-Renamed from build_or_update_card_registry — still a plain function,
-not a new orchestrator class (matches the "thin runnable snippet"
-pattern src/data_retrieval/README.md's examples already use).
+See src/data_refinement/README.md for this container's scope and
+plans/card_binder_v2.md for the design this implements. Still a plain
+function, not an orchestrator class (matches the "thin runnable
+snippet" pattern src/data_retrieval/README.md's own examples use).
+
+Much thinner than the pre-card_binder_v2 driver: there is no
+per-candidate loop here anymore, and no AddOutcome tallying — all of
+that logic now lives inside each CardIngestionStage implementation's
+own ingest(), since a stage owns its own identity/collision handling
+directly against the CardBinder it's handed (see ingestion.py's module
+docstring). This function's only remaining job is the load/save
+bracketing around that call, plus knowing which game's binder file to
+read/write — which it gets from ingestion_stage.SOURCE_GAME, not a
+parameter of its own.
 """
 
-from dataclasses import dataclass
 from pathlib import Path
+from uuid import UUID
 
-from src.data_refinement.card_binder.card_binder import AddOutcome, CardBinder
+from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.ingestion import CardIngestionStage
-from src.schema.game_id import GameId
-
-
-@dataclass(frozen=True)
-class IngestSummary:
-    """Tallied AddOutcome counts from one build_or_update_card_binder() run.
-
-    Inputs: none (data holder).
-    Output: n/a.
-    Side effects: none.
-    Exceptions: none.
-    """
-
-    inserted: int
-    content_updated: int
-    kept_existing: int
 
 
 def build_or_update_card_binder(
     raw_path: Path,
-    source_game: GameId,
     ingestion_stage: CardIngestionStage,
     binder_path: Path,
-) -> IngestSummary:
+) -> list[UUID]:
     """Ingest raw_path into binder_path, creating or updating it.
 
     Composed of:
         1. CardBinder.load([binder_path]) if binder_path already
            exists, else CardBinder.load([]).
-        2. ingestion_stage.ingest(raw_path, source_game) — produces
-           IngestedCandidates from the raw source.
-        3. Per IngestedCandidate: one binder.add(candidate.card) call,
-           tallied into IngestSummary's counters, followed by one
-           binder.register_alias(...) call per entry in
-           candidate.aliases (using the nocab_uuid add() actually
-           stored the card under — see AddResult.stored_card — not
-           necessarily candidate.card's own nocab_uuid, if it lost a
-           collision).
-        4. binder.save(binder_path, source_game).
-        5. Return the IngestSummary built in step 3.
+        2. ingestion_stage.ingest(raw_path, binder) — creates/updates
+           cards and registers aliases directly on binder, as a side
+           effect, under ingestion_stage.SOURCE_GAME.
+        3. binder.save(binder_path, ingestion_stage.SOURCE_GAME).
+        4. Return the list[UUID] ingest() itself returned, unchanged.
 
     Inputs:
         raw_path: path to a raw source file (format depends on
             ingestion_stage, e.g. a Scryfall oracle-cards .jsonl for
             ScryfallCardIngestionStage).
-        source_game: which game raw_path's cards belong to.
         ingestion_stage: which CardIngestionStage to parse raw_path
-            with (dependency injection — PATTERNS.md).
+            with.
         binder_path: where the game's binder file lives (read if
             present, always (re)written at the end) — e.g.
             data/final/cards/<game>.jsonl.
-    Output: an IngestSummary tallying how many candidates were
-        INSERTED, CONTENT_UPDATED, or KEPT_EXISTING.
+    Output: nocab_uuid of every card ingestion_stage.ingest() created
+        or content-changed this run — see CardIngestionStage.ingest()'s
+        own docstring for exactly what's included.
     Side effects: reads binder_path if it exists, and raw_path;
         creates binder_path's parent directory if missing; writes/
         overwrites binder_path and its sibling alias_ledger file.
@@ -74,41 +61,21 @@ def build_or_update_card_binder(
         >>> from src.data_refinement.card_binder.scryfall.ingestion_stage import (
         ...     ScryfallCardIngestionStage,
         ... )
-        >>> summary = build_or_update_card_binder(
+        >>> changed_uuids = build_or_update_card_binder(
         ...     Path("data/raw/scryfall/oracle-cards-20260820090157.jsonl"),
-        ...     GameId.MTG,
         ...     ScryfallCardIngestionStage(),
         ...     Path("data/final/cards/mtg.jsonl"),
         ... )
-        >>> summary.inserted
     """
+    # Start from whatever's already on disk for this game, or empty.
     binder = CardBinder.load([binder_path] if binder_path.exists() else [])
-    candidates = ingestion_stage.ingest(raw_path, source_game)
 
-    inserted = 0
-    content_updated = 0
-    kept_existing = 0
-    for candidate in candidates:
-        result = binder.add(candidate.card)
-        if result.outcome == AddOutcome.INSERTED:
-            inserted += 1
-        elif result.outcome == AddOutcome.CONTENT_UPDATED:
-            content_updated += 1
-        else:
-            kept_existing += 1
+    # The stage owns all identity/collision handling itself, as a side
+    # effect against binder — nothing left for this function to loop
+    # over or tally.
+    changed_uuids = ingestion_stage.ingest(raw_path, binder)
 
-        for alias in candidate.aliases:
-            binder.register_alias(
-                candidate.card.source_game,
-                alias.data_source,
-                alias.source_id,
-                result.stored_card.nocab_uuid,
-            )
+    # Persist the updated binder back under the stage's own game.
+    binder.save(binder_path, ingestion_stage.SOURCE_GAME)
 
-    binder.save(binder_path, source_game)
-
-    return IngestSummary(
-        inserted=inserted,
-        content_updated=content_updated,
-        kept_existing=kept_existing,
-    )
+    return changed_uuids

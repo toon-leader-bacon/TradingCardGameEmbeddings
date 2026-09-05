@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.gwent_one.ingestion_stage import (
     GwentOneCardIngestionStage,
 )
@@ -15,6 +16,22 @@ _MASK_OF_UROBOROS_HTML = """
      data-armor="0" data-provision="0" data-faction="skellige"
      data-set="merchants of ofir" data-color="gold" data-type="stratagem"
      data-rarity="legendary">
+    <div class="card-head">
+        <div class="card-name"><a href="https://gwent.one/en/card/202512">Mask of Uroboros</a></div>
+        <div class="card-category">Location</div>
+    </div>
+    <div class="card-body">
+        <div class="card-body-ability"><span class="keyword order">Order</span>: Draw a card, then <span class="keyword discard">Discard</span> a card and <span class="keyword spawn">Spawn</span> 2 Crows on your <span class="keyword melee">Melee</span> row.<br /></div>
+    </div>
+</div>
+"""
+
+# Same data-id, richer ability text — a re-fetch with more content.
+_MASK_OF_UROBOROS_RICHER_HTML = """
+<div class="card-wrap card-data" data-id="202512" data-power="0"
+     data-armor="0" data-provision="0" data-faction="skellige"
+     data-set="merchants of ofir" data-color="gold" data-type="stratagem"
+     data-rarity="legendary" data-patch-note="added in 9.0">
     <div class="card-head">
         <div class="card-name"><a href="https://gwent.one/en/card/202512">Mask of Uroboros</a></div>
         <div class="card-category">Location</div>
@@ -82,37 +99,47 @@ def _write_page(path: Path, *card_html: str) -> None:
 
 
 class TestIngest:
-    def test_parses_one_candidate_per_card_in_one_page(self, tmp_path: Path) -> None:
+    def test_creates_one_card_per_block_in_one_page(self, tmp_path: Path) -> None:
         _write_page(tmp_path / "page_1.html", _MASK_OF_UROBOROS_HTML, _WEREWOLF_HTML)
+        binder = CardBinder()
 
-        candidates = GwentOneCardIngestionStage().ingest(tmp_path, GameId.GWENT)
+        changed = GwentOneCardIngestionStage().ingest(tmp_path, binder)
 
-        assert len(candidates) == 2
-        assert {c.card.name for c in candidates} == {"Mask of Uroboros", "Werewolf"}
+        assert len(changed) == 2
+        assert set(binder.all_uuids(GameId.GWENT)) == set(changed)
 
-    def test_parses_across_multiple_pages(self, tmp_path: Path) -> None:
+    def test_creates_across_multiple_pages(self, tmp_path: Path) -> None:
         _write_page(tmp_path / "page_1.html", _MASK_OF_UROBOROS_HTML)
         _write_page(tmp_path / "page_2.html", _WEREWOLF_HTML)
+        binder = CardBinder()
 
-        candidates = GwentOneCardIngestionStage().ingest(tmp_path, GameId.GWENT)
+        GwentOneCardIngestionStage().ingest(tmp_path, binder)
 
-        assert {c.card.name for c in candidates} == {"Mask of Uroboros", "Werewolf"}
+        assert binder.get_by_name(GameId.GWENT, "Mask of Uroboros") != []
+        assert binder.get_by_name(GameId.GWENT, "Werewolf") != []
 
     def test_maps_data_id_to_provenance_source_id(self, tmp_path: Path) -> None:
         _write_page(tmp_path / "page_1.html", _MASK_OF_UROBOROS_HTML)
+        binder = CardBinder()
 
-        candidates = GwentOneCardIngestionStage().ingest(tmp_path, GameId.GWENT)
+        GwentOneCardIngestionStage().ingest(tmp_path, binder)
 
-        assert candidates[0].card.provenance.source_id == "202512"
-        assert candidates[0].card.provenance.data_source == DataSource.GWENT_ONE
+        card = binder.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, "202512")
+        assert card is not None
+        assert card.provenance.source_id == "202512"
+        assert card.provenance.data_source == DataSource.GWENT_ONE
 
     def test_raw_content_has_stripped_data_attrs_plus_name_category_ability(
         self, tmp_path: Path
     ) -> None:
         _write_page(tmp_path / "page_1.html", _MASK_OF_UROBOROS_HTML)
+        binder = CardBinder()
 
-        candidates = GwentOneCardIngestionStage().ingest(tmp_path, GameId.GWENT)
-        raw_content = candidates[0].card.raw_content
+        GwentOneCardIngestionStage().ingest(tmp_path, binder)
+
+        raw_content = binder.get_by_alias(
+            GameId.GWENT, DataSource.GWENT_ONE, "202512"
+        ).raw_content
 
         assert raw_content["id"] == "202512"
         assert raw_content["power"] == "0"
@@ -131,10 +158,12 @@ class TestIngest:
         self, tmp_path: Path
     ) -> None:
         _write_page(tmp_path / "page_1.html", _WEREWOLF_HTML)
+        binder = CardBinder()
 
-        candidates = GwentOneCardIngestionStage().ingest(tmp_path, GameId.GWENT)
+        GwentOneCardIngestionStage().ingest(tmp_path, binder)
 
-        assert candidates[0].card.raw_content["ability_text"] == (
+        card = binder.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, "201600")
+        assert card.raw_content["ability_text"] == (
             "Resilience.\n"
             "Deploy: Spawn Imperial Fleet to the left of self and Imperial "
             "Marine to the right of self.\n"
@@ -145,62 +174,60 @@ class TestIngest:
         self, tmp_path: Path
     ) -> None:
         _write_page(tmp_path / "page_1.html", _ARMORED_UNIT_HTML)
+        binder = CardBinder()
 
-        candidates = GwentOneCardIngestionStage().ingest(tmp_path, GameId.GWENT)
+        GwentOneCardIngestionStage().ingest(tmp_path, binder)
 
-        assert candidates[0].card.raw_content["ability_text"] == "Resilience."
+        card = binder.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, "200600")
+        assert card.raw_content["ability_text"] == "Resilience."
 
     def test_empty_category_becomes_empty_string(self, tmp_path: Path) -> None:
         _write_page(tmp_path / "page_1.html", _WEREWOLF_HTML)
+        binder = CardBinder()
 
-        candidates = GwentOneCardIngestionStage().ingest(tmp_path, GameId.GWENT)
+        GwentOneCardIngestionStage().ingest(tmp_path, binder)
 
-        assert candidates[0].card.raw_content["category"] == ""
+        card = binder.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, "201600")
+        assert card.raw_content["category"] == ""
 
     def test_no_ability_div_becomes_empty_string(self, tmp_path: Path) -> None:
         _write_page(tmp_path / "page_1.html", _VANILLA_UNIT_HTML)
+        binder = CardBinder()
 
-        candidates = GwentOneCardIngestionStage().ingest(tmp_path, GameId.GWENT)
+        GwentOneCardIngestionStage().ingest(tmp_path, binder)
 
-        assert candidates[0].card.raw_content["ability_text"] == ""
-
-    def test_threads_source_game_through_unchanged(self, tmp_path: Path) -> None:
-        _write_page(tmp_path / "page_1.html", _MASK_OF_UROBOROS_HTML)
-
-        candidates = GwentOneCardIngestionStage().ingest(tmp_path, GameId.GWENT)
-
-        assert candidates[0].card.source_game == GameId.GWENT
+        card = binder.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, "200055")
+        assert card.raw_content["ability_text"] == ""
 
     def test_each_card_gets_a_distinct_uuid(self, tmp_path: Path) -> None:
         _write_page(tmp_path / "page_1.html", _MASK_OF_UROBOROS_HTML, _WEREWOLF_HTML)
+        binder = CardBinder()
 
-        candidates = GwentOneCardIngestionStage().ingest(tmp_path, GameId.GWENT)
+        GwentOneCardIngestionStage().ingest(tmp_path, binder)
 
-        assert candidates[0].card.nocab_uuid != candidates[1].card.nocab_uuid
-
-    def test_aliases_are_always_empty(self, tmp_path: Path) -> None:
-        _write_page(tmp_path / "page_1.html", _MASK_OF_UROBOROS_HTML)
-
-        candidates = GwentOneCardIngestionStage().ingest(tmp_path, GameId.GWENT)
-
-        assert candidates[0].aliases == []
+        mask = binder.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, "202512")
+        werewolf = binder.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, "201600")
+        assert mask.nocab_uuid != werewolf.nocab_uuid
 
     def test_raises_if_raw_path_does_not_exist(self, tmp_path: Path) -> None:
+        binder = CardBinder()
         with pytest.raises(ValueError):
-            GwentOneCardIngestionStage().ingest(tmp_path / "missing", GameId.GWENT)
+            GwentOneCardIngestionStage().ingest(tmp_path / "missing", binder)
 
     def test_raises_if_raw_path_is_not_a_directory(self, tmp_path: Path) -> None:
         file_path = tmp_path / "not_a_dir.html"
         file_path.write_text("<html></html>")
+        binder = CardBinder()
 
         with pytest.raises(ValueError):
-            GwentOneCardIngestionStage().ingest(file_path, GameId.GWENT)
+            GwentOneCardIngestionStage().ingest(file_path, binder)
 
     def test_raises_if_no_page_html_files_found(self, tmp_path: Path) -> None:
         (tmp_path / "other.html").write_text("<html></html>")
+        binder = CardBinder()
 
         with pytest.raises(ValueError):
-            GwentOneCardIngestionStage().ingest(tmp_path, GameId.GWENT)
+            GwentOneCardIngestionStage().ingest(tmp_path, binder)
 
     def test_raises_if_card_block_missing_data_id(self, tmp_path: Path) -> None:
         malformed_html = (
@@ -209,13 +236,63 @@ class TestIngest:
             "</div>"
         )
         _write_page(tmp_path / "page_1.html", malformed_html)
+        binder = CardBinder()
 
         with pytest.raises(ValueError):
-            GwentOneCardIngestionStage().ingest(tmp_path, GameId.GWENT)
+            GwentOneCardIngestionStage().ingest(tmp_path, binder)
 
     def test_raises_if_card_block_missing_name(self, tmp_path: Path) -> None:
         malformed_html = '<div class="card-wrap card-data" data-id="999999"></div>'
         _write_page(tmp_path / "page_1.html", malformed_html)
+        binder = CardBinder()
 
         with pytest.raises(ValueError):
-            GwentOneCardIngestionStage().ingest(tmp_path, GameId.GWENT)
+            GwentOneCardIngestionStage().ingest(tmp_path, binder)
+
+
+class TestReIngestDuplicates:
+    def test_unchanged_block_is_a_noop_and_preserves_uuid(self, tmp_path: Path) -> None:
+        binder = CardBinder()
+        stage = GwentOneCardIngestionStage()
+        _write_page(tmp_path / "page_1.html", _MASK_OF_UROBOROS_HTML)
+        stage.ingest(tmp_path, binder)
+        original = binder.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, "202512")
+
+        second_dir = tmp_path / "second"
+        second_dir.mkdir()
+        _write_page(second_dir / "page_1.html", _MASK_OF_UROBOROS_HTML)
+        changed = stage.ingest(second_dir, binder)
+
+        reloaded = binder.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, "202512")
+        assert reloaded.nocab_uuid == original.nocab_uuid
+        assert changed == []
+
+    def test_richer_block_updates_content_in_place(self, tmp_path: Path) -> None:
+        binder = CardBinder()
+        stage = GwentOneCardIngestionStage()
+        _write_page(tmp_path / "page_1.html", _MASK_OF_UROBOROS_HTML)
+        stage.ingest(tmp_path, binder)
+        original = binder.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, "202512")
+
+        richer_dir = tmp_path / "richer"
+        richer_dir.mkdir()
+        _write_page(richer_dir / "page_1.html", _MASK_OF_UROBOROS_RICHER_HTML)
+        changed = stage.ingest(richer_dir, binder)
+
+        updated = binder.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, "202512")
+        assert updated.nocab_uuid == original.nocab_uuid
+        assert updated.raw_content["patch-note"] == "added in 9.0"
+        assert changed == [original.nocab_uuid]
+
+    def test_alias_still_registered_on_noop_duplicate_branch(self, tmp_path: Path) -> None:
+        binder = CardBinder()
+        stage = GwentOneCardIngestionStage()
+        _write_page(tmp_path / "page_1.html", _MASK_OF_UROBOROS_HTML)
+        stage.ingest(tmp_path, binder)
+
+        second_dir = tmp_path / "second"
+        second_dir.mkdir()
+        _write_page(second_dir / "page_1.html", _MASK_OF_UROBOROS_HTML)
+        stage.ingest(second_dir, binder)
+
+        assert binder.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, "202512") is not None
