@@ -20,5 +20,11 @@ not something fixed by this container's structure.
   17lands raw source: three sibling metric-engine pipelines over
   17lands' `draft_data`/`game_data`/`replay_data` CSVs. See
   [`seventeenlands/README.md`](seventeenlands/README.md).
+- **`sts_gg/`** *(technology demonstration)* — a single streaming
+  metric (`DeckOutcomeMetric`) converting sts_gg's raw Slay the Spire 2
+  run data into a per-run deck/outcome row, resolving card references
+  through the same `CardBinder` a *different* source (`spire_codex`)
+  built — this project's first metric spanning two independent raw
+  sources for one game. See [`sts_gg/README.md`](sts_gg/README.md).
 
 This file grows as more top-level stages get added.
