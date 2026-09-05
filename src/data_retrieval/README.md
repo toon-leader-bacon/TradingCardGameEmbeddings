@@ -13,7 +13,7 @@ specific to that source — none of that is shared logic, so it stays
 local to the source rather than pushed up into this file. Two things
 live at this shared level instead: `rate_limiter.py` (deliberately
 placed here from the start, ahead of a second consumer — see its own
-module docstring) and `download_to_file.py` (extracted after the same
+module docstring) and `download_utils.py` (extracted after the same
 stream-to-disk block showed up independently in three downloaders —
 the "rule of three" case, not a preemptive one). What else is shared
 across sources, once something actually needs it, belongs at this
@@ -29,10 +29,25 @@ Implemented today:
   source later, as a separate V2 rather than a rewrite of this one).
 - `hearthstonejson/` — pulls per-build card JSON dumps from
   HearthstoneJSON (api.hearthstonejson.com).
-- `spire_codex/` — pulls a single static `cards.json` file from the
-  spire-codex GitHub repo's raw-content URL (no API, no pagination).
+- `spire_codex/` — `card_downloader.py` pulls a single static
+  `cards.json` file from the spire-codex GitHub repo's raw-content URL
+  (no API, no pagination). `run_downloader.py` pulls spire-codex.com's
+  bulk run export (`/api/exports/runs`), a cursor-paginated gzipped
+  JSONL dump of every submitted Slay the Spire 2 run, one gzip file
+  per page under `data/raw/spire_codex/runs/` — resumable (skips pages
+  already complete on disk) and rate-limited (the server 429s under
+  rapid sequential requests despite no documented limit).
 - `gwent_one/` — pulls raw HTML page fragments from gwent.one's card
   search AJAX endpoint (no bulk dump exists for Gwent).
+- `sts_gg/` — `run_downloader.py` pulls Slay the Spire 2 run data from
+  sts.gg, in two phases: `phase_1()` pages the leaderboard API
+  (totalPages is authoritative — the `limit` query param has no effect
+  on actual page size) to collect every run id into `run_ids.txt`,
+  `phase_2()` fetches each run's detail JSON and appends it to
+  `runs.jsonl` (skipping ids already recorded in `runs_manifest.txt`)
+  — one shared file rather than one per run, since this leaderboard is
+  only ~1,000 runs, not a bulk historical export. Both phases use the
+  shared `download_to_string` helper.
 - `play_gwent/` — pulls deck guides from playgwent.com, in two phases:
   `phase_1()` pages through the site's guides-list API to collect
   every guide id, `phase_2()` fetches each guide's HTML detail page
@@ -43,9 +58,12 @@ Implemented today:
   deliberately-deferred naming inconsistency with the other sources
   in this container.
 - `rate_limiter.py` — shared politeness pacer (`RateLimiter`).
-- `download_to_file.py` — shared streamed-GET-to-disk helper
-  (`download_to_file`), used by any source's plain single-file
-  downloads.
+- `download_utils.py` — shared GET-with-retries helpers:
+  `download_to_file` (streamed straight to disk, for any source's
+  plain single-file downloads) and `download_to_string` (returns the
+  response body as text, for a caller that needs to inspect it — e.g.
+  a pagination total — before deciding what to do next). Both retry
+  through the same private backoff loop.
 
 Planned, not yet built — no subdirectory exists for either yet:
 
@@ -104,13 +122,29 @@ print(downloader.fetch())
 "
 ```
 
-**Spire Codex** (a single static file, no rate limiting needed):
+**Spire Codex cards** (a single static file, no rate limiting needed):
 
 ```bash
 python3 -c "
-from src.data_retrieval.spire_codex.downloader import SpireCodexDownloader
+from src.data_retrieval.spire_codex.card_downloader import SpireCodexCardDownloader
 
-downloader = SpireCodexDownloader()
+downloader = SpireCodexCardDownloader()
+print(downloader.fetch())
+"
+```
+
+**Spire Codex runs** (a cursor-paginated bulk export — resumes across
+interrupted runs, and self-paces since the server 429s under rapid
+sequential requests despite no documented rate limit):
+
+```bash
+python3 -c "
+from src.data_retrieval.spire_codex.run_downloader import SpireCodexRunDownloader
+from src.data_retrieval.rate_limiter import RateLimiter
+
+downloader = SpireCodexRunDownloader(
+    rate_limiter=RateLimiter(requests_per_minute=60),
+)
 print(downloader.fetch())
 "
 ```
@@ -142,6 +176,21 @@ from src.data_retrieval.play_gwent.downloader import PlayGwentDownloader
 from src.data_retrieval.rate_limiter import RateLimiter
 
 downloader = PlayGwentDownloader(RateLimiter(requests_per_minute=12))
+downloader.phase_1()
+print(downloader.phase_2())
+"
+```
+
+**STS.gg runs** (sts.gg's leaderboard + per-run detail API — two
+phases, run in order; `phase_2()` skips any run id already saved to
+disk from a prior run):
+
+```bash
+python3 -c "
+from src.data_retrieval.sts_gg.run_downloader import STSGGRunDownloader
+from src.data_retrieval.rate_limiter import RateLimiter
+
+downloader = STSGGRunDownloader(RateLimiter(requests_per_minute=12))
 downloader.phase_1()
 print(downloader.phase_2())
 "

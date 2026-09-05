@@ -4,11 +4,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from src.data_retrieval.spire_codex.downloader import SpireCodexDownloader
+from src.data_retrieval.spire_codex.card_downloader import SpireCodexCardDownloader
 
 
-def _make_downloader(raw_data_dir: Path) -> SpireCodexDownloader:
-    return SpireCodexDownloader(raw_data_dir=raw_data_dir)
+def _make_downloader(raw_data_dir: Path) -> SpireCodexCardDownloader:
+    return SpireCodexCardDownloader(raw_data_dir=raw_data_dir)
 
 
 def _mock_streaming_response(chunks: list[bytes]) -> MagicMock:
@@ -22,13 +22,13 @@ def _mock_streaming_response(chunks: list[bytes]) -> MagicMock:
 
 class TestInit:
     def test_defaults_cards_url_and_raw_data_dir_when_omitted(self) -> None:
-        downloader = SpireCodexDownloader()
+        downloader = SpireCodexCardDownloader()
 
-        assert downloader.cards_url == SpireCodexDownloader.DEFAULT_CARDS_URL
-        assert downloader.raw_data_dir == SpireCodexDownloader.DEFAULT_RAW_DATA_DIR
+        assert downloader.cards_url == SpireCodexCardDownloader.DEFAULT_CARDS_URL
+        assert downloader.raw_data_dir == SpireCodexCardDownloader.DEFAULT_RAW_DATA_DIR
 
     def test_honors_explicit_overrides(self, tmp_path: Path) -> None:
-        downloader = SpireCodexDownloader("https://example.test/cards.json", tmp_path)
+        downloader = SpireCodexCardDownloader("https://example.test/cards.json", tmp_path)
 
         assert downloader.cards_url == "https://example.test/cards.json"
         assert downloader.raw_data_dir == tmp_path
@@ -43,7 +43,7 @@ class TestFetch:
             result_path = downloader.fetch()
 
         mock_get.assert_called_once()
-        assert mock_get.call_args.args[0] == SpireCodexDownloader.DEFAULT_CARDS_URL
+        assert mock_get.call_args.args[0] == SpireCodexCardDownloader.DEFAULT_CARDS_URL
         assert result_path == tmp_path / "cards.json"
         assert result_path.read_bytes() == b'[{"name": "Strike"}]'
 

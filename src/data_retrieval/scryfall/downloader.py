@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import ClassVar
 from urllib.parse import urlparse
 
-from src.data_retrieval.download_to_file import download_to_file
+from src.data_retrieval.download_utils import download_to_file
 
 
 @dataclass

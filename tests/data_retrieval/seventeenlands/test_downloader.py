@@ -214,15 +214,21 @@ class TestDownload:
         )
         succeeding_response = _mock_streaming_response([gzip.compress(b"data")])
 
-        with patch(
-            "requests.get", side_effect=[failing_response, succeeding_response]
-        ) as mock_get:
+        # Keyed by URL rather than call order: download_to_file() retries
+        # internally now, so the failing ref's URL is requested more than
+        # once before it's given up on, and a positional side_effect list
+        # would hand the second ref's response to one of those retries
+        # instead.
+        def _get_side_effect(url: str, **kwargs: object) -> MagicMock:
+            return failing_response if url == _GAME_MSH_PREMIER.url else succeeding_response
+
+        with patch("requests.get", side_effect=_get_side_effect) as mock_get:
             with patch(
                 "src.data_retrieval.seventeenlands.downloader.tqdm.write"
             ) as mock_write:
                 result = downloader.download([_GAME_MSH_PREMIER, _GAME_WOE_TRAD])
 
-        assert mock_get.call_count == 2
+        assert mock_get.call_count > 1
         assert len(result.outcomes) == 2
 
         first, second = result.outcomes

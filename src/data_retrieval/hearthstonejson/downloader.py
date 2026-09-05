@@ -25,7 +25,7 @@ from typing import ClassVar
 import requests
 from tqdm import tqdm
 
-from src.data_retrieval.download_to_file import download_to_file
+from src.data_retrieval.download_utils import download_to_file
 from src.data_retrieval.rate_limiter import RateLimiter
 
 _REQUEST_TIMEOUT_SECONDS = 60

@@ -20,7 +20,7 @@ from typing import ClassVar
 
 from tqdm import tqdm
 
-from src.data_retrieval.download_to_file import download_to_file
+from src.data_retrieval.download_utils import download_to_file
 from src.data_retrieval.rate_limiter import RateLimiter
 from src.data_retrieval.seventeenlands.refs import DataType, SeventeenLandsFileRef
 

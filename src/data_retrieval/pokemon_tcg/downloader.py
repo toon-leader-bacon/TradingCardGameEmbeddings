@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import ClassVar
 
-from src.data_retrieval.download_to_file import download_to_file
+from src.data_retrieval.download_utils import download_to_file
 
 _ARCHIVE_FILENAME = "pokemon-tcg-data.zip"  # zipball URLs carry no filename
 # of their own to derive one from

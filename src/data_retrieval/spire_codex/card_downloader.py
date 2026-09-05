@@ -15,10 +15,10 @@ phase and no rate limiter dependency.
 from pathlib import Path
 from typing import ClassVar
 
-from src.data_retrieval.download_to_file import download_to_file
+from src.data_retrieval.download_utils import download_to_file
 
 
-class SpireCodexDownloader:
+class SpireCodexCardDownloader:
     """Downloads spire-codex's full cards.json in a single request.
 
     Single-consumer to src/data_retrieval/spire_codex/ — no other
@@ -72,7 +72,7 @@ class SpireCodexDownloader:
             non-2xx response) or on failure to write the file.
 
         Example:
-            >>> downloader = SpireCodexDownloader()
+            >>> downloader = SpireCodexCardDownloader()
             >>> path = downloader.fetch()
         """
         destination_path = self.raw_data_dir / "cards.json"

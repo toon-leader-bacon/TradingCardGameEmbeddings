@@ -235,15 +235,21 @@ class TestDownloadMissingBuilds:
         )
         succeeding_response = _mock_streaming_response([b"data"])
 
-        with patch(
-            "requests.get", side_effect=[failing_response, succeeding_response]
-        ) as mock_get:
+        # Keyed by URL rather than call order: download_to_file() retries
+        # internally now, so the failing build's URL is requested more
+        # than once before it's given up on, and a positional side_effect
+        # list would hand the second build's response to one of those
+        # retries instead.
+        def _get_side_effect(url: str, **kwargs: object) -> MagicMock:
+            return failing_response if "111111" in url else succeeding_response
+
+        with patch("requests.get", side_effect=_get_side_effect) as mock_get:
             with patch(
                 "src.data_retrieval.hearthstonejson.downloader.tqdm.write"
             ) as mock_write:
                 outcomes = downloader.download_missing_builds(["111111", "222222"])
 
-        assert mock_get.call_count == 2
+        assert mock_get.call_count > 1
         assert outcomes == [
             BuildDownloadFailure(build_id="111111", error="404 Not Found"),
             BuildDownloadSuccess(build_id="222222", path=tmp_path / "222222.json"),
@@ -279,7 +285,12 @@ class TestDownloadMissingBuilds:
             "404 Not Found"
         )
 
-        with patch("requests.get", side_effect=[succeeding_response, failing_response]):
+        # Keyed by URL, not call order — see
+        # test_failed_build_is_reported_and_loop_continues for why.
+        def _get_side_effect(url: str, **kwargs: object) -> MagicMock:
+            return succeeding_response if "111111" in url else failing_response
+
+        with patch("requests.get", side_effect=_get_side_effect):
             outcomes = downloader.download_missing_builds(["111111", "222222"])
 
         assert outcomes == [

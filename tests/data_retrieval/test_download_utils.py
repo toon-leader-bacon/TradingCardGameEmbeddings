@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from src.data_retrieval.download_to_file import download_to_file
+from src.data_retrieval.download_utils import download_to_file, download_to_string
 
 
 def _mock_streaming_response(chunks: list[bytes]) -> MagicMock:
@@ -13,6 +13,13 @@ def _mock_streaming_response(chunks: list[bytes]) -> MagicMock:
     response.iter_content.return_value = iter(chunks)
     response.__enter__.return_value = response
     response.__exit__.return_value = False
+    return response
+
+
+def _mock_text_response(text: str) -> MagicMock:
+    response = MagicMock()
+    response.raise_for_status.return_value = None
+    response.text = text
     return response
 
 
@@ -72,3 +79,49 @@ class TestDownloadToFile:
                 download_to_file("https://example.com/file.bin", destination_path)
 
         assert not destination_path.exists()
+
+
+class TestDownloadToString:
+    def test_returns_response_text(self) -> None:
+        response = _mock_text_response('{"hello": "world"}')
+
+        with patch("requests.get", return_value=response) as mock_get:
+            body = download_to_string("https://example.com/page.json")
+
+        mock_get.assert_called_once_with(
+            "https://example.com/page.json", timeout=60
+        )
+        assert body == '{"hello": "world"}'
+
+    def test_uses_given_timeout(self) -> None:
+        response = _mock_text_response("data")
+
+        with patch("requests.get", return_value=response) as mock_get:
+            download_to_string("https://example.com/page.json", timeout_seconds=5)
+
+        assert mock_get.call_args.kwargs["timeout"] == 5
+
+    def test_retries_then_succeeds(self) -> None:
+        failing_response = _mock_text_response("")
+        failing_response.raise_for_status.side_effect = requests.ConnectionError(
+            "dropped"
+        )
+        succeeding_response = _mock_text_response("data")
+
+        with patch(
+            "requests.get", side_effect=[failing_response, succeeding_response]
+        ) as mock_get:
+            body = download_to_string("https://example.com/page.json")
+
+        assert mock_get.call_count == 2
+        assert body == "data"
+
+    def test_raises_after_max_attempts_exhausted(self) -> None:
+        response = _mock_text_response("")
+        response.raise_for_status.side_effect = requests.HTTPError("500 Server Error")
+
+        with patch("requests.get", return_value=response) as mock_get:
+            with pytest.raises(requests.HTTPError):
+                download_to_string("https://example.com/page.json", max_attempts=2)
+
+        assert mock_get.call_count == 2
