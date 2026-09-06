@@ -30,29 +30,16 @@ than letting a fourth copy accumulate.
 
 import gzip
 import shutil
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 from urllib.parse import urlparse
 
 from src.data_retrieval.download_utils import download_to_file
+from src.data_retrieval.downloader import Downloader
+from src.data_retrieval.rate_limiter import RateLimiter
 
 
-@dataclass
-class STS2RunsDownloadResult:
-    """Paths to the two files a completed fetch leaves on disk.
-
-    Inputs: none (data holder).
-    Output: n/a.
-    Side effects: none.
-    Exceptions: none.
-    """
-
-    compressed_path: Path  # the downloaded .json.gz, as-is from sts2runs.com
-    ndjson_path: Path  # the extracted NDJSON file, sibling of compressed_path
-
-
-class STS2RunsDownloader:
+class STS2RunsDownloader(Downloader):
     """Downloads and extracts one sts2runs.com monthly run-data snapshot.
 
     Single-consumer to src/data_retrieval/sts2runs/ — no other source
@@ -69,10 +56,15 @@ class STS2RunsDownloader:
     )
 
     def __init__(
-        self, source_url: str | None = None, raw_data_dir: Path | None = None
+        self,
+        rate_limiter: RateLimiter | None = None,
+        raw_data_dir: Path | None = None,
+        source_url: str | None = None,
     ) -> None:
         """
         Inputs:
+            rate_limiter: see Downloader.__init__.
+            raw_data_dir: see Downloader.__init__.
             source_url: full URL to a specific sts2runs.com monthly
                 dump (e.g.
                 "https://sts2runs.com/downloads/runs-all-before-2026-06.json.gz").
@@ -81,54 +73,49 @@ class STS2RunsDownloader:
                 this class was written — check
                 https://sts2runs.com/downloads for a newer one and pass
                 it explicitly once it's stale.
-            raw_data_dir: directory both the compressed and extracted
-                files are written into. Defaults to
-                DEFAULT_RAW_DATA_DIR when omitted (expected to be a
-                path under data/raw, per src/README.md — not this
-                class's concern to enforce, just to receive).
         Output: none (constructor).
-        Side effects: none — no I/O happens until fetch()/download()/
+        Side effects: none — no I/O happens until phase_1()/download()/
             extract() are called.
         Exceptions: none.
         """
+        super().__init__(rate_limiter, raw_data_dir)
         self.source_url = (
             source_url if source_url is not None else self.DEFAULT_SOURCE_URL
         )
-        self.raw_data_dir = (
-            raw_data_dir if raw_data_dir is not None else self.DEFAULT_RAW_DATA_DIR
-        )
 
-    def fetch(self) -> STS2RunsDownloadResult:
-        """Entry point: download the monthly snapshot, then extract it.
+    def _run_phase_1(self) -> Path:
+        """Download the monthly snapshot, then extract it, returning
+        the extracted file's path — the artifact any downstream
+        consumer actually reads.
 
         Composed of download() followed by extract() — no additional
-        logic beyond calling the two and returning their result.
+        logic beyond calling the two and returning extract()'s result.
+        The intermediate compressed file stays reachable via download()
+        directly, for a caller that specifically wants it.
 
         Inputs: none (uses self.source_url, self.raw_data_dir).
-        Output: STS2RunsDownloadResult with both resulting paths.
+        Output: path to the extracted NDJSON file.
         Side effects: one network request; writes two files to
             raw_data_dir.
         Exceptions: whatever download() or extract() raise.
 
         Example:
             >>> downloader = STS2RunsDownloader(
-            ...     "https://sts2runs.com/downloads/runs-all-before-2026-06.json.gz",
+            ...     source_url="https://sts2runs.com/downloads/runs-all-before-2026-06.json.gz",
             ... )
-            >>> result = downloader.fetch()
+            >>> ndjson_path = downloader.phase_1()
         """
         compressed_path = self.download()
-        ndjson_path = self.extract(compressed_path)
-        return STS2RunsDownloadResult(
-            compressed_path=compressed_path, ndjson_path=ndjson_path
-        )
+        return self.extract(compressed_path)
 
     def download(self) -> Path:
         """Download self.source_url into self.raw_data_dir, unmodified.
 
-        Inputs: none (uses self.source_url, self.raw_data_dir).
+        Inputs: none (uses self.source_url, self.raw_data_dir,
+            self.rate_limiter).
         Output: path to the saved .json.gz file.
-        Side effects: one network request; creates raw_data_dir if
-            missing; writes one file to disk.
+        Side effects: one paced network request; creates raw_data_dir
+            if missing; writes one file to disk.
         Exceptions: raises on network failure (e.g. connection error,
             non-2xx response) or on failure to write the file. Any
             partially-written file is removed before the exception
@@ -137,6 +124,7 @@ class STS2RunsDownloader:
         filename = Path(urlparse(self.source_url).path).name
         destination_path = self.raw_data_dir / filename
 
+        self.rate_limiter.wait()
         download_to_file(self.source_url, destination_path)
 
         return destination_path

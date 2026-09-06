@@ -24,7 +24,11 @@ def _fast_rate_limiter() -> RateLimiter:
 
 
 def _make_downloader(
-    raw_data_dir: Path, *, page_limit: int | None = None
+    raw_data_dir: Path,
+    *,
+    page_limit: int | None = None,
+    start: str | None = None,
+    end: str | None = None,
 ) -> SpireCodexRunDownloader:
     return SpireCodexRunDownloader(
         export_url=_EXPORT_URL,
@@ -32,6 +36,8 @@ def _make_downloader(
         stats_url=_STATS_URL,
         page_limit=page_limit,
         rate_limiter=_fast_rate_limiter(),
+        start=start,
+        end=end,
     )
 
 
@@ -254,7 +260,7 @@ class TestFetchPage:
                 downloader._fetch_page(0, None, start=None, end=None)
 
 
-class TestFetch:
+class TestPhase1:
     def test_creates_raw_data_dir_if_missing(self, tmp_path: Path) -> None:
         nested_dir = tmp_path / "does" / "not" / "exist"
         downloader = _make_downloader(nested_dir)
@@ -264,11 +270,13 @@ class TestFetch:
         ]
 
         with patch("requests.get", side_effect=responses):
-            downloader.fetch()
+            downloader.phase_1()
 
         assert nested_dir.is_dir()
 
-    def test_walks_every_page_until_no_next_cursor(self, tmp_path: Path) -> None:
+    def test_walks_every_page_until_no_next_cursor_and_returns_raw_data_dir(
+        self, tmp_path: Path
+    ) -> None:
         downloader = _make_downloader(tmp_path)
         responses = [
             _mock_stats_response(total_runs=100_000),
@@ -277,13 +285,10 @@ class TestFetch:
         ]
 
         with patch("requests.get", side_effect=responses) as mock_get:
-            page_paths = downloader.fetch()
+            result = downloader.phase_1()
 
         assert mock_get.call_count == 3  # stats + 2 pages
-        assert page_paths == [
-            tmp_path / "page_00000.jsonl.gz",
-            tmp_path / "page_00001.jsonl.gz",
-        ]
+        assert result == tmp_path
         assert (tmp_path / "page_00000.jsonl.gz").read_bytes() == b"page-0-bytes"
         assert (tmp_path / "page_00001.jsonl.gz").read_bytes() == b"page-1-bytes"
         assert json.loads((tmp_path / "window.json").read_text(encoding="utf-8")) == {
@@ -302,12 +307,12 @@ class TestFetch:
         ]
 
         with patch("requests.get", side_effect=responses) as mock_get:
-            page_paths = downloader.fetch()
+            downloader.phase_1()
 
         assert mock_get.call_count == 2  # stats + only the missing page
-        assert page_paths == [
-            tmp_path / "page_00000.jsonl.gz",
-            tmp_path / "page_00001.jsonl.gz",
+        assert downloader._scan_downloaded_pages() == [
+            _FetchedPage(path=tmp_path / "page_00000.jsonl.gz", next_cursor="cursor-1"),
+            _FetchedPage(path=tmp_path / "page_00001.jsonl.gz", next_cursor=None),
         ]
 
     def test_already_complete_export_makes_no_page_requests(
@@ -319,19 +324,20 @@ class TestFetch:
         _write_page(tmp_path, 0, None)
 
         with patch("requests.get") as mock_get:
-            page_paths = downloader.fetch()
+            result = downloader.phase_1()
 
         mock_get.assert_not_called()
-        assert page_paths == [tmp_path / "page_00000.jsonl.gz"]
+        assert result == tmp_path
 
     def test_raises_on_window_mismatch_before_any_request(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)
         tmp_path.mkdir(parents=True, exist_ok=True)
         downloader._record_window("2026-01-01", None)
+        mismatched_downloader = _make_downloader(tmp_path, start="2026-02-01")
 
         with patch("requests.get") as mock_get:
             with pytest.raises(ValueError, match="does not match"):
-                downloader.fetch(start="2026-02-01")
+                mismatched_downloader.phase_1()
 
         mock_get.assert_not_called()
 
@@ -342,6 +348,6 @@ class TestFetch:
         responses = [failing_stats_response, _mock_page_response([b"page-0"], None)]
 
         with patch("requests.get", side_effect=responses):
-            page_paths = downloader.fetch()
+            result = downloader.phase_1()
 
-        assert page_paths == [tmp_path / "page_00000.jsonl.gz"]
+        assert result == tmp_path

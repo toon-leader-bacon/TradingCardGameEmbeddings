@@ -5,10 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from src.data_retrieval.sts2runs.downloader import (
-    STS2RunsDownloader,
-    STS2RunsDownloadResult,
-)
+from src.data_retrieval.sts2runs.downloader import STS2RunsDownloader
 
 _SOURCE_URL = "https://sts2runs.com/downloads/runs-all-before-2026-06.json.gz"
 
@@ -105,7 +102,7 @@ class TestExtract:
             downloader.extract(bad_path)
 
 
-class TestFetch:
+class TestPhase1:
     def test_composes_download_and_extract(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)
         compressed_path = tmp_path / "runs-all-before-2026-06.json.gz"
@@ -117,10 +114,8 @@ class TestFetch:
             with patch.object(
                 downloader, "extract", return_value=ndjson_path
             ) as mock_extract:
-                result = downloader.fetch()
+                result = downloader.phase_1()
 
         mock_download.assert_called_once_with()
         mock_extract.assert_called_once_with(compressed_path)
-        assert result == STS2RunsDownloadResult(
-            compressed_path=compressed_path, ndjson_path=ndjson_path
-        )
+        assert result == ndjson_path

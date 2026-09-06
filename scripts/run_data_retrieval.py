@@ -34,7 +34,7 @@ def main() -> None:
     # )
     downloader = fabtcg_decklist_downloader(
         rate_limiter=RateLimiter(requests_per_minute=60),
-        output_dir=Path("data/raw/fabtcg_decklists"),
+        raw_data_dir=Path("data/raw/fabtcg_decklists"),
     )
     downloader.phase_1()
     downloader.phase_2()

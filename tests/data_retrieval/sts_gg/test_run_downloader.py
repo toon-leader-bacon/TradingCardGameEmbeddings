@@ -18,12 +18,15 @@ def _fast_rate_limiter() -> RateLimiter:
     return RateLimiter(requests_per_minute=1_000_000_000)
 
 
-def _make_downloader(output_dir: Path) -> STSGGRunDownloader:
+def _make_downloader(
+    raw_data_dir: Path, *, per_page_count: int = 100
+) -> STSGGRunDownloader:
     return STSGGRunDownloader(
         _fast_rate_limiter(),
-        output_dir,
+        raw_data_dir,
         _LEADERBOARD_URL,
         _RUN_DETAIL_URL,
+        per_page_count,
     )
 
 
@@ -47,27 +50,27 @@ class TestInit:
     def test_defaults_urls_and_output_dir_when_omitted(self) -> None:
         downloader = STSGGRunDownloader(_fast_rate_limiter())
 
-        assert downloader.output_dir == STSGGRunDownloader.DEFAULT_RAW_DATA_DIR
+        assert downloader.raw_data_dir == STSGGRunDownloader.DEFAULT_RAW_DATA_DIR
         assert downloader.leaderboard_url == STSGGRunDownloader.DEFAULT_LEADERBOARD_URL
         assert downloader.run_detail_url == STSGGRunDownloader.DEFAULT_RUN_DETAIL_URL
 
     def test_honors_explicit_overrides(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)
 
-        assert downloader.output_dir == tmp_path
+        assert downloader.raw_data_dir == tmp_path
         assert downloader.leaderboard_url == _LEADERBOARD_URL
         assert downloader.run_detail_url == _RUN_DETAIL_URL
 
 
 class TestPhase1:
     def test_writes_ids_from_a_single_page(self, tmp_path: Path) -> None:
-        downloader = _make_downloader(tmp_path)
+        downloader = _make_downloader(tmp_path, per_page_count=100)
         page = _mock_text_response(
             _leaderboard_page(["a", "b", "c"], page=1, total_pages=1)
         )
 
         with patch("requests.get", return_value=page) as mock_get:
-            ids_path = downloader.phase_1(per_page_count=100)
+            ids_path = downloader.phase_1()
 
         mock_get.assert_called_once()
         assert mock_get.call_args.args[0] == (

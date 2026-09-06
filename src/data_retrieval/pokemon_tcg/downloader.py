@@ -15,9 +15,11 @@ import shutil
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import ClassVar
+from typing import ClassVar, Tuple
 
 from src.data_retrieval.download_utils import download_to_file
+from src.data_retrieval.downloader import Downloader
+from src.data_retrieval.rate_limiter import RateLimiter
 
 _ARCHIVE_FILENAME = "pokemon-tcg-data.zip"  # zipball URLs carry no filename
 # of their own to derive one from
@@ -39,7 +41,7 @@ class PokemonTcgDataDownloadResult:
     decks_dir: Path  # extracted *.json files from the repo's decks/en/
 
 
-class PokemonTcgDataDownloader:
+class PokemonTcgDataDownloader(Downloader):
     """Downloads and extracts the pokemon-tcg-data repo's card and deck JSON.
 
     Single-consumer to src/data_retrieval/pokemon_tcg/ — no other
@@ -48,35 +50,40 @@ class PokemonTcgDataDownloader:
 
     DEFAULT_RAW_DATA_DIR: ClassVar[Path] = Path("data/raw/pokemon_tcg")
 
-    def __init__(self, repo_zip_url: str, raw_data_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        repo_zip_url: str,
+        rate_limiter: RateLimiter | None = None,
+        raw_data_dir: Path | None = None,
+    ) -> None:
         """
         Inputs:
             repo_zip_url: GitHub zipball URL for the repo (e.g.
                 "https://api.github.com/repos/PokemonTCG/pokemon-tcg-data/zipball").
-            raw_data_dir: directory the extracted cards/ and decks/
-                subdirectories are written into. Defaults to
-                DEFAULT_RAW_DATA_DIR when omitted (expected to be a
-                path under data/raw, per src/README.md — not this
-                class's concern to enforce, just to receive).
+                Required and positional: no sensible default.
+            rate_limiter: see Downloader.__init__.
+            raw_data_dir: see Downloader.__init__.
         Output: none (constructor).
-        Side effects: none — no I/O happens until fetch()/download()/
+        Side effects: none — no I/O happens until phase_1()/download()/
             extract() are called.
         Exceptions: none.
         """
+        super().__init__(rate_limiter, raw_data_dir)
         self.repo_zip_url = repo_zip_url
-        self.raw_data_dir = (
-            raw_data_dir if raw_data_dir is not None else self.DEFAULT_RAW_DATA_DIR
-        )
 
-    def fetch(self) -> PokemonTcgDataDownloadResult:
-        """Entry point: download the repo zip, then extract it.
+    def _run_phase_1(self) -> Path:
+        """Download the repo zip, then extract it, returning
+        raw_data_dir — the extraction produces two equally-important
+        sibling directories (cards/, decks/), so there's no single
+        primary artifact to return instead.
 
         Composed of download() followed by extract() — no additional
-        logic beyond calling the two and returning their result.
+        logic beyond calling the two. extract()'s own richer
+        PokemonTcgDataDownloadResult (both directory paths) stays
+        available via calling download()/extract() directly.
 
         Inputs: none (uses self.repo_zip_url, self.raw_data_dir).
-        Output: PokemonTcgDataDownloadResult with both resulting
-            directory paths.
+        Output: self.raw_data_dir.
         Side effects: one network request; writes many files to
             raw_data_dir.
         Exceptions: whatever download() or extract() raise.
@@ -85,18 +92,20 @@ class PokemonTcgDataDownloader:
             >>> downloader = PokemonTcgDataDownloader(
             ...     "https://api.github.com/repos/PokemonTCG/pokemon-tcg-data/zipball",
             ... )
-            >>> result = downloader.fetch()
+            >>> raw_data_dir = downloader.phase_1()
         """
         zip_path = self.download()
-        return self.extract(zip_path)
+        self.extract(zip_path)
+        return self.raw_data_dir
 
     def download(self) -> Path:
         """Download the repo zipball into self.raw_data_dir, unmodified.
 
-        Inputs: none (uses self.repo_zip_url, self.raw_data_dir).
+        Inputs: none (uses self.repo_zip_url, self.raw_data_dir,
+            self.rate_limiter).
         Output: path to the saved .zip file.
-        Side effects: one network request; creates raw_data_dir if
-            missing; writes one file to disk.
+        Side effects: one paced network request; creates raw_data_dir
+            if missing; writes one file to disk.
         Exceptions: raises on network failure (e.g. connection error,
             non-2xx response) or on failure to write the file. Any
             partially-written file is removed before the exception
@@ -104,6 +113,7 @@ class PokemonTcgDataDownloader:
         """
         destination_path = self.raw_data_dir / _ARCHIVE_FILENAME
 
+        self.rate_limiter.wait()
         download_to_file(self.repo_zip_url, destination_path)
 
         return destination_path
@@ -177,28 +187,11 @@ class PokemonTcgDataDownloader:
         matched_any = False
 
         for member in zip_file.infolist():
-            if member.is_dir():
+            if member.is_dir() or not self._member_matches_suffix(member, suffix_parts):
                 continue
-
-            # Strip the zipball's variable top-level repo folder before matching.
-            member_parts = PurePosixPath(member.filename).parts[1:]
-            if (
-                len(member_parts) != len(suffix_parts) + 1
-                or member_parts[:-1] != suffix_parts
-                or not member_parts[-1].endswith(".json")
-            ):
-                continue
-
             matched_any = True
             destination_dir.mkdir(parents=True, exist_ok=True)
-            destination_path = destination_dir / member_parts[-1]
-            try:
-                with zip_file.open(member) as source_file:
-                    with open(destination_path, "wb") as destination_file:
-                        shutil.copyfileobj(source_file, destination_file)
-            except Exception:
-                destination_path.unlink(missing_ok=True)
-                raise
+            self._extract_one_member(zip_file, member, destination_dir)
 
         if not matched_any:
             raise ValueError(
@@ -207,3 +200,47 @@ class PokemonTcgDataDownloader:
             )
 
         return destination_dir
+
+    @staticmethod
+    def _member_matches_suffix(
+        member: zipfile.ZipInfo, suffix_parts: Tuple[str, ...]
+    ) -> bool:
+        """Whether member's path (minus the zipball's top-level repo folder)
+        is exactly suffix_parts plus one trailing *.json filename.
+
+        Inputs: member, the zip entry to check; suffix_parts, the target
+            directory path split into parts (e.g. ("cards", "en")).
+        Output: bool.
+        Side effects: none.
+        Exceptions: none.
+        """
+        member_parts = PurePosixPath(member.filename).parts[1:]
+        return (
+            len(member_parts) == len(suffix_parts) + 1
+            and member_parts[:-1] == suffix_parts
+            and member_parts[-1].endswith(".json")
+        )
+
+    @staticmethod
+    def _extract_one_member(
+        zip_file: zipfile.ZipFile, member: zipfile.ZipInfo, destination_dir: Path
+    ) -> None:
+        """Copy one matched zip member into destination_dir, flattened to
+        just its filename.
+
+        Inputs: zip_file, the open archive; member, the entry to copy;
+            destination_dir, already created by the caller.
+        Output: none.
+        Side effects: writes destination_dir/<member's filename>.
+        Exceptions: raises on a write failure, after removing the partial
+            destination file (see extract()'s docstring on why earlier
+            members' files are not also rolled back).
+        """
+        destination_path = destination_dir / PurePosixPath(member.filename).name
+        try:
+            with zip_file.open(member) as source_file:
+                with open(destination_path, "wb") as destination_file:
+                    shutil.copyfileobj(source_file, destination_file)
+        except Exception:
+            destination_path.unlink(missing_ok=True)
+            raise

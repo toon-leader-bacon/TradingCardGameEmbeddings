@@ -1,8 +1,26 @@
 [flake8]
+max-line-length = 100
+
+# Single source of truth for the line-length limit — check.sh no longer
+# needs to pass --max-line-length itself, and an editor plugin invoking
+# flake8 directly now sees the same limit instead of falling back to
+# flake8's own default of 79.
+exclude =
+    .git,
+    __pycache__,
+    .mypy_cache,
+    .pytest_cache,
+    build,
+    dist
+
 # E203 (whitespace before ':') conflicts with black's slice formatting —
 # black intentionally adds that space for complex slice expressions.
 # https://black.readthedocs.io/en/stable/faq.html#why-are-flake8-s-e203-and-w503-violated
 extend-ignore = E203
+
+# mccabe cyclomatic complexity: counts decision points (if/for/while/
+# and/or/except/...), not nesting depth directly
+max-complexity = 10
 
 # These fixture files embed raw HTML strings where exact whitespace is
 # load-bearing for the ability-text-flattening logic under test — line

@@ -22,10 +22,10 @@ def _fast_rate_limiter() -> RateLimiter:
     return RateLimiter(requests_per_minute=1_000_000_000)
 
 
-def _make_downloader(output_dir: Path) -> PitchstackDeckDownloader:
+def _make_downloader(raw_data_dir: Path) -> PitchstackDeckDownloader:
     return PitchstackDeckDownloader(
         _fast_rate_limiter(),
-        output_dir,
+        raw_data_dir,
         _SITEMAP_URL,
         _DECK_URL,
     )
@@ -52,14 +52,14 @@ class TestInit:
     def test_defaults_urls_and_output_dir_when_omitted(self) -> None:
         downloader = PitchstackDeckDownloader(_fast_rate_limiter())
 
-        assert downloader.output_dir == PitchstackDeckDownloader.DEFAULT_RAW_DATA_DIR
+        assert downloader.raw_data_dir == PitchstackDeckDownloader.DEFAULT_RAW_DATA_DIR
         assert downloader.sitemap_url == PitchstackDeckDownloader.DEFAULT_SITEMAP_URL
         assert downloader.deck_url == PitchstackDeckDownloader.DEFAULT_DECK_URL
 
     def test_honors_explicit_overrides(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)
 
-        assert downloader.output_dir == tmp_path
+        assert downloader.raw_data_dir == tmp_path
         assert downloader.sitemap_url == _SITEMAP_URL
         assert downloader.deck_url == _DECK_URL
 

@@ -19,31 +19,18 @@ result_limit set above the live card count (visible in gwent.one's own
 "Cards: N" footer), returning every card in one response.
 """
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
 import requests
 
+from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.rate_limiter import RateLimiter
 
 _REQUEST_TIMEOUT_SECONDS = 60
 
 
-@dataclass(frozen=True)
-class GwentOneDownloadResult:
-    """Paths to each page fragment a completed fetch() wrote to disk.
-
-    Inputs: none (data holder).
-    Output: n/a.
-    Side effects: none.
-    Exceptions: none.
-    """
-
-    page_paths: list[Path]  # one path per page fetched, in request order
-
-
-class GwentOneDownloader:
+class GwentOneDownloader(Downloader):
     """Downloads one or more raw HTML page fragments from gwent.one's
     card search AJAX endpoint.
 
@@ -56,14 +43,31 @@ class GwentOneDownloader:
 
     def __init__(
         self,
-        ajax_url: str | None = None,
+        result_limit: int,
+        rate_limiter: RateLimiter | None = None,
         raw_data_dir: Path | None = None,
         *,
-        rate_limiter: RateLimiter,
+        pages: int = 1,
+        ajax_url: str | None = None,
         language: str = "en",
     ) -> None:
         """
         Inputs:
+            result_limit: value sent as the `total` form field —
+                gwent.one's per-request result cap. Set above the live
+                card count to get every card back in a single page
+                (see module docstring). Required and positional: no
+                sensible source-wide default (it depends on gwent.one's
+                current live card count).
+            rate_limiter: see Downloader.__init__.
+            raw_data_dir: see Downloader.__init__.
+            pages: number of pages phase_1() fetches, starting at 1.
+                Defaults to 1 — today's expected usage is one page with
+                a high result_limit; multi-page support exists for a
+                future filtered/narrower query that might need more
+                than one. Moved here from a phase_1()-call argument
+                (this class's old fetch() method) since
+                Downloader.phase_1() takes no arguments.
             ajax_url: full URL to gwent.one's search AJAX endpoint.
                 Defaults to DEFAULT_AJAX_URL when omitted — unlike
                 Scryfall's per-dump timestamped URL or HearthstoneJSON's
@@ -73,54 +77,36 @@ class GwentOneDownloader:
                 pass it) is worth doing here specifically, so this
                 exact endpoint stays discoverable from the code itself
                 rather than only from this session's history.
-            raw_data_dir: directory each page's HTML fragment is
-                written into. Defaults to DEFAULT_RAW_DATA_DIR when
-                omitted (expected to be a path under data/raw, per
-                src/README.md — not this class's concern to enforce,
-                just to receive).
-            rate_limiter: paces every outgoing request this class
-                makes. Passed in rather than constructed internally
-                (dependency injection — PATTERNS.md), same convention
-                as HearthstoneJsonDownloader — so the same shared
-                RateLimiter instance can be reused across sources, and
-                so tests can supply a fast/no-op limiter.
             language: value sent as the `lang` form field (e.g. "en").
         Output: none (constructor).
-        Side effects: none — no I/O happens until fetch()/
+        Side effects: none — no I/O happens until phase_1()/
             fetch_page() are called.
         Exceptions: none.
         """
+        super().__init__(rate_limiter, raw_data_dir)
+        self.result_limit = result_limit
+        self.pages = pages
         self.ajax_url = ajax_url if ajax_url is not None else self.DEFAULT_AJAX_URL
-        self.raw_data_dir = (
-            raw_data_dir if raw_data_dir is not None else self.DEFAULT_RAW_DATA_DIR
-        )
-        self.rate_limiter = rate_limiter
         self.language = language
 
-    def fetch(self, result_limit: int, pages: int = 1) -> GwentOneDownloadResult:
-        """Entry point: fetch `pages` page(s), each capped at
-        `result_limit` cards, saving each page's raw HTML fragment to
-        disk.
+    def _run_phase_1(self) -> Path:
+        """Fetch self.pages page(s), each capped at self.result_limit
+        cards, saving each page's raw HTML fragment to disk, and
+        return raw_data_dir — one page per file, with no single
+        artifact that's "the" result when self.pages > 1.
 
-        Composed of one fetch_page() call per page in range(1, pages +
-        1) — no additional logic beyond calling that and collecting
-        the resulting paths.
+        Composed of one fetch_page() call per page in range(1,
+        self.pages + 1) — no additional logic beyond calling that.
+        The full page-path list stays available via calling
+        fetch_page() directly.
 
-        Inputs:
-            result_limit: value sent as the `total` form field —
-                gwent.one's per-request result cap. Set above the live
-                card count to get every card back in a single page
-                (see module docstring).
-            pages: number of pages to fetch, starting at 1. Defaults
-                to 1 — today's expected usage is one page with a high
-                result_limit; multi-page support exists for a future
-                filtered/narrower query that might need more than one.
-        Output: GwentOneDownloadResult listing each page's saved path,
-            in request order.
+        Inputs: none (uses self.result_limit, self.pages,
+            self.raw_data_dir, self.rate_limiter).
+        Output: self.raw_data_dir.
         Side effects: one paced network request per page; creates
             raw_data_dir if missing; writes one file per page.
         Exceptions: whatever fetch_page() raises — one page failing is
-            a hard failure for the whole fetch() call. Unlike
+            a hard failure for the whole call. Unlike
             HearthstoneJsonDownloader's per-build best-effort outcome
             union, there's no per-page independence to preserve today
             (single-page use is the only exercised case) — worth
@@ -130,14 +116,14 @@ class GwentOneDownloader:
 
         Example:
             >>> downloader = GwentOneDownloader(
+            ...     result_limit=1300,
             ...     rate_limiter=RateLimiter(requests_per_minute=12),
             ... )
-            >>> result = downloader.fetch(result_limit=1300)
+            >>> raw_data_dir = downloader.phase_1()
         """
-        page_paths = [
-            self.fetch_page(page, result_limit) for page in range(1, pages + 1)
-        ]
-        return GwentOneDownloadResult(page_paths=page_paths)
+        for page in range(1, self.pages + 1):
+            self.fetch_page(page, self.result_limit)
+        return self.raw_data_dir
 
     def fetch_page(self, page: int, result_limit: int) -> Path:
         """Fetch one page from the AJAX endpoint and save its raw HTML

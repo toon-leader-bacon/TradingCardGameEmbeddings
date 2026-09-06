@@ -26,6 +26,7 @@ import requests
 from tqdm import tqdm
 
 from src.data_retrieval.download_utils import download_to_file
+from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.rate_limiter import RateLimiter
 
 _REQUEST_TIMEOUT_SECONDS = 60
@@ -75,7 +76,7 @@ class BuildDownloadFailure:
 BuildDownloadOutcome = BuildDownloadSuccess | BuildDownloadFailure
 
 
-class HearthstoneJsonDownloader:
+class HearthstoneJsonDownloader(Downloader):
     """Downloads one enUS cards.json per known Hearthstone build.
 
     Single-consumer to src/data_retrieval/hearthstonejson/ — no other
@@ -87,53 +88,39 @@ class HearthstoneJsonDownloader:
     def __init__(
         self,
         listing_url: str,
+        rate_limiter: RateLimiter | None = None,
         raw_data_dir: Path | None = None,
-        *,
-        rate_limiter: RateLimiter,
     ) -> None:
         """
         Inputs:
             listing_url: root HearthstoneJSON listing page URL (e.g.
-                "https://api.hearthstonejson.com/v1/").
-            raw_data_dir: directory each build's cards.json is written
-                into. Defaults to DEFAULT_RAW_DATA_DIR when omitted
-                (expected to be a path under data/raw, per
-                src/README.md — not this class's concern to enforce,
-                just to receive).
-            rate_limiter: paces every outgoing request this class
-                makes. Passed in rather than constructed internally
-                (dependency injection — PATTERNS.md) so the same
-                shared RateLimiter instance can be reused across
-                sources, and so tests can supply a fast/no-op limiter
-                instead of a real one.
+                "https://api.hearthstonejson.com/v1/"). Required and
+                positional: no sensible default.
+            rate_limiter: see Downloader.__init__.
+            raw_data_dir: see Downloader.__init__.
         Output: none (constructor).
-        Side effects: none — no I/O happens until fetch()/
+        Side effects: none — no I/O happens until phase_1()/
             list_build_ids()/download_missing_builds()/download_build()
             are called.
         Exceptions: none.
         """
+        super().__init__(rate_limiter, raw_data_dir)
         self.listing_url = listing_url
-        self.raw_data_dir = (
-            raw_data_dir if raw_data_dir is not None else self.DEFAULT_RAW_DATA_DIR
-        )
-        self.rate_limiter = rate_limiter
 
-    def fetch(self) -> list[BuildDownloadOutcome]:
-        """Entry point: list every known build, then download the
-        ones not already present in raw_data_dir.
+    def _run_phase_1(self) -> Path:
+        """List every known build, download the ones not already
+        present in raw_data_dir, and return raw_data_dir — a build
+        outcome list has no single artifact that's "the" result, since
+        any given call may include failures alongside successes.
 
         Composed of list_build_ids() followed by
         download_missing_builds() — no additional logic beyond calling
-        the two and returning the result.
+        the two. The full list[BuildDownloadOutcome] stays available
+        via calling those two methods directly.
 
         Inputs: none (uses self.listing_url, self.raw_data_dir,
             self.rate_limiter).
-        Output: one BuildDownloadOutcome per known build id —
-            BuildDownloadSuccess for a build whose cards.json is
-            present in raw_data_dir (already there or newly downloaded
-            this run), BuildDownloadFailure for a build whose download
-            failed. A single build's failure does not stop the rest —
-            see download_missing_builds().
+        Output: self.raw_data_dir.
         Side effects: one network request per list_build_ids(), plus
             one more per build actually downloaded; writes one file
             per newly-downloaded, successful build.
@@ -147,11 +134,11 @@ class HearthstoneJsonDownloader:
             ...     "https://api.hearthstonejson.com/v1/",
             ...     rate_limiter=RateLimiter(requests_per_minute=12),
             ... )
-            >>> outcomes = downloader.fetch()
-            >>> failures = [o for o in outcomes if isinstance(o, BuildDownloadFailure)]
+            >>> raw_data_dir = downloader.phase_1()
         """
         build_ids = self.list_build_ids()
-        return self.download_missing_builds(build_ids)
+        self.download_missing_builds(build_ids)
+        return self.raw_data_dir
 
     def list_build_ids(self) -> list[str]:
         """Fetch the root listing page and parse out every build id
@@ -233,7 +220,7 @@ class HearthstoneJsonDownloader:
         Exceptions: none — download_build() failures are caught here,
             not propagated. (A failure in list_build_ids(), which this
             method doesn't call, is unaffected by this and still
-            raises normally — see fetch().)
+            raises normally — see _run_phase_1().)
         """
         self.raw_data_dir.mkdir(parents=True, exist_ok=True)
 

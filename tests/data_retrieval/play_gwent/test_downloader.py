@@ -31,12 +31,19 @@ def _fast_rate_limiter() -> RateLimiter:
     return RateLimiter(requests_per_minute=1_000_000_000)
 
 
-def _make_downloader(output_dir: Path) -> PlayGwentDownloader:
+def _make_downloader(
+    raw_data_dir: Path,
+    *,
+    initial_offset: int = 0,
+    per_page_count: int = 500,
+) -> PlayGwentDownloader:
     return PlayGwentDownloader(
         _fast_rate_limiter(),
-        output_dir,
+        raw_data_dir,
         _DECK_ID_GETTER_URL,
         _DECK_DETAIL_URL,
+        initial_offset,
+        per_page_count,
     )
 
 
@@ -62,7 +69,7 @@ class TestInit:
     def test_defaults_urls_and_output_dir_when_omitted(self) -> None:
         downloader = PlayGwentDownloader(_fast_rate_limiter())
 
-        assert downloader.output_dir == PlayGwentDownloader.DEFAULT_RAW_DATA_DIR
+        assert downloader.raw_data_dir == PlayGwentDownloader.DEFAULT_RAW_DATA_DIR
         assert (
             downloader.deck_id_getter_url
             == PlayGwentDownloader.DEFAULT_DECK_ID_GETTER_URL
@@ -72,18 +79,18 @@ class TestInit:
     def test_honors_explicit_overrides(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)
 
-        assert downloader.output_dir == tmp_path
+        assert downloader.raw_data_dir == tmp_path
         assert downloader.deck_id_getter_url == _DECK_ID_GETTER_URL
         assert downloader.deck_detail_url == _DECK_DETAIL_URL
 
 
 class TestPhase1:
     def test_writes_single_page_of_ids(self, tmp_path: Path) -> None:
-        downloader = _make_downloader(tmp_path)
+        downloader = _make_downloader(tmp_path, per_page_count=500)
         response = _mock_json_response(_guides_page([1, 2, 3]))
 
         with patch("requests.get", return_value=response) as mock_get:
-            ids_path = downloader.phase_1(per_page_count=500)
+            ids_path = downloader.phase_1()
 
         mock_get.assert_called_once()
         assert mock_get.call_args.args[0] == (
@@ -93,12 +100,12 @@ class TestPhase1:
         assert ids_path.read_text(encoding="utf-8") == "1\n2\n3\n"
 
     def test_pages_until_a_short_page_is_returned(self, tmp_path: Path) -> None:
-        downloader = _make_downloader(tmp_path)
+        downloader = _make_downloader(tmp_path, per_page_count=2)
         full_page = _mock_json_response(_guides_page([1, 2]))
         short_page = _mock_json_response(_guides_page([3]))
 
         with patch("requests.get", side_effect=[full_page, short_page]) as mock_get:
-            ids_path = downloader.phase_1(per_page_count=2)
+            ids_path = downloader.phase_1()
 
         assert mock_get.call_args_list[0].args[0] == (
             "https://example.test/guides/offset/0/limit/2"
@@ -109,53 +116,53 @@ class TestPhase1:
         assert ids_path.read_text(encoding="utf-8") == "1\n2\n3\n"
 
     def test_stops_on_empty_page(self, tmp_path: Path) -> None:
-        downloader = _make_downloader(tmp_path)
+        downloader = _make_downloader(tmp_path, per_page_count=2)
         full_page = _mock_json_response(_guides_page([1, 2]))
         empty_page = _mock_json_response(_guides_page([]))
 
         with patch("requests.get", side_effect=[full_page, empty_page]) as mock_get:
-            ids_path = downloader.phase_1(per_page_count=2)
+            ids_path = downloader.phase_1()
 
         assert mock_get.call_count == 2
         assert ids_path.read_text(encoding="utf-8") == "1\n2\n"
 
     def test_deduplicates_ids_preserving_first_seen_order(self, tmp_path: Path) -> None:
-        downloader = _make_downloader(tmp_path)
+        downloader = _make_downloader(tmp_path, per_page_count=3)
         full_page = _mock_json_response(_guides_page([1, 2, 1]))
         short_page = _mock_json_response(_guides_page([2, 3]))
 
         with patch("requests.get", side_effect=[full_page, short_page]):
-            ids_path = downloader.phase_1(per_page_count=3)
+            ids_path = downloader.phase_1()
 
         assert ids_path.read_text(encoding="utf-8") == "1\n2\n3\n"
 
     def test_starts_at_initial_offset(self, tmp_path: Path) -> None:
-        downloader = _make_downloader(tmp_path)
+        downloader = _make_downloader(tmp_path, initial_offset=1000, per_page_count=500)
         response = _mock_json_response(_guides_page([1]))
 
         with patch("requests.get", return_value=response) as mock_get:
-            downloader.phase_1(initial_offset=1000, per_page_count=500)
+            downloader.phase_1()
 
         assert mock_get.call_args.args[0] == (
             "https://example.test/guides/offset/1000/limit/500"
         )
 
     def test_empty_result_writes_empty_file(self, tmp_path: Path) -> None:
-        downloader = _make_downloader(tmp_path)
+        downloader = _make_downloader(tmp_path, per_page_count=500)
         response = _mock_json_response(_guides_page([]))
 
         with patch("requests.get", return_value=response):
-            ids_path = downloader.phase_1(per_page_count=500)
+            ids_path = downloader.phase_1()
 
         assert ids_path.read_text(encoding="utf-8") == ""
 
     def test_creates_output_dir_if_missing(self, tmp_path: Path) -> None:
         nested_dir = tmp_path / "does" / "not" / "exist"
-        downloader = _make_downloader(nested_dir)
+        downloader = _make_downloader(nested_dir, per_page_count=500)
         response = _mock_json_response(_guides_page([1]))
 
         with patch("requests.get", return_value=response):
-            downloader.phase_1(per_page_count=500)
+            downloader.phase_1()
 
         assert nested_dir.is_dir()
 

@@ -23,7 +23,6 @@ cd "$PROJECT_ROOT"
 
 SRC_DIR="src"
 TEST_DIR="tests"
-MAX_LINE_LENGTH=100
 
 failed=0
 
@@ -44,7 +43,7 @@ run_step "black (auto-format)" \
     black "$SRC_DIR" "$TEST_DIR"
 
 run_step "flake8 (lint)" \
-    flake8 --max-line-length="$MAX_LINE_LENGTH" "$SRC_DIR" "$TEST_DIR"
+    flake8 "$SRC_DIR" "$TEST_DIR"
 
 run_step "mypy (type-check)" \
     mypy --ignore-missing-imports "$SRC_DIR"

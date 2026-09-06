@@ -4,10 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from src.data_retrieval.gwent_one.downloader import (
-    GwentOneDownloader,
-    GwentOneDownloadResult,
-)
+from src.data_retrieval.gwent_one.downloader import GwentOneDownloader
 from src.data_retrieval.rate_limiter import RateLimiter
 
 _AJAX_URL = "https://gwent.one/search/ajax"
@@ -19,10 +16,12 @@ def _fast_rate_limiter() -> RateLimiter:
     return RateLimiter(requests_per_minute=1_000_000_000)
 
 
-def _make_downloader(raw_data_dir: Path) -> GwentOneDownloader:
+def _make_downloader(raw_data_dir: Path, pages: int = 1) -> GwentOneDownloader:
     return GwentOneDownloader(
+        result_limit=1300,
         raw_data_dir=raw_data_dir,
         rate_limiter=_fast_rate_limiter(),
+        pages=pages,
     )
 
 
@@ -35,23 +34,29 @@ def _mock_text_response(text: str) -> MagicMock:
 
 class TestInit:
     def test_defaults_ajax_url_and_raw_data_dir_when_omitted(self) -> None:
-        downloader = GwentOneDownloader(rate_limiter=_fast_rate_limiter())
+        downloader = GwentOneDownloader(
+            result_limit=1300, rate_limiter=_fast_rate_limiter()
+        )
 
         assert downloader.ajax_url == GwentOneDownloader.DEFAULT_AJAX_URL
         assert downloader.raw_data_dir == GwentOneDownloader.DEFAULT_RAW_DATA_DIR
         assert downloader.language == "en"
+        assert downloader.pages == 1
 
     def test_honors_explicit_overrides(self, tmp_path: Path) -> None:
         downloader = GwentOneDownloader(
-            "https://example.test/ajax",
-            tmp_path,
+            1300,
             rate_limiter=_fast_rate_limiter(),
+            raw_data_dir=tmp_path,
+            pages=2,
+            ajax_url="https://example.test/ajax",
             language="de",
         )
 
         assert downloader.ajax_url == "https://example.test/ajax"
         assert downloader.raw_data_dir == tmp_path
         assert downloader.language == "de"
+        assert downloader.pages == 2
 
 
 class TestFetchPage:
@@ -124,24 +129,24 @@ class TestFetchPage:
         assert not destination.exists()
 
 
-class TestFetch:
-    def test_composes_fetch_page_per_page(self, tmp_path: Path) -> None:
-        downloader = _make_downloader(tmp_path)
+class TestPhase1:
+    def test_composes_fetch_page_per_page_and_returns_raw_data_dir(
+        self, tmp_path: Path
+    ) -> None:
+        downloader = _make_downloader(tmp_path, pages=2)
 
         with patch.object(
             downloader,
             "fetch_page",
             side_effect=[tmp_path / "page_1.html", tmp_path / "page_2.html"],
         ) as mock_fetch_page:
-            result = downloader.fetch(result_limit=140, pages=2)
+            result = downloader.phase_1()
 
         assert mock_fetch_page.call_args_list == [
-            ((1, 140),),
-            ((2, 140),),
+            ((1, 1300),),
+            ((2, 1300),),
         ]
-        assert result == GwentOneDownloadResult(
-            page_paths=[tmp_path / "page_1.html", tmp_path / "page_2.html"]
-        )
+        assert result == tmp_path
 
     def test_defaults_to_a_single_page(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)
@@ -149,7 +154,7 @@ class TestFetch:
         with patch.object(
             downloader, "fetch_page", return_value=tmp_path / "page_1.html"
         ) as mock_fetch_page:
-            result = downloader.fetch(result_limit=1300)
+            result = downloader.phase_1()
 
         mock_fetch_page.assert_called_once_with(1, 1300)
-        assert result == GwentOneDownloadResult(page_paths=[tmp_path / "page_1.html"])
+        assert result == tmp_path

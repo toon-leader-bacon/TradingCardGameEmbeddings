@@ -5,10 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from src.data_retrieval.scryfall.downloader import (
-    ScryfallDownloadResult,
-    ScryfallOracleDownloader,
-)
+from src.data_retrieval.scryfall.downloader import ScryfallOracleDownloader
 
 _SOURCE_URL = (
     "https://data.scryfall.io/oracle-cards/oracle-cards-20260820090157.jsonl.gz"
@@ -89,7 +86,7 @@ class TestExtract:
             downloader.extract(bad_path)
 
 
-class TestFetch:
+class TestPhase1:
     def test_composes_download_and_extract(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)
         compressed_path = tmp_path / "oracle-cards-20260820090157.jsonl.gz"
@@ -101,10 +98,8 @@ class TestFetch:
             with patch.object(
                 downloader, "extract", return_value=jsonl_path
             ) as mock_extract:
-                result = downloader.fetch()
+                result = downloader.phase_1()
 
         mock_download.assert_called_once_with()
         mock_extract.assert_called_once_with(compressed_path)
-        assert result == ScryfallDownloadResult(
-            compressed_path=compressed_path, jsonl_path=jsonl_path
-        )
+        assert result == jsonl_path

@@ -1,2 +1,0 @@
-- Standardize the arguments and order of args for the various downloaders
-- Standardize the function names (phase 1 vs fetch for example)

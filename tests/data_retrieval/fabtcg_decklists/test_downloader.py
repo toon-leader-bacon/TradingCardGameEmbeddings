@@ -31,10 +31,10 @@ def _fast_rate_limiter() -> RateLimiter:
     return RateLimiter(requests_per_minute=1_000_000_000)
 
 
-def _make_downloader(output_dir: Path) -> FabtcgDecklistDownloader:
+def _make_downloader(raw_data_dir: Path) -> FabtcgDecklistDownloader:
     return FabtcgDecklistDownloader(
         _fast_rate_limiter(),
-        output_dir,
+        raw_data_dir,
         _SITEMAP_INDEX_URL,
     )
 
@@ -64,7 +64,7 @@ class TestInit:
     def test_defaults_urls_and_output_dir_when_omitted(self) -> None:
         downloader = FabtcgDecklistDownloader(_fast_rate_limiter())
 
-        assert downloader.output_dir == FabtcgDecklistDownloader.DEFAULT_RAW_DATA_DIR
+        assert downloader.raw_data_dir == FabtcgDecklistDownloader.DEFAULT_RAW_DATA_DIR
         assert (
             downloader.sitemap_index_url
             == FabtcgDecklistDownloader.DEFAULT_SITEMAP_INDEX_URL
@@ -73,7 +73,7 @@ class TestInit:
     def test_honors_explicit_overrides(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)
 
-        assert downloader.output_dir == tmp_path
+        assert downloader.raw_data_dir == tmp_path
         assert downloader.sitemap_index_url == _SITEMAP_INDEX_URL
 
 

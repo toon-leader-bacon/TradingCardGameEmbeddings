@@ -299,12 +299,12 @@ class TestDownloadMissingBuilds:
         ]
 
 
-class TestFetch:
-    def test_composes_list_build_ids_and_download_missing_builds(
+class TestPhase1:
+    def test_composes_list_build_ids_and_download_missing_builds_and_returns_raw_data_dir(
         self, tmp_path: Path
     ) -> None:
         downloader = _make_downloader(tmp_path)
-        expected_outcomes = [
+        outcomes = [
             BuildDownloadSuccess(build_id="190920", path=tmp_path / "190920.json")
         ]
 
@@ -312,10 +312,10 @@ class TestFetch:
             downloader, "list_build_ids", return_value=["190920"]
         ) as mock_list:
             with patch.object(
-                downloader, "download_missing_builds", return_value=expected_outcomes
+                downloader, "download_missing_builds", return_value=outcomes
             ) as mock_download:
-                result = downloader.fetch()
+                result = downloader.phase_1()
 
         mock_list.assert_called_once_with()
         mock_download.assert_called_once_with(["190920"])
-        assert result == expected_outcomes
+        assert result == tmp_path

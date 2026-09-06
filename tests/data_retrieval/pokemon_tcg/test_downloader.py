@@ -173,11 +173,13 @@ class TestExtract:
         assert written_files == ["base1.json"]
 
 
-class TestFetch:
-    def test_composes_download_and_extract(self, tmp_path: Path) -> None:
+class TestPhase1:
+    def test_composes_download_and_extract_and_returns_raw_data_dir(
+        self, tmp_path: Path
+    ) -> None:
         downloader = _make_downloader(tmp_path)
         zip_path = tmp_path / "pokemon-tcg-data.zip"
-        expected_result = PokemonTcgDataDownloadResult(
+        extract_result = PokemonTcgDataDownloadResult(
             cards_dir=tmp_path / "cards", decks_dir=tmp_path / "decks"
         )
 
@@ -185,10 +187,10 @@ class TestFetch:
             downloader, "download", return_value=zip_path
         ) as mock_download:
             with patch.object(
-                downloader, "extract", return_value=expected_result
+                downloader, "extract", return_value=extract_result
             ) as mock_extract:
-                result = downloader.fetch()
+                result = downloader.phase_1()
 
         mock_download.assert_called_once_with()
         mock_extract.assert_called_once_with(zip_path)
-        assert result == expected_result
+        assert result == tmp_path

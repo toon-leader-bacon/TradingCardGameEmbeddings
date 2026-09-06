@@ -21,9 +21,10 @@ separate steps against a live, paginated, mutating site:
        recorded in guides_manifest.txt, fetches that guide's detail
        page and appends its extracted JSON payload to guides.jsonl.
 
-See this directory's TODO.md for a known naming inconsistency
-(phase_1/phase_2, positional rate_limiter) deliberately left
-unresolved for now.
+Subclasses src/data_retrieval/downloader.py's Downloader — see that
+module for what phase_1()/phase_2() mean in general and
+plans/downloader_base_class.md for the standardization this class was
+migrated under.
 """
 
 import html
@@ -37,6 +38,7 @@ from bs4 import BeautifulSoup
 from tqdm import tqdm
 
 from src.data_retrieval.download_utils import append_with_manifest, read_manifest
+from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.rate_limiter import RateLimiter
 
 _REQUEST_TIMEOUT_SECONDS = 60
@@ -61,7 +63,7 @@ _ESTIMATED_TOTAL_GUIDES = 70_000
 _ROOT_DIV_SELECTOR = "div.wrapper > div.content > div#root"
 
 
-class PlayGwentDownloader:
+class PlayGwentDownloader(Downloader):
     """Downloads deck guide ids and deck guide detail pages from
     playgwent.com.
 
@@ -79,67 +81,64 @@ class PlayGwentDownloader:
 
     def __init__(
         self,
-        rate_limiter: RateLimiter,
-        output_dir: Path | None = None,
+        rate_limiter: RateLimiter | None = None,
+        raw_data_dir: Path | None = None,
         deck_id_getter_url: str | None = None,
         deck_detail_url: str | None = None,
+        initial_offset: int = 0,
+        per_page_count: int = 500,
     ) -> None:
         """
         Inputs:
-            rate_limiter: paces every outgoing request this class
-                makes. Passed in rather than constructed internally
-                (dependency injection — PATTERNS.md), same convention
-                as the sibling downloaders — so the same shared
-                RateLimiter instance can be reused across sources, and
-                so tests can supply a fast/no-op limiter. Required and
-                positional here rather than keyword-only, unlike the
-                sibling downloaders — see this directory's TODO.md.
-            output_dir: directory this class's output is written into
-                (deck_ids.txt, guides.jsonl, guides_manifest.txt).
-                Defaults to DEFAULT_RAW_DATA_DIR when omitted (expected
-                to be a path under data/raw, per src/README.md — not
-                this class's concern to enforce, just to receive).
+            rate_limiter: see Downloader.__init__.
+            raw_data_dir: see Downloader.__init__.
             deck_id_getter_url: URL template for the guides-list API,
                 containing "{offset}" and "{limit}" placeholders.
                 Defaults to DEFAULT_DECK_ID_GETTER_URL when omitted.
             deck_detail_url: URL template for one guide's HTML detail
                 page, containing a "{guide_id}" placeholder. Defaults
                 to DEFAULT_DECK_DETAIL_URL when omitted.
+            initial_offset: offset _run_phase_1() starts paging from.
+                Moved here from a phase_1()-call argument (this class's
+                old phase_1() method) since Downloader.phase_1() takes
+                no arguments.
+            per_page_count: number of guide references
+                _run_phase_1() requests per page (the API's own "limit"
+                path segment), and the threshold used to detect the
+                last page. Same constructor-argument move as
+                initial_offset.
         Output: none (constructor).
         Side effects: none — no I/O happens until phase_1()/phase_2()
             are called.
         Exceptions: none.
         """
-        self.rate_limiter = rate_limiter
-        self.output_dir = output_dir or self.DEFAULT_RAW_DATA_DIR
+        super().__init__(rate_limiter, raw_data_dir)
         self.deck_id_getter_url = deck_id_getter_url or self.DEFAULT_DECK_ID_GETTER_URL
         self.deck_detail_url = deck_detail_url or self.DEFAULT_DECK_DETAIL_URL
+        self.initial_offset = initial_offset
+        self.per_page_count = per_page_count
 
-    def phase_1(self, initial_offset: int = 0, per_page_count: int = 500) -> Path:
+    def _run_phase_1(self) -> Path:
         """Page through the guides-list API and write every guide id
         collected to disk.
 
-        Pages starting at offset=initial_offset, advancing by
-        per_page_count each request, until a page's "guides" list has
-        fewer than per_page_count entries (an empty list included) —
-        the site's signal that it was the last page. Ids are collected
-        across all pages, in response order, without deduplicating as
-        it goes; deduplication (preserving first-seen order) happens
-        once, after the loop, right before writing — a duplicate id
-        seen mid-loop can be a real signal that the live guide list
-        shifted during the crawl (a new guide inserted between two of
-        this method's own requests), not just redundant data, so it's
-        deliberately not hidden by deduplicating early.
+        Pages starting at offset=self.initial_offset, advancing by
+        self.per_page_count each request, until a page's "guides" list
+        has fewer than self.per_page_count entries (an empty list
+        included) — the site's signal that it was the last page. Ids
+        are collected across all pages, in response order, without
+        deduplicating as it goes; deduplication (preserving first-seen
+        order) happens once, after the loop, right before writing — a
+        duplicate id seen mid-loop can be a real signal that the live
+        guide list shifted during the crawl (a new guide inserted
+        between two of this method's own requests), not just redundant
+        data, so it's deliberately not hidden by deduplicating early.
 
-        Inputs:
-            initial_offset: offset to start paging from.
-            per_page_count: number of guide references requested per
-                page (the API's own "limit" path segment), and the
-                threshold used to detect the last page.
-        Output: path to the written ids file (output_dir/deck_ids.txt).
+        Inputs: none (uses self.initial_offset, self.per_page_count).
+        Output: path to the written ids file (raw_data_dir/deck_ids.txt).
         Side effects: one paced network request per page; creates
-            output_dir if missing; writes one file
-            (output_dir/deck_ids.txt), overwriting any existing one;
+            raw_data_dir if missing; writes one file
+            (raw_data_dir/deck_ids.txt), overwriting any existing one;
             prints a tqdm progress bar to stderr, sized against
             _ESTIMATED_TOTAL_GUIDES (a rough guess, not the pagination
             loop's actual stopping condition — see that constant's
@@ -160,14 +159,14 @@ class PlayGwentDownloader:
             >>> ids_path = downloader.phase_1()
         """
         collected_ids: list[int] = []
-        offset = initial_offset
+        offset = self.initial_offset
 
         with tqdm(
             total=_ESTIMATED_TOTAL_GUIDES, desc="Play Gwent guide ids", unit="guide"
         ) as progress:
             while True:
                 url = self.deck_id_getter_url.format(
-                    offset=offset, limit=per_page_count
+                    offset=offset, limit=self.per_page_count
                 )
                 response = self._get_with_retries(url)
 
@@ -175,14 +174,14 @@ class PlayGwentDownloader:
                 collected_ids.extend(guide["id"] for guide in page_guides)
                 progress.update(len(page_guides))
 
-                if len(page_guides) < per_page_count:
+                if len(page_guides) < self.per_page_count:
                     break
-                offset += per_page_count
+                offset += self.per_page_count
 
         deduplicated_ids = list(dict.fromkeys(collected_ids))
 
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        ids_path = self.output_dir / "deck_ids.txt"
+        self.raw_data_dir.mkdir(parents=True, exist_ok=True)
+        ids_path = self.raw_data_dir / "deck_ids.txt"
         ids_path.write_text(
             "".join(f"{guide_id}\n" for guide_id in deduplicated_ids),
             encoding="utf-8",
@@ -218,10 +217,10 @@ class PlayGwentDownloader:
         it's indistinguishable from "not yet attempted" and a later
         phase_2() run will retry it like any other.
 
-        Inputs: none (uses self.output_dir, self.deck_detail_url,
-            self.rate_limiter — reads output_dir/deck_ids.txt, written
+        Inputs: none (uses self.raw_data_dir, self.deck_detail_url,
+            self.rate_limiter — reads raw_data_dir/deck_ids.txt, written
             by phase_1()).
-        Output: path to the JSONL data file (output_dir/guides.jsonl).
+        Output: path to the JSONL data file (raw_data_dir/guides.jsonl).
         Side effects: one paced network request (more on retry — see
             _get_with_retries) per guide id not already in
             guides_manifest.txt; appends one line to guides.jsonl and
@@ -232,7 +231,7 @@ class PlayGwentDownloader:
             position reflects "how far through deck_ids.txt," not just
             "how many new fetches happened"); prints one tqdm.write()
             line per guide that fails and gets skipped.
-        Exceptions: raises only if output_dir/deck_ids.txt doesn't
+        Exceptions: raises only if raw_data_dir/deck_ids.txt doesn't
             exist (phase_1() hasn't been run) — per-guide failures are
             caught internally (see above), never propagated.
 
@@ -243,17 +242,17 @@ class PlayGwentDownloader:
             >>> downloader.phase_1()
             >>> guides_path = downloader.phase_2()
         """
-        ids_path = self.output_dir / "deck_ids.txt"
+        ids_path = self.raw_data_dir / "deck_ids.txt"
         guide_ids = [
             int(line)
             for line in ids_path.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
 
-        manifest_path = self.output_dir / "guides_manifest.txt"
+        manifest_path = self.raw_data_dir / "guides_manifest.txt"
         already_downloaded = {int(line) for line in read_manifest(manifest_path)}
 
-        guides_path = self.output_dir / "guides.jsonl"
+        guides_path = self.raw_data_dir / "guides.jsonl"
 
         for guide_id in tqdm(guide_ids, desc="Play Gwent guide details", unit="guide"):
             if guide_id in already_downloaded:

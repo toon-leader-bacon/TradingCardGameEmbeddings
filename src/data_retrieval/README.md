@@ -10,14 +10,35 @@ source doesn't block the others.
 Internally, each source subdirectory is expected to be a fairly
 independent scraper/downloader with its own retry and auth concerns
 specific to that source — none of that is shared logic, so it stays
-local to the source rather than pushed up into this file. Two things
+local to the source rather than pushed up into this file. Three things
 live at this shared level instead: `rate_limiter.py` (deliberately
 placed here from the start, ahead of a second consumer — see its own
-module docstring) and `download_utils.py` (extracted after the same
+module docstring), `download_utils.py` (extracted after the same
 stream-to-disk block showed up independently in three downloaders —
-the "rule of three" case, not a preemptive one). What else is shared
-across sources, once something actually needs it, belongs at this
-level too rather than duplicated per source.
+the "rule of three" case, not a preemptive one), and `downloader.py`
+(the `Downloader` abstract base class every source's downloader class
+subclasses — see plans/downloader_base_class.md for the design
+discussion). What else is shared across sources, once something
+actually needs it, belongs at this level too rather than duplicated
+per source.
+
+Every downloader class below except `seventeenlands/` subclasses
+`Downloader` (`downloader.py`) and follows its `phase_1()`/`phase_2()`
+convention — `SeventeenLandsDownloader`'s primary method takes a
+required `refs` list plus filters, which doesn't fit the no-arg
+`phase_1()` contract, so it deliberately keeps its own shape rather
+than being forced into this one. Every other source's convention: `phase_1()` always
+does a source's first fetch (a single static file, a fully
+self-contained paginated walk, or — for an id-list-then-detail source
+— just the id-list collection step); `phase_2()` does further fetching
+that depends on `phase_1()`'s own output, and defaults to a no-op
+(returning `phase_1()`'s own result unchanged) for a source with
+nothing further to fetch — see `Downloader`'s own docstring for the
+full contract. Every downloader's constructor accepts, at minimum, an
+optional `rate_limiter` (defaulting to `RateLimiter(requests_per_minute=60)`)
+and an optional `raw_data_dir` (defaulting to that class's own
+`DEFAULT_RAW_DATA_DIR`), and may declare further source-specific
+constructor arguments beyond those two.
 
 Implemented today:
 
@@ -61,10 +82,7 @@ Implemented today:
   every guide id, `phase_2()` fetches each guide's HTML detail page
   and extracts the deck payload embedded in it (a `data-state` HTML
   attribute holding HTML-escaped JSON — no separate API endpoint
-  exists for deck details). See
-  [`play_gwent/TODO.md`](play_gwent/TODO.md) for a known,
-  deliberately-deferred naming inconsistency with the other sources
-  in this container.
+  exists for deck details).
 - `cardvault_fabtcg/` — pulls Flesh and Blood card data from
   cardvault.fabtcg.com's single static print-list CSV (no API, no
   pagination), served from a CloudFront distribution.
@@ -130,7 +148,7 @@ from src.data_retrieval.scryfall.downloader import ScryfallOracleDownloader
 downloader = ScryfallOracleDownloader(
     'https://data.scryfall.io/oracle-cards/oracle-cards-20260820090157.jsonl.gz',
 )
-print(downloader.fetch())
+print(downloader.phase_1())
 "
 ```
 
@@ -144,35 +162,31 @@ from src.data_retrieval.pokemon_tcg.downloader import PokemonTcgDataDownloader
 downloader = PokemonTcgDataDownloader(
     'https://api.github.com/repos/PokemonTCG/pokemon-tcg-data/zipball',
 )
-print(downloader.fetch())
+print(downloader.phase_1())
 "
 ```
 
-**HearthstoneJSON** (downloads ~80+ files — the `RateLimiter` paces
-requests, `tqdm` shows progress):
+**HearthstoneJSON** (downloads ~80+ files — the default `RateLimiter`
+paces requests, `tqdm` shows progress):
 
 ```bash
 python3 -c "
 from pathlib import Path
 from src.data_retrieval.hearthstonejson.downloader import HearthstoneJsonDownloader
-from src.data_retrieval.rate_limiter import RateLimiter
 
-downloader = HearthstoneJsonDownloader(
-    'https://api.hearthstonejson.com/v1/',
-    rate_limiter=RateLimiter(requests_per_minute=12),
-)
-print(downloader.fetch())
+downloader = HearthstoneJsonDownloader('https://api.hearthstonejson.com/v1/')
+print(downloader.phase_1())
 "
 ```
 
-**Spire Codex cards** (a single static file, no rate limiting needed):
+**Spire Codex cards** (a single static file):
 
 ```bash
 python3 -c "
 from src.data_retrieval.spire_codex.card_downloader import SpireCodexCardDownloader
 
 downloader = SpireCodexCardDownloader()
-print(downloader.fetch())
+print(downloader.phase_1())
 "
 ```
 
@@ -183,12 +197,9 @@ sequential requests despite no documented rate limit):
 ```bash
 python3 -c "
 from src.data_retrieval.spire_codex.run_downloader import SpireCodexRunDownloader
-from src.data_retrieval.rate_limiter import RateLimiter
 
-downloader = SpireCodexRunDownloader(
-    rate_limiter=RateLimiter(requests_per_minute=60),
-)
-print(downloader.fetch())
+downloader = SpireCodexRunDownloader()
+print(downloader.phase_1())
 "
 ```
 
@@ -200,12 +211,9 @@ endpoint was reverse-engineered):
 ```bash
 python3 -c "
 from src.data_retrieval.gwent_one.downloader import GwentOneDownloader
-from src.data_retrieval.rate_limiter import RateLimiter
 
-downloader = GwentOneDownloader(
-    rate_limiter=RateLimiter(requests_per_minute=12),
-)
-print(downloader.fetch(result_limit=1300))
+downloader = GwentOneDownloader(result_limit=1300)
+print(downloader.phase_1())
 "
 ```
 
@@ -219,7 +227,7 @@ python3 -c "
 from src.data_retrieval.sts2runs.downloader import STS2RunsDownloader
 
 downloader = STS2RunsDownloader()
-print(downloader.fetch())
+print(downloader.phase_1())
 "
 ```
 
@@ -230,9 +238,8 @@ print(downloader.fetch())
 ```bash
 python3 -c "
 from src.data_retrieval.play_gwent.downloader import PlayGwentDownloader
-from src.data_retrieval.rate_limiter import RateLimiter
 
-downloader = PlayGwentDownloader(RateLimiter(requests_per_minute=12))
+downloader = PlayGwentDownloader()
 downloader.phase_1()
 print(downloader.phase_2())
 "
@@ -245,23 +252,21 @@ disk from a prior run):
 ```bash
 python3 -c "
 from src.data_retrieval.sts_gg.run_downloader import STSGGRunDownloader
-from src.data_retrieval.rate_limiter import RateLimiter
 
-downloader = STSGGRunDownloader(RateLimiter(requests_per_minute=12))
+downloader = STSGGRunDownloader()
 downloader.phase_1()
 print(downloader.phase_2())
 "
 ```
 
-**CardVault (fabtcg.com)** (a single static CSV, no rate limiting
-needed):
+**CardVault (fabtcg.com)** (a single static CSV):
 
 ```bash
 python3 -c "
 from src.data_retrieval.cardvault_fabtcg.card_downloader import CardVaultFabtcgCardDownloader
 
 downloader = CardVaultFabtcgCardDownloader()
-print(downloader.fetch())
+print(downloader.phase_1())
 "
 ```
 
@@ -272,9 +277,8 @@ already saved to disk from a prior run):
 ```bash
 python3 -c "
 from src.data_retrieval.pitchstack.downloader import PitchstackDeckDownloader
-from src.data_retrieval.rate_limiter import RateLimiter
 
-downloader = PitchstackDeckDownloader(RateLimiter(requests_per_minute=12))
+downloader = PitchstackDeckDownloader()
 downloader.phase_1()
 print(downloader.phase_2())
 "
@@ -287,12 +291,16 @@ whose output file already exists from a prior run):
 ```bash
 python3 -c "
 from src.data_retrieval.fabtcg_decklists.downloader import FabtcgDecklistDownloader
-from src.data_retrieval.rate_limiter import RateLimiter
 
-downloader = FabtcgDecklistDownloader(RateLimiter(requests_per_minute=12))
+downloader = FabtcgDecklistDownloader()
 downloader.phase_1()
 print(downloader.phase_2())
 "
 ```
+
+Every downloader above accepts an optional `rate_limiter=RateLimiter(requests_per_minute=...)`
+to override its default pacing (60/min) — pass one explicitly (as
+several of these snippets used to show) when a source's own docs
+warrant a different rate.
 
 This file grows as each source directory above is actually built out.

@@ -7,29 +7,16 @@ data_refinement's job).
 
 import gzip
 import shutil
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 from urllib.parse import urlparse
 
 from src.data_retrieval.download_utils import download_to_file
+from src.data_retrieval.downloader import Downloader
+from src.data_retrieval.rate_limiter import RateLimiter
 
 
-@dataclass
-class ScryfallDownloadResult:
-    """Paths to the two files a completed fetch leaves on disk.
-
-    Inputs: none (data holder).
-    Output: n/a.
-    Side effects: none.
-    Exceptions: none.
-    """
-
-    compressed_path: Path  # the downloaded .jsonl.gz, as-is from Scryfall
-    jsonl_path: Path  # the extracted .jsonl, sibling of compressed_path
-
-
-class ScryfallOracleDownloader:
+class ScryfallOracleDownloader(Downloader):
     """Downloads and extracts one Scryfall oracle-cards bulk data file.
 
     Single-consumer to src/data_retrieval/scryfall/ — no other source
@@ -38,35 +25,43 @@ class ScryfallOracleDownloader:
 
     DEFAULT_RAW_DATA_DIR: ClassVar[Path] = Path("data/raw/scryfall")
 
-    def __init__(self, source_url: str, raw_data_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        source_url: str,
+        rate_limiter: RateLimiter | None = None,
+        raw_data_dir: Path | None = None,
+    ) -> None:
         """
         Inputs:
             source_url: full URL to a Scryfall oracle-cards
                 .jsonl.gz bulk data file (e.g.
                 "https://data.scryfall.io/oracle-cards/oracle-cards-<ts>.jsonl.gz").
-            raw_data_dir: directory both the compressed and extracted
-                files are written into. Defaults to
-                DEFAULT_RAW_DATA_DIR when omitted (expected to be a
-                path under data/raw, per src/README.md — not this
-                class's concern to enforce, just to receive).
+                Required and positional (unlike rate_limiter/
+                raw_data_dir): there is no sensible default, since
+                Scryfall's dump URLs are dated and change with every
+                bulk-data release.
+            rate_limiter: see Downloader.__init__.
+            raw_data_dir: see Downloader.__init__.
         Output: none (constructor).
-        Side effects: none — no I/O happens until fetch()/download()/
+        Side effects: none — no I/O happens until phase_1()/download()/
             extract() are called.
         Exceptions: none.
         """
+        super().__init__(rate_limiter, raw_data_dir)
         self.source_url = source_url
-        self.raw_data_dir = (
-            raw_data_dir if raw_data_dir is not None else self.DEFAULT_RAW_DATA_DIR
-        )
 
-    def fetch(self) -> ScryfallDownloadResult:
-        """Entry point: download the bulk file, then extract it.
+    def _run_phase_1(self) -> Path:
+        """Download the bulk file, then extract it, returning the
+        extracted file's path — the artifact any downstream consumer
+        actually reads.
 
         Composed of download() followed by extract() — no additional
-        logic beyond calling the two and returning their result.
+        logic beyond calling the two and returning extract()'s result.
+        The intermediate compressed file stays reachable via download()
+        directly, for a caller that specifically wants it.
 
         Inputs: none (uses self.source_url, self.raw_data_dir).
-        Output: ScryfallDownloadResult with both resulting paths.
+        Output: path to the extracted .jsonl file.
         Side effects: one network request; writes two files to
             raw_data_dir.
         Exceptions: whatever download() or extract() raise.
@@ -75,21 +70,19 @@ class ScryfallOracleDownloader:
             >>> downloader = ScryfallOracleDownloader(
             ...     "https://data.scryfall.io/oracle-cards/oracle-cards-20260820090157.jsonl.gz",
             ... )
-            >>> result = downloader.fetch()
+            >>> jsonl_path = downloader.phase_1()
         """
         compressed_path = self.download()
-        jsonl_path = self.extract(compressed_path)
-        return ScryfallDownloadResult(
-            compressed_path=compressed_path, jsonl_path=jsonl_path
-        )
+        return self.extract(compressed_path)
 
     def download(self) -> Path:
         """Download self.source_url into self.raw_data_dir, unmodified.
 
-        Inputs: none (uses self.source_url, self.raw_data_dir).
+        Inputs: none (uses self.source_url, self.raw_data_dir,
+            self.rate_limiter).
         Output: path to the saved .jsonl.gz file.
-        Side effects: one network request; creates raw_data_dir if
-            missing; writes one file to disk.
+        Side effects: one paced network request; creates raw_data_dir
+            if missing; writes one file to disk.
         Exceptions: raises on network failure (e.g. connection error,
             non-2xx response) or on failure to write the file. Any
             partially-written file is removed before the exception
@@ -99,6 +92,7 @@ class ScryfallOracleDownloader:
         filename = Path(urlparse(self.source_url).path).name
         destination_path = self.raw_data_dir / filename
 
+        self.rate_limiter.wait()
         download_to_file(self.source_url, destination_path)
 
         return destination_path

@@ -80,10 +80,11 @@ from src.data_retrieval.download_utils import (
     download_to_string,
     read_manifest,
 )
+from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.rate_limiter import RateLimiter
 
 
-class STSGGRunDownloader:
+class STSGGRunDownloader(Downloader):
     """Downloads Slay the Spire 2 run ids and run detail JSON from
     sts.gg.
 
@@ -101,24 +102,16 @@ class STSGGRunDownloader:
 
     def __init__(
         self,
-        rate_limiter: RateLimiter,
-        output_dir: Path | None = None,
+        rate_limiter: RateLimiter | None = None,
+        raw_data_dir: Path | None = None,
         leaderboard_url: str | None = None,
         run_detail_url: str | None = None,
+        per_page_count: int = 100,
     ) -> None:
         """
         Inputs:
-            rate_limiter: paces every outgoing request this class
-                makes. Passed in rather than constructed internally
-                (dependency injection — PATTERNS.md), same convention
-                as the sibling downloaders — so the same shared
-                RateLimiter instance can be reused across sources, and
-                so tests can supply a fast/no-op limiter.
-            output_dir: directory this class's output is written into
-                (run_ids.txt, runs.jsonl, runs_manifest.txt). Defaults
-                to DEFAULT_RAW_DATA_DIR when omitted (expected to be a
-                path under data/raw, per src/README.md — not this
-                class's concern to enforce, just to receive).
+            rate_limiter: see Downloader.__init__.
+            raw_data_dir: see Downloader.__init__.
             leaderboard_url: URL template for the leaderboard API,
                 containing "{page}" and "{limit}" placeholders.
                 Defaults to DEFAULT_LEADERBOARD_URL when omitted.
@@ -126,43 +119,46 @@ class STSGGRunDownloader:
                 containing a "{run_id}" placeholder. Defaults to
                 DEFAULT_RUN_DETAIL_URL when omitted (confirmed live —
                 see this module's docstring).
+            per_page_count: value _run_phase_1() sends as the API's own
+                "limit" query param. Confirmed live to have no effect
+                on actual page size (see module docstring) — kept as a
+                parameter in case that ever changes, not relied on for
+                loop logic. Moved here from a phase_1()-call argument
+                (this class's old phase_1() method) since
+                Downloader.phase_1() takes no arguments.
         Output: none (constructor).
         Side effects: none — no I/O happens until phase_1()/phase_2()
             are called.
         Exceptions: none.
         """
-        self.rate_limiter = rate_limiter
-        self.output_dir = output_dir or self.DEFAULT_RAW_DATA_DIR
+        super().__init__(rate_limiter, raw_data_dir)
         self.leaderboard_url = leaderboard_url or self.DEFAULT_LEADERBOARD_URL
         self.run_detail_url = run_detail_url or self.DEFAULT_RUN_DETAIL_URL
+        self.per_page_count = per_page_count
 
-    def phase_1(self, per_page_count: int = 100) -> Path:
+    def _run_phase_1(self) -> Path:
         """Page through the leaderboard API and write every run id
         collected to disk.
 
         Reads totalPages off the first page's response and pages
         1..totalPages (see this module's docstring — totalPages is the
-        only authoritative stopping condition; per_page_count/`limit`
-        is sent but confirmed NOT to change the server's actual page
-        size). Ids are collected across all pages, in response order,
-        without deduplicating as it goes; deduplication (preserving
-        first-seen order) happens once, after the loop, right before
-        writing — same rationale as PlayGwentDownloader.phase_1: a
-        duplicate id seen mid-loop can be a real signal the live
-        leaderboard shifted rank order during the crawl, not just
-        redundant data, so it's deliberately not hidden by
-        deduplicating early.
+        only authoritative stopping condition; self.per_page_count/
+        `limit` is sent but confirmed NOT to change the server's actual
+        page size). Ids are collected across all pages, in response
+        order, without deduplicating as it goes; deduplication
+        (preserving first-seen order) happens once, after the loop,
+        right before writing — same rationale as
+        PlayGwentDownloader._run_phase_1: a duplicate id seen mid-loop
+        can be a real signal the live leaderboard shifted rank order
+        during the crawl, not just redundant data, so it's deliberately
+        not hidden by deduplicating early.
 
-        Inputs:
-            per_page_count: value sent as the API's own "limit" query
-                param. Confirmed live to have no effect on actual page
-                size (see module docstring) — kept as a parameter in
-                case that ever changes, not relied on for loop logic.
-        Output: path to the written ids file (output_dir/run_ids.txt).
+        Inputs: none (uses self.per_page_count).
+        Output: path to the written ids file (raw_data_dir/run_ids.txt).
         Side effects: one paced network request per page (via
             download_to_string(), which retries internally); creates
-            output_dir if missing; writes one file
-            (output_dir/run_ids.txt), overwriting any existing one;
+            raw_data_dir if missing; writes one file
+            (raw_data_dir/run_ids.txt), overwriting any existing one;
             prints a tqdm progress bar to stderr, sized against
             totalPages once known.
         Exceptions: raises on a page that still fails after
@@ -179,7 +175,7 @@ class STSGGRunDownloader:
             ... )
             >>> ids_path = downloader.phase_1()
         """
-        first_page = self._fetch_leaderboard_page(1, per_page_count)
+        first_page = self._fetch_leaderboard_page(1, self.per_page_count)
         total_pages = first_page["totalPages"]
         collected_ids = [run["id"] for run in first_page["runs"]]
 
@@ -187,14 +183,14 @@ class STSGGRunDownloader:
             total=total_pages, initial=1, desc="sts.gg leaderboard", unit="page"
         ) as progress:
             for page in range(2, total_pages + 1):
-                page_body = self._fetch_leaderboard_page(page, per_page_count)
+                page_body = self._fetch_leaderboard_page(page, self.per_page_count)
                 collected_ids.extend(run["id"] for run in page_body["runs"])
                 progress.update(1)
 
         deduplicated_ids = list(dict.fromkeys(collected_ids))
 
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        ids_path = self.output_dir / "run_ids.txt"
+        self.raw_data_dir.mkdir(parents=True, exist_ok=True)
+        ids_path = self.raw_data_dir / "run_ids.txt"
         ids_path.write_text(
             "".join(f"{run_id}\n" for run_id in deduplicated_ids),
             encoding="utf-8",
@@ -228,10 +224,10 @@ class STSGGRunDownloader:
         indistinguishable from "not yet attempted" and a later phase_2()
         run will retry it like any other.
 
-        Inputs: none (uses self.output_dir, self.run_detail_url,
-            self.rate_limiter — reads output_dir/run_ids.txt, written by
+        Inputs: none (uses self.raw_data_dir, self.run_detail_url,
+            self.rate_limiter — reads raw_data_dir/run_ids.txt, written by
             phase_1()).
-        Output: path to the JSONL data file (output_dir/runs.jsonl).
+        Output: path to the JSONL data file (raw_data_dir/runs.jsonl).
         Side effects: one paced network request (more on retry — see
             download_to_string()) per run id not already in
             runs_manifest.txt; appends one line to runs.jsonl and one
@@ -242,7 +238,7 @@ class STSGGRunDownloader:
             reflects "how far through run_ids.txt," not just "how many
             new fetches happened"); prints one tqdm.write() line per run
             that fails and gets skipped.
-        Exceptions: raises only if output_dir/run_ids.txt doesn't exist
+        Exceptions: raises only if raw_data_dir/run_ids.txt doesn't exist
             (phase_1() hasn't been run) — per-run failures are caught
             internally (see above), never propagated.
 
@@ -253,17 +249,17 @@ class STSGGRunDownloader:
             >>> downloader.phase_1()
             >>> runs_path = downloader.phase_2()
         """
-        ids_path = self.output_dir / "run_ids.txt"
+        ids_path = self.raw_data_dir / "run_ids.txt"
         run_ids = [
             line
             for line in ids_path.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
 
-        manifest_path = self.output_dir / "runs_manifest.txt"
+        manifest_path = self.raw_data_dir / "runs_manifest.txt"
         already_downloaded = read_manifest(manifest_path)
 
-        runs_path = self.output_dir / "runs.jsonl"
+        runs_path = self.raw_data_dir / "runs.jsonl"
 
         for run_id in tqdm(run_ids, desc="sts.gg run details", unit="run"):
             if run_id in already_downloaded:

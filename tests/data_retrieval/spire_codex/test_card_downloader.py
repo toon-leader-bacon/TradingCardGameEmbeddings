@@ -29,20 +29,20 @@ class TestInit:
 
     def test_honors_explicit_overrides(self, tmp_path: Path) -> None:
         downloader = SpireCodexCardDownloader(
-            "https://example.test/cards.json", tmp_path
+            raw_data_dir=tmp_path, cards_url="https://example.test/cards.json"
         )
 
         assert downloader.cards_url == "https://example.test/cards.json"
         assert downloader.raw_data_dir == tmp_path
 
 
-class TestFetch:
+class TestPhase1:
     def test_writes_response_to_cards_json(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)
         response = _mock_streaming_response([b'[{"name": "Strike"}]'])
 
         with patch("requests.get", return_value=response) as mock_get:
-            result_path = downloader.fetch()
+            result_path = downloader.phase_1()
 
         mock_get.assert_called_once()
         assert mock_get.call_args.args[0] == SpireCodexCardDownloader.DEFAULT_CARDS_URL
@@ -55,7 +55,7 @@ class TestFetch:
         response = _mock_streaming_response([b"[]"])
 
         with patch("requests.get", return_value=response):
-            downloader.fetch()
+            downloader.phase_1()
 
         assert nested_dir.is_dir()
 
@@ -65,7 +65,7 @@ class TestFetch:
         response = _mock_streaming_response([b"fresh"])
 
         with patch("requests.get", return_value=response):
-            downloader.fetch()
+            downloader.phase_1()
 
         assert (tmp_path / "cards.json").read_bytes() == b"fresh"
 
@@ -76,4 +76,4 @@ class TestFetch:
 
         with patch("requests.get", return_value=response):
             with pytest.raises(requests.HTTPError):
-                downloader.fetch()
+                downloader.phase_1()

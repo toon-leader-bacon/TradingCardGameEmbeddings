@@ -64,6 +64,7 @@ from bs4 import BeautifulSoup
 from tqdm import tqdm
 
 from src.data_retrieval.download_utils import download_to_string
+from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.rate_limiter import RateLimiter
 
 # See https://www.sitemaps.org/schemas/sitemap/0.9 — ElementTree
@@ -98,7 +99,7 @@ _DECK_URL_PATTERN = re.compile(r"^https://fabtcg\.com/decklists/([^/]+)/$")
 _DECKLIST_FRAGMENT_SELECTOR = "section.decklist-list-view.block.hidden"
 
 
-class FabtcgDecklistDownloader:
+class FabtcgDecklistDownloader(Downloader):
     """Downloads Flesh and Blood decklist pages from fabtcg.com.
 
     Single-consumer to src/data_retrieval/fabtcg_decklists/ — no other
@@ -110,23 +111,14 @@ class FabtcgDecklistDownloader:
 
     def __init__(
         self,
-        rate_limiter: RateLimiter,
-        output_dir: Path | None = None,
+        rate_limiter: RateLimiter | None = None,
+        raw_data_dir: Path | None = None,
         sitemap_index_url: str | None = None,
     ) -> None:
         """
         Inputs:
-            rate_limiter: paces every outgoing request this class
-                makes. Passed in rather than constructed internally
-                (dependency injection — PATTERNS.md), same convention
-                as the sibling downloaders — so the same shared
-                RateLimiter instance can be reused across sources, and
-                so tests can supply a fast/no-op limiter.
-            output_dir: directory this class's output is written into
-                (deck_urls.txt, decklists/<slug>.html). Defaults to
-                DEFAULT_RAW_DATA_DIR when omitted (expected to be a
-                path under data/raw, per src/README.md — not this
-                class's concern to enforce, just to receive).
+            rate_limiter: see Downloader.__init__.
+            raw_data_dir: see Downloader.__init__.
             sitemap_index_url: URL of fabtcg.com's top-level sitemap
                 index. Defaults to DEFAULT_SITEMAP_INDEX_URL when
                 omitted.
@@ -135,23 +127,22 @@ class FabtcgDecklistDownloader:
             are called.
         Exceptions: none.
         """
-        self.rate_limiter = rate_limiter
-        self.output_dir = output_dir or self.DEFAULT_RAW_DATA_DIR
+        super().__init__(rate_limiter, raw_data_dir)
         self.sitemap_index_url = sitemap_index_url or self.DEFAULT_SITEMAP_INDEX_URL
 
-    def phase_1(self) -> Path:
+    def _run_phase_1(self) -> Path:
         """Walk the sitemap index → decklist sub-sitemaps → deck page
         URLs, and write every deck URL found to disk.
 
-        Inputs: none (uses self.sitemap_index_url, self.output_dir,
+        Inputs: none (uses self.sitemap_index_url, self.raw_data_dir,
             self.rate_limiter).
         Output: path to the written URLs file
-            (output_dir/deck_urls.txt).
+            (raw_data_dir/deck_urls.txt).
         Side effects: one paced network request for the sitemap index,
             plus one per decklist sub-sitemap it lists (all via
             download_to_string(), which retries internally); creates
-            output_dir if missing; writes one file
-            (output_dir/deck_urls.txt), overwriting any existing one.
+            raw_data_dir if missing; writes one file
+            (raw_data_dir/deck_urls.txt), overwriting any existing one.
         Exceptions: raises on a request that still fails after
             download_to_string()'s retries, if a response body isn't
             valid XML, or if no deck URLs are found across every
@@ -195,8 +186,8 @@ class FabtcgDecklistDownloader:
         # sibling downloaders' phase_1 methods.
         deduplicated_urls = list(dict.fromkeys(deck_urls))
 
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        result = self.output_dir / "deck_urls.txt"
+        self.raw_data_dir.mkdir(parents=True, exist_ok=True)
+        result = self.raw_data_dir / "deck_urls.txt"
         result.write_text(
             "".join(f"{deck_url}\n" for deck_url in deduplicated_urls),
             encoding="utf-8",
@@ -228,17 +219,17 @@ class FabtcgDecklistDownloader:
         container: a run over many thousands of decks shouldn't be
         lost to one bad page.
 
-        Inputs: none (uses self.output_dir, self.rate_limiter — reads
-            output_dir/deck_urls.txt, written by phase_1()).
+        Inputs: none (uses self.raw_data_dir, self.rate_limiter — reads
+            raw_data_dir/deck_urls.txt, written by phase_1()).
         Output: path to the directory decklist files are saved into
-            (output_dir/decklists/).
+            (raw_data_dir/decklists/).
         Side effects: one paced network request (more on retry — see
             download_to_string()) per deck URL not already saved;
-            creates output_dir/decklists/ if missing; writes one file
+            creates raw_data_dir/decklists/ if missing; writes one file
             per successfully-fetched deck; prints a tqdm progress bar
             to stderr covering all deck URLs; prints one tqdm.write()
             line per deck that fails and gets skipped.
-        Exceptions: raises only if output_dir/deck_urls.txt doesn't
+        Exceptions: raises only if raw_data_dir/deck_urls.txt doesn't
             exist (phase_1() hasn't been run) — per-deck failures are
             caught internally (see above), never propagated.
 
@@ -251,14 +242,14 @@ class FabtcgDecklistDownloader:
         """
         result: Path
 
-        urls_path = self.output_dir / "deck_urls.txt"
+        urls_path = self.raw_data_dir / "deck_urls.txt"
         deck_urls = [
             line
             for line in urls_path.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
 
-        result = self.output_dir / "decklists"
+        result = self.raw_data_dir / "decklists"
         result.mkdir(parents=True, exist_ok=True)
 
         # Fetch and save each deck page not already saved from a prior

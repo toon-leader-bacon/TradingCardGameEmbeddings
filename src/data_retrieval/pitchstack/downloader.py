@@ -89,6 +89,7 @@ from src.data_retrieval.download_utils import (
     download_to_string,
     read_manifest,
 )
+from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.rate_limiter import RateLimiter
 
 # Sitemaps use this namespace on every element, including <loc> — see
@@ -108,7 +109,7 @@ _DECK_ID_PATTERN = re.compile(
 )
 
 
-class PitchstackDeckDownloader:
+class PitchstackDeckDownloader(Downloader):
     """Downloads Flesh and Blood deck ids and per-deck records from
     pitchstack.gg.
 
@@ -124,24 +125,15 @@ class PitchstackDeckDownloader:
 
     def __init__(
         self,
-        rate_limiter: RateLimiter,
-        output_dir: Path | None = None,
+        rate_limiter: RateLimiter | None = None,
+        raw_data_dir: Path | None = None,
         sitemap_url: str | None = None,
         deck_url: str | None = None,
     ) -> None:
         """
         Inputs:
-            rate_limiter: paces every outgoing request this class
-                makes. Passed in rather than constructed internally
-                (dependency injection — PATTERNS.md), same convention
-                as the sibling downloaders — so the same shared
-                RateLimiter instance can be reused across sources, and
-                so tests can supply a fast/no-op limiter.
-            output_dir: directory this class's output is written into
-                (deck_ids.txt, decks.jsonl, decks_manifest.txt).
-                Defaults to DEFAULT_RAW_DATA_DIR when omitted (expected
-                to be a path under data/raw, per src/README.md — not
-                this class's concern to enforce, just to receive).
+            rate_limiter: see Downloader.__init__.
+            raw_data_dir: see Downloader.__init__.
             sitemap_url: URL of the public-decks sitemap. Defaults to
                 DEFAULT_SITEMAP_URL when omitted.
             deck_url: URL template for one deck's record JSON,
@@ -152,22 +144,21 @@ class PitchstackDeckDownloader:
             are called.
         Exceptions: none.
         """
-        self.rate_limiter = rate_limiter
-        self.output_dir = output_dir or self.DEFAULT_RAW_DATA_DIR
+        super().__init__(rate_limiter, raw_data_dir)
         self.sitemap_url = sitemap_url or self.DEFAULT_SITEMAP_URL
         self.deck_url = deck_url or self.DEFAULT_DECK_URL
 
-    def phase_1(self) -> Path:
+    def _run_phase_1(self) -> Path:
         """Fetch the public-decks sitemap and write every deck id found
         in it to disk.
 
-        Inputs: none (uses self.sitemap_url, self.output_dir,
+        Inputs: none (uses self.sitemap_url, self.raw_data_dir,
             self.rate_limiter).
-        Output: path to the written ids file (output_dir/deck_ids.txt).
+        Output: path to the written ids file (raw_data_dir/deck_ids.txt).
         Side effects: one paced network request (via
             download_to_string(), which retries internally); creates
-            output_dir if missing; writes one file
-            (output_dir/deck_ids.txt), overwriting any existing one.
+            raw_data_dir if missing; writes one file
+            (raw_data_dir/deck_ids.txt), overwriting any existing one.
         Exceptions: raises on a request that still fails after
             download_to_string()'s retries, if the response body isn't
             valid XML, or if it contains no <loc> entries with an
@@ -198,8 +189,8 @@ class PitchstackDeckDownloader:
         # hidden by deduplicating any earlier than this.
         deduplicated_ids = list(dict.fromkeys(deck_ids))
 
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        result = self.output_dir / "deck_ids.txt"
+        self.raw_data_dir.mkdir(parents=True, exist_ok=True)
+        result = self.raw_data_dir / "deck_ids.txt"
         result.write_text(
             "".join(f"{deck_id}\n" for deck_id in deduplicated_ids),
             encoding="utf-8",
@@ -226,10 +217,10 @@ class PitchstackDeckDownloader:
         rather than private helpers of its own — see this module's
         docstring.
 
-        Inputs: none (uses self.output_dir, self.deck_url,
-            self.rate_limiter — reads output_dir/deck_ids.txt, written
+        Inputs: none (uses self.raw_data_dir, self.deck_url,
+            self.rate_limiter — reads raw_data_dir/deck_ids.txt, written
             by phase_1()).
-        Output: path to the JSONL data file (output_dir/decks.jsonl).
+        Output: path to the JSONL data file (raw_data_dir/decks.jsonl).
         Side effects: one paced network request (more on retry — see
             download_to_string()) per deck id not already in
             decks_manifest.txt; appends one line to decks.jsonl and one
@@ -237,7 +228,7 @@ class PitchstackDeckDownloader:
             flushing each write immediately; prints a tqdm progress bar
             to stderr covering all of deck_ids; prints one
             tqdm.write() line per deck that fails and gets skipped.
-        Exceptions: raises only if output_dir/deck_ids.txt doesn't
+        Exceptions: raises only if raw_data_dir/deck_ids.txt doesn't
             exist (phase_1() hasn't been run) — per-deck failures are
             caught internally (see above), never propagated.
 
@@ -250,17 +241,17 @@ class PitchstackDeckDownloader:
         """
         result: Path
 
-        ids_path = self.output_dir / "deck_ids.txt"
+        ids_path = self.raw_data_dir / "deck_ids.txt"
         deck_ids = [
             line
             for line in ids_path.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
 
-        manifest_path = self.output_dir / "decks_manifest.txt"
+        manifest_path = self.raw_data_dir / "decks_manifest.txt"
         already_downloaded = read_manifest(manifest_path)
 
-        result = self.output_dir / "decks.jsonl"
+        result = self.raw_data_dir / "decks.jsonl"
 
         # Fetch each not-yet-downloaded deck, appending its payload
         # (data row) then its id (manifest row) as soon as each one

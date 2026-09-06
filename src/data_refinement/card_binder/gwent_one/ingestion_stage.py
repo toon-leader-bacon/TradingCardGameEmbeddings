@@ -7,7 +7,7 @@ and owns its own duplicate-detection and collision-resolution directly
 against it — see src/data_refinement/card_binder/scryfall/ingestion_stage.py
 for the reference shape this follows.
 
-This stage reads a *directory* of page_*.html files — GwentOneDownloader.fetch()
+This stage reads a *directory* of page_*.html files — GwentOneDownloader.phase_1()
 can write more than one page, and there's no reason for this stage to
 assume exactly one.
 

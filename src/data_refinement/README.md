@@ -26,5 +26,21 @@ not something fixed by this container's structure.
   through the same `CardBinder` a *different* source (`spire_codex`)
   built — this project's first metric spanning two independent raw
   sources for one game. See [`sts_gg/README.md`](sts_gg/README.md).
+- **`fabtcg_decklists/`** — a single streaming metric
+  (`DecklistCardsMetric`) converting one fabtcg.com decklist HTML
+  fragment (as saved by `data_retrieval/fabtcg_decklists/`) into a
+  per-deck `(deck_slug, card_nocab_uuids)` row, resolving each card's
+  name against an already-loaded `CardBinder` (populated from
+  `cardvault_fabtcg`'s ingestion). Multiple copies of the same card
+  appear as repeated uuids in `card_nocab_uuids`, not a count field.
+  Structurally a sibling to `sts_gg/` (same streaming-metric-plus-
+  directory-scanner shape: `DecklistCardsMetric.accumulate()`/
+  `finalize()` plus a separate `scan_decklists_dir()`), not a
+  `card_binder/<source>/ingestion_stage.py` — this stage never
+  creates or replaces a `GenericCard`, only resolves existing ones.
+  This first version deliberately flattens every card group (Hero /
+  Weapon / Equipment, Pitch 1/2/3) into one flat list — see
+  [`fabtcg_decklists/TODO.md`](fabtcg_decklists/TODO.md) for a
+  deferred structured/grouped follow-up.
 
 This file grows as more top-level stages get added.
