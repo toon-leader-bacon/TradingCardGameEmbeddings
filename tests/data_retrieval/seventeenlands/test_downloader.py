@@ -6,10 +6,7 @@ import pytest
 import requests
 
 from src.data_retrieval.rate_limiter import RateLimiter
-from src.data_retrieval.seventeenlands.downloader import (
-    DownloadBatchResult,
-    SeventeenLandsDownloader,
-)
+from src.data_retrieval.seventeenlands.downloader import SeventeenLandsDownloader
 from src.data_retrieval.seventeenlands.refs import DataType, SeventeenLandsFileRef
 
 _GAME_MSH_PREMIER = SeventeenLandsFileRef.from_known(
@@ -197,14 +194,53 @@ class TestDownload:
         ]
         assert all(outcome.error is None for outcome in result.outcomes)
 
-    def test_empty_refs_downloads_nothing(self, tmp_path: Path) -> None:
+    def test_omitted_refs_downloads_every_known_ref(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)
+        response = _mock_streaming_response([gzip.compress(b"data")])
 
-        with patch("requests.get") as mock_get:
-            result = downloader.download([])
+        with patch("requests.get", return_value=response) as mock_get:
+            with patch(
+                "src.data_retrieval.seventeenlands.downloader.list_known_refs",
+                return_value=[_GAME_MSH_PREMIER, _GAME_WOE_TRAD],
+            ):
+                result = downloader.download()
 
-        mock_get.assert_not_called()
-        assert result == DownloadBatchResult(outcomes=[])
+        assert mock_get.call_count == 2
+        assert [outcome.ref for outcome in result.outcomes] == [
+            _GAME_MSH_PREMIER,
+            _GAME_WOE_TRAD,
+        ]
+
+    def test_empty_refs_downloads_every_known_ref(self, tmp_path: Path) -> None:
+        downloader = _make_downloader(tmp_path)
+        response = _mock_streaming_response([gzip.compress(b"data")])
+
+        with patch("requests.get", return_value=response) as mock_get:
+            with patch(
+                "src.data_retrieval.seventeenlands.downloader.list_known_refs",
+                return_value=[_GAME_MSH_PREMIER, _GAME_WOE_TRAD],
+            ):
+                result = downloader.download([])
+
+        assert mock_get.call_count == 2
+        assert [outcome.ref for outcome in result.outcomes] == [
+            _GAME_MSH_PREMIER,
+            _GAME_WOE_TRAD,
+        ]
+
+    def test_empty_refs_still_respects_filters(self, tmp_path: Path) -> None:
+        downloader = _make_downloader(tmp_path)
+        response = _mock_streaming_response([gzip.compress(b"data")])
+
+        with patch("requests.get", return_value=response) as mock_get:
+            with patch(
+                "src.data_retrieval.seventeenlands.downloader.list_known_refs",
+                return_value=[_GAME_MSH_PREMIER, _GAME_WOE_TRAD],
+            ):
+                result = downloader.download([], expansions=["MSH"])
+
+        mock_get.assert_called_once()
+        assert [outcome.ref for outcome in result.outcomes] == [_GAME_MSH_PREMIER]
 
     def test_failed_ref_is_reported_and_loop_continues(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)

@@ -71,6 +71,25 @@ Reads don't presume any uniqueness:
 - `all_uuids(source_game=None)` / `all_cards(source_game)` —
   enumeration, with an optional/required game filter respectively.
 
+## The "Unknown" sentinel card
+
+`ensure_unknown_card(source_game) -> GenericCard` looks up (or, on first
+call for a game, creates) a well-known placeholder card named
+`UNKNOWN_CARD_NAME` ("Unknown") — for a consumer (e.g. a
+`deck_box/`'s `DeckExtractionStage`) that needs *some* `nocab_uuid` to
+substitute for a raw card reference that fails to resolve, rather than
+dropping that reference entirely. Its `nocab_uuid` is deterministic
+(`uuid5` over a fixed namespace and `source_game`, not a random
+`uuid4`), so every caller across every process agrees on the same
+sentinel identity without needing to share state; the lookup checks
+that uuid directly (`get_by_uuid`), never by name, so a real card that
+happens to also be named "Unknown" is never mistaken for it. Seeding
+is a deliberate, explicit bootstrap step — nothing in this container
+calls it automatically, and a `DeckExtractionStage` is expected to
+require it be called ahead of time rather than create the sentinel
+itself (see `deck_box/README.md`'s `sts_gg/` entry for the concrete
+consumer).
+
 ## Why there's an `AliasLedger`, not just one `source_id` field
 
 A `GenericCard` only has room for one *current* external identifier

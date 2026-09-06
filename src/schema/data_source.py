@@ -43,3 +43,7 @@ class DataSource(str, Enum):
     # public_card_data.csv dump (see
     # src/data_retrieval/cardvault_fabtcg/card_downloader.py and
     # src/data_refinement/card_binder/cardvault_fabtcg/ingestion_stage.py).
+    SYSTEM = "system"  # minted internally by CardBinder itself for
+    # synthetic sentinel cards (e.g. the "Unknown" fallback card — see
+    # CardBinder.ensure_unknown_card()), never fetched from an external
+    # source.

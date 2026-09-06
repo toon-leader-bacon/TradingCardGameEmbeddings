@@ -14,5 +14,5 @@
   The group label is already available for free at the point of
   extraction (the `<h3>` text on each `div.list-view-container` a
   card's `<li>` sits under) — a future stage doesn't need to re-derive
-  the DOM walk in `_extract_card_uuids`, just thread that label through
-  instead of discarding it.
+  the DOM walk done by `fragment_parsing.iter_card_quantities_and_names()`,
+  just thread that label through instead of discarding it.

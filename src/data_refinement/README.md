@@ -16,6 +16,12 @@ not something fixed by this container's structure.
 - **`card_binder/`** *(stable)* — the standardized, multi-game card
   store every other stage (and `training`, downstream) reads from and
   writes into. See [`card_binder/README.md`](card_binder/README.md).
+- **`deck_box/`** *(in progress)* — the standardized, multi-game deck
+  store: `DeckBox` (mirroring `card_binder`'s CRUD-by-uuid shape, minus
+  the alias-ledger/collision machinery decks don't need) plus the
+  `DeckExtractionStage` Strategy Protocol every raw deck source will
+  implement. No source implementation exists yet. See
+  [`deck_box/README.md`](deck_box/README.md).
 - **`seventeenlands/`** *(in progress)* — everything specific to the
   17lands raw source: three sibling metric-engine pipelines over
   17lands' `draft_data`/`game_data`/`replay_data` CSVs. See

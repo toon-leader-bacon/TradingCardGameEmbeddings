@@ -78,5 +78,6 @@ class GenericDeck:
     nocab_uuid: UUID
     source_game: GameId
     name: str
-    card_nocab_uuids: list[UUID]
-    metadata: dict  # format, source, etc.
+    card_nocab_uuids: list[
+        UUID
+    ]  # multiset: unordered, duplicates meaningful (copy count)

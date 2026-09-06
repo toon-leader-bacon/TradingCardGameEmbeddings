@@ -4,18 +4,25 @@ See src/data_retrieval/README.md for this container's scope: fetch and
 land raw files on disk, no parsing or filtering (that's
 data_refinement's job).
 
-A SeventeenLandsFileRef can be produced two ways, both yielding the
+A SeventeenLandsFileRef can be produced three ways, all yielding the
 same type and consumed identically by SeventeenLandsDownloader:
     - LandingPageParser.parse() (landing_page_parser.py) — discovery,
-      scrapes whatever .csv.gz links are currently listed on the
-      17lands.com landing page.
+      scrapes whatever .csv.gz links are currently listed on a
+      fully-rendered copy of the 17lands.com landing page's HTML.
     - SeventeenLandsFileRef.from_known() (this module) — Factory
       Method building a ref directly from a known (data_type,
       expansion, format) triple, since the download URL is a
       deterministic template. No network/HTML needed; this is the
-      fallback path when the caller already knows what they want. See
+      path when the caller already knows what they want. See
       notes.txt in this directory for a reference list of known
       expansion and format codes.
+    - known_files.list_known_refs() — every (data_type, expansion,
+      format_code) triple 17Lands is known to have actually published
+      a file for, as of a hand-refreshed snapshot (see that module's
+      docstring for why this can't be derived from the enums below:
+      not every combination is valid, e.g. STX+Sealed only ever got a
+      GAME file). This is what SeventeenLandsDownloader.download()
+      falls back to when given an empty refs list.
 
 No date-range filtering is offered anywhere in this container: every
 17lands file is a static full-history dump per (data_type, expansion,
@@ -30,6 +37,57 @@ _URL_TEMPLATE = (
     "https://17lands-public.s3.amazonaws.com/analysis_data/"
     "{data_type}/{data_type}_public.{expansion}.{format_code}.csv.gz"
 )
+
+
+class Expansion(str, Enum):
+    HOB = "HOB"
+    MSH = "MSH"
+    SOS = "SOS"
+    TMT = "TMT"
+    ECL = "ECL"
+    TLA = "TLA"
+    # The 17Lands URL slug for this expansion, not a display name —
+    # see notes.txt's "Cube - Powered" for the human-readable form.
+    Powered_Cube = "Cube_-_Powered"
+    OM1 = "OM1"
+    EOE = "EOE"
+    FIN = "FIN"
+    TDM = "TDM"
+    DFT = "DFT"
+    PIO = "PIO"
+    FDN = "FDN"
+    DSK = "DSK"
+    BLB = "BLB"
+    MH3 = "MH3"
+    OTJ = "OTJ"
+    MKM = "MKM"
+    KTK = "KTK"
+    LCI = "LCI"
+    WOE = "WOE"
+    LTR = "LTR"
+    MOM = "MOM"
+    SIR = "SIR"
+    ONE = "ONE"
+    BRO = "BRO"
+    DMU = "DMU"
+    HBG = "HBG"
+    SNC = "SNC"
+    NEO = "NEO"
+    VOW = "VOW"
+    MID = "MID"
+    AFR = "AFR"
+    STX = "STX"
+    KHM = "KHM"
+
+
+class format_code(str, Enum):
+    PremierDraft = "PremierDraft"
+    TradDraft = "TradDraft"
+    PickTwoDraft = "PickTwoDraft"
+    Sealed = "Sealed"
+    TradSealed = "TradSealed"
+    PickTwoTradDraft = "PickTwoTradDraft"
+    QuickDraft = "QuickDraft"
 
 
 class DataType(str, Enum):

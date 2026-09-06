@@ -2,8 +2,40 @@
 
 - Reorganize this top level directory to have the following subs
   - card_binder (already exists)
+  - deck_box (already exists — see deck_box/README.md)
   - metrics
 Each of these subs should have a dedicated sub-diretory per data source (as appropriate)
+
+**Resolved:** the 3-way refinement split (card extraction / flat deck
+extraction / other metric extraction) discussed below is decided —
+`deck_box/` now exists as its own top-level container alongside
+`card_binder/`, with `DeckBox` + `DeckExtractionStage` implemented (see
+`deck_box/README.md`). Still open/deferred, follow-up work:
+
+- ~~Migrating `sts_gg`'s `DeckOutcomeMetric`...~~ **Done:**
+  `StsGgDeckExtractionStage` (`deck_box/sts_gg/extraction_stage.py`)
+  is the first real `DeckExtractionStage` — see `deck_box/README.md`'s
+  Sources section. `DeckOutcomeMetric` itself is untouched (its `win`
+  outcome field isn't carried over; a separate outcome metric keyed by
+  this stage's deck `nocab_uuid` remains future work).
+- ~~Migrating `fabtcg_decklists`'s `DecklistCardsMetric`...~~ **Done:**
+  `FabtcgDecklistsExtractionStage`
+  (`deck_box/fabtcg_decklists/extraction_stage.py`) is the second real
+  `DeckExtractionStage` — see `deck_box/README.md`'s Sources section.
+  Its HTML-walking mechanics were split out of `DecklistCardsMetric`
+  into a shared `fabtcg_decklists/fragment_parsing.py` module so both
+  stages parse fragments identically while keeping their own distinct
+  card-resolution policy. `DecklistCardsMetric` itself is untouched.
+- Folding `seventeenlands/` (and future `cardvault_fabtcg`/`sts2runs`
+  metrics work) under a top-level `metrics/` directory, per this file's
+  original reorg proposal above.
+- Standardizing one shared `Metric`/extraction protocol across the
+  CSV-chunked (`seventeenlands`), JSONL/HTML-streaming
+  (`sts_gg`/`fabtcg_decklists`), and corpus-scan (`cardvault_fabtcg`
+  brainstorm) metric shapes — deferred until enough real implementations
+  exist to see the actual common shape, rather than guessed at now.
+
+Original reasoning that led to the resolved split, kept for context:
 
 Additionally, I think there needs to be a concept of a few different types of refinements:
 

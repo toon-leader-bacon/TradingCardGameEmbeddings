@@ -9,7 +9,9 @@ during download, corrupt gzip during extraction) does not abort the
 rest of a batch — every ref's outcome is recorded in
 DownloadBatchResult, same convention as HearthstoneJsonDownloader's
 BuildDownloadOutcome. See refs.py's module docstring for how refs are
-produced (LandingPageParser vs. SeventeenLandsFileRef.from_known()).
+produced (LandingPageParser, SeventeenLandsFileRef.from_known(), or
+known_files.list_known_refs()) — download() falls back to the last of
+those when given no refs (or an empty refs list).
 """
 
 import gzip
@@ -22,6 +24,7 @@ from tqdm import tqdm
 
 from src.data_retrieval.download_utils import download_to_file
 from src.data_retrieval.rate_limiter import RateLimiter
+from src.data_retrieval.seventeenlands.known_files import list_known_refs
 from src.data_retrieval.seventeenlands.refs import DataType, SeventeenLandsFileRef
 
 
@@ -96,7 +99,7 @@ class SeventeenLandsDownloader:
 
     def download(
         self,
-        refs: list[SeventeenLandsFileRef],
+        refs: list[SeventeenLandsFileRef] | None = None,
         *,
         data_types: list[DataType] | None = None,
         expansions: list[str] | None = None,
@@ -104,14 +107,21 @@ class SeventeenLandsDownloader:
     ) -> DownloadBatchResult:
         """Filter refs, then download+extract each surviving one.
 
-        Composed of _filter_refs() followed by one download_one() call
-        per surviving ref — no additional logic beyond calling the two
-        and collecting results. Best-effort: one ref's failure is
-        recorded and the loop continues to the next ref, rather than
-        aborting the whole batch — see download_one().
+        refs is optional — omitting it (or passing an empty list) means
+        "every known-valid file" rather than "nothing" — it's expanded
+        to known_files.list_known_refs()
+        before filtering, so a caller with no specific refs in hand
+        can still pass expansions=[...]/formats=[...] to narrow that
+        full set down. Composed of _filter_refs() followed by one
+        download_one() call per surviving ref — no additional logic
+        beyond calling the two and collecting results. Best-effort: one
+        ref's failure is recorded and the loop continues to the next
+        ref, rather than aborting the whole batch — see download_one().
 
         Inputs:
-            refs: candidate files to download.
+            refs: candidate files to download. None (the default) or
+                an empty list both mean every ref in
+                known_files.list_known_refs().
             data_types: if given, only refs whose data_type is in this
                 list are downloaded. None means no filtering on this
                 dimension (all data types included).
@@ -139,9 +149,14 @@ class SeventeenLandsDownloader:
             ... )
             >>> refs = [SeventeenLandsFileRef.from_known(DataType.GAME, "MSH", "PremierDraft")]
             >>> result = downloader.download(refs)
+            >>> everything = downloader.download()  # every known-valid file
         """
+        candidate_refs = refs if refs else list_known_refs()
         filtered_refs = self._filter_refs(
-            refs, data_types=data_types, expansions=expansions, formats=formats
+            candidate_refs,
+            data_types=data_types,
+            expansions=expansions,
+            formats=formats,
         )
 
         outcomes: list[DownloadOutcome] = []

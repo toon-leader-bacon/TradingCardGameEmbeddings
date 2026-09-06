@@ -1,19 +1,25 @@
 """
 PYTHONPATH=. python3 scripts/run_data_retrieval.py
 """
-from pathlib import Path
-
-from src.data_retrieval.play_gwent.downloader import \
-    PlayGwentDownloader as gwent_deck_downloader
-from src.data_retrieval.rate_limiter import RateLimiter
-from src.data_retrieval.sts_gg.run_downloader import \
-    STSGGRunDownloader as sts_gg_run_downloader
-from src.data_retrieval.sts2runs.downloader import \
-    STS2RunsDownloader as sts2runs_downloader
-from src.data_retrieval.pitchstack.downloader import \
-    PitchstackDeckDownloader as pitchstack_downloader
+from src.data_retrieval.spire_codex.run_downloader import \
+    SpireCodexRunDownloader as spire_codex_run_downloader
+from src.data_retrieval.gwent_one.downloader import \
+    GwentOneDownloader as gwentone_downloader
 from src.data_retrieval.fabtcg_decklists.downloader import \
     FabtcgDecklistDownloader as fabtcg_decklist_downloader
+from src.data_retrieval.pitchstack.downloader import \
+    PitchstackDeckDownloader as pitchstack_downloader
+from src.data_retrieval.sts2runs.downloader import \
+    STS2RunsDownloader as sts2runs_downloader
+from src.data_retrieval.sts_gg.run_downloader import \
+    STSGGRunDownloader as sts_gg_run_downloader
+from src.data_retrieval.rate_limiter import RateLimiter
+from src.data_retrieval.play_gwent.downloader import \
+    PlayGwentDownloader as gwent_deck_downloader
+from pathlib import Path
+
+from src.data_retrieval.seventeenlands.downloader import \
+    SeventeenLandsDownloader as seventeenlands_downloader
 
 
 def main() -> None:
@@ -32,12 +38,23 @@ def main() -> None:
     #     rate_limiter=RateLimiter(requests_per_minute=60),
     #     output_dir=Path("data/raw/pitchstack"),
     # )
-    downloader = fabtcg_decklist_downloader(
+    # downloader = fabtcg_decklist_downloader(
+    #     rate_limiter=RateLimiter(requests_per_minute=60),
+    #     raw_data_dir=Path("data/raw/fabtcg_decklists"),
+    # )
+    # downloader = gwentone_downloader(
+    #     rate_limiter=RateLimiter(requests_per_minute=60),
+    #     raw_data_dir=Path("data/raw/gwent_one"),
+    # )
+    # downloader = spire_codex_run_downloader(
+    #     rate_limiter=RateLimiter(requests_per_minute=60),
+    #     raw_data_dir=Path("data/raw/spire_codex"),
+    # )
+    downloader = seventeenlands_downloader(
         rate_limiter=RateLimiter(requests_per_minute=60),
-        raw_data_dir=Path("data/raw/fabtcg_decklists"),
+        raw_data_dir=Path("data/raw/seventeenlands"),
     )
-    downloader.phase_1()
-    downloader.phase_2()
+    downloader.download()
 
 
 if __name__ == "__main__":

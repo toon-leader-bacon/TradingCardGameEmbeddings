@@ -43,7 +43,7 @@ class GwentOneDownloader(Downloader):
 
     def __init__(
         self,
-        result_limit: int,
+        result_limit: int = 10_000,  # As of sept 6, 2026 the total is 1260, so 10k should be enough
         rate_limiter: RateLimiter | None = None,
         raw_data_dir: Path | None = None,
         *,

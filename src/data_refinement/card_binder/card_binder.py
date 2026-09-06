@@ -24,15 +24,22 @@ directly, only CardBinder's own get_by_alias()/register_alias().
 import json
 import re
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import ClassVar, Iterable
-from uuid import UUID
+from uuid import UUID, uuid5
 
 from src.data_refinement.card_binder.alias_ledger import AliasLedger
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
+
+# Fixed, arbitrary — never regenerate. Namespace for ensure_unknown_card()'s
+# deterministic per-game sentinel-card uuids (uuid5(_UNKNOWN_CARD_NAMESPACE,
+# source_game.value)), so every caller across every process always agrees
+# on the same nocab_uuid for a given game's "Unknown" card without needing
+# a shared alias lookup first.
+_UNKNOWN_CARD_NAMESPACE = UUID("bfb18b53-3b13-4b1e-9f0e-9a6e0f6e6c5a")
 
 
 class CardBinder:
@@ -47,6 +54,7 @@ class CardBinder:
 
     DEFAULT_OUTPUT_DIR: ClassVar[Path] = Path("data/final/cards")
     DEFAULT_OUTPUT_NAME: ClassVar[str] = "{game}.jsonl"
+    UNKNOWN_CARD_NAME: ClassVar[str] = "Unknown"
 
     def __init__(self) -> None:
         """Construct an empty binder, with an empty owned AliasLedger.
@@ -404,6 +412,69 @@ class CardBinder:
             if card.source_game == source_game
         ]
 
+    def ensure_unknown_card(self, source_game: GameId) -> GenericCard:
+        """Look up (or lazily create) this game's sentinel "Unknown" card.
+
+        For a DeckExtractionStage's card-reference resolution: a raw
+        card reference that fails to resolve against a real card should
+        fall back to a well-known placeholder rather than being dropped
+        (like a word embedding's "unknown token" bucket) — this is that
+        placeholder's home. Deliberately a CardBinder method, not
+        something a DeckExtractionStage builds itself: deck extraction
+        stages only ever read cards (see
+        src/data_refinement/deck_box/extraction.py's CardLookup
+        rationale), so seeding this sentinel is a bootstrap step run
+        once against a real CardBinder, ahead of any extraction stage
+        that might need it.
+
+        Idempotent by construction: UNKNOWN_CARD_NAME lookup short-
+        circuits on every call after the first, and even the fallback
+        creation path uses a deterministic nocab_uuid
+        (_unknown_card_uuid(source_game)) rather than a fresh uuid4 —
+        so calling this twice for the same source_game, even across
+        separate CardBinder instances/processes, always agrees on the
+        same card identity.
+
+        Inputs:
+            source_game: which game's Unknown sentinel to fetch or
+                create.
+        Output: the existing or newly created GenericCard named
+            UNKNOWN_CARD_NAME for source_game.
+        Side effects: if no such card exists yet, creates one via
+            self.create() (mutates this binder's in-memory indices).
+        Exceptions: none.
+
+        Example:
+            >>> binder = CardBinder()
+            >>> unknown = binder.ensure_unknown_card(GameId.SLAY_THE_SPIRE_2)
+            >>> binder.ensure_unknown_card(GameId.SLAY_THE_SPIRE_2) == unknown
+            True
+        """
+        # Short-circuit: already seeded for this game. Checked by this
+        # sentinel's own deterministic uuid, NOT by name — a real
+        # ingested card could legitimately be named "Unknown" too, and
+        # a name-based check would silently mistake it for the
+        # sentinel.
+        unknown_uuid = self._unknown_card_uuid(source_game)
+        existing = self.get_by_uuid(unknown_uuid)
+        if existing is not None:
+            return existing
+
+        # Not seeded yet — build and store it, deterministic uuid so a
+        # concurrent/later call for the same source_game agrees.
+        card = GenericCard(
+            nocab_uuid=unknown_uuid,
+            source_game=source_game,
+            name=self.UNKNOWN_CARD_NAME,
+            raw_content={},
+            provenance=Provenance(
+                data_source=DataSource.SYSTEM,
+                source_id="unknown",
+                fetched_at=datetime.now(timezone.utc),
+            ),
+        )
+        return self.create(card)
+
     # endregion Card Getters
 
     # region Persistence
@@ -641,6 +712,25 @@ class CardBinder:
                 del self._uuids_by_name[old_name_key]
 
         self._uuids_by_name.setdefault(new_name_key, set()).add(card.nocab_uuid)
+
+    @staticmethod
+    def _unknown_card_uuid(source_game: GameId) -> UUID:
+        """Compute the deterministic nocab_uuid for one game's Unknown card.
+
+        Private helper — single consumer is ensure_unknown_card().
+        uuid5 (not uuid4): the same source_game must always produce the
+        same uuid, across every process and every call, with no shared
+        state (an alias ledger entry, a database row) required to agree
+        on it.
+
+        Inputs:
+            source_game: which game's Unknown sentinel uuid to compute.
+        Output: a uuid unique to (this fixed namespace, source_game) —
+            stable forever for a given source_game.
+        Side effects: none.
+        Exceptions: none.
+        """
+        return uuid5(_UNKNOWN_CARD_NAMESPACE, source_game.value)
 
     @staticmethod
     def _alias_ledger_path(path: Path) -> Path:

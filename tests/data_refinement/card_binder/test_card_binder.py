@@ -497,3 +497,47 @@ class TestDefaultOutputPath:
         assert CardBinder.default_output_path(
             GameId.MTG
         ) != CardBinder.default_output_path(GameId.POKEMON)
+
+
+class TestEnsureUnknownCard:
+    def test_creates_sentinel_on_first_call(self) -> None:
+        binder = CardBinder()
+
+        unknown = binder.ensure_unknown_card(GameId.MTG)
+
+        assert unknown.name == CardBinder.UNKNOWN_CARD_NAME
+        assert unknown.source_game == GameId.MTG
+        assert binder.get_by_uuid(unknown.nocab_uuid) == unknown
+
+    def test_second_call_returns_the_same_card(self) -> None:
+        binder = CardBinder()
+
+        first = binder.ensure_unknown_card(GameId.MTG)
+        second = binder.ensure_unknown_card(GameId.MTG)
+
+        assert second == first
+        assert len(list(binder.all_cards(GameId.MTG))) == 1
+
+    def test_different_games_get_different_uuids(self) -> None:
+        binder = CardBinder()
+
+        mtg_unknown = binder.ensure_unknown_card(GameId.MTG)
+        pokemon_unknown = binder.ensure_unknown_card(GameId.POKEMON)
+
+        assert mtg_unknown.nocab_uuid != pokemon_unknown.nocab_uuid
+
+    def test_unrelated_card_legitimately_named_unknown_is_not_mistaken_for_sentinel(
+        self,
+    ) -> None:
+        # Regression test for the bug caught during skeleton review: the
+        # short-circuit must check by this sentinel's own deterministic
+        # uuid, not by name — a real ingested card happening to be named
+        # "Unknown" must not be silently treated as the sentinel.
+        binder = CardBinder()
+        real_card_named_unknown = _card("Unknown", "src-1", {"a": 1})
+        binder.create(real_card_named_unknown)
+
+        sentinel = binder.ensure_unknown_card(GameId.MTG)
+
+        assert sentinel.nocab_uuid != real_card_named_unknown.nocab_uuid
+        assert len(list(binder.all_cards(GameId.MTG))) == 2

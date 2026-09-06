@@ -64,30 +64,6 @@ def _card_item(quantity_and_name: str) -> str:
     )
 
 
-class TestParseQuantityAndName:
-    def test_single_digit_quantity(self, tmp_path: Path) -> None:
-        binder = _binder_with_cards([])
-        metric = DecklistCardsMetric(binder, tmp_path / "out.parquet")
-        assert metric._parse_quantity_and_name("1x Dorinthea Ironsong") == (
-            1,
-            "Dorinthea Ironsong",
-        )
-        metric.finalize()
-
-    def test_multi_digit_quantity(self, tmp_path: Path) -> None:
-        binder = _binder_with_cards([])
-        metric = DecklistCardsMetric(binder, tmp_path / "out.parquet")
-        assert metric._parse_quantity_and_name("12x Some Card") == (12, "Some Card")
-        metric.finalize()
-
-    def test_raises_on_non_matching_text(self, tmp_path: Path) -> None:
-        binder = _binder_with_cards([])
-        metric = DecklistCardsMetric(binder, tmp_path / "out.parquet")
-        with pytest.raises(ValueError):
-            metric._parse_quantity_and_name("no quantity prefix here")
-        metric.finalize()
-
-
 class TestExtractCardUuids:
     def test_walks_hero_and_pitch_groups_and_preserves_multi_copy(
         self, tmp_path: Path

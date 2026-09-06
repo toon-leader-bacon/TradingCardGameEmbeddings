@@ -9,29 +9,11 @@ cardvault_fabtcg's ingestion stage) to nocab_uuids. See
 plans/fabtcg_decklists_refinement.md for the full design this
 implements.
 
-FRAGMENT SHAPE (confirmed live against data/tmp/list_view.html):
-src/data_retrieval/fabtcg_decklists/ saves one prettified
-`<section class="decklist-list-view block hidden">` fragment per deck.
-Every group inside it — the combined "Hero / Weapon / Equipment" group,
-and each of "Pitch 1"/"Pitch 2"/"Pitch 3" — is a uniformly-shaped
-`<div class="list-view-container">`, so a single
-`soup.select("div.list-view-container")` finds all of them regardless
-of the pitch groups' extra `<section class="pitch-section">` wrapper —
-no special-casing needed. Each `<li class="card-item group">` holds
-`<div class="card-name"><span>1x</span> Card Name</div>` — quantity and
-name are not separate elements, so extraction reads
-`" ".join(name_div.get_text().split())` ("1x Card Name") and splits it
-with _QUANTITY_AND_NAME_PATTERN. The split()/join() (rather than
-get_text(" ", strip=True)) is deliberate: some real card-name divs wrap
-their text across an internal newline as one text node — get_text's
-separator only joins BETWEEN separate text nodes, so it would never
-collapse an internal one, and a long name plus a trailing pitch-color
-marker on its own line would otherwise fail to match
-_QUANTITY_AND_NAME_PATTERN.
-
-FIRST ITERATION FLATTENS GROUPS: which group each card came from is
-discarded here — see TODO.md for the deferred structured/grouped
-follow-up and why that's a deliberate simplification, not an oversight.
+FRAGMENT SHAPE AND PARSING: the actual HTML-walking mechanics
+(selectors, quantity/name splitting) live in fragment_parsing.py, split
+out once deck_box/fabtcg_decklists/extraction_stage.py became a second
+consumer needing the same walk with a different per-card resolution
+policy — see that module's docstring for the full reasoning.
 
 CARD RESOLUTION AND FAILURE POLICY: cards are looked up via
 CardBinder.get_by_name_single(..., strict=False) rather than the
@@ -53,24 +35,20 @@ for "this deck genuinely has no cards."
 """
 
 import logging
-import re
 from pathlib import Path
 from typing import ClassVar
 from uuid import UUID
 
 import pyarrow as pa
 import pyarrow.parquet as pq
-from bs4 import BeautifulSoup
 
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.fabtcg_decklists.fragment_parsing import (
+    iter_card_quantities_and_names,
+)
 from src.schema.game_id import GameId
 
 _logger = logging.getLogger(__name__)
-
-_LIST_VIEW_CONTAINER_SELECTOR = "div.list-view-container"
-_CARD_ITEM_SELECTOR = "li.card-item"
-_CARD_NAME_SELECTOR = "div.card-name"
-_QUANTITY_AND_NAME_PATTERN = re.compile(r"^(\d+)x\s+(.+)$")
 
 # Fixed and known upfront, same convention as DeckOutcomeMetric's
 # _OUTPUT_SCHEMA.
@@ -210,10 +188,10 @@ class DecklistCardsMetric:
         """Walk every card group in one deck fragment, resolving each
         card name to a nocab_uuid, duplicated per copy.
 
-        Private helper — single consumer is accumulate(). See module
-        docstring's FRAGMENT SHAPE and FIRST ITERATION FLATTENS GROUPS
-        sections for exactly what's walked and what's deliberately
-        discarded (group membership).
+        Private helper — single consumer is accumulate(). Delegates the
+        actual HTML walk to fragment_parsing.iter_card_quantities_and_names()
+        (see that module's docstring for what's walked and what's
+        deliberately discarded — group membership).
 
         Inputs:
             fragment_html: one deck's saved decklist fragment.
@@ -224,81 +202,26 @@ class DecklistCardsMetric:
             resolves.
         Side effects: emits one logging.warning() per unresolved card
             name.
-        Exceptions: raises ValueError if a card-item's name text
-            doesn't match _QUANTITY_AND_NAME_PATTERN.
+        Exceptions: whatever iter_card_quantities_and_names() raises
+            propagates (see its own Exceptions).
         """
-        soup = BeautifulSoup(fragment_html, "html.parser")
         card_uuids: list[UUID] = []
-
-        # Walk every group container (Hero/Weapon/Equipment, and each
-        # Pitch N) uniformly — see module docstring's FRAGMENT SHAPE.
-        for container in soup.select(_LIST_VIEW_CONTAINER_SELECTOR):
-            for card_item in container.select(_CARD_ITEM_SELECTOR):
-                name_div = card_item.select_one(_CARD_NAME_SELECTOR)
-                if name_div is None:
-                    raise ValueError(
-                        f"_extract_card_uuids: a {_CARD_ITEM_SELECTOR!r} element "
-                        f"has no {_CARD_NAME_SELECTOR!r} child — fabtcg.com's "
-                        "markup may have changed"
-                    )
-
-                # " ".join(...split()) rather than get_text(" ",
-                # strip=True): some real card-name divs wrap their text
-                # across an internal newline (e.g. a long name plus a
-                # trailing "(red)" pitch marker on its own line) as ONE
-                # text node — get_text's separator only joins BETWEEN
-                # separate text nodes, so it never collapses that
-                # internal newline, and _QUANTITY_AND_NAME_PATTERN
-                # (whose `.` doesn't match newlines) would otherwise
-                # raise on a perfectly valid card. split()/join()
-                # normalizes every run of whitespace uniformly.
-                quantity, name = self._parse_quantity_and_name(
-                    " ".join(name_div.get_text().split())
+        for quantity, name in iter_card_quantities_and_names(fragment_html):
+            card = self._card_binder.get_by_name_single(
+                GameId.FLESH_AND_BLOOD, name, strict=False
+            )
+            if card is None:
+                _logger.warning(
+                    "DecklistCardsMetric: card name %r did not resolve "
+                    "against the CardBinder — excluding it from this "
+                    "deck's card_nocab_uuids",
+                    name,
                 )
+                continue
 
-                # Look up this card name against the binder
-                card = self._card_binder.get_by_name_single(
-                    GameId.FLESH_AND_BLOOD, name, strict=False
-                )
-                if card is None:
-                    _logger.warning(
-                        "DecklistCardsMetric: card name %r did not resolve "
-                        "against the CardBinder — excluding it from this "
-                        "deck's card_nocab_uuids",
-                        name,
-                    )
-                    continue
-
-                card_uuids.extend([card.nocab_uuid] * quantity)
+            card_uuids.extend([card.nocab_uuid] * quantity)
 
         return card_uuids
-
-    def _parse_quantity_and_name(self, name_div_text: str) -> tuple[int, str]:
-        """Split one card-name div's flattened text into its quantity
-        and card name.
-
-        Private helper — single consumer is _extract_card_uuids().
-        E.g. "1x Dorinthea Ironsong" -> (1, "Dorinthea Ironsong").
-
-        Inputs:
-            name_div_text: a `div.card-name` element's text, with every
-                run of whitespace (including any internal newline)
-                already collapsed to a single space (see
-                _extract_card_uuids' call site).
-        Output: (quantity, name).
-        Side effects: none.
-        Exceptions: raises ValueError if name_div_text doesn't match
-            _QUANTITY_AND_NAME_PATTERN.
-        """
-        match = _QUANTITY_AND_NAME_PATTERN.match(name_div_text)
-        if match is None:
-            raise ValueError(
-                f"_parse_quantity_and_name: {name_div_text!r} does not match "
-                f"the expected {_QUANTITY_AND_NAME_PATTERN.pattern!r} shape"
-            )
-
-        quantity, name = match.groups()
-        return int(quantity), name
 
 
 def scan_decklists_dir(decklists_dir: Path, metric: DecklistCardsMetric) -> Path:
