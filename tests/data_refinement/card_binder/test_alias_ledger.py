@@ -88,7 +88,9 @@ class TestSaveAndLoad:
 
         assert nested_path.exists()
 
-    def test_load_of_empty_file_returns_usable_empty_ledger(self, tmp_path: Path) -> None:
+    def test_load_of_empty_file_returns_usable_empty_ledger(
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "empty.alias_ledger.jsonl"
         path.write_text("")
 

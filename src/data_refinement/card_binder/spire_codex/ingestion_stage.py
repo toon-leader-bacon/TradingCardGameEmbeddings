@@ -137,7 +137,9 @@ class SpireCodexCardIngestionStage:
         Exceptions: raises if row is missing "id" or "name".
         """
         card_id = row["id"]
-        existing = binder.get_by_alias(self.SOURCE_GAME, DataSource.SPIRE_CODEX, card_id)
+        existing = binder.get_by_alias(
+            self.SOURCE_GAME, DataSource.SPIRE_CODEX, card_id
+        )
 
         if existing is None:
             card = self._build_card(row, card_id)
@@ -152,7 +154,9 @@ class SpireCodexCardIngestionStage:
                 binder.replace(existing.nocab_uuid, merged)
             stored_uuid = existing.nocab_uuid
 
-        binder.register_alias(self.SOURCE_GAME, DataSource.SPIRE_CODEX, card_id, stored_uuid)
+        binder.register_alias(
+            self.SOURCE_GAME, DataSource.SPIRE_CODEX, card_id, stored_uuid
+        )
 
         return stored_uuid if changed else None
 

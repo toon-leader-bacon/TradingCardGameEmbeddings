@@ -200,7 +200,9 @@ class GwentOneCardIngestionStage:
                 binder.replace(existing.nocab_uuid, merged)
             stored_uuid = existing.nocab_uuid
 
-        binder.register_alias(self.SOURCE_GAME, DataSource.GWENT_ONE, card_id, stored_uuid)
+        binder.register_alias(
+            self.SOURCE_GAME, DataSource.GWENT_ONE, card_id, stored_uuid
+        )
 
         return stored_uuid if changed else None
 

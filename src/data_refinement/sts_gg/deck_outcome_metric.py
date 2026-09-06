@@ -99,7 +99,9 @@ class DeckOutcomeMetric:
         "data/final/metrics/sts_gg/deck_outcome.parquet"
     )
 
-    def __init__(self, card_binder: CardBinder, output_path: Path | None = None) -> None:
+    def __init__(
+        self, card_binder: CardBinder, output_path: Path | None = None
+    ) -> None:
         """
         Inputs:
             card_binder: registry to resolve sts_gg's "CARD.<id>"

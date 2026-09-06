@@ -36,19 +36,27 @@ def _run_row(run_id: str, card_ids: list[str], win: bool) -> dict:
     return {
         "id": run_id,
         "win": win,
-        "deck": [{"id": f"CARD.{card_id}", "upgraded": False, "floor": 1} for card_id in card_ids],
+        "deck": [
+            {"id": f"CARD.{card_id}", "upgraded": False, "floor": 1}
+            for card_id in card_ids
+        ],
     }
 
 
 class TestAccumulate:
     def test_every_card_resolves(self, tmp_path: Path) -> None:
         binder = _binder_from_rows(
-            [{"id": "STRIKE_SILENT", "name": "Strike"}, {"id": "DEFEND_SILENT", "name": "Defend"}],
+            [
+                {"id": "STRIKE_SILENT", "name": "Strike"},
+                {"id": "DEFEND_SILENT", "name": "Defend"},
+            ],
             tmp_path,
         )
         metric = DeckOutcomeMetric(binder, tmp_path / "out.parquet")
 
-        metric.accumulate(_run_row("run1", ["STRIKE_SILENT", "DEFEND_SILENT"], win=True))
+        metric.accumulate(
+            _run_row("run1", ["STRIKE_SILENT", "DEFEND_SILENT"], win=True)
+        )
         metric.finalize()
 
         rows = pq.read_table(tmp_path / "out.parquet").to_pylist()
@@ -66,11 +74,15 @@ class TestAccumulate:
     def test_unresolved_card_is_excluded_and_logged(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        binder = _binder_from_rows([{"id": "STRIKE_SILENT", "name": "Strike"}], tmp_path)
+        binder = _binder_from_rows(
+            [{"id": "STRIKE_SILENT", "name": "Strike"}], tmp_path
+        )
         metric = DeckOutcomeMetric(binder, tmp_path / "out.parquet")
 
         with caplog.at_level(logging.ERROR):
-            metric.accumulate(_run_row("run1", ["STRIKE_SILENT", "NOT_A_REAL_CARD"], win=False))
+            metric.accumulate(
+                _run_row("run1", ["STRIKE_SILENT", "NOT_A_REAL_CARD"], win=False)
+            )
         metric.finalize()
 
         rows = pq.read_table(tmp_path / "out.parquet").to_pylist()
@@ -87,10 +99,14 @@ class TestAccumulate:
         )
 
     def test_multiple_copies_of_a_card_are_preserved(self, tmp_path: Path) -> None:
-        binder = _binder_from_rows([{"id": "STRIKE_SILENT", "name": "Strike"}], tmp_path)
+        binder = _binder_from_rows(
+            [{"id": "STRIKE_SILENT", "name": "Strike"}], tmp_path
+        )
         metric = DeckOutcomeMetric(binder, tmp_path / "out.parquet")
 
-        metric.accumulate(_run_row("run1", ["STRIKE_SILENT", "STRIKE_SILENT"], win=True))
+        metric.accumulate(
+            _run_row("run1", ["STRIKE_SILENT", "STRIKE_SILENT"], win=True)
+        )
         metric.finalize()
 
         rows = pq.read_table(tmp_path / "out.parquet").to_pylist()
@@ -100,7 +116,9 @@ class TestAccumulate:
 
 class TestFinalize:
     def test_is_idempotent(self, tmp_path: Path) -> None:
-        binder = _binder_from_rows([{"id": "STRIKE_SILENT", "name": "Strike"}], tmp_path)
+        binder = _binder_from_rows(
+            [{"id": "STRIKE_SILENT", "name": "Strike"}], tmp_path
+        )
         metric = DeckOutcomeMetric(binder, tmp_path / "out.parquet")
         metric.accumulate(_run_row("run1", ["STRIKE_SILENT"], win=True))
 
@@ -114,7 +132,10 @@ class TestFinalize:
 class TestScanRunsJsonl:
     def test_drives_every_line_into_one_parquet_output(self, tmp_path: Path) -> None:
         binder = _binder_from_rows(
-            [{"id": "STRIKE_SILENT", "name": "Strike"}, {"id": "DEFEND_SILENT", "name": "Defend"}],
+            [
+                {"id": "STRIKE_SILENT", "name": "Strike"},
+                {"id": "DEFEND_SILENT", "name": "Defend"},
+            ],
             tmp_path,
         )
         raw_path = tmp_path / "runs.jsonl"
@@ -138,7 +159,9 @@ class TestScanRunsJsonl:
         assert [row["win"] for row in rows] == [True, False]
 
     def test_skips_blank_lines(self, tmp_path: Path) -> None:
-        binder = _binder_from_rows([{"id": "STRIKE_SILENT", "name": "Strike"}], tmp_path)
+        binder = _binder_from_rows(
+            [{"id": "STRIKE_SILENT", "name": "Strike"}], tmp_path
+        )
         raw_path = tmp_path / "runs.jsonl"
         raw_path.write_text(
             json.dumps(_run_row("run1", ["STRIKE_SILENT"], win=True)) + "\n\n   \n",
@@ -151,7 +174,9 @@ class TestScanRunsJsonl:
         assert pq.read_table(output_path).num_rows == 1
 
     def test_still_finalizes_when_a_line_is_malformed(self, tmp_path: Path) -> None:
-        binder = _binder_from_rows([{"id": "STRIKE_SILENT", "name": "Strike"}], tmp_path)
+        binder = _binder_from_rows(
+            [{"id": "STRIKE_SILENT", "name": "Strike"}], tmp_path
+        )
         raw_path = tmp_path / "runs.jsonl"
         raw_path.write_text(
             json.dumps(_run_row("run1", ["STRIKE_SILENT"], win=True))

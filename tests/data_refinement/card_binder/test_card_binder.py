@@ -319,7 +319,9 @@ class TestGetByAlias:
     def test_not_found(self) -> None:
         binder = CardBinder()
 
-        assert binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "nonexistent") is None
+        assert (
+            binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "nonexistent") is None
+        )
 
 
 class TestRegisterAlias:
@@ -343,7 +345,9 @@ class TestAllUuids:
     def test_no_filter_returns_every_uuid(self) -> None:
         binder = CardBinder()
         mtg_card = _card("Bolt", "src-1", {"a": 1}, source_game=GameId.MTG)
-        pokemon_card = _card("Charmander", "src-2", {"a": 1}, source_game=GameId.POKEMON)
+        pokemon_card = _card(
+            "Charmander", "src-2", {"a": 1}, source_game=GameId.POKEMON
+        )
         binder.create(mtg_card)
         binder.create(pokemon_card)
 
@@ -352,7 +356,9 @@ class TestAllUuids:
     def test_filter_by_game(self) -> None:
         binder = CardBinder()
         mtg_card = _card("Bolt", "src-1", {"a": 1}, source_game=GameId.MTG)
-        pokemon_card = _card("Charmander", "src-2", {"a": 1}, source_game=GameId.POKEMON)
+        pokemon_card = _card(
+            "Charmander", "src-2", {"a": 1}, source_game=GameId.POKEMON
+        )
         binder.create(mtg_card)
         binder.create(pokemon_card)
 
@@ -363,7 +369,9 @@ class TestAllCards:
     def test_returns_every_card_for_one_game(self) -> None:
         binder = CardBinder()
         mtg_card = _card("Bolt", "src-1", {"a": 1}, source_game=GameId.MTG)
-        pokemon_card = _card("Charmander", "src-2", {"a": 1}, source_game=GameId.POKEMON)
+        pokemon_card = _card(
+            "Charmander", "src-2", {"a": 1}, source_game=GameId.POKEMON
+        )
         binder.create(mtg_card)
         binder.create(pokemon_card)
 
@@ -383,14 +391,17 @@ class TestLoad:
         path.write_text(
             '{"nocab_uuid": "%s", "source_game": "mtg", "name": "Bolt", '
             '"raw_content": {"a": 1}, "provenance": {"data_source": "scryfall", '
-            '"source_id": "src-1", "fetched_at": "2026-01-01T00:00:00+00:00"}}\n' % card.nocab_uuid
+            '"source_id": "src-1", "fetched_at": "2026-01-01T00:00:00+00:00"}}\n'
+            % card.nocab_uuid
         )
 
         binder = CardBinder.load([path])
 
         assert binder.get_by_uuid(card.nocab_uuid) is not None
 
-    def test_last_path_wins_on_uuid_collision_across_paths(self, tmp_path: Path) -> None:
+    def test_last_path_wins_on_uuid_collision_across_paths(
+        self, tmp_path: Path
+    ) -> None:
         card = _card("Bolt", "src-1", {"a": 1})
         first_binder = CardBinder()
         first_binder.create(card)
@@ -409,7 +420,9 @@ class TestLoad:
 
 
 class TestSaveLoadRoundTrip:
-    def test_nocab_uuid_is_bit_for_bit_identical_after_round_trip(self, tmp_path: Path) -> None:
+    def test_nocab_uuid_is_bit_for_bit_identical_after_round_trip(
+        self, tmp_path: Path
+    ) -> None:
         binder = CardBinder()
         card = _card("Bolt", "src-1", {"a": 1})
         binder.create(card)
@@ -426,7 +439,9 @@ class TestSaveLoadRoundTrip:
     def test_writes_only_requested_games_subset(self, tmp_path: Path) -> None:
         binder = CardBinder()
         binder.create(_card("Bolt", "src-1", {"a": 1}, source_game=GameId.MTG))
-        binder.create(_card("Charmander", "src-2", {"a": 1}, source_game=GameId.POKEMON))
+        binder.create(
+            _card("Charmander", "src-2", {"a": 1}, source_game=GameId.POKEMON)
+        )
         path = tmp_path / "mtg.jsonl"
 
         binder.save(path, GameId.MTG)
@@ -474,11 +489,11 @@ class TestSaveLoadRoundTrip:
 
 class TestDefaultOutputPath:
     def test_matches_default_output_dir_and_name(self) -> None:
-        assert CardBinder.default_output_path(GameId.MTG) == CardBinder.DEFAULT_OUTPUT_DIR / (
-            "mtg.jsonl"
-        )
+        assert CardBinder.default_output_path(
+            GameId.MTG
+        ) == CardBinder.DEFAULT_OUTPUT_DIR / ("mtg.jsonl")
 
     def test_varies_by_game(self) -> None:
-        assert CardBinder.default_output_path(GameId.MTG) != CardBinder.default_output_path(
-            GameId.POKEMON
-        )
+        assert CardBinder.default_output_path(
+            GameId.MTG
+        ) != CardBinder.default_output_path(GameId.POKEMON)

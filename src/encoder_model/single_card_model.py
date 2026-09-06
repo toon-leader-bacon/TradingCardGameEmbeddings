@@ -27,8 +27,15 @@ class SingleCardModel(nn.Module):
 
     def forward(
         self,
-        x: Union[SingleCardInput, MultiCardInput, MultiGroupInput, BatchedMultiGroupInput]
-    ) -> Union[SingleCardEmbedding, MultiCardEmbedding, MultiGroupEmbedding, BatchedMultiGroupEmbedding]:
+        x: Union[
+            SingleCardInput, MultiCardInput, MultiGroupInput, BatchedMultiGroupInput
+        ],
+    ) -> Union[
+        SingleCardEmbedding,
+        MultiCardEmbedding,
+        MultiGroupEmbedding,
+        BatchedMultiGroupEmbedding,
+    ]:
         if isinstance(x, SingleCardInput):
             # Simple case, one card in one embedding out
             return self.internal_model(x.embedding)
@@ -72,4 +79,5 @@ class SingleCardModel(nn.Module):
         for multi_group in x:
             results.append(self.forward_multi_group(multi_group))
         return results
+
     # endregion Forward Methods

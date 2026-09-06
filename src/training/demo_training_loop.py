@@ -16,7 +16,7 @@ class DemoTrainingLoop:
         optimizer = torch.optim.Adam(model.parameters(), lr=0.001)  # example
 
         # Train the model
-        best_test_loss = float('inf')
+        best_test_loss = float("inf")
         for epoch in range(10):
             dojo.reset_split(split=Split.TRAIN, shuffle=True)
             for batch in dojo.next_batch(Split.TRAIN, batch_size=128):
@@ -31,7 +31,7 @@ class DemoTrainingLoop:
             # Test the model
             total_test_loss = 0.0
             total_test_samples = 0
-            for (inputs, labels) in dojo.next_batch(Split.TEST, batch_size=128):
+            for inputs, labels in dojo.next_batch(Split.TEST, batch_size=128):
                 # TODO: Think about how to signal/ produce the full batch without
                 # looping over the split/ duplicating elements in the split.
                 with torch.no_grad():
@@ -46,10 +46,14 @@ class DemoTrainingLoop:
         # End of all epochs
 
         # validate the model
-        for (inputs, labels) in dojo.next_batch(Split.VALIDATION, batch_size=128):
+        total_validation_loss = 0.0
+        total_validation_samples = 0
+        for inputs, labels in dojo.next_batch(Split.VALIDATION, batch_size=128):
             with torch.no_grad():
                 embeddings = model.forward(inputs)
                 loss = dojo.compute_loss(embeddings, labels)
             total_validation_loss += loss.item()
             total_validation_samples += len(inputs)
-        print(f"Average Validation loss: {total_validation_loss / total_validation_samples}")
+        print(
+            f"Average Validation loss: {total_validation_loss / total_validation_samples}"
+        )

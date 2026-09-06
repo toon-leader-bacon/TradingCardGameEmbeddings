@@ -22,7 +22,9 @@ from src.dojos.file_managers.FileManagerParquet import (
     FileManagerParquet,
     ParquetChunkReader,
 )
-from src.dojos.loss.pick_prediction_cross_entropy_loss import PickPredictionCrossEntropyLoss
+from src.dojos.loss.pick_prediction_cross_entropy_loss import (
+    PickPredictionCrossEntropyLoss,
+)
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.dojos.seventeenlands.draft_game_metrics.pick_prediction.data_constructor import (
     PickPredictionDataConstructor,
@@ -34,14 +36,15 @@ from src.schema.type_hints import BatchedModelOutput, Label, TrainingDatum
 
 
 class PickPredictionDojo:
-    def __init__(self, path_to_training_data: Path,
-                 card_binder: CardBinder,
-                 card_embedding_size: int,
-                 rng_seed: int | None = None):
+    def __init__(
+        self,
+        path_to_training_data: Path,
+        card_binder: CardBinder,
+        card_embedding_size: int,
+        rng_seed: int | None = None,
+    ):
         self.card_embedding_size = card_embedding_size
-        self.rng = random.Random(rng_seed) \
-            if rng_seed is not None \
-            else random.Random()
+        self.rng = random.Random(rng_seed) if rng_seed is not None else random.Random()
 
         self.file_manager = FileManagerParquet(
             path_to_training_data,
@@ -76,19 +79,22 @@ class PickPredictionDojo:
 
     def validation_data(self) -> Generator[Batch, None, None]:
         validation_file_iterator = self.file_iterators[2]
-        yield from self._data_iterator(validation_file_iterator, apply_mod_pipeline=False)
+        yield from self._data_iterator(
+            validation_file_iterator, apply_mod_pipeline=False
+        )
 
-    def _data_iterator(self, file_iterator: ParquetChunkReader,
-                        apply_mod_pipeline: bool = False) -> Generator[Batch, None, None]:
+    def _data_iterator(
+        self, file_iterator: ParquetChunkReader, apply_mod_pipeline: bool = False
+    ) -> Generator[Batch, None, None]:
         for chunk in file_iterator:
             data: List[TrainingDatum] = self.data_constructor.build(chunk)
             if apply_mod_pipeline:
                 data = self.data_mod_pipeline.apply(data)
             yield Batch.from_training_data(data)
 
-    def compute_loss(self,
-                      embeddings: BatchedModelOutput,
-                      labels: List[Label]) -> torch.Tensor:
+    def compute_loss(
+        self, embeddings: BatchedModelOutput, labels: List[Label]
+    ) -> torch.Tensor:
         """Compute the loss between the embeddings and the labels.
 
         We expect len(embeddings) == len(labels), in matching order - the
@@ -97,7 +103,9 @@ class PickPredictionDojo:
         """
         if len(embeddings) != len(labels):
             raise ValueError(
-                f"The number of embeddings ({len(embeddings)}) does not match the number of labels ({len(labels)})")
+                f"The number of embeddings ({len(embeddings)}) does not match "
+                f"the number of labels ({len(labels)})"
+            )
 
         decoder_output = self.decoder_head(embeddings)
         return self.loss_calculator.calculate(decoder_output, labels)

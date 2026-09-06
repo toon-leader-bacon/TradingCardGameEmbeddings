@@ -25,13 +25,18 @@ class AveragePickNumberMetric:
     """
 
     DEFAULT_OUTPUT_DIR: ClassVar[Path] = Path("data/final/metrics/17lands/draft")
-    DEFAULT_OUTPUT_NAME: ClassVar[str] = "{expansion}.{format_code}.average_pick_number.parquet"
+    DEFAULT_OUTPUT_NAME: ClassVar[str] = (
+        "{expansion}.{format_code}.average_pick_number.parquet"
+    )
 
-    def __init__(self, card_binder: CardBinder,
-                 expansion: str,
-                 format_code: str,
-                 output_dir: Path | None = None,
-                 output_name: str | None = None) -> None:
+    def __init__(
+        self,
+        card_binder: CardBinder,
+        expansion: str,
+        format_code: str,
+        output_dir: Path | None = None,
+        output_name: str | None = None,
+    ) -> None:
         """
         Inputs:
             card_binder: registry to resolve pick names against.
@@ -48,7 +53,9 @@ class AveragePickNumberMetric:
         self._card_binder = card_binder
         self._expansion = expansion
         self._format_code = format_code
-        self._output_path = self.output_path(expansion, format_code, output_dir, output_name)
+        self._output_path = self.output_path(
+            expansion, format_code, output_dir, output_name
+        )
 
         # Accumulator state
         self._name_to_pick_sum: defaultdict[str, int] = defaultdict(int)
@@ -59,13 +66,19 @@ class AveragePickNumberMetric:
         return type(self).__name__
 
     @staticmethod
-    def output_path(expansion: str, format_code: str,
-                     output_dir: Path | None = None,
-                     output_name: str | None = None) -> Path:
+    def output_path(
+        expansion: str,
+        format_code: str,
+        output_dir: Path | None = None,
+        output_name: str | None = None,
+    ) -> Path:
         return metric_output_path(
             AveragePickNumberMetric.DEFAULT_OUTPUT_DIR,
             AveragePickNumberMetric.DEFAULT_OUTPUT_NAME,
-            expansion, format_code, output_dir, output_name,
+            expansion,
+            format_code,
+            output_dir,
+            output_name,
         )
 
     def accumulate(self, chunk: pd.DataFrame) -> None:
@@ -113,11 +126,13 @@ class AveragePickNumberMetric:
             nocab_uuid = find_uuid_by_name(self._card_binder, GameId.MTG, name)
             if nocab_uuid is None or self._name_to_pick_count[name] == 0:
                 continue
-            rows.append({
-                "name": name,
-                "nocab_uuid": str(nocab_uuid),
-                "average_pick_number": pick_sum / self._name_to_pick_count[name],
-            })
+            rows.append(
+                {
+                    "name": name,
+                    "nocab_uuid": str(nocab_uuid),
+                    "average_pick_number": pick_sum / self._name_to_pick_count[name],
+                }
+            )
 
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(rows).to_parquet(self._output_path, index=False)

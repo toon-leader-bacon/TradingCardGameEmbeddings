@@ -159,7 +159,9 @@ class ScryfallCardIngestionStage:
                 binder.replace(existing.nocab_uuid, merged)
             stored_uuid = existing.nocab_uuid
 
-        binder.register_alias(self.SOURCE_GAME, DataSource.SCRYFALL, oracle_id, stored_uuid)
+        binder.register_alias(
+            self.SOURCE_GAME, DataSource.SCRYFALL, oracle_id, stored_uuid
+        )
         for data_source, source_id in self._extract_aliases(row):
             binder.register_alias(self.SOURCE_GAME, data_source, source_id, stored_uuid)
 

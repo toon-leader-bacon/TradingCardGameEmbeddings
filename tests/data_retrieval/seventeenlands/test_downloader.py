@@ -220,7 +220,11 @@ class TestDownload:
         # would hand the second ref's response to one of those retries
         # instead.
         def _get_side_effect(url: str, **kwargs: object) -> MagicMock:
-            return failing_response if url == _GAME_MSH_PREMIER.url else succeeding_response
+            return (
+                failing_response
+                if url == _GAME_MSH_PREMIER.url
+                else succeeding_response
+            )
 
         with patch("requests.get", side_effect=_get_side_effect) as mock_get:
             with patch(

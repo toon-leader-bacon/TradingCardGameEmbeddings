@@ -1,21 +1,13 @@
-
-
-import math
 import random
 from typing import Generic, TypeVar
 
-
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class SplitSamplerWithReplacement(Generic[T]):
-    def __init__(self,
-                 collection: list[T],
-                 rng_seed: int | None = None):
+    def __init__(self, collection: list[T], rng_seed: int | None = None):
         self.collection = collection
-        self.rng = random.Random(rng_seed) \
-            if rng_seed is not None \
-            else random.Random()
+        self.rng = random.Random(rng_seed) if rng_seed is not None else random.Random()
 
     def sample(self, batch_size: int, seed: int | None = None) -> list[T]:
         if batch_size <= 0 or len(self.collection) == 0:
@@ -26,16 +18,12 @@ class SplitSamplerWithReplacement(Generic[T]):
 
 
 class SplitSamplerWellOrdered(Generic[T]):
-    def __init__(self,
-                 collection: list[T],
-                 rng_seed: int | None = None):
+    def __init__(self, collection: list[T], rng_seed: int | None = None):
         self.collection = collection
         self.next_idx = 0
         self.length = len(collection)
 
-        self.rng = random.Random(rng_seed) \
-            if rng_seed is not None \
-            else random.Random()
+        self.rng = random.Random(rng_seed) if rng_seed is not None else random.Random()
 
     def reset(self, shuffle: bool = False, seed: int | None = None):
         self.next_idx = 0
@@ -60,15 +48,11 @@ class SplitSamplerWellOrdered(Generic[T]):
 
 
 class SplitSamplerWellOrderedLooping(Generic[T]):
-    def __init__(self,
-                 collection: list[T],
-                 rng_seed: int | None = None):
+    def __init__(self, collection: list[T], rng_seed: int | None = None):
         self.collection = collection
         self.next_idx = 0
         self.length = len(collection)
-        self.rng = random.Random(rng_seed) \
-            if rng_seed is not None \
-            else random.Random()
+        self.rng = random.Random(rng_seed) if rng_seed is not None else random.Random()
 
     def reset(self, shuffle: bool = False, seed: int | None = None):
         self.next_idx = 0
@@ -91,6 +75,6 @@ class SplitSamplerWellOrderedLooping(Generic[T]):
             # Take either the remaining elements needed to reach `batch_size`,
             # or the remaining elements in the collection, whichever is less.
             take = min(batch_size - len(result), self.length - self.next_idx)
-            result.extend(self.collection[self.next_idx:self.next_idx + take])
+            result.extend(self.collection[self.next_idx : self.next_idx + take])
             self.next_idx += take
         return result

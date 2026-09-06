@@ -24,7 +24,9 @@ class _FakeIngestionStage:
     def ingest(self, raw_path: Path, binder: CardBinder) -> list[UUID]:
         changed = []
         for name, source_id, raw_content in self._rows:
-            existing = binder.get_by_alias(self.SOURCE_GAME, DataSource.SCRYFALL, source_id)
+            existing = binder.get_by_alias(
+                self.SOURCE_GAME, DataSource.SCRYFALL, source_id
+            )
             if existing is not None:
                 continue
             card = GenericCard(
@@ -39,7 +41,9 @@ class _FakeIngestionStage:
                 ),
             )
             binder.create(card)
-            binder.register_alias(self.SOURCE_GAME, DataSource.SCRYFALL, source_id, card.nocab_uuid)
+            binder.register_alias(
+                self.SOURCE_GAME, DataSource.SCRYFALL, source_id, card.nocab_uuid
+            )
             changed.append(card.nocab_uuid)
         return changed
 
@@ -98,7 +102,9 @@ class TestBuildOrUpdateCardBinder:
         assert changed == []
         assert binder_path.exists()
 
-    def test_uses_ingestion_stage_source_game_not_a_parameter(self, tmp_path: Path) -> None:
+    def test_uses_ingestion_stage_source_game_not_a_parameter(
+        self, tmp_path: Path
+    ) -> None:
         binder_path = tmp_path / "mtg.jsonl"
         stage = _FakeIngestionStage([("Bolt", "src-1", {"a": 1})])
 

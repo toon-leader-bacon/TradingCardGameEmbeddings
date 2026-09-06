@@ -300,7 +300,7 @@ class TestPhase2:
 
         with patch("requests.get", return_value=response):
             with patch(
-                "src.data_retrieval.play_gwent.downloader.open",
+                "src.data_retrieval.download_utils.open",
                 side_effect=_tracking_open,
                 create=True,
             ):

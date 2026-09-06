@@ -56,10 +56,13 @@ class FileManagerParquet:
 
     _schema: pa.Schema
 
-    def __init__(self, path_to_training_data: Path,
-                 output_directory: Path,
-                 output_file_prefix: str = "split_",
-                 seed: int | None = None) -> None:
+    def __init__(
+        self,
+        path_to_training_data: Path,
+        output_directory: Path,
+        output_file_prefix: str = "split_",
+        seed: int | None = None,
+    ) -> None:
         """
         Inputs:
             path_to_training_data: source .parquet file (e.g. a metric
@@ -87,23 +90,30 @@ class FileManagerParquet:
         self.output_file_prefix = output_file_prefix
 
         if not self.path_to_training_data.exists():
-            raise FileNotFoundError(f"Training data file not found: {self.path_to_training_data}")
+            raise FileNotFoundError(
+                f"Training data file not found: {self.path_to_training_data}"
+            )
 
-        if not self.path_to_training_data.suffix == '.parquet':
+        if not self.path_to_training_data.suffix == ".parquet":
             raise ValueError(
-                f"Training data file is not a parquet file: {self.path_to_training_data}")
+                f"Training data file is not a parquet file: {self.path_to_training_data}"
+            )
 
         if self.path_to_training_data.stat().st_size == 0:
-            raise ValueError(f"Training data file is empty: {self.path_to_training_data}")
+            raise ValueError(
+                f"Training data file is empty: {self.path_to_training_data}"
+            )
 
         self._schema = pq.ParquetFile(self.path_to_training_data).schema_arrow
 
-    def make_splits(self,
-                    split_ratios: List[float] = [8, 1, 1],
-                    delete_old_splits: bool = True,
-                    shuffle: bool = True,
-                    batch_size: int = 32,
-                    load_row_group_batch_size: int = 10_000) -> List[ParquetChunkReader]:
+    def make_splits(
+        self,
+        split_ratios: List[float] = [8, 1, 1],
+        delete_old_splits: bool = True,
+        shuffle: bool = True,
+        batch_size: int = 32,
+        load_row_group_batch_size: int = 10_000,
+    ) -> List[ParquetChunkReader]:
         """Stream the source parquet file in row-group batches, split each
         batch by ratio, append each slice to the matching split's parquet
         file, then return one ParquetChunkReader per split.
@@ -127,12 +137,15 @@ class FileManagerParquet:
         _write_batch_to_splits per streamed batch).
         """
         splits: TTVSplits = TTVSplits.from_unnormalized(split_ratios)
-        output_paths = self._prepare_split_output_files(splits.num_splits, delete_old_splits)
-        self._stream_source_into_splits(output_paths, splits, shuffle, load_row_group_batch_size)
+        output_paths = self._prepare_split_output_files(
+            splits.num_splits, delete_old_splits
+        )
+        self._stream_source_into_splits(
+            output_paths, splits, shuffle, load_row_group_batch_size
+        )
         return [ParquetChunkReader(path, batch_size) for path in output_paths]
 
-    def shuffle_split(self, split: Split,
-                      batch_size: int = 32) -> ParquetChunkReader:
+    def shuffle_split(self, split: Split, batch_size: int = 32) -> ParquetChunkReader:
         """Convenience wrapper around shuffle_split_index taking the real
         Split enum (src.schema.splits.Split) instead of a raw index — the
         interface the trainer uses to re-shuffle a split's data (typically
@@ -154,8 +167,9 @@ class FileManagerParquet:
         else:
             raise ValueError(f"Unsupported split: {split}")
 
-    def shuffle_split_index(self, split_index: int,
-                            batch_size: int = 32) -> ParquetChunkReader:
+    def shuffle_split_index(
+        self, split_index: int, batch_size: int = 32
+    ) -> ParquetChunkReader:
         """Load one split file fully into memory, shuffle its rows, write
         it back out, and return a fresh chunked reader over it.
 
@@ -172,18 +186,20 @@ class FileManagerParquet:
         shuffle-and-rewrite round trip can't drift the file's on-disk
         schema away from self._schema over repeated epochs.
         """
-        target_file = self.output_directory / \
-            f"{self.output_file_prefix}_{get_split_file_postfix(split_index)}.parquet"
+        target_file = (
+            self.output_directory
+            / f"{self.output_file_prefix}_{get_split_file_postfix(split_index)}.parquet"
+        )
         df = pd.read_parquet(target_file, dtype_backend="pyarrow")
-        df = df.sample(
-            frac=1,
-            random_state=self.rng.randint(0, MAX_INT)
-        ).reset_index(drop=True)
+        df = df.sample(frac=1, random_state=self.rng.randint(0, MAX_INT)).reset_index(
+            drop=True
+        )
         df.to_parquet(target_file, index=False)
         return ParquetChunkReader(target_file, batch_size)
 
-    def _prepare_split_output_files(self, num_splits: int,
-                                    delete_old_splits: bool = True) -> List[Path]:
+    def _prepare_split_output_files(
+        self, num_splits: int, delete_old_splits: bool = True
+    ) -> List[Path]:
         """Compute each split's output path, deleting any pre-existing
         split files first when requested.
 
@@ -200,17 +216,23 @@ class FileManagerParquet:
         """
         self.output_directory.mkdir(parents=True, exist_ok=True)
         if delete_old_splits:
-            for path in self.output_directory.glob(f"{self.output_file_prefix}*.parquet"):
+            for path in self.output_directory.glob(
+                f"{self.output_file_prefix}*.parquet"
+            ):
                 path.unlink()
         return [
-            self.output_directory / f"{self.output_file_prefix}_{get_split_file_postfix(i)}.parquet"
+            self.output_directory
+            / f"{self.output_file_prefix}_{get_split_file_postfix(i)}.parquet"
             for i in range(num_splits)
         ]
 
-    def _stream_source_into_splits(self, output_paths: List[Path],
-                                   splits: TTVSplits,
-                                   shuffle: bool,
-                                   load_row_group_batch_size: int) -> None:
+    def _stream_source_into_splits(
+        self,
+        output_paths: List[Path],
+        splits: TTVSplits,
+        shuffle: bool,
+        load_row_group_batch_size: int,
+    ) -> None:
         """Stream self.path_to_training_data in row-group batches and
         write each batch's split-ratio slices into the matching split's
         parquet file.
@@ -242,14 +264,19 @@ class FileManagerParquet:
                 stack.enter_context(pq.ParquetWriter(path, self._schema))
                 for path in output_paths
             ]
-            for record_batch in source_file.iter_batches(batch_size=load_row_group_batch_size):
+            for record_batch in source_file.iter_batches(
+                batch_size=load_row_group_batch_size
+            ):
                 batch = record_batch.to_pandas(types_mapper=pd.ArrowDtype)
                 self._write_batch_to_splits(batch, writers, splits, shuffle)
 
-    def _write_batch_to_splits(self, batch: pd.DataFrame,
-                               writers: List[pq.ParquetWriter],
-                               splits: TTVSplits,
-                               shuffle: bool) -> None:
+    def _write_batch_to_splits(
+        self,
+        batch: pd.DataFrame,
+        writers: List[pq.ParquetWriter],
+        splits: TTVSplits,
+        shuffle: bool,
+    ) -> None:
         """Split one streamed batch by ratio and write each non-empty
         slice to its corresponding open writer.
 
@@ -273,10 +300,16 @@ class FileManagerParquet:
                 random_state=self.rng.randint(0, MAX_INT),
             ).reset_index(drop=True)
 
-        for i, (start_index, end_index) in enumerate(splits.get_split_indices(len(batch))):
+        for i, (start_index, end_index) in enumerate(
+            splits.get_split_indices(len(batch))
+        ):
             if start_index == end_index:
                 continue
             slice_df = batch.iloc[start_index:end_index]
-            writers[i].write_table(pa.Table.from_pandas(
-                slice_df, schema=self._schema, preserve_index=False,
-            ))
+            writers[i].write_table(
+                pa.Table.from_pandas(
+                    slice_df,
+                    schema=self._schema,
+                    preserve_index=False,
+                )
+            )

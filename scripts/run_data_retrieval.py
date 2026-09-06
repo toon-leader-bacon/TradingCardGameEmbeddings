@@ -10,6 +10,8 @@ from src.data_retrieval.sts_gg.run_downloader import \
     STSGGRunDownloader as sts_gg_run_downloader
 from src.data_retrieval.sts2runs.downloader import \
     STS2RunsDownloader as sts2runs_downloader
+from src.data_retrieval.pitchstack.downloader import \
+    PitchstackDeckDownloader as pitchstack_downloader
 
 
 def main() -> None:
@@ -21,10 +23,15 @@ def main() -> None:
     #     rate_limiter=RateLimiter(requests_per_minute=60),
     #     output_dir=Path("data/raw/sts_gg"),
     # )
-    downloader = sts2runs_downloader(
-        raw_data_dir=Path("data/raw/sts2runs"),
+    # downloader = sts2runs_downloader(
+    #     raw_data_dir=Path("data/raw/sts2runs"),
+    # )
+    downloader = pitchstack_downloader(
+        rate_limiter=RateLimiter(requests_per_minute=60),
+        output_dir=Path("data/raw/pitchstack"),
     )
-    downloader.download()
+    downloader.phase_1()
+    downloader.phase_2()
 
 
 if __name__ == "__main__":

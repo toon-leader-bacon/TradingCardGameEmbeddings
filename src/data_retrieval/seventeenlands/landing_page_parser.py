@@ -48,9 +48,9 @@ class LandingPageParser:
 
         Example:
             >>> parser = LandingPageParser()
-            >>> html = '<a href="https://17lands-public.s3.amazonaws.com/analysis_data/game_data/game_data_public.MSH.PremierDraft.csv.gz">link</a>'
+            >>> html = '<a href="https://17lands-public.s3.amazonaws.com/analysis_data/game_data/game_data_public.MSH.PremierDraft.csv.gz">link</a>'  # noqa: E501
             >>> parser.parse(html)
-            [SeventeenLandsFileRef(data_type=DataType.GAME, expansion='MSH', format_code='PremierDraft', url='https://17lands-public.s3.amazonaws.com/analysis_data/game_data/game_data_public.MSH.PremierDraft.csv.gz')]
+            [SeventeenLandsFileRef(data_type=DataType.GAME, expansion='MSH', format_code='PremierDraft', url='https://17lands-public.s3.amazonaws.com/analysis_data/game_data/game_data_public.MSH.PremierDraft.csv.gz')]  # noqa: E501
         """
         refs = []
         for match in _CSV_GZ_LINK_PATTERN.finditer(html):

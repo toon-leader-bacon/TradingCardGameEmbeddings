@@ -89,7 +89,9 @@ class SeventeenLandsDownloader:
             download_one() is called.
         Exceptions: none.
         """
-        self.raw_data_dir = raw_data_dir if raw_data_dir is not None else self.DEFAULT_RAW_DATA_DIR
+        self.raw_data_dir = (
+            raw_data_dir if raw_data_dir is not None else self.DEFAULT_RAW_DATA_DIR
+        )
         self.rate_limiter = rate_limiter
 
     def download(

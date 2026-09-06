@@ -1,12 +1,11 @@
-
 import random
 from typing import Tuple, TypeVar, Generic
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class TTVSplits(Generic[T]):
-    """ Utility for helping compute Train Test and Validate splits."""
+    """Utility for helping compute Train Test and Validate splits."""
 
     def __init__(self, split_ratios: list[float] = []):
         # Typically size 2 (train, test) or 3 (train, test, validate)
@@ -23,9 +22,12 @@ class TTVSplits(Generic[T]):
         total = sum(unnormalized_ratios)
         return cls([ratio / total for ratio in unnormalized_ratios])
 
-    def split_collection(self, collection: list[Generic[T]],
-                         shuffle: bool = False,
-                         rng_seed: int | None = None) -> list[list[Generic[T]]]:
+    def split_collection(
+        self,
+        collection: list[T],
+        shuffle: bool = False,
+        rng_seed: int | None = None,
+    ) -> list[list[T]]:
         """
         Splits a collection into a list of lists, where each list is a split.
         """
@@ -39,7 +41,7 @@ class TTVSplits(Generic[T]):
         elif self.num_splits == 1:
             return [collection]
 
-        result: list[list[Generic[T]]] = []
+        result: list[list[T]] = []
 
         left_i: int = 0  # Represents the first index of the current split
         right_i: int = 0  # Represents the last index + 1 of the current split
@@ -48,7 +50,7 @@ class TTVSplits(Generic[T]):
             # round down to nearest integer represengting the last element in the
             # current split
             right_i = left_i + int(self.split_ratios[split_idx] * len(collection))
-            split: list[Generic[T]] = collection[left_i:right_i]
+            split: list[T] = collection[left_i:right_i]
 
             result.append(split)
 

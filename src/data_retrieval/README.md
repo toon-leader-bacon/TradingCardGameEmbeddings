@@ -65,6 +65,22 @@ Implemented today:
   [`play_gwent/TODO.md`](play_gwent/TODO.md) for a known,
   deliberately-deferred naming inconsistency with the other sources
   in this container.
+- `cardvault_fabtcg/` — pulls Flesh and Blood card data from
+  cardvault.fabtcg.com's single static print-list CSV (no API, no
+  pagination), served from a CloudFront distribution.
+- `pitchstack/` — pulls Flesh and Blood deck data from pitchstack.gg,
+  in two phases: `phase_1()` fetches the site's public-decks XML
+  sitemap (`/sitemaps/public-decks-0.xml`) and extracts every deck id
+  (`d-<uuid>`) found in its `<loc>` URLs, `phase_2()` fetches each
+  deck's full record (`GET /v1/decks/{deck_id}`) and appends it to
+  `decks.jsonl` — that record already embeds every deck *version* id
+  the deck has (`activeDeckVersionId`, and the full `deckVersions`
+  list), which is otherwise unrelated to and not derivable from the
+  deck id itself. Two further pitchstack.gg endpoints
+  (`/v1/deck_versions/{deck_version_id}/cards` — one version's card
+  list; `/v1/deck_versions/{deck_version_id}/history` — a version's
+  edit history) are documented in the module docstring but
+  deliberately not implemented yet.
 - `rate_limiter.py` — shared politeness pacer (`RateLimiter`).
 - `download_utils.py` — shared GET-with-retries helpers:
   `download_to_file` (streamed straight to disk, for any source's
@@ -213,6 +229,33 @@ from src.data_retrieval.sts_gg.run_downloader import STSGGRunDownloader
 from src.data_retrieval.rate_limiter import RateLimiter
 
 downloader = STSGGRunDownloader(RateLimiter(requests_per_minute=12))
+downloader.phase_1()
+print(downloader.phase_2())
+"
+```
+
+**CardVault (fabtcg.com)** (a single static CSV, no rate limiting
+needed):
+
+```bash
+python3 -c "
+from src.data_retrieval.cardvault_fabtcg.card_downloader import CardVaultFabtcgCardDownloader
+
+downloader = CardVaultFabtcgCardDownloader()
+print(downloader.fetch())
+"
+```
+
+**Pitchstack decks** (pitchstack.gg's public-decks sitemap + per-deck
+record API — two phases, run in order; `phase_2()` skips any deck id
+already saved to disk from a prior run):
+
+```bash
+python3 -c "
+from src.data_retrieval.pitchstack.downloader import PitchstackDeckDownloader
+from src.data_retrieval.rate_limiter import RateLimiter
+
+downloader = PitchstackDeckDownloader(RateLimiter(requests_per_minute=12))
 downloader.phase_1()
 print(downloader.phase_2())
 "

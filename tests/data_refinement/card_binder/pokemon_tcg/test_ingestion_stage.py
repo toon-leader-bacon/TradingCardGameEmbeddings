@@ -42,7 +42,9 @@ class TestIngest:
         assert set(binder.all_uuids(GameId.POKEMON)) == set(changed)
 
     def test_creates_across_multiple_set_files(self, tmp_path: Path) -> None:
-        _write_set_file(tmp_path / "base4.json", [{"id": "base4-1", "name": "Alakazam"}])
+        _write_set_file(
+            tmp_path / "base4.json", [{"id": "base4-1", "name": "Alakazam"}]
+        )
         _write_set_file(tmp_path / "bw1.json", [{"id": "bw1-1", "name": "Emboar"}])
         binder = CardBinder()
 
@@ -83,7 +85,9 @@ class TestIngest:
 
         PokemonTcgCardIngestionStage().ingest(tmp_path, binder)
 
-        alakazam = binder.get_by_alias(GameId.POKEMON, DataSource.POKEMON_TCG, "base4-1")
+        alakazam = binder.get_by_alias(
+            GameId.POKEMON, DataSource.POKEMON_TCG, "base4-1"
+        )
         chansey = binder.get_by_alias(GameId.POKEMON, DataSource.POKEMON_TCG, "base4-2")
         assert alakazam.nocab_uuid != chansey.nocab_uuid
 
@@ -92,7 +96,9 @@ class TestIngest:
         # these are distinct cards under this project's own identity
         # rule (name, set code), confirmed against real
         # cross-era Pokemon reprints.
-        _write_set_file(tmp_path / "base4.json", [{"id": "base4-1", "name": "Alakazam"}])
+        _write_set_file(
+            tmp_path / "base4.json", [{"id": "base4-1", "name": "Alakazam"}]
+        )
         _write_set_file(tmp_path / "neo1.json", [{"id": "neo1-1", "name": "Alakazam"}])
         binder = CardBinder()
 
@@ -150,25 +156,35 @@ class TestReIngestDuplicates:
         stage = PokemonTcgCardIngestionStage()
         _write_set_file(tmp_path / "base4.json", [_REAL_ROW])
         stage.ingest(tmp_path, binder)
-        original = binder.get_by_alias(GameId.POKEMON, DataSource.POKEMON_TCG, "base4-1")
+        original = binder.get_by_alias(
+            GameId.POKEMON, DataSource.POKEMON_TCG, "base4-1"
+        )
 
         second_dir = tmp_path / "second"
         second_dir.mkdir()
         _write_set_file(second_dir / "base4.json", [_REAL_ROW])
         changed = stage.ingest(second_dir, binder)
 
-        reloaded = binder.get_by_alias(GameId.POKEMON, DataSource.POKEMON_TCG, "base4-1")
+        reloaded = binder.get_by_alias(
+            GameId.POKEMON, DataSource.POKEMON_TCG, "base4-1"
+        )
         assert reloaded.nocab_uuid == original.nocab_uuid
         assert changed == []
 
-    def test_richer_alternate_art_updates_content_in_place(self, tmp_path: Path) -> None:
+    def test_richer_alternate_art_updates_content_in_place(
+        self, tmp_path: Path
+    ) -> None:
         binder = CardBinder()
         stage = PokemonTcgCardIngestionStage()
         sparse_dir = tmp_path / "sparse"
         sparse_dir.mkdir()
-        _write_set_file(sparse_dir / "swsh8.json", [{"id": "swsh8-113", "name": "Mew V"}])
+        _write_set_file(
+            sparse_dir / "swsh8.json", [{"id": "swsh8-113", "name": "Mew V"}]
+        )
         stage.ingest(sparse_dir, binder)
-        original = binder.get_by_alias(GameId.POKEMON, DataSource.POKEMON_TCG, "swsh8-113")
+        original = binder.get_by_alias(
+            GameId.POKEMON, DataSource.POKEMON_TCG, "swsh8-113"
+        )
 
         richer_dir = tmp_path / "richer"
         richer_dir.mkdir()
@@ -182,12 +198,16 @@ class TestReIngestDuplicates:
 
         changed = stage.ingest(richer_dir, binder)
 
-        updated = binder.get_by_alias(GameId.POKEMON, DataSource.POKEMON_TCG, "swsh8-113")
+        updated = binder.get_by_alias(
+            GameId.POKEMON, DataSource.POKEMON_TCG, "swsh8-113"
+        )
         assert updated.nocab_uuid == original.nocab_uuid
         assert updated.raw_content == richer_row
         assert changed == [original.nocab_uuid]
         # Both printing ids resolve to the same, now-merged card.
         assert (
-            binder.get_by_alias(GameId.POKEMON, DataSource.POKEMON_TCG, "swsh8-250").nocab_uuid
+            binder.get_by_alias(
+                GameId.POKEMON, DataSource.POKEMON_TCG, "swsh8-250"
+            ).nocab_uuid
             == original.nocab_uuid
         )

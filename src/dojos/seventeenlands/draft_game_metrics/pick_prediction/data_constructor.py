@@ -47,8 +47,12 @@ class PickPredictionDataConstructor:
                 continue
             picked_index = pack_uuid_list.index(picked_card_uuid)
 
-            pack_cards = [self.card_binder.get_by_uuid(UUID(uuid)) for uuid in pack_uuid_list]
-            pool_cards = [self.card_binder.get_by_uuid(UUID(uuid)) for uuid in pool_uuid_list]
+            pack_cards = [
+                self.card_binder.get_by_uuid(UUID(uuid)) for uuid in pack_uuid_list
+            ]
+            pool_cards = [
+                self.card_binder.get_by_uuid(UUID(uuid)) for uuid in pool_uuid_list
+            ]
             if not all(pack_cards) or not all(pool_cards):
                 continue
 

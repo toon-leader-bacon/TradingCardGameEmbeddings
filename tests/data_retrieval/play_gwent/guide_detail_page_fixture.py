@@ -82,7 +82,8 @@ DOUBLE_QUOTED_GUIDE_PAGE_HTML = f"""
 <body>
 {_DECOY_QUOTED_ATTRIBUTE_ELEMENT}
 <div class="wrapper"><div class="content">
-<div id="root" data-url-base="/en/decks" data-state="{_ESCAPED_DATA_STATE}" data-translations="{{}}"></div>
+<div id="root" data-url-base="/en/decks"
+     data-state="{_ESCAPED_DATA_STATE}" data-translations="{{}}"></div>
 </div></div></body></html>
 """
 
@@ -95,7 +96,8 @@ SINGLE_QUOTED_GUIDE_PAGE_HTML = f"""
 <body>
 {_DECOY_QUOTED_ATTRIBUTE_ELEMENT}
 <div class="wrapper"><div class="content">
-<div id="root" data-url-base="/en/decks" data-state='{_ESCAPED_DATA_STATE}' data-translations="{{}}"></div>
+<div id="root" data-url-base="/en/decks"
+     data-state='{_ESCAPED_DATA_STATE}' data-translations="{{}}"></div>
 </div></div></body></html>
 """
 

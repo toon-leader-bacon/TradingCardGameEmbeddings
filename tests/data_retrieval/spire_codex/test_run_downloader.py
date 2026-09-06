@@ -23,7 +23,9 @@ def _fast_rate_limiter() -> RateLimiter:
     return RateLimiter(requests_per_minute=1_000_000_000)
 
 
-def _make_downloader(raw_data_dir: Path, *, page_limit: int | None = None) -> SpireCodexRunDownloader:
+def _make_downloader(
+    raw_data_dir: Path, *, page_limit: int | None = None
+) -> SpireCodexRunDownloader:
     return SpireCodexRunDownloader(
         export_url=_EXPORT_URL,
         raw_data_dir=raw_data_dir,
@@ -95,7 +97,9 @@ class TestResumePoint:
     def test_fresh_walk_starts_at_page_zero(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)
 
-        assert downloader._resume_point([]) == _PagesRemaining(next_page_index=0, cursor=None)
+        assert downloader._resume_point([]) == _PagesRemaining(
+            next_page_index=0, cursor=None
+        )
 
     def test_continues_from_last_page_with_a_cursor(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)
@@ -107,7 +111,9 @@ class TestResumePoint:
             next_page_index=1, cursor="cursor-1"
         )
 
-    def test_export_complete_when_last_page_has_no_next_cursor(self, tmp_path: Path) -> None:
+    def test_export_complete_when_last_page_has_no_next_cursor(
+        self, tmp_path: Path
+    ) -> None:
         downloader = _make_downloader(tmp_path)
         downloaded_pages = [
             _FetchedPage(path=tmp_path / "page_00000.jsonl.gz", next_cursor=None)
@@ -146,7 +152,9 @@ class TestRecordWindow:
 
 
 class TestEstimateTotalPages:
-    def test_computes_ceiling_of_total_runs_over_page_limit(self, tmp_path: Path) -> None:
+    def test_computes_ceiling_of_total_runs_over_page_limit(
+        self, tmp_path: Path
+    ) -> None:
         downloader = _make_downloader(tmp_path, page_limit=50000)
         response = _mock_stats_response(total_runs=1_527_664)
 
@@ -178,7 +186,9 @@ class TestFetchPage:
     def test_writes_page_and_cursor_sidecar(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)
         tmp_path.mkdir(parents=True, exist_ok=True)
-        response = _mock_page_response([b"gz-bytes-a", b"gz-bytes-b"], next_cursor="cursor-1")
+        response = _mock_page_response(
+            [b"gz-bytes-a", b"gz-bytes-b"], next_cursor="cursor-1"
+        )
 
         with patch("requests.get", return_value=response) as mock_get:
             page = downloader._fetch_page(0, None, start=None, end=None)
@@ -188,7 +198,9 @@ class TestFetchPage:
         assert page.path == tmp_path / "page_00000.jsonl.gz"
         assert page.next_cursor == "cursor-1"
         assert page.path.read_bytes() == b"gz-bytes-agz-bytes-b"
-        assert (tmp_path / "page_00000.next_cursor").read_text(encoding="utf-8") == "cursor-1"
+        assert (tmp_path / "page_00000.next_cursor").read_text(
+            encoding="utf-8"
+        ) == "cursor-1"
 
     def test_empty_sidecar_when_no_next_cursor_header(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)
@@ -246,7 +258,10 @@ class TestFetch:
     def test_creates_raw_data_dir_if_missing(self, tmp_path: Path) -> None:
         nested_dir = tmp_path / "does" / "not" / "exist"
         downloader = _make_downloader(nested_dir)
-        responses = [_mock_stats_response(total_runs=1), _mock_page_response([b"x"], None)]
+        responses = [
+            _mock_stats_response(total_runs=1),
+            _mock_page_response([b"x"], None),
+        ]
 
         with patch("requests.get", side_effect=responses):
             downloader.fetch()
@@ -295,7 +310,9 @@ class TestFetch:
             tmp_path / "page_00001.jsonl.gz",
         ]
 
-    def test_already_complete_export_makes_no_page_requests(self, tmp_path: Path) -> None:
+    def test_already_complete_export_makes_no_page_requests(
+        self, tmp_path: Path
+    ) -> None:
         downloader = _make_downloader(tmp_path)
         tmp_path.mkdir(parents=True, exist_ok=True)
         downloader._record_window(None, None)

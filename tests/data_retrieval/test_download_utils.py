@@ -4,7 +4,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from src.data_retrieval.download_utils import download_to_file, download_to_string
+from src.data_retrieval.download_utils import (
+    append_with_manifest,
+    download_to_file,
+    download_to_string,
+    read_manifest,
+)
 
 
 def _mock_streaming_response(chunks: list[bytes]) -> MagicMock:
@@ -88,9 +93,7 @@ class TestDownloadToString:
         with patch("requests.get", return_value=response) as mock_get:
             body = download_to_string("https://example.com/page.json")
 
-        mock_get.assert_called_once_with(
-            "https://example.com/page.json", timeout=60
-        )
+        mock_get.assert_called_once_with("https://example.com/page.json", timeout=60)
         assert body == '{"hello": "world"}'
 
     def test_uses_given_timeout(self) -> None:
@@ -125,3 +128,59 @@ class TestDownloadToString:
                 download_to_string("https://example.com/page.json", max_attempts=2)
 
         assert mock_get.call_count == 2
+
+
+class TestReadManifest:
+    def test_returns_empty_set_when_manifest_does_not_exist(
+        self, tmp_path: Path
+    ) -> None:
+        assert read_manifest(tmp_path / "manifest.txt") == set()
+
+    def test_returns_recorded_ids(self, tmp_path: Path) -> None:
+        manifest_path = tmp_path / "manifest.txt"
+        manifest_path.write_text("a\nb\nc\n", encoding="utf-8")
+
+        assert read_manifest(manifest_path) == {"a", "b", "c"}
+
+    def test_skips_blank_lines(self, tmp_path: Path) -> None:
+        manifest_path = tmp_path / "manifest.txt"
+        manifest_path.write_text("a\n\nb\n\n", encoding="utf-8")
+
+        assert read_manifest(manifest_path) == {"a", "b"}
+
+
+class TestAppendWithManifest:
+    def test_appends_data_line_and_manifest_id(self, tmp_path: Path) -> None:
+        data_path = tmp_path / "data.jsonl"
+        manifest_path = tmp_path / "manifest.txt"
+
+        append_with_manifest(data_path, manifest_path, '{"id": "a"}', "a")
+        append_with_manifest(data_path, manifest_path, '{"id": "b"}', "b")
+
+        assert data_path.read_text(encoding="utf-8") == '{"id": "a"}\n{"id": "b"}\n'
+        assert manifest_path.read_text(encoding="utf-8") == "a\nb\n"
+
+    def test_writes_data_line_before_manifest_line(self, tmp_path: Path) -> None:
+        # Regression guard for the crash-safety write ordering this
+        # function exists to centralize: a crash between the two
+        # writes must leave a data row with no matching manifest
+        # entry (harmless, re-fetchable), never the reverse.
+        data_path = tmp_path / "data.jsonl"
+        manifest_path = tmp_path / "manifest.txt"
+
+        real_open = open
+        write_order: list[str] = []
+
+        def _tracking_open(path, mode="r", *args, **kwargs):
+            if mode == "a":
+                write_order.append(Path(path).name)
+            return real_open(path, mode, *args, **kwargs)
+
+        with patch(
+            "src.data_retrieval.download_utils.open",
+            side_effect=_tracking_open,
+            create=True,
+        ):
+            append_with_manifest(data_path, manifest_path, "data", "id")
+
+        assert write_order == ["data.jsonl", "manifest.txt"]

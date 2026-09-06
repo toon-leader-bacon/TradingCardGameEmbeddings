@@ -36,6 +36,7 @@ import requests
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 
+from src.data_retrieval.download_utils import append_with_manifest, read_manifest
 from src.data_retrieval.rate_limiter import RateLimiter
 
 _REQUEST_TIMEOUT_SECONDS = 60
@@ -250,15 +251,7 @@ class PlayGwentDownloader:
         ]
 
         manifest_path = self.output_dir / "guides_manifest.txt"
-        already_downloaded = (
-            {
-                int(line)
-                for line in manifest_path.read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            }
-            if manifest_path.exists()
-            else set()
-        )
+        already_downloaded = {int(line) for line in read_manifest(manifest_path)}
 
         guides_path = self.output_dir / "guides.jsonl"
 
@@ -283,13 +276,9 @@ class PlayGwentDownloader:
                 tqdm.write(f"Play Gwent guide {guide_id} failed: {error}")
                 continue
 
-            with open(guides_path, "a", encoding="utf-8") as guides_file:
-                guides_file.write(json.dumps(guide_payload) + "\n")
-                guides_file.flush()
-
-            with open(manifest_path, "a", encoding="utf-8") as manifest_file:
-                manifest_file.write(f"{guide_id}\n")
-                manifest_file.flush()
+            append_with_manifest(
+                guides_path, manifest_path, json.dumps(guide_payload), str(guide_id)
+            )
 
         return guides_path
 
@@ -381,7 +370,7 @@ class PlayGwentDownloader:
             )
 
         data_state = root_div.get("data-state")
-        if data_state is None:
+        if not isinstance(data_state, str):
             raise ValueError(
                 f"{_ROOT_DIV_SELECTOR!r} element has no data-state attribute"
             )

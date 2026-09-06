@@ -399,7 +399,9 @@ class CardBinder:
             >>> list(binder.all_cards(GameId.MTG))
         """
         return [
-            card for card in self._cards_by_uuid.values() if card.source_game == source_game
+            card
+            for card in self._cards_by_uuid.values()
+            if card.source_game == source_game
         ]
 
     # endregion Card Getters
@@ -443,7 +445,9 @@ class CardBinder:
             >>> binder.register_alias(GameId.MTG, DataSource.ARENA, "76497", some_card.nocab_uuid)
         """
         if nocab_uuid not in self._cards_by_uuid:
-            raise ValueError(f"register_alias: {nocab_uuid} is not a card this binder holds")
+            raise ValueError(
+                f"register_alias: {nocab_uuid} is not a card this binder holds"
+            )
         self._alias_ledger.register(source_game, data_source, source_id, nocab_uuid)
 
     @staticmethod
@@ -499,7 +503,9 @@ class CardBinder:
                         provenance=Provenance(
                             data_source=DataSource(row["provenance"]["data_source"]),
                             source_id=row["provenance"]["source_id"],
-                            fetched_at=datetime.fromisoformat(row["provenance"]["fetched_at"]),
+                            fetched_at=datetime.fromisoformat(
+                                row["provenance"]["fetched_at"]
+                            ),
                         ),
                     )
                     binder._upsert_card(card)
@@ -622,7 +628,9 @@ class CardBinder:
         Exceptions: none.
         """
         old_card = self._cards_by_uuid.get(card.nocab_uuid)
-        old_name_key = (old_card.source_game, old_card.name) if old_card is not None else None
+        old_name_key = (
+            (old_card.source_game, old_card.name) if old_card is not None else None
+        )
         new_name_key = (card.source_game, card.name)
 
         self._cards_by_uuid[card.nocab_uuid] = card

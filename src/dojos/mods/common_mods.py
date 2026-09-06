@@ -21,7 +21,7 @@ class MaskTargetKeyMod(Mod):
     def apply_single(self, data: TrainingDatum) -> TrainingDatum:
         # Assumes the first element of the TrainingDatum is a single GenericCard
         card: GenericCard = data[0]
-        card.raw_content[self.key] = f"[MASK]"
+        card.raw_content[self.key] = "[MASK]"
         return (card, data[1])
 
     def apply(self, data: List[TrainingDatum]) -> List[TrainingDatum]:

@@ -25,12 +25,14 @@ class PickPredictionCrossEntropyLoss(NocabLoss[List[torch.Tensor], List[int]]):
     NocabLoss.calculate is expected to return.
     """
 
-    def calculate(self,
-                  decoder_output: List[torch.Tensor],
-                  labels: List[int]) -> torch.Tensor:
+    def calculate(
+        self, decoder_output: List[torch.Tensor], labels: List[int]
+    ) -> torch.Tensor:
         if len(decoder_output) != len(labels):
             raise ValueError(
-                f"The number of decoder outputs ({len(decoder_output)}) does not match the number of labels ({len(labels)})")
+                f"The number of decoder outputs ({len(decoder_output)}) does not "
+                f"match the number of labels ({len(labels)})"
+            )
 
         per_datum_losses = [
             F.cross_entropy(logits.unsqueeze(0), torch.tensor([label]))

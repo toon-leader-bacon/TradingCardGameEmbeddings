@@ -22,6 +22,13 @@ the only real difference between them (streaming straight to disk vs.
 buffering the whole body as text) lives entirely inside each one's own
 attempt closure. See src/data_retrieval/TODO.md's note on migrating
 other sources' private retry loops onto these shared functions.
+
+read_manifest()/append_with_manifest() were extracted once the same
+"read a manifest file's ids, else empty set" plus "append a data row,
+then its manifest row, flushing both" shape showed up independently in
+three two-phase downloaders' phase_2() methods (STSGGRunDownloader,
+PlayGwentDownloader, PitchstackDeckDownloader) — the rule-of-three
+case, same as download_to_file/download_to_string themselves.
 """
 
 import time
@@ -133,6 +140,89 @@ def download_to_file(
             raise
 
     _call_with_retries(_attempt, max_attempts=max_attempts)
+
+
+def read_manifest(manifest_path: Path) -> set[str]:
+    """Read a manifest file's recorded ids, or an empty set if it
+    doesn't exist yet.
+
+    Shared across data_retrieval sources — extracted after the same
+    read-if-exists-else-empty-set block showed up independently in
+    three downloaders (STSGGRunDownloader, PlayGwentDownloader,
+    PitchstackDeckDownloader), each pairing it with a JSONL data file
+    resumed via append_with_manifest() below. Placed at this shared
+    level for the same rule-of-three reason as download_to_file/
+    download_to_string — see this module's docstring.
+
+    Inputs:
+        manifest_path: path to a manifest file, one id per line.
+    Output: recorded ids, as a set (order doesn't matter — this is
+        purely a fast "already downloaded" membership check).
+    Side effects: reads manifest_path if it exists.
+    Exceptions: none expected beyond filesystem errors.
+
+    Example:
+        >>> already_downloaded = read_manifest(Path("data/raw/example/manifest.txt"))
+    """
+    if not manifest_path.exists():
+        return set()
+
+    return {
+        line
+        for line in manifest_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
+
+
+def append_with_manifest(
+    data_path: Path, manifest_path: Path, data_line: str, manifest_id: str
+) -> None:
+    """Append data_line to data_path, then manifest_id to
+    manifest_path, flushing each write immediately.
+
+    Shared across data_retrieval sources — see read_manifest() above
+    for the extraction rationale. data_line is appended BEFORE
+    manifest_id, deliberately: a crash between the two leaves a data
+    row with no matching manifest entry (a harmless, self-correcting
+    gap — the next run just re-fetches and re-appends that same item,
+    producing a duplicate line a downstream reader can de-dup on)
+    rather than the reverse failure mode, where the manifest would
+    claim an item is done while its data row was never written — a
+    silent, undetectable loss. This ordering is the entire reason this
+    function exists rather than each caller writing two open()/write()
+    calls inline: centralizing it here means every caller gets it
+    right by construction, not by each one remembering the rule.
+
+    Inputs:
+        data_path: JSONL (or similar line-oriented) file data_line is
+            appended to, exactly as given — this function has no
+            opinion on its contents' format.
+        manifest_path: manifest file manifest_id is appended to, after
+            data_path's write completes.
+        data_line: one line's worth of content, without a trailing
+            newline (this function adds it).
+        manifest_id: the id being recorded as done, without a trailing
+            newline (this function adds it).
+    Output: none.
+    Side effects: appends one line to data_path, flushing immediately;
+        then appends one line to manifest_path, flushing immediately.
+    Exceptions: raises on failure to write either file.
+
+    Example:
+        >>> append_with_manifest(
+        ...     Path("data/raw/example/items.jsonl"),
+        ...     Path("data/raw/example/manifest.txt"),
+        ...     json.dumps(payload),
+        ...     item_id,
+        ... )
+    """
+    with open(data_path, "a", encoding="utf-8") as data_file:
+        data_file.write(data_line + "\n")
+        data_file.flush()
+
+    with open(manifest_path, "a", encoding="utf-8") as manifest_file:
+        manifest_file.write(manifest_id + "\n")
+        manifest_file.flush()
 
 
 def download_to_string(

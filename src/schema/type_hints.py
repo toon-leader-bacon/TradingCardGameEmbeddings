@@ -25,13 +25,13 @@ BatchedMultiGroupInput = List[MultiGroupInput]
 
 TrainingInput = Union[
     SingleCardInput,  # GenericCard
-    MultiCardInput,   # List[GenericCard]
-    MultiGroupInput   # List[List[GenericCard]]
+    MultiCardInput,  # List[GenericCard]
+    MultiGroupInput,  # List[List[GenericCard]]
 ]
 BatchedTrainingInput = Union[
     BatchedSingleCardInput,  # List[GenericCard]
-    BatchedMultiCardInput,   # List[List[GenericCard]]
-    BatchedMultiGroupInput   # List[List[List[GenericCard]]]
+    BatchedMultiCardInput,  # List[List[GenericCard]]
+    BatchedMultiGroupInput,  # List[List[List[GenericCard]]]
 ]
 # endregion Inputs
 
@@ -51,14 +51,8 @@ BatchedMultiCardEmbedding = List[MultiCardEmbedding]
 MultiGroupEmbedding = List[MultiCardEmbedding]
 BatchedMultiGroupEmbedding = List[MultiGroupEmbedding]
 
-ModelOutput = Union[
-    SingleCardEmbedding,
-    MultiCardEmbedding,
-    MultiGroupEmbedding
-]
+ModelOutput = Union[SingleCardEmbedding, MultiCardEmbedding, MultiGroupEmbedding]
 BatchedModelOutput = Union[
-    BatchedSingleCardEmbedding,
-    BatchedMultiCardEmbedding,
-    BatchedMultiGroupEmbedding
+    BatchedSingleCardEmbedding, BatchedMultiCardEmbedding, BatchedMultiGroupEmbedding
 ]
 # endregion Outputs

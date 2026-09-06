@@ -147,7 +147,11 @@ class AliasLedger:
         """
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as ledger_file:
-            for (game, data_source, source_id), nocab_uuid in self._uuid_by_alias.items():
+            for (
+                game,
+                data_source,
+                source_id,
+            ), nocab_uuid in self._uuid_by_alias.items():
                 if game != source_game:
                     continue
                 row = {

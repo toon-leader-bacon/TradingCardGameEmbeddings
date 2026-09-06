@@ -30,10 +30,14 @@ class Metric(Protocol):
         ...
 
 
-def metric_output_path(default_dir: Path, default_name: str,
-                        expansion: str, format_code: str,
-                        output_dir: Path | None = None,
-                        output_name: str | None = None) -> Path:
+def metric_output_path(
+    default_dir: Path,
+    default_name: str,
+    expansion: str,
+    format_code: str,
+    output_dir: Path | None = None,
+    output_name: str | None = None,
+) -> Path:
     """Build a metric's output path from expansion/format_code, falling
     back to a metric's own class-level defaults when output_dir/
     output_name aren't overridden. Shared by every Metric's own

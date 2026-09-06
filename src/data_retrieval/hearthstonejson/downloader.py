@@ -85,7 +85,11 @@ class HearthstoneJsonDownloader:
     DEFAULT_RAW_DATA_DIR: ClassVar[Path] = Path("data/raw/hearthstonejson")
 
     def __init__(
-        self, listing_url: str, raw_data_dir: Path | None = None, *, rate_limiter: RateLimiter
+        self,
+        listing_url: str,
+        raw_data_dir: Path | None = None,
+        *,
+        rate_limiter: RateLimiter,
     ) -> None:
         """
         Inputs:
@@ -109,7 +113,9 @@ class HearthstoneJsonDownloader:
         Exceptions: none.
         """
         self.listing_url = listing_url
-        self.raw_data_dir = raw_data_dir if raw_data_dir is not None else self.DEFAULT_RAW_DATA_DIR
+        self.raw_data_dir = (
+            raw_data_dir if raw_data_dir is not None else self.DEFAULT_RAW_DATA_DIR
+        )
         self.rate_limiter = rate_limiter
 
     def fetch(self) -> list[BuildDownloadOutcome]:

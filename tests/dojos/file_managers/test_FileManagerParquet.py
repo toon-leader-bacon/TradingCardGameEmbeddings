@@ -9,10 +9,12 @@ from src.schema.splits import Split
 
 
 def _write_source(path: Path, num_rows: int = 100) -> None:
-    df = pd.DataFrame({
-        "name": [f"card{i}" for i in range(num_rows)],
-        "value": range(num_rows),
-    })
+    df = pd.DataFrame(
+        {
+            "name": [f"card{i}" for i in range(num_rows)],
+            "value": range(num_rows),
+        }
+    )
     df.to_parquet(path, index=False)
 
 
@@ -77,13 +79,11 @@ class TestMakeSplits:
 
         fm = FileManagerParquet(source, tmp_path / "out", seed=1)
         readers = fm.make_splits(
-            split_ratios=[8, 1, 1], batch_size=16, load_row_group_batch_size=40)
+            split_ratios=[8, 1, 1], batch_size=16, load_row_group_batch_size=40
+        )
 
         all_names = sorted(
-            name
-            for reader in readers
-            for chunk in reader
-            for name in chunk["name"]
+            name for reader in readers for chunk in reader for name in chunk["name"]
         )
         expected_names = sorted(f"card{i}" for i in range(137))
         assert all_names == expected_names
@@ -128,24 +128,30 @@ class TestMakeSplits:
 
     def test_preserves_nulls_in_nullable_int_column(self, tmp_path: Path) -> None:
         source = tmp_path / "source.parquet"
-        df = pd.DataFrame({
-            "name": [f"card{i}" for i in range(50)],
-            "value": pd.array(
-                [i if i % 7 != 0 else None for i in range(50)], dtype="Int64",
-            ),
-        })
+        df = pd.DataFrame(
+            {
+                "name": [f"card{i}" for i in range(50)],
+                "value": pd.array(
+                    [i if i % 7 != 0 else None for i in range(50)],
+                    dtype="Int64",
+                ),
+            }
+        )
         df.to_parquet(source, index=False)
 
         fm = FileManagerParquet(source, tmp_path / "out", seed=0)
         readers = fm.make_splits(
-            split_ratios=[1], batch_size=8, load_row_group_batch_size=5)
+            split_ratios=[1], batch_size=8, load_row_group_batch_size=5
+        )
 
         result = _read_all(readers[0])
         assert result["value"].isna().sum() == sum(1 for i in range(50) if i % 7 == 0)
         assert len(result) == 50
 
     def test_split_writers_all_close_even_if_one_batch_write_fails(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         source = tmp_path / "source.parquet"
         _write_source(source, num_rows=100)
@@ -166,7 +172,8 @@ class TestMakeSplits:
 
         with pytest.raises(RuntimeError, match="simulated failure mid-stream"):
             fm.make_splits(
-                split_ratios=[8, 1, 1], batch_size=8, load_row_group_batch_size=10)
+                split_ratios=[8, 1, 1], batch_size=8, load_row_group_batch_size=10
+            )
 
         for split_file in out_dir.glob(f"{fm.output_file_prefix}*.parquet"):
             # A writer left open by an unhandled exception never writes a

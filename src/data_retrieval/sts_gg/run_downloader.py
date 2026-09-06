@@ -75,7 +75,11 @@ from typing import ClassVar
 
 from tqdm import tqdm
 
-from src.data_retrieval.download_utils import download_to_string
+from src.data_retrieval.download_utils import (
+    append_with_manifest,
+    download_to_string,
+    read_manifest,
+)
 from src.data_retrieval.rate_limiter import RateLimiter
 
 
@@ -257,15 +261,7 @@ class STSGGRunDownloader:
         ]
 
         manifest_path = self.output_dir / "runs_manifest.txt"
-        already_downloaded = (
-            {
-                line
-                for line in manifest_path.read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            }
-            if manifest_path.exists()
-            else set()
-        )
+        already_downloaded = read_manifest(manifest_path)
 
         runs_path = self.output_dir / "runs.jsonl"
 
@@ -288,13 +284,9 @@ class STSGGRunDownloader:
                 tqdm.write(f"sts.gg run {run_id} failed: {error}")
                 continue
 
-            with open(runs_path, "a", encoding="utf-8") as runs_file:
-                runs_file.write(json.dumps(run_payload) + "\n")
-                runs_file.flush()
-
-            with open(manifest_path, "a", encoding="utf-8") as manifest_file:
-                manifest_file.write(f"{run_id}\n")
-                manifest_file.flush()
+            append_with_manifest(
+                runs_path, manifest_path, json.dumps(run_payload), run_id
+            )
 
         return runs_path
 

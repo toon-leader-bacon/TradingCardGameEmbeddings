@@ -55,7 +55,9 @@ class ScryfallOracleDownloader:
         Exceptions: none.
         """
         self.source_url = source_url
-        self.raw_data_dir = raw_data_dir if raw_data_dir is not None else self.DEFAULT_RAW_DATA_DIR
+        self.raw_data_dir = (
+            raw_data_dir if raw_data_dir is not None else self.DEFAULT_RAW_DATA_DIR
+        )
 
     def fetch(self) -> ScryfallDownloadResult:
         """Entry point: download the bulk file, then extract it.

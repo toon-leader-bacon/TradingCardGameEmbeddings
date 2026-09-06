@@ -17,7 +17,9 @@ _MASK_OF_UROBOROS_HTML = """
      data-set="merchants of ofir" data-color="gold" data-type="stratagem"
      data-rarity="legendary">
     <div class="card-head">
-        <div class="card-name"><a href="https://gwent.one/en/card/202512">Mask of Uroboros</a></div>
+        <div class="card-name">
+            <a href="https://gwent.one/en/card/202512">Mask of Uroboros</a>
+        </div>
         <div class="card-category">Location</div>
     </div>
     <div class="card-body">
@@ -33,7 +35,9 @@ _MASK_OF_UROBOROS_RICHER_HTML = """
      data-set="merchants of ofir" data-color="gold" data-type="stratagem"
      data-rarity="legendary" data-patch-note="added in 9.0">
     <div class="card-head">
-        <div class="card-name"><a href="https://gwent.one/en/card/202512">Mask of Uroboros</a></div>
+        <div class="card-name">
+            <a href="https://gwent.one/en/card/202512">Mask of Uroboros</a>
+        </div>
         <div class="card-category">Location</div>
     </div>
     <div class="card-body">
@@ -51,7 +55,9 @@ _WEREWOLF_HTML = """
      data-set="base" data-color="bronze" data-type="unit"
      data-rarity="common">
     <div class="card-head">
-        <div class="card-name"><a href="https://gwent.one/en/card/201600">Werewolf</a></div>
+        <div class="card-name">
+            <a href="https://gwent.one/en/card/201600">Werewolf</a>
+        </div>
         <div class="card-category">&nbsp;</div>
     </div>
     <div class="card-body">
@@ -67,7 +73,9 @@ _VANILLA_UNIT_HTML = """
      data-set="base" data-color="bronze" data-type="unit"
      data-rarity="common">
     <div class="card-head">
-        <div class="card-name"><a href="https://gwent.one/en/card/200055">Nilfgaardian Knight</a></div>
+        <div class="card-name">
+            <a href="https://gwent.one/en/card/200055">Nilfgaardian Knight</a>
+        </div>
         <div class="card-category">&nbsp;</div>
     </div>
     <div class="card-body"></div>
@@ -84,11 +92,15 @@ _ARMORED_UNIT_HTML = """
      data-set="base" data-color="bronze" data-type="unit"
      data-rarity="rare">
     <div class="card-head">
-        <div class="card-name"><a href="https://gwent.one/en/card/200600">Blue Stripes Commando</a></div>
+        <div class="card-name">
+            <a href="https://gwent.one/en/card/200600">Blue Stripes Commando</a>
+        </div>
         <div class="card-category">&nbsp;</div>
     </div>
     <div class="card-body">
-        <div class="card-body-ability"><span class="keyword resilient">Resilience</span>.<br /></div>
+        <div class="card-body-ability">
+            <span class="keyword resilient">Resilience</span>.<br />
+        </div>
     </div>
 </div>
 """
@@ -284,7 +296,9 @@ class TestReIngestDuplicates:
         assert updated.raw_content["patch-note"] == "added in 9.0"
         assert changed == [original.nocab_uuid]
 
-    def test_alias_still_registered_on_noop_duplicate_branch(self, tmp_path: Path) -> None:
+    def test_alias_still_registered_on_noop_duplicate_branch(
+        self, tmp_path: Path
+    ) -> None:
         binder = CardBinder()
         stage = GwentOneCardIngestionStage()
         _write_page(tmp_path / "page_1.html", _MASK_OF_UROBOROS_HTML)
@@ -295,4 +309,7 @@ class TestReIngestDuplicates:
         _write_page(second_dir / "page_1.html", _MASK_OF_UROBOROS_HTML)
         stage.ingest(second_dir, binder)
 
-        assert binder.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, "202512") is not None
+        assert (
+            binder.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, "202512")
+            is not None
+        )

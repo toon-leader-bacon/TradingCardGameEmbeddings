@@ -1,0 +1,11 @@
+[flake8]
+# E203 (whitespace before ':') conflicts with black's slice formatting —
+# black intentionally adds that space for complex slice expressions.
+# https://black.readthedocs.io/en/stable/faq.html#why-are-flake8-s-e203-and-w503-violated
+extend-ignore = E203
+
+# These fixture files embed raw HTML strings where exact whitespace is
+# load-bearing for the ability-text-flattening logic under test — line
+# breaks can't be inserted without changing the fixture's meaning.
+per-file-ignores =
+    tests/data_refinement/card_binder/gwent_one/test_ingestion_stage.py:E501

@@ -28,7 +28,9 @@ class TestInit:
         assert downloader.raw_data_dir == SpireCodexCardDownloader.DEFAULT_RAW_DATA_DIR
 
     def test_honors_explicit_overrides(self, tmp_path: Path) -> None:
-        downloader = SpireCodexCardDownloader("https://example.test/cards.json", tmp_path)
+        downloader = SpireCodexCardDownloader(
+            "https://example.test/cards.json", tmp_path
+        )
 
         assert downloader.cards_url == "https://example.test/cards.json"
         assert downloader.raw_data_dir == tmp_path

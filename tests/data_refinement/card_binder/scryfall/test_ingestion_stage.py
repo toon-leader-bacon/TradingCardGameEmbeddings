@@ -41,7 +41,9 @@ class TestIngestNewCards:
         assert card.source_game == GameId.MTG
         assert changed == [card.nocab_uuid]
 
-    def test_multiple_distinct_rows_all_created_independently(self, tmp_path: Path) -> None:
+    def test_multiple_distinct_rows_all_created_independently(
+        self, tmp_path: Path
+    ) -> None:
         raw_path = tmp_path / "oracle-cards.jsonl"
         _write_jsonl(
             raw_path,
@@ -121,7 +123,9 @@ class TestReIngestDuplicates:
         assert updated.raw_content == richer_row
         assert changed == [original.nocab_uuid]
 
-    def test_less_rich_row_leaves_existing_content_untouched(self, tmp_path: Path) -> None:
+    def test_less_rich_row_leaves_existing_content_untouched(
+        self, tmp_path: Path
+    ) -> None:
         binder = CardBinder()
         stage = ScryfallCardIngestionStage()
         richer_path = tmp_path / "richer.jsonl"
@@ -166,7 +170,9 @@ class TestAliasRegistration:
         assert binder.get_by_alias(GameId.MTG, DataSource.GATHERER, "513581") == card
         assert binder.get_by_alias(GameId.MTG, DataSource.GATHERER, "513582") == card
 
-    def test_aliases_still_registered_on_noop_duplicate_branch(self, tmp_path: Path) -> None:
+    def test_aliases_still_registered_on_noop_duplicate_branch(
+        self, tmp_path: Path
+    ) -> None:
         # Aliases must be re-registered even when content doesn't
         # change — a losing/no-op row's identifier must never become
         # a dead end (plans/card_binder_v2.md's "Open risks").
@@ -201,7 +207,9 @@ class TestAliasRegistration:
 
 class TestExtractAliases:
     def test_extracts_every_present_alias_field(self) -> None:
-        aliases = set(ScryfallCardIngestionStage()._extract_aliases(_ROW_WITH_ALL_ALIASES))
+        aliases = set(
+            ScryfallCardIngestionStage()._extract_aliases(_ROW_WITH_ALL_ALIASES)
+        )
 
         assert aliases == {
             (DataSource.ARENA, "76497"),

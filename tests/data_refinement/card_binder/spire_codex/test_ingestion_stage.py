@@ -49,7 +49,9 @@ class TestIngest:
 
         SpireCodexCardIngestionStage().ingest(cards_path, binder)
 
-        card = binder.get_by_alias(GameId.SLAY_THE_SPIRE_2, DataSource.SPIRE_CODEX, "ABRASIVE")
+        card = binder.get_by_alias(
+            GameId.SLAY_THE_SPIRE_2, DataSource.SPIRE_CODEX, "ABRASIVE"
+        )
         assert card is not None
         assert card.provenance.source_id == _REAL_ROW["id"]
         assert card.provenance.data_source == DataSource.SPIRE_CODEX
@@ -60,7 +62,9 @@ class TestIngest:
 
         SpireCodexCardIngestionStage().ingest(cards_path, binder)
 
-        card = binder.get_by_alias(GameId.SLAY_THE_SPIRE_2, DataSource.SPIRE_CODEX, "ABRASIVE")
+        card = binder.get_by_alias(
+            GameId.SLAY_THE_SPIRE_2, DataSource.SPIRE_CODEX, "ABRASIVE"
+        )
         assert card.raw_content == _REAL_ROW
 
     def test_name_is_kept_plain_no_disambiguation(self, tmp_path: Path) -> None:
@@ -73,7 +77,9 @@ class TestIngest:
 
         SpireCodexCardIngestionStage().ingest(cards_path, binder)
 
-        card = binder.get_by_alias(GameId.SLAY_THE_SPIRE_2, DataSource.SPIRE_CODEX, "ABRASIVE")
+        card = binder.get_by_alias(
+            GameId.SLAY_THE_SPIRE_2, DataSource.SPIRE_CODEX, "ABRASIVE"
+        )
         assert card.name == "Abrasive"
 
     def test_each_card_gets_a_distinct_uuid(self, tmp_path: Path) -> None:
@@ -88,7 +94,9 @@ class TestIngest:
 
         SpireCodexCardIngestionStage().ingest(cards_path, binder)
 
-        abrasive = binder.get_by_alias(GameId.SLAY_THE_SPIRE_2, DataSource.SPIRE_CODEX, "ABRASIVE")
+        abrasive = binder.get_by_alias(
+            GameId.SLAY_THE_SPIRE_2, DataSource.SPIRE_CODEX, "ABRASIVE"
+        )
         accelerant = binder.get_by_alias(
             GameId.SLAY_THE_SPIRE_2, DataSource.SPIRE_CODEX, "ACCELERANT"
         )
@@ -141,7 +149,9 @@ class TestReIngestDuplicates:
         second_path = _write_cards_file(tmp_path / "second", [_REAL_ROW])
         changed = stage.ingest(second_path, binder)
 
-        reloaded = binder.get_by_alias(GameId.SLAY_THE_SPIRE_2, DataSource.SPIRE_CODEX, "ABRASIVE")
+        reloaded = binder.get_by_alias(
+            GameId.SLAY_THE_SPIRE_2, DataSource.SPIRE_CODEX, "ABRASIVE"
+        )
         assert reloaded.nocab_uuid == original.nocab_uuid
         assert changed == []
 
@@ -160,7 +170,9 @@ class TestReIngestDuplicates:
         richer_path = _write_cards_file(tmp_path / "richer", [_REAL_ROW])
         changed = stage.ingest(richer_path, binder)
 
-        updated = binder.get_by_alias(GameId.SLAY_THE_SPIRE_2, DataSource.SPIRE_CODEX, "ABRASIVE")
+        updated = binder.get_by_alias(
+            GameId.SLAY_THE_SPIRE_2, DataSource.SPIRE_CODEX, "ABRASIVE"
+        )
         assert updated.nocab_uuid == original.nocab_uuid
         assert updated.raw_content == _REAL_ROW
         assert changed == [original.nocab_uuid]

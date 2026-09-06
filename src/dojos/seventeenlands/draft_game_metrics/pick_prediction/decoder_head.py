@@ -55,7 +55,8 @@ class PickPredictionDecoderHead(nn.Module):
             num_pack_cards = len(pack_embeddings)
             if num_pack_cards > self.max_pack_size:
                 raise ValueError(
-                    f"pack has {num_pack_cards} cards, exceeds max_pack_size={self.max_pack_size}")
+                    f"pack has {num_pack_cards} cards, exceeds max_pack_size={self.max_pack_size}"
+                )
 
             pack = torch.stack(pack_embeddings)  # (num_pack_cards, embedding_dim)
             context = (
@@ -64,9 +65,12 @@ class PickPredictionDecoderHead(nn.Module):
                 else torch.zeros(self.card_embedding_size)
             )  # (embedding_dim,)
             context = context.unsqueeze(0).expand(
-                num_pack_cards, -1)  # (num_pack_cards, embedding_dim)
+                num_pack_cards, -1
+            )  # (num_pack_cards, embedding_dim)
 
-            combined = torch.cat([pack, context], dim=-1)  # (num_pack_cards, embedding_dim * 2)
+            combined = torch.cat(
+                [pack, context], dim=-1
+            )  # (num_pack_cards, embedding_dim * 2)
             logits = self.scorer(combined).squeeze(-1)  # (num_pack_cards,)
 
             # Pad up to max_pack_size with -inf, so padded slots always lose
@@ -103,7 +107,9 @@ class PickPredictionDecoderHeadV2(nn.Module):
     the pack too.
     """
 
-    def __init__(self, card_embedding_size: int, num_heads: int = 4, num_layers: int = 2):
+    def __init__(
+        self, card_embedding_size: int, num_heads: int = 4, num_layers: int = 2
+    ):
         super().__init__()
         self.card_embedding_size = card_embedding_size
 
@@ -151,16 +157,20 @@ class PickPredictionDecoderHeadV2(nn.Module):
 
             # nn.TransformerEncoder expects a batch dim; treat each training
             # datum as its own batch of size 1, then drop it back off.
-            pool_contextualized = self.pool_encoder(pool_with_cls.unsqueeze(0)).squeeze(0)
+            pool_contextualized = self.pool_encoder(pool_with_cls.unsqueeze(0)).squeeze(
+                0
+            )
             pooled_context = pool_contextualized[0]  # the CLS token's own output row
 
-            pack_contextualized = self.pack_encoder(
-                pack.unsqueeze(0)
-            ).squeeze(0)  # (num_pack_cards, embedding_dim)
+            pack_contextualized = self.pack_encoder(pack.unsqueeze(0)).squeeze(
+                0
+            )  # (num_pack_cards, embedding_dim)
 
             query = self.query_proj(pooled_context)  # (embedding_dim,)
             keys = self.key_proj(pack_contextualized)  # (num_pack_cards, embedding_dim)
 
-            logits = (keys @ query) / (self.card_embedding_size ** 0.5)  # (num_pack_cards,)
+            logits = (keys @ query) / (
+                self.card_embedding_size**0.5
+            )  # (num_pack_cards,)
             results.append(logits)
         return results

@@ -96,7 +96,7 @@ class SeventeenLandsFileRef:
             >>> SeventeenLandsFileRef.from_known(
             ...     DataType.GAME, "MSH", "PremierDraft"
             ... )
-            SeventeenLandsFileRef(data_type=DataType.GAME, expansion='MSH', format_code='PremierDraft', url='https://17lands-public.s3.amazonaws.com/analysis_data/game_data/game_data_public.MSH.PremierDraft.csv.gz')
+            SeventeenLandsFileRef(data_type=DataType.GAME, expansion='MSH', format_code='PremierDraft', url='https://17lands-public.s3.amazonaws.com/analysis_data/game_data/game_data_public.MSH.PremierDraft.csv.gz')  # noqa: E501
         """
         url = _URL_TEMPLATE.format(
             data_type=data_type.value, expansion=expansion, format_code=format_code

@@ -20,13 +20,18 @@ class PickedVHeldVPackMetric:
     """
 
     DEFAULT_OUTPUT_DIR: ClassVar[Path] = Path("data/final/metrics/17lands/draft")
-    DEFAULT_OUTPUT_NAME: ClassVar[str] = "{expansion}.{format_code}.picked_v_held_v_pack.parquet"
+    DEFAULT_OUTPUT_NAME: ClassVar[str] = (
+        "{expansion}.{format_code}.picked_v_held_v_pack.parquet"
+    )
 
-    def __init__(self, card_binder: CardBinder,
-                 expansion: str,
-                 format_code: str,
-                 output_dir: Path | None = None,
-                 output_name: str | None = None) -> None:
+    def __init__(
+        self,
+        card_binder: CardBinder,
+        expansion: str,
+        format_code: str,
+        output_dir: Path | None = None,
+        output_name: str | None = None,
+    ) -> None:
         """
         Inputs:
             card_binder: registry to resolve pack/pool/pick card names against.
@@ -43,7 +48,9 @@ class PickedVHeldVPackMetric:
         self._card_binder = card_binder
         self._expansion = expansion
         self._format_code = format_code
-        self._output_path = self.output_path(expansion, format_code, output_dir, output_name)
+        self._output_path = self.output_path(
+            expansion, format_code, output_dir, output_name
+        )
         self._rows: list[dict] = []
 
     @property
@@ -51,13 +58,19 @@ class PickedVHeldVPackMetric:
         return type(self).__name__
 
     @staticmethod
-    def output_path(expansion: str, format_code: str,
-                    output_dir: Path | None = None,
-                    output_name: str | None = None) -> Path:
+    def output_path(
+        expansion: str,
+        format_code: str,
+        output_dir: Path | None = None,
+        output_name: str | None = None,
+    ) -> Path:
         return metric_output_path(
             PickedVHeldVPackMetric.DEFAULT_OUTPUT_DIR,
             PickedVHeldVPackMetric.DEFAULT_OUTPUT_NAME,
-            expansion, format_code, output_dir, output_name,
+            expansion,
+            format_code,
+            output_dir,
+            output_name,
         )
 
     def accumulate(self, chunk: pd.DataFrame) -> None:
@@ -87,27 +100,37 @@ class PickedVHeldVPackMetric:
         Side effects: appends to self._rows.
         Exceptions: none expected.
         """
-        pack_card_columns = [col for col in chunk.columns if col.startswith("pack_card_")]
+        pack_card_columns = [
+            col for col in chunk.columns if col.startswith("pack_card_")
+        ]
         pool_card_columns = [col for col in chunk.columns if col.startswith("pool_")]
 
-        pack_card_names = {col: col.removeprefix("pack_card_") for col in pack_card_columns}
+        pack_card_names = {
+            col: col.removeprefix("pack_card_") for col in pack_card_columns
+        }
         pool_card_names = {col: col.removeprefix("pool_") for col in pool_card_columns}
 
         for _, row in chunk.iterrows():
-            picked_card_uuid = find_uuid_by_name(self._card_binder, GameId.MTG, row["pick"])
+            picked_card_uuid = find_uuid_by_name(
+                self._card_binder, GameId.MTG, row["pick"]
+            )
             if picked_card_uuid is None:
                 # This is the true label, can't be null so skip if it is
                 continue
 
-            self._rows.append({
-                "picked_card_uuid": str(picked_card_uuid),
-                "pack_cards_uuids": self._card_uuids_by_count(row, pack_card_names),
-                "pool_cards_uuids": self._card_uuids_by_count(row, pool_card_names),
-            })
+            self._rows.append(
+                {
+                    "picked_card_uuid": str(picked_card_uuid),
+                    "pack_cards_uuids": self._card_uuids_by_count(row, pack_card_names),
+                    "pool_cards_uuids": self._card_uuids_by_count(row, pool_card_names),
+                }
+            )
 
-    def _card_uuids_by_count(self, row: pd.Series, column_to_name: dict[str, str]) -> list[str]:
+    def _card_uuids_by_count(
+        self, row: pd.Series, column_to_name: dict[str, str]
+    ) -> list[str]:
         """
-        The cell data is a number, typically <4 of the number of copies of the 
+        The cell data is a number, typically <4 of the number of copies of the
         card. The column header contains the name of the card. So this helper
         function will iterate over the columns, and for each column, it will
         get the name of the card, and the number of copies of that card. It will

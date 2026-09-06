@@ -116,7 +116,9 @@ class PokemonTcgCardIngestionStage:
 
         set_paths = sorted(raw_path.glob("*.json"))
         if not set_paths:
-            raise ValueError(f"pokemon_tcg ingest: no *.json files found under {raw_path}")
+            raise ValueError(
+                f"pokemon_tcg ingest: no *.json files found under {raw_path}"
+            )
 
         changed_uuids = []
         for set_path in set_paths:

@@ -1,5 +1,5 @@
 """
-Scans a CSV file, breaks it into chunks, and passes those chunks into 
+Scans a CSV file, breaks it into chunks, and passes those chunks into
 a collection of metrics. Finalize will be called on each metric after the
 CSV has been completely scanned.
 """
@@ -22,9 +22,9 @@ class CsvScanner:
     different set of active metrics gets its own instance.
     """
 
-    def __init__(self, raw_csv_path: Path,
-                 chunk_size: int,
-                 metrics: list[Metric]) -> None:
+    def __init__(
+        self, raw_csv_path: Path, chunk_size: int, metrics: list[Metric]
+    ) -> None:
         """
         Inputs:
             raw_csv_path: path to the raw CSV to stream.

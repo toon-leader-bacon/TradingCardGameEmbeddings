@@ -197,12 +197,16 @@ class SpireCodexRunDownloader:
         Side effects: none — no I/O happens until fetch() is called.
         Exceptions: none.
         """
-        self.export_url = export_url if export_url is not None else self.DEFAULT_EXPORT_URL
+        self.export_url = (
+            export_url if export_url is not None else self.DEFAULT_EXPORT_URL
+        )
         self.raw_data_dir = (
             raw_data_dir if raw_data_dir is not None else self.DEFAULT_RAW_DATA_DIR
         )
         self.stats_url = stats_url if stats_url is not None else self.DEFAULT_STATS_URL
-        self.page_limit = page_limit if page_limit is not None else self.DEFAULT_PAGE_LIMIT
+        self.page_limit = (
+            page_limit if page_limit is not None else self.DEFAULT_PAGE_LIMIT
+        )
         self.rate_limiter = rate_limiter
 
     def fetch(self, *, start: str | None = None, end: str | None = None) -> list[Path]:
@@ -321,15 +325,18 @@ class SpireCodexRunDownloader:
             page_path = self.raw_data_dir / _PAGE_FILENAME_TEMPLATE.format(
                 page_index=page_index
             )
-            cursor_sidecar_path = self.raw_data_dir / _NEXT_CURSOR_SIDECAR_TEMPLATE.format(
-                page_index=page_index
+            cursor_sidecar_path = (
+                self.raw_data_dir
+                / _NEXT_CURSOR_SIDECAR_TEMPLATE.format(page_index=page_index)
             )
             if not (page_path.exists() and cursor_sidecar_path.exists()):
                 break
 
             cursor_content = cursor_sidecar_path.read_text(encoding="utf-8")
             next_cursor = cursor_content if cursor_content else None
-            downloaded_pages.append(_FetchedPage(path=page_path, next_cursor=next_cursor))
+            downloaded_pages.append(
+                _FetchedPage(path=page_path, next_cursor=next_cursor)
+            )
             page_index += 1
 
         return downloaded_pages
@@ -427,7 +434,13 @@ class SpireCodexRunDownloader:
             response.raise_for_status()
             total_runs = response.json()["total_runs"]
             return math.ceil(total_runs / self.page_limit)
-        except (requests.RequestException, ValueError, KeyError, TypeError, ZeroDivisionError):
+        except (
+            requests.RequestException,
+            ValueError,
+            KeyError,
+            TypeError,
+            ZeroDivisionError,
+        ):
             return None
 
     def _fetch_page(
@@ -466,7 +479,9 @@ class SpireCodexRunDownloader:
         if end is not None:
             params["end"] = end
 
-        page_path = self.raw_data_dir / _PAGE_FILENAME_TEMPLATE.format(page_index=page_index)
+        page_path = self.raw_data_dir / _PAGE_FILENAME_TEMPLATE.format(
+            page_index=page_index
+        )
         cursor_sidecar_path = self.raw_data_dir / _NEXT_CURSOR_SIDECAR_TEMPLATE.format(
             page_index=page_index
         )
@@ -474,12 +489,17 @@ class SpireCodexRunDownloader:
         self.rate_limiter.wait()
         try:
             with requests.get(
-                self.export_url, params=params, stream=True, timeout=_REQUEST_TIMEOUT_SECONDS
+                self.export_url,
+                params=params,
+                stream=True,
+                timeout=_REQUEST_TIMEOUT_SECONDS,
             ) as response:
                 response.raise_for_status()
                 next_cursor = response.headers.get(_NEXT_CURSOR_HEADER)
                 with open(page_path, "wb") as page_file:
-                    for chunk in response.iter_content(chunk_size=_DEFAULT_CHUNK_SIZE_BYTES):
+                    for chunk in response.iter_content(
+                        chunk_size=_DEFAULT_CHUNK_SIZE_BYTES
+                    ):
                         page_file.write(chunk)
         except Exception:
             page_path.unlink(missing_ok=True)

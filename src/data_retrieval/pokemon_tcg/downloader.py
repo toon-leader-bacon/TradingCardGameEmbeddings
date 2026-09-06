@@ -64,7 +64,9 @@ class PokemonTcgDataDownloader:
         Exceptions: none.
         """
         self.repo_zip_url = repo_zip_url
-        self.raw_data_dir = raw_data_dir if raw_data_dir is not None else self.DEFAULT_RAW_DATA_DIR
+        self.raw_data_dir = (
+            raw_data_dir if raw_data_dir is not None else self.DEFAULT_RAW_DATA_DIR
+        )
 
     def fetch(self) -> PokemonTcgDataDownloadResult:
         """Entry point: download the repo zip, then extract it.

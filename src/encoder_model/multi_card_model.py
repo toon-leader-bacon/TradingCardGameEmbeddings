@@ -21,7 +21,9 @@ from src.schema.type_hints import (
 
 
 class MultiCardModel(nn.Module):
-    def __init__(self, card_embedding_size: int, num_heads: int = 4, num_layers: int = 2):
+    def __init__(
+        self, card_embedding_size: int, num_heads: int = 4, num_layers: int = 2
+    ):
         super().__init__()
         self.card_embedding_size = card_embedding_size
 
@@ -39,13 +41,17 @@ class MultiCardModel(nn.Module):
             nhead=num_heads,
             batch_first=True,
         )
-        self.self_attention = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.self_attention = nn.TransformerEncoder(
+            encoder_layer, num_layers=num_layers
+        )
 
     def internal_model(self, cards: List[GenericCard]) -> List[torch.Tensor]:
         """One contextualized embedding per input card, same order - every
         card attends to every other card in `cards` before its embedding
         is returned."""
-        indices = torch.tensor([card.nocab_uuid.int % self.card_vocab_size for card in cards])
+        indices = torch.tensor(
+            [card.nocab_uuid.int % self.card_vocab_size for card in cards]
+        )
         base = self.base_embedder(indices)  # (num_cards, embedding_dim)
 
         # nn.TransformerEncoder expects a batch dim; treat this one group
@@ -56,8 +62,15 @@ class MultiCardModel(nn.Module):
 
     def forward(
         self,
-        x: Union[SingleCardInput, MultiCardInput, MultiGroupInput, BatchedMultiGroupInput]
-    ) -> Union[SingleCardEmbedding, MultiCardEmbedding, MultiGroupEmbedding, BatchedMultiGroupEmbedding]:
+        x: Union[
+            SingleCardInput, MultiCardInput, MultiGroupInput, BatchedMultiGroupInput
+        ],
+    ) -> Union[
+        SingleCardEmbedding,
+        MultiCardEmbedding,
+        MultiGroupEmbedding,
+        BatchedMultiGroupEmbedding,
+    ]:
         if isinstance(x, SingleCardInput):
             return self.forward_single_card(x)
         elif isinstance(x, MultiCardInput) or isinstance(x, BatchedSingleCardInput):
@@ -80,16 +93,22 @@ class MultiCardModel(nn.Module):
         model_out: List[torch.Tensor] = self.internal_model([x])
         return model_out[0]
 
-    def forward_multi_card(self, x: Union[MultiCardInput, BatchedSingleCardInput]) -> Union[MultiCardEmbedding, BatchedSingleCardEmbedding]:
+    def forward_multi_card(
+        self, x: Union[MultiCardInput, BatchedSingleCardInput]
+    ) -> Union[MultiCardEmbedding, BatchedSingleCardEmbedding]:
         return self.internal_model(x)
 
-    def forward_multi_group(self, x: Union[MultiGroupInput, BatchedMultiCardInput]) -> Union[MultiGroupEmbedding, BatchedMultiCardEmbedding]:
+    def forward_multi_group(
+        self, x: Union[MultiGroupInput, BatchedMultiCardInput]
+    ) -> Union[MultiGroupEmbedding, BatchedMultiCardEmbedding]:
         results: MultiGroupEmbedding = []
         for group in x:
             results.append(self.forward_multi_card(group))
         return results
 
-    def forward_batched_multi_group(self, x: BatchedMultiGroupInput) -> BatchedMultiGroupEmbedding:
+    def forward_batched_multi_group(
+        self, x: BatchedMultiGroupInput
+    ) -> BatchedMultiGroupEmbedding:
         results: BatchedMultiGroupEmbedding = []
         for multi_group in x:
             results.append(self.forward_multi_group(multi_group))

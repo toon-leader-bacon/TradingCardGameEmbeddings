@@ -62,7 +62,9 @@ class TestInit:
 class TestPhase1:
     def test_writes_ids_from_a_single_page(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)
-        page = _mock_text_response(_leaderboard_page(["a", "b", "c"], page=1, total_pages=1))
+        page = _mock_text_response(
+            _leaderboard_page(["a", "b", "c"], page=1, total_pages=1)
+        )
 
         with patch("requests.get", return_value=page) as mock_get:
             ids_path = downloader.phase_1(per_page_count=100)
@@ -78,9 +80,13 @@ class TestPhase1:
         self, tmp_path: Path
     ) -> None:
         downloader = _make_downloader(tmp_path)
-        page_1 = _mock_text_response(_leaderboard_page(["a", "b"], page=1, total_pages=3))
+        page_1 = _mock_text_response(
+            _leaderboard_page(["a", "b"], page=1, total_pages=3)
+        )
         page_2 = _mock_text_response(_leaderboard_page(["c"], page=2, total_pages=3))
-        page_3 = _mock_text_response(_leaderboard_page(["d", "e"], page=3, total_pages=3))
+        page_3 = _mock_text_response(
+            _leaderboard_page(["d", "e"], page=3, total_pages=3)
+        )
 
         with patch("requests.get", side_effect=[page_1, page_2, page_3]) as mock_get:
             ids_path = downloader.phase_1()
@@ -92,8 +98,12 @@ class TestPhase1:
         self, tmp_path: Path
     ) -> None:
         downloader = _make_downloader(tmp_path)
-        page_1 = _mock_text_response(_leaderboard_page(["a", "b"], page=1, total_pages=2))
-        page_2 = _mock_text_response(_leaderboard_page(["b", "c"], page=2, total_pages=2))
+        page_1 = _mock_text_response(
+            _leaderboard_page(["a", "b"], page=1, total_pages=2)
+        )
+        page_2 = _mock_text_response(
+            _leaderboard_page(["b", "c"], page=2, total_pages=2)
+        )
 
         with patch("requests.get", side_effect=[page_1, page_2]):
             ids_path = downloader.phase_1()
@@ -129,10 +139,15 @@ class TestPhase2:
         assert mock_get.call_count == 2
         assert runs_path == tmp_path / "runs.jsonl"
 
-        rows = [json.loads(line) for line in runs_path.read_text(encoding="utf-8").splitlines()]
+        rows = [
+            json.loads(line)
+            for line in runs_path.read_text(encoding="utf-8").splitlines()
+        ]
         assert rows == [{"id": "run1"}, {"id": "run2"}]
 
-        manifest_ids = (tmp_path / "runs_manifest.txt").read_text(encoding="utf-8").splitlines()
+        manifest_ids = (
+            (tmp_path / "runs_manifest.txt").read_text(encoding="utf-8").splitlines()
+        )
         assert manifest_ids == ["run1", "run2"]
 
     def test_skips_a_run_id_already_in_the_manifest(self, tmp_path: Path) -> None:
@@ -162,8 +177,13 @@ class TestPhase2:
         with patch("requests.get", side_effect=_get_side_effect):
             runs_path = downloader.phase_2()
 
-        rows = [json.loads(line) for line in runs_path.read_text(encoding="utf-8").splitlines()]
+        rows = [
+            json.loads(line)
+            for line in runs_path.read_text(encoding="utf-8").splitlines()
+        ]
         assert rows == [{"id": "run2"}]
-        manifest_ids = (tmp_path / "runs_manifest.txt").read_text(encoding="utf-8").splitlines()
+        manifest_ids = (
+            (tmp_path / "runs_manifest.txt").read_text(encoding="utf-8").splitlines()
+        )
         assert manifest_ids == ["run2"]
         assert "run1" in capsys.readouterr().out
