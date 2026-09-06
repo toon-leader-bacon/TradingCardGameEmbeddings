@@ -74,6 +74,28 @@ class TestDownloadToFile:
             with pytest.raises(requests.HTTPError):
                 download_to_file("https://example.com/file.bin", destination_path)
 
+    def test_sends_given_headers(self, tmp_path: Path) -> None:
+        destination_path = tmp_path / "file.bin"
+        response = _mock_streaming_response([b"data"])
+
+        with patch("requests.get", return_value=response) as mock_get:
+            download_to_file(
+                "https://example.com/file.bin",
+                destination_path,
+                headers={"User-Agent": "test-agent"},
+            )
+
+        assert mock_get.call_args.kwargs["headers"] == {"User-Agent": "test-agent"}
+
+    def test_omitting_headers_sends_none(self, tmp_path: Path) -> None:
+        destination_path = tmp_path / "file.bin"
+        response = _mock_streaming_response([b"data"])
+
+        with patch("requests.get", return_value=response) as mock_get:
+            download_to_file("https://example.com/file.bin", destination_path)
+
+        assert mock_get.call_args.kwargs["headers"] is None
+
     def test_removes_partial_file_on_write_failure(self, tmp_path: Path) -> None:
         destination_path = tmp_path / "file.bin"
         response = _mock_streaming_response([b"first-chunk"])
@@ -93,7 +115,9 @@ class TestDownloadToString:
         with patch("requests.get", return_value=response) as mock_get:
             body = download_to_string("https://example.com/page.json")
 
-        mock_get.assert_called_once_with("https://example.com/page.json", timeout=60)
+        mock_get.assert_called_once_with(
+            "https://example.com/page.json", timeout=60, headers=None
+        )
         assert body == '{"hello": "world"}'
 
     def test_uses_given_timeout(self) -> None:
@@ -103,6 +127,24 @@ class TestDownloadToString:
             download_to_string("https://example.com/page.json", timeout_seconds=5)
 
         assert mock_get.call_args.kwargs["timeout"] == 5
+
+    def test_sends_given_headers(self) -> None:
+        response = _mock_text_response("data")
+
+        with patch("requests.get", return_value=response) as mock_get:
+            download_to_string(
+                "https://example.com/page.json", headers={"User-Agent": "test-agent"}
+            )
+
+        assert mock_get.call_args.kwargs["headers"] == {"User-Agent": "test-agent"}
+
+    def test_omitting_headers_sends_none(self) -> None:
+        response = _mock_text_response("data")
+
+        with patch("requests.get", return_value=response) as mock_get:
+            download_to_string("https://example.com/page.json")
+
+        assert mock_get.call_args.kwargs["headers"] is None
 
     def test_retries_then_succeeds(self) -> None:
         failing_response = _mock_text_response("")

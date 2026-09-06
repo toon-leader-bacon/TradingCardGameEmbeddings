@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, cast
 
 import torch.nn as nn
 
@@ -9,12 +9,14 @@ from src.schema.type_hints import (
     BatchedMultiGroupInput,
     BatchedSingleCardEmbedding,
     BatchedSingleCardInput,
+    InputShape,
     MultiCardEmbedding,
     MultiCardInput,
     MultiGroupEmbedding,
     MultiGroupInput,
     SingleCardEmbedding,
     SingleCardInput,
+    input_shape_of,
 )
 
 
@@ -36,24 +38,27 @@ class SingleCardModel(nn.Module):
         MultiGroupEmbedding,
         BatchedMultiGroupEmbedding,
     ]:
-        if isinstance(x, SingleCardInput):
+        shape = input_shape_of(x)
+        if shape is InputShape.SINGLE_CARD:
             # Simple case, one card in one embedding out
-            return self.internal_model(x.embedding)
-        elif isinstance(x, MultiCardInput) or isinstance(x, BatchedSingleCardInput):
-            # Batch of single cards, or a single multi-card input
-            # Multi-card case. One embedding per card, organized in the same
-            # order as the input list
-            return self.forward_multi_card(x)
-        elif isinstance(x, MultiGroupInput) or isinstance(x, BatchedMultiCardInput):
-            # Batch of multi-card inputs, or a single multi-group input
-            # Multi-group case. Still one embedding per card, still organized
-            # in the same order as the input list of lists
-            return self.forward_multi_group(x)
-        elif isinstance(x, BatchedMultiGroupInput):
-            # Batch of multi-group inputs, or a single multi-group input
-            return self.forward_batched_multi_group(x)
+            return self.internal_model(cast(SingleCardInput, x).embedding)
+        elif shape is InputShape.MULTI_CARD:
+            # Batch of single cards, or a single multi-card input - same
+            # runtime shape (one list of GenericCard). One embedding per
+            # card, organized in the same order as the input list.
+            return self.forward_multi_card(
+                cast(Union[MultiCardInput, BatchedSingleCardInput], x)
+            )
+        elif shape is InputShape.MULTI_GROUP:
+            # Batch of multi-card inputs, or a single multi-group input -
+            # same runtime shape. Still one embedding per card, still
+            # organized in the same order as the input list of lists.
+            return self.forward_multi_group(
+                cast(Union[MultiGroupInput, BatchedMultiCardInput], x)
+            )
         else:
-            raise ValueError(f"Unsupported input type: {type(x)}")
+            # Batch of multi-group inputs.
+            return self.forward_batched_multi_group(cast(BatchedMultiGroupInput, x))
 
     # region Forward Methods
     def forward_multi_card(

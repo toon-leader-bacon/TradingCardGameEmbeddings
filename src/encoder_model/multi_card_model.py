@@ -1,4 +1,4 @@
-from typing import List, Union
+from typing import List, Union, cast
 
 import torch
 import torch.nn as nn
@@ -11,12 +11,14 @@ from src.schema.type_hints import (
     BatchedMultiGroupInput,
     BatchedSingleCardEmbedding,
     BatchedSingleCardInput,
+    InputShape,
     MultiCardEmbedding,
     MultiCardInput,
     MultiGroupEmbedding,
     MultiGroupInput,
     SingleCardEmbedding,
     SingleCardInput,
+    input_shape_of,
 )
 
 
@@ -71,16 +73,19 @@ class MultiCardModel(nn.Module):
         MultiGroupEmbedding,
         BatchedMultiGroupEmbedding,
     ]:
-        if isinstance(x, SingleCardInput):
-            return self.forward_single_card(x)
-        elif isinstance(x, MultiCardInput) or isinstance(x, BatchedSingleCardInput):
-            return self.forward_multi_card(x)
-        elif isinstance(x, MultiGroupInput) or isinstance(x, BatchedMultiCardInput):
-            return self.forward_multi_group(x)
-        elif isinstance(x, BatchedMultiGroupInput):
-            return self.forward_batched_multi_group(x)
+        shape = input_shape_of(x)
+        if shape is InputShape.SINGLE_CARD:
+            return self.forward_single_card(cast(SingleCardInput, x))
+        elif shape is InputShape.MULTI_CARD:
+            return self.forward_multi_card(
+                cast(Union[MultiCardInput, BatchedSingleCardInput], x)
+            )
+        elif shape is InputShape.MULTI_GROUP:
+            return self.forward_multi_group(
+                cast(Union[MultiGroupInput, BatchedMultiCardInput], x)
+            )
         else:
-            raise ValueError(f"Unsupported input type: {type(x)} for MultiCardModel ")
+            return self.forward_batched_multi_group(cast(BatchedMultiGroupInput, x))
 
     # region Forward Methods
 

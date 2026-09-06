@@ -12,6 +12,8 @@ from src.data_retrieval.sts2runs.downloader import \
     STS2RunsDownloader as sts2runs_downloader
 from src.data_retrieval.pitchstack.downloader import \
     PitchstackDeckDownloader as pitchstack_downloader
+from src.data_retrieval.fabtcg_decklists.downloader import \
+    FabtcgDecklistDownloader as fabtcg_decklist_downloader
 
 
 def main() -> None:
@@ -26,9 +28,13 @@ def main() -> None:
     # downloader = sts2runs_downloader(
     #     raw_data_dir=Path("data/raw/sts2runs"),
     # )
-    downloader = pitchstack_downloader(
+    # downloader = pitchstack_downloader(
+    #     rate_limiter=RateLimiter(requests_per_minute=60),
+    #     output_dir=Path("data/raw/pitchstack"),
+    # )
+    downloader = fabtcg_decklist_downloader(
         rate_limiter=RateLimiter(requests_per_minute=60),
-        output_dir=Path("data/raw/pitchstack"),
+        output_dir=Path("data/raw/fabtcg_decklists"),
     )
     downloader.phase_1()
     downloader.phase_2()

@@ -19,8 +19,10 @@ class MaskTargetKeyMod(Mod):
         self.key = key
 
     def apply_single(self, data: TrainingDatum) -> TrainingDatum:
-        # Assumes the first element of the TrainingDatum is a single GenericCard
-        card: GenericCard = data[0]
+        card = data[0]
+        assert isinstance(
+            card, GenericCard
+        ), "MaskTargetKeyMod expects a single-card TrainingDatum"
         card.raw_content[self.key] = "[MASK]"
         return (card, data[1])
 
@@ -30,8 +32,10 @@ class MaskTargetKeyMod(Mod):
 
 class ShuffleDeckMod(Mod):
     def apply_single(self, data: TrainingDatum) -> TrainingDatum:
-        # Assumes the first element of the TrainingDatum is a list of GenericCards
-        deck: List[GenericCard] = data[0]
+        deck = data[0]
+        assert isinstance(deck, list) and all(
+            isinstance(card, GenericCard) for card in deck
+        ), "ShuffleDeckMod expects a multi-card TrainingDatum"
         random.shuffle(deck)
         return (deck, data[1])
 

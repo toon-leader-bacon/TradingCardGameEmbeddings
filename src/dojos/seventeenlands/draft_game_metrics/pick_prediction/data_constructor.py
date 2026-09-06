@@ -12,12 +12,13 @@ chunk's cell is already a list/array of nocab_uuid strings - no JSON
 decoding needed.
 """
 
-from typing import List
+from typing import List, cast
 from uuid import UUID
 
 import pandas as pd
 
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.schema.card import GenericCard
 from src.schema.type_hints import TrainingDatum
 
 
@@ -56,5 +57,15 @@ class PickPredictionDataConstructor:
             if not all(pack_cards) or not all(pool_cards):
                 continue
 
-            results.append(([pack_cards, pool_cards], picked_index))
+            # The all()-truthiness check above already ruled out None for
+            # every element; mypy can't narrow that on its own.
+            results.append(
+                (
+                    [
+                        cast(List[GenericCard], pack_cards),
+                        cast(List[GenericCard], pool_cards),
+                    ],
+                    picked_index,
+                )
+            )
         return results

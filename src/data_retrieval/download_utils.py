@@ -29,6 +29,14 @@ then its manifest row, flushing both" shape showed up independently in
 three two-phase downloaders' phase_2() methods (STSGGRunDownloader,
 PlayGwentDownloader, PitchstackDeckDownloader) — the rule-of-three
 case, same as download_to_file/download_to_string themselves.
+
+download_to_file()/download_to_string() both gained an optional
+`headers` param once FabtcgDecklistDownloader needed one: fabtcg.com's
+WAF 403s the default python-requests User-Agent on every endpoint it
+uses, but 200s an ordinary browser-style one. Backwards compatible —
+every existing caller keeps passing nothing, which still means
+"requests' own default headers," identical to before this param
+existed.
 """
 
 import time
@@ -93,6 +101,7 @@ def download_to_file(
     url: str,
     destination_path: Path,
     *,
+    headers: dict[str, str] | None = None,
     timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
     chunk_size_bytes: int = _DEFAULT_CHUNK_SIZE_BYTES,
     max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
@@ -103,6 +112,10 @@ def download_to_file(
     Inputs:
         url: URL to GET.
         destination_path: file path the response body is written to.
+        headers: extra HTTP headers to send with every attempt (e.g. a
+            User-Agent a source's server requires). None (the default)
+            sends requests' own default headers, identical to this
+            function's behavior before this param existed.
         timeout_seconds: request timeout, in seconds.
         chunk_size_bytes: size of each streamed write, in bytes.
         max_attempts: total GET attempts before giving up (1 initial
@@ -130,7 +143,9 @@ def download_to_file(
 
     def _attempt() -> None:
         try:
-            with requests.get(url, stream=True, timeout=timeout_seconds) as response:
+            with requests.get(
+                url, stream=True, timeout=timeout_seconds, headers=headers
+            ) as response:
                 response.raise_for_status()
                 with open(destination_path, "wb") as destination_file:
                     for chunk in response.iter_content(chunk_size=chunk_size_bytes):
@@ -228,6 +243,7 @@ def append_with_manifest(
 def download_to_string(
     url: str,
     *,
+    headers: dict[str, str] | None = None,
     timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
     max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
 ) -> str:
@@ -249,6 +265,10 @@ def download_to_string(
 
     Inputs:
         url: URL to GET.
+        headers: extra HTTP headers to send with every attempt (e.g. a
+            User-Agent a source's server requires). None (the default)
+            sends requests' own default headers, identical to this
+            function's behavior before this param existed.
         timeout_seconds: request timeout, in seconds.
         max_attempts: total GET attempts before giving up (1 initial
             try plus up to max_attempts - 1 retries), with a fixed
@@ -267,7 +287,7 @@ def download_to_string(
     """
 
     def _attempt() -> str:
-        response = requests.get(url, timeout=timeout_seconds)
+        response = requests.get(url, timeout=timeout_seconds, headers=headers)
         response.raise_for_status()
         return response.text
 

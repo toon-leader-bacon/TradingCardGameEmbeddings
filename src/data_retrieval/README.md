@@ -81,13 +81,32 @@ Implemented today:
   list; `/v1/deck_versions/{deck_version_id}/history` — a version's
   edit history) are documented in the module docstring but
   deliberately not implemented yet.
+- `fabtcg_decklists/` — pulls Flesh and Blood decklist pages from
+  fabtcg.com (distinct from `cardvault_fabtcg/` above — a different
+  subdomain, no API), in two phases: `phase_1()` walks fabtcg.com's
+  sitemap index (`/sitemap_index.xml`) down to its numbered decklist
+  sub-sitemaps and extracts every deck page URL
+  (`https://fabtcg.com/decklists/<slug>/`, excluding a bare
+  `/decklists/` entry and locale-prefixed variants also present in the
+  real sitemaps) into `deck_urls.txt`; `phase_2()` fetches each deck
+  page's HTML and extracts+prettifies the one fragment
+  (`<section class="decklist-list-view block hidden">`) that already
+  contains the deck's Hero/Weapon/Equipment and Pitch 1/2/3 groups,
+  saving each to its own file under `decklists/<slug>.html` —
+  resumability here is "does that file already exist," not a shared
+  manifest, since output is one file per deck rather than rows in one
+  JSONL. fabtcg.com's WAF 403s the default `requests`/curl User-Agent
+  on every endpoint this source uses, which is why `download_to_file`/
+  `download_to_string` below both gained an optional `headers` param.
 - `rate_limiter.py` — shared politeness pacer (`RateLimiter`).
 - `download_utils.py` — shared GET-with-retries helpers:
   `download_to_file` (streamed straight to disk, for any source's
   plain single-file downloads) and `download_to_string` (returns the
   response body as text, for a caller that needs to inspect it — e.g.
   a pagination total — before deciding what to do next). Both retry
-  through the same private backoff loop.
+  through the same private backoff loop, and both accept an optional
+  `headers` dict (added for `fabtcg_decklists/`; every other caller
+  omits it and gets identical behavior to before this param existed).
 
 Planned, not yet built — no subdirectory exists for either yet:
 
@@ -256,6 +275,21 @@ from src.data_retrieval.pitchstack.downloader import PitchstackDeckDownloader
 from src.data_retrieval.rate_limiter import RateLimiter
 
 downloader = PitchstackDeckDownloader(RateLimiter(requests_per_minute=12))
+downloader.phase_1()
+print(downloader.phase_2())
+"
+```
+
+**Fabtcg decklists (fabtcg.com)** (fabtcg.com's sitemap index + HTML
+decklist pages — two phases, run in order; `phase_2()` skips any deck
+whose output file already exists from a prior run):
+
+```bash
+python3 -c "
+from src.data_retrieval.fabtcg_decklists.downloader import FabtcgDecklistDownloader
+from src.data_retrieval.rate_limiter import RateLimiter
+
+downloader = FabtcgDecklistDownloader(RateLimiter(requests_per_minute=12))
 downloader.phase_1()
 print(downloader.phase_2())
 "
