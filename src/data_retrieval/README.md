@@ -174,16 +174,16 @@ print(downloader.fetch(result_limit=1300))
 "
 ```
 
-**sts2runs** (a single dated `.json.gz` monthly dump — check
-https://sts2runs.com/downloads for the current filename):
+**sts2runs** (a single dated `.json.gz` monthly dump — `source_url`
+defaults to the snapshot current as of when this was written; check
+https://sts2runs.com/downloads for a newer one and pass it explicitly
+once that default goes stale):
 
 ```bash
 python3 -c "
 from src.data_retrieval.sts2runs.downloader import STS2RunsDownloader
 
-downloader = STS2RunsDownloader(
-    'https://sts2runs.com/downloads/runs-all-before-2026-06.json.gz',
-)
+downloader = STS2RunsDownloader()
 print(downloader.fetch())
 "
 ```

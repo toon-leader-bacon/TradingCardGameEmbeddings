@@ -33,6 +33,11 @@ class TestInit:
         assert downloader.source_url == _SOURCE_URL
         assert downloader.raw_data_dir == STS2RunsDownloader.DEFAULT_RAW_DATA_DIR
 
+    def test_defaults_source_url_when_omitted(self) -> None:
+        downloader = STS2RunsDownloader()
+
+        assert downloader.source_url == STS2RunsDownloader.DEFAULT_SOURCE_URL
+
     def test_honors_explicit_raw_data_dir(self, tmp_path: Path) -> None:
         downloader = STS2RunsDownloader(source_url=_SOURCE_URL, raw_data_dir=tmp_path)
 

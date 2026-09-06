@@ -39,3 +39,7 @@ class DataSource(str, Enum):
     SPIRE_CODEX = "spire_codex"  # spire-codex GitHub repo's cards.json
     # (see src/data_retrieval/spire_codex/downloader.py and
     # src/data_refinement/card_binder/spire_codex/ingestion_stage.py).
+    CARDVAULT_FABTCG = "cardvault_fabtcg"  # cardvault.fabtcg.com's
+    # public_card_data.csv dump (see
+    # src/data_retrieval/cardvault_fabtcg/card_downloader.py and
+    # src/data_refinement/card_binder/cardvault_fabtcg/ingestion_stage.py).

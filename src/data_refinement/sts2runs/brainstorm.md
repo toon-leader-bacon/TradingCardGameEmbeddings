@@ -37,63 +37,64 @@ deltas, `card_choices`, `cards_gained`, `cards_removed`,
 11. Given a deck, predict which character the run is for.
 12. Given a final deck, predict how many elite fights / monster
     fights / shops / etc. occurred over the run.
+13. P(Which_card_upgrade | deck, an_upgrade_did_happen)
 
 ## Additional ideas
 
-13. `P(relic_pick | deck, relic_choices)` — PDF over a `relic_choices`
+ 1. `P(relic_pick | deck, relic_choices)` — PDF over a `relic_choices`
     list (treasure rooms, elites, bosses, some events all offer these),
     the relic analogue of the draft-card PDF.
-14. `P(potion_pick | deck, potion_choices)` — PDF over a
+ 2. `P(potion_pick | deck, potion_choices)` — PDF over a
     `potion_choices` list (elites/shops), the potion analogue of the
     same task.
-15. `P(card_removed | deck, current_gold)` — PDF over which card in
+ 3. `P(card_removed | deck, current_gold)` — PDF over which card in
     the current deck a shop's `cards_removed` entry targets, given the
     deck composition and gold on hand at that point.
-16. `P(event_choice | deck, event_id, event_choices)` — predict which
+ 4. `P(event_choice | deck, event_id, event_choices)` — predict which
     option a player takes in an `unknown`/event room, given the deck
     and the event's id and offered `event_choices`.
-17. `P(rest_site_choice | deck, current_hp, max_hp)` — predict rest
+ 5. `P(rest_site_choice | deck, current_hp, max_hp)` — predict rest
     vs. smith vs. dig vs. recall etc. from `rest_site_choices`, given
     deck and HP state.
-18. Predict `turns_taken` for a specific encounter, given the deck and
+ 6. Predict `turns_taken` for a specific encounter, given the deck and
     that encounter's `monster_ids`/`model_id` — an encounter
     difficulty/matchup metric, keyed by monster rather than "next
     fight" generically.
-19. Predict `damage_taken` in a specific encounter, given the deck and
+ 7. Predict `damage_taken` in a specific encounter, given the deck and
     that encounter's `monster_ids`/`model_id` — same matchup framing
     as #18, health-loss instead of turn-count.
-20. Predict `gold_spent` at a shop visit, given the deck, `current_gold`,
+ 8. Predict `gold_spent` at a shop visit, given the deck, `current_gold`,
     and that shop's offered cards/relics/potions.
-21. Given a final deck and potion list, predict which potions were
+ 9. Given a final deck and potion list, predict which potions were
     used (`potion_used`) vs. carried to the end unused — a
     potion-utilization/hoarding classifier.
-22. Predict a card's removal likelihood — across all runs containing
+10. Predict a card's removal likelihood — across all runs containing
     that card, what fraction later show it in a `cards_removed` event
     — an attrition-tendency stat per card, independent of any one
     deck.
-23. Predict the outcome of a `cards_transformed` event (`final_card`),
+11. Predict the outcome of a `cards_transformed` event (`final_card`),
     given the `original_card` and the surrounding deck — a
     "what does this become" task for smith/transform-type effects.
-24. For lost runs, predict the floor of death (regression), given the
+12. For lost runs, predict the floor of death (regression), given the
     deck snapshot at some earlier floor.
-25. Given two cards, predict `P(both in deck | either in deck)` —
+13. Given two cards, predict `P(both in deck | either in deck)` —
     a co-occurrence/synergy statistic across all runs, useful as a
     pretraining signal for card-embedding proximity independent of any
     single-deck task.
-26. Given a deck snapshot at floor N, predict relic count and/or relic
+14. Given a deck snapshot at floor N, predict relic count and/or relic
     rarity distribution at floor N+k — a "deck power trajectory"
     forecast, generalizing the ascension/win predictions into a
     continuous-progress signal.
-27. Given a final deck/relic/potion signature, predict `_isCheated` —
+15. Given a final deck/relic/potion signature, predict `_isCheated` —
     an anomaly-detection framing, useful for data-quality filtering
     rather than gameplay modeling.
-28. Given a deck, predict `killed_by_encounter`/`killed_by_event` for
+16. Given a deck, predict `killed_by_encounter`/`killed_by_event` for
     runs that lost — which specific fight or event ended the run,
     as a multi-class target rather than #24's floor regression.
-29. Given a deck at the start of an act, predict how much gold will be
+17. Given a deck at the start of an act, predict how much gold will be
     accumulated by that act's boss (an economy-trajectory analogue of
     the HP-loss metric in #10).
-30. Given the sequence of `map_point_type`s already visited this act
+18. Given the sequence of `map_point_type`s already visited this act
     (monster/elite/shop/rest/event/treasure so far), predict the next
     map point's type — a route/pathing model independent of deck
     contents, useful as a baseline to condition the deck-dependent

@@ -224,6 +224,29 @@ guarding against a mistake a stage has no reason to make.
   identity is keyed on `id` rather than name, all 5 correctly get
   their own `nocab_uuid`, and `get_by_name("Strike")` on the built
   binder correctly returns all 5.
+- `cardvault_fabtcg/ingestion_stage.py` — `CardVaultFabtcgCardIngestionStage`
+  (`SOURCE_GAME = GameId.FLESH_AND_BLOOD`), reading a *single*
+  `public_card_data.csv` file (one row per print — card x set/reprint
+  x print_language x finish). Identity is `get_by_alias(
+  GameId.FLESH_AND_BLOOD, DataSource.CARDVAULT_FABTCG, card_id)` —
+  `card_id` (e.g. `"10000-year-reunion-1"`) is stable across every
+  reprint, every one of the 9 `print_language` values, and every
+  finish/rarity of the same card, a perfect natural key structurally
+  identical to Scryfall's `oracle_id`. Each row's own `print_id` (e.g.
+  `"MST131"`, `"MST131-RF"`) is registered as a secondary alias,
+  analogous to Scryfall's `arena_id`/`multiverse_ids`. `name` is
+  `face_1_true_name`, joined as `"{face_1} // {face_2}"` when
+  `face_2_true_name` is populated (489/46,660 rows — genuine two-faced
+  cards, e.g. `"A Drop in the Ocean // Inner Chi"`, same shape as an
+  MTG DFC). The one deliberate departure from every other stage's
+  single-pass shape: ingestion is two-pass — pass 1 builds/merges
+  content from `print_language == "en"` rows only (so a non-English
+  row can never win `merge_strategies.keep_longer_content` purely on
+  serialized-byte-length and make the canonical name/rules text
+  non-English), pass 2 processes every other row and only registers
+  its `print_id` as a secondary alias against whichever card pass 1
+  already created — safe by construction since every `card_id` in the
+  corpus has at least one `en` row.
 
 ## How it works
 
@@ -304,6 +327,21 @@ changed_uuids = build_or_update_card_binder(
     Path("data/raw/spire_codex/cards.json"),
     SpireCodexCardIngestionStage(),
     Path("data/final/cards/slay_the_spire_2.jsonl"),
+)
+```
+
+```python
+# cardvault.fabtcg.com: raw_path is a single public_card_data.csv file.
+from pathlib import Path
+from src.data_refinement.card_binder.build import build_or_update_card_binder
+from src.data_refinement.card_binder.cardvault_fabtcg.ingestion_stage import (
+    CardVaultFabtcgCardIngestionStage,
+)
+
+changed_uuids = build_or_update_card_binder(
+    Path("data/raw/cardvault_fabtcg/public_card_data.csv"),
+    CardVaultFabtcgCardIngestionStage(),
+    Path("data/final/cards/flesh_and_blood.jsonl"),
 )
 ```
 

@@ -9,8 +9,11 @@ as a single gzip-compressed NDJSON file (one run object per line, each
 tagged with _serverId/_isCheated/_cheatedReasons) under a dated
 filename at https://sts2runs.com/downloads/ — no API, no pagination,
 no auth, but the filename changes with every monthly snapshot (like
-Scryfall's oracle-cards dumps), so unlike SpireCodexCardDownloader's
-fixed URL, the caller must pass the current snapshot's URL in.
+Scryfall's oracle-cards dumps). DEFAULT_SOURCE_URL is only ever the
+snapshot current as of when this was written — unlike
+SpireCodexCardDownloader's genuinely fixed URL, a caller after a new
+monthly snapshot has been published should pass the current one in
+explicitly rather than relying on the default going stale.
 
 download()/extract() below are structurally identical to
 ScryfallOracleDownloader's (src/data_retrieval/scryfall/downloader.py)
@@ -61,16 +64,23 @@ class STS2RunsDownloader:
     """
 
     DEFAULT_RAW_DATA_DIR: ClassVar[Path] = Path("data/raw/sts2runs")
+    DEFAULT_SOURCE_URL: ClassVar[str] = (
+        "https://sts2runs.com/downloads/runs-all-before-2026-06.json.gz"
+    )
 
-    def __init__(self, source_url: str, raw_data_dir: Path | None = None) -> None:
+    def __init__(
+        self, source_url: str | None = None, raw_data_dir: Path | None = None
+    ) -> None:
         """
         Inputs:
             source_url: full URL to a specific sts2runs.com monthly
                 dump (e.g.
                 "https://sts2runs.com/downloads/runs-all-before-2026-06.json.gz").
-                Current URL must be read off
-                https://sts2runs.com/downloads by the caller — no
-                listing endpoint exists to discover it automatically.
+                Defaults to DEFAULT_SOURCE_URL when omitted, but that
+                constant only reflects the snapshot current as of when
+                this class was written — check
+                https://sts2runs.com/downloads for a newer one and pass
+                it explicitly once it's stale.
             raw_data_dir: directory both the compressed and extracted
                 files are written into. Defaults to
                 DEFAULT_RAW_DATA_DIR when omitted (expected to be a
@@ -81,7 +91,7 @@ class STS2RunsDownloader:
             extract() are called.
         Exceptions: none.
         """
-        self.source_url = source_url
+        self.source_url = source_url if source_url is not None else self.DEFAULT_SOURCE_URL
         self.raw_data_dir = (
             raw_data_dir if raw_data_dir is not None else self.DEFAULT_RAW_DATA_DIR
         )
