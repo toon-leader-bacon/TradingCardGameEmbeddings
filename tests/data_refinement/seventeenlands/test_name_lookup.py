@@ -2,7 +2,9 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.seventeenlands.name_lookup import find_uuid_by_name
+from src.data_refinement.metrics.legacy.seventeenlands.name_lookup import (
+    find_uuid_by_name,
+)
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId

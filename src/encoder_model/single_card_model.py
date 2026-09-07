@@ -66,7 +66,7 @@ class SingleCardModel(nn.Module):
     ) -> Union[MultiCardEmbedding, BatchedSingleCardEmbedding]:
         results: MultiCardEmbedding = []
         for card in x:
-            results.append(self.internal_model(card.embedding))
+            results.append(self.internal_model(card))
         return results
 
     def forward_multi_group(

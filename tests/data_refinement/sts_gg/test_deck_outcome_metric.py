@@ -10,7 +10,7 @@ from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.spire_codex.ingestion_stage import (
     SpireCodexCardIngestionStage,
 )
-from src.data_refinement.sts_gg.deck_outcome_metric import (
+from src.data_refinement.metrics.legacy.sts_gg.deck_outcome_metric import (
     DeckOutcomeMetric,
     scan_runs_jsonl,
 )

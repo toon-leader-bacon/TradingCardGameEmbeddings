@@ -32,14 +32,34 @@ anything richer (a win/loss label, a run id, per-slot structure) is a
 separate metric's own output, referencing the deck's `nocab_uuid`, not a
 field on `GenericDeck` itself.
 
+## Other `DeckBox` instances beyond this container's published one
+
+`DeckBox` is just a store — nothing in this class ties an instance to
+the published `data/final/decks/` location or to a
+`DeckExtractionStage`. `metrics/sts_gg/` uses a second, entirely
+separate `DeckBox` instance this way: private to that container, saved
+under `data/metrics/sts_gg/` instead, and keyed by a content-derived
+id (`create_if_absent()` + `metrics/hash_utils.py`'s
+`deck_uuid_from_cards()`) rather than this container's
+`uuid5(namespace, run_id)` scheme — see
+[`../metrics/sts_gg/README.md`](../metrics/sts_gg/README.md)'s "Deck
+references" section for why and how. The two instances are never
+merged or cross-referenced.
+
 ## Files
 
 - `deck_box.py` — `DeckBox`, the in-memory, multi-game deck store. Three
-  regions: **CRUD by UUID** (`create`/`update`/`replace`/`delete`,
-  `get_by_uuid`, `all_uuids`, `all_decks`), **Persistence**
-  (`load`/`save`, `default_output_path`), **Private Helpers**
-  (`_upsert_deck`). `create()` raises if `nocab_uuid` is already stored;
-  `update()` overwrites whichever of `card_nocab_uuids`/`name` are given
+  regions: **CRUD by UUID** (`create`/`create_if_absent`/`update`/
+  `replace`/`delete`, `get_by_uuid`, `all_uuids`, `all_decks`),
+  **Persistence** (`load`/`save`, `default_output_path`), **Private
+  Helpers** (`_upsert_deck`). `create()` raises if `nocab_uuid` is
+  already stored; `create_if_absent()` is its counterpart for a
+  content-derived id scheme (e.g.
+  `metrics/hash_utils.py`'s `deck_uuid_from_cards()`) where the same
+  id legitimately recurring across calls is expected, not an error —
+  a recurrence is a no-op that returns whatever is already stored,
+  without comparing it against the argument; `update()` overwrites
+  whichever of `card_nocab_uuids`/`name` are given
   (`None` leaves that field untouched) rather than `CardBinder.update()`'s
   dict-merge, since `GenericDeck` has no dict-shaped field to merge into;
   `replace()` fully swaps a deck's content. `DEFAULT_OUTPUT_DIR`/

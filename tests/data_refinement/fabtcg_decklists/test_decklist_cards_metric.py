@@ -7,7 +7,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.fabtcg_decklists.decklist_cards_metric import (
+from src.data_refinement.metrics.legacy.fabtcg_decklists.decklist_cards_metric import (
     DecklistCardsMetric,
     scan_decklists_dir,
 )

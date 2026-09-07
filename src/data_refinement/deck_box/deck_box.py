@@ -84,6 +84,40 @@ class DeckBox:
         self._upsert_deck(deck)
         return deck
 
+    def create_if_absent(self, deck: GenericDeck) -> GenericDeck:
+        """Insert deck only if deck.nocab_uuid isn't already stored.
+
+        The counterpart to create() for callers whose id scheme is
+        deliberately content-derived (e.g. a hash of card_nocab_uuids
+        — see metrics/hash_utils.py's deck_uuid_from_cards()) and
+        therefore expect the same id to legitimately recur across many
+        calls — create() raises on every recurrence; this treats a
+        recurrence as a no-op instead of an error. On a recurrence,
+        deck is NOT compared against the stored value for equality —
+        the existing entry wins unconditionally, on the assumption
+        that identical ids from a content-derived scheme imply
+        identical content.
+
+        Inputs:
+            deck: the deck to insert if deck.nocab_uuid is new.
+        Output: the deck now stored under deck.nocab_uuid — deck
+            itself on a genuinely new id, or whatever was already
+            stored on a recurrence.
+        Side effects: mutates this box's in-memory store only when
+            deck.nocab_uuid is new.
+        Exceptions: none.
+
+        Example:
+            >>> box = DeckBox()
+            >>> box.create_if_absent(some_deck)
+            >>> box.create_if_absent(some_deck)  # no-op, same id
+        """
+        existing = self._decks_by_uuid.get(deck.nocab_uuid)
+        if existing is not None:
+            return existing
+        self._upsert_deck(deck)
+        return deck
+
     def update(
         self,
         nocab_uuid: UUID,

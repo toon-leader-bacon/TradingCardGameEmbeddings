@@ -41,6 +41,29 @@ class TestCreate:
             box.create(deck)
 
 
+class TestCreateIfAbsent:
+    def test_inserts_new_deck(self) -> None:
+        box = DeckBox()
+        deck = _deck("Mono Red", [uuid4(), uuid4()])
+
+        result = box.create_if_absent(deck)
+
+        assert result == deck
+        assert box.get_by_uuid(deck.nocab_uuid) == deck
+
+    def test_recurrence_is_a_no_op_and_returns_existing(self) -> None:
+        box = DeckBox()
+        deck = _deck("Mono Red", [uuid4()])
+        box.create_if_absent(deck)
+        recurrence = _deck("Different Name", [uuid4(), uuid4()])
+        recurrence = replace(recurrence, nocab_uuid=deck.nocab_uuid)
+
+        result = box.create_if_absent(recurrence)
+
+        assert result == deck
+        assert box.get_by_uuid(deck.nocab_uuid) == deck
+
+
 class TestUpdate:
     def test_overrides_card_nocab_uuids_when_given(self) -> None:
         box = DeckBox()
