@@ -75,7 +75,19 @@ text:
 
 ### Single-card (12)
 
-1. **Faction Prediction from Ability Text** — Input: single-card.
+BUILT (see plans/masking_metrics.md and
+src/data_refinement/metrics/gwent_one/*_mask_metric.py): items 1-6,
+10, and 11 below are now masking metrics (FactionMaskMetric,
+ProvisionMaskMetric, PowerMaskMetric, ColorMaskMetric,
+RarityMaskMetric, TypeMaskMetric, SetMaskMetric, ArmorMaskMetric) — a
+different
+metric shape than originally sketched here (no "predict from ability
+text" model input yet, just the masked-field/true-label reference row
+a future Dojo will build that input from). Left as-is below for
+historical context on the original idea; not a live TODO for these 7
+anymore.
+
+1. **Faction Prediction from Masked card** — Input: single-card.
    Label: classification (fixed-set, 7 factions). Predict
    `data-faction` from `.card-body-ability` text + `data-type` +
    `data-color`.
@@ -127,52 +139,52 @@ text:
 
 ### Multi-card (10)
 
-13. **Faction-Legality Pairing** — Input: multi-card (pair). Label:
+ 1. **Faction-Legality Pairing** — Input: multi-card (pair). Label:
     probability. `P(pair_legal_in_same_deck | faction_1, faction_2)`
     — a card is deck-legal only alongside its own faction or
     `neutral`; a trivial sanity-check baseline like cardvault_fabtcg's
     class-legality idea.
-14. **Keyword Co-Occurrence / Synergy Signal** — Input: multi-card
+ 2. **Keyword Co-Occurrence / Synergy Signal** — Input: multi-card
     (pair). Label: probability. `P(share_a_keyword | card_1, card_2)`
     — a card-text-derived synergy proxy, since no real deck-co-
     occurrence data exists in this container (contrast `play_gwent`'s
     guide decks, a separate source).
-15. **Category/Tribe Synergy Pairing** — Input: multi-card (pair).
+ 3. **Category/Tribe Synergy Pairing** — Input: multi-card (pair).
     Label: probability. `P(share_a_category | card_1, card_2)` — the
     tribal-synergy analogue of #14, using `.card-category` instead of
     keywords.
-16. **Provision-Curve Complementarity** — Input: multi-card (pair).
+ 4. **Provision-Curve Complementarity** — Input: multi-card (pair).
     Label: probability (deterministic sanity-check). `P(provision(card_1)
-    + provision(card_2) <= a fixed provision-limit budget)` — an
+    - provision(card_2) <= a fixed provision-limit budget)` — an
     arithmetic baseline like cardvault_fabtcg's pitch-for-cost idea.
-17. **Gold/Bronze Balance in a Hypothetical Pool** — Input: multi-card
+ 5. **Gold/Bronze Balance in a Hypothetical Pool** — Input: multi-card
     (small synthetic group, since no real deck data exists here).
     Label: regression-continuous. Predict the gold-to-bronze ratio
     across a synthetically-sampled small group — a stand-in until
     real deck data (see `play_gwent`) is joined in.
-18. **Faction Representation in a Hypothetical Pool** — Input:
+ 6. **Faction Representation in a Hypothetical Pool** — Input:
     multi-card (small synthetic group). Label: classification
     (fixed-set, plurality faction). Predict the plurality faction
     across a group.
-19. **Reprint/Variant Invariance Check** — Input: multi-card (pair,
+ 7. **Reprint/Variant Invariance Check** — Input: multi-card (pair,
     same underlying card across `data-artid` art variants if any
     exist). Label: none (embedding-similarity evaluation, not a
     supervised target) — flagged as an eval metric, mirroring
     cardvault_fabtcg's reprint-invariance idea; needs confirming
     whether gwent.one's listing actually contains multiple `artid`
     variants per card `id` before committing to this.
-20. **Set Adjacency Pairing** — Input: multi-card (pair). Label:
+ 8. **Set Adjacency Pairing** — Input: multi-card (pair). Label:
     probability. `P(same_set | card_1, card_2)` inferred from ability-
     text style/theme alone, without reading `data-set` directly — a
     free auxiliary/pretraining signal, similar to cardvault_fabtcg's
     family-grouping idea.
-21. **Deploy/Order Ability Pairing** — Input: multi-card (pair).
+ 9. **Deploy/Order Ability Pairing** — Input: multi-card (pair).
     Label: probability. `P(card_2's order ability targets a
     card-type card_1 belongs to | card_1, card_2)` — a
     targeting-compatibility signal, speculative since it requires
     parsing target references out of ability prose, not just
     detecting keyword presence.
-22. **Cross-Faction Neutral-Card Utility** — Input: multi-card (a
+10. **Cross-Faction Neutral-Card Utility** — Input: multi-card (a
     neutral card + one faction's full card pool, as a comparison).
     Label: probability. `P(neutral card commonly thematically fits
     faction | neutral card, faction's typical keywords/categories)` —
@@ -181,37 +193,37 @@ text:
 
 ### Multi-group / corpus-level (8)
 
-23. **Faction Representation Balance** — Input: multi-group (whole
+ 1. **Faction Representation Balance** — Input: multi-group (whole
     corpus). Label: count (distribution). Count of cards per faction
     — a dataset-balance stat before training any faction-prediction
     metric (#1).
-24. **Color-Tier by Faction Distribution** — Input: multi-group (whole
+ 2. **Color-Tier by Faction Distribution** — Input: multi-group (whole
     corpus, cross-tabulated by faction × color). Label: count
     (distribution). Whether some factions run gold-heavy vs.
     bronze-heavy card pools.
-25. **Keyword Representation Balance** — Input: multi-group (whole
+ 3. **Keyword Representation Balance** — Input: multi-group (whole
     corpus). Label: count (distribution). Frequency of each keyword
     (#8's target) across the corpus — `deploy` alone appears on
     632/1,260 cards, flag the resulting imbalance before training.
-26. **Category/Tribe Representation Balance** — Input: multi-group
+ 4. **Category/Tribe Representation Balance** — Input: multi-group
     (whole corpus). Label: count (distribution). Count of cards per
     tribe/category tag, including the 44 `&nbsp;` (no-category) rows
     as their own bucket.
-27. **Provision Distribution by Rarity** — Input: multi-group (whole
+ 5. **Provision Distribution by Rarity** — Input: multi-group (whole
     corpus, split by rarity). Label: count (distribution). Whether
     higher-rarity cards skew toward higher/more variable provision
     cost — a sanity check for #2/#5 before training either.
-28. **Ability Text Length Distribution** — Input: multi-group (whole
+ 6. **Ability Text Length Distribution** — Input: multi-group (whole
     corpus, split by type/color). Label: count (distribution).
     Word/character-count distribution of `.card-body-ability` text —
     validates whether the text-driven single-card metrics (#1, #6-9)
     have enough signal to work with.
-29. **Set Size and Power-Level Trend** — Input: multi-group (whole
+ 7. **Set Size and Power-Level Trend** — Input: multi-group (whole
     corpus, grouped by `data-set` in release order). Label: count/
     regression-continuous (per-set averages). Whether average
     provision/power creeps upward across successive expansions — a
     power-creep sanity check.
-30. **Faction Keyword Signature** — Input: multi-group (all cards of
+ 8. **Faction Keyword Signature** — Input: multi-group (all cards of
     one faction, as a group, compared across factions). Label: count
     (distribution, per-faction keyword frequency table). Which
     keywords are over-represented in one faction relative to the
