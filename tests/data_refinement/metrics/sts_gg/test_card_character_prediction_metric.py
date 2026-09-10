@@ -56,8 +56,8 @@ class TestAccumulate:
         df = pd.read_parquet(tmp_path / "out.parquet")
         row = df.iloc[0]
         assert row["nocab_uuid"] == str(_uuid_for(binder, "STRIKE_SILENT"))
-        assert row["character"] == "CHARACTER.SILENT"
-        assert row["probability"] == 1.0
+        assert list(row["characters"]) == ["CHARACTER.SILENT"]
+        assert list(row["probabilities"]) == pytest.approx([1.0])
         assert row["sample_count"] == 1
 
     def test_card_seen_with_two_characters_splits_probability(
@@ -76,11 +76,12 @@ class TestAccumulate:
         metric.finalize()
 
         df = pd.read_parquet(tmp_path / "out.parquet")
-        by_character = {row["character"]: row for _, row in df.iterrows()}
-        assert by_character["CHARACTER.SILENT"]["probability"] == pytest.approx(2 / 3)
-        assert by_character["CHARACTER.REGENT"]["probability"] == pytest.approx(1 / 3)
-        assert by_character["CHARACTER.SILENT"]["sample_count"] == 3
-        assert by_character["CHARACTER.REGENT"]["sample_count"] == 3
+        assert len(df) == 1
+        row = df.iloc[0]
+        by_character = dict(zip(row["characters"], row["probabilities"]))
+        assert by_character["CHARACTER.SILENT"] == pytest.approx(2 / 3)
+        assert by_character["CHARACTER.REGENT"] == pytest.approx(1 / 3)
+        assert row["sample_count"] == 3
 
     def test_multiple_copies_in_one_run_are_independent_samples(
         self, tmp_path: Path

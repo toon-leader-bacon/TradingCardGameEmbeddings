@@ -111,3 +111,21 @@ def test_killed_by_is_a_real_null_on_a_loss(tmp_path: Path) -> None:
 def test_default_output_paths_are_all_distinct() -> None:
     output_paths = {metric_cls.DEFAULT_OUTPUT_PATH for metric_cls, _ in _CASES}
     assert len(output_paths) == len(_CASES)
+
+
+def test_character_prediction_falls_back_to_other_for_unknown_character(
+    tmp_path: Path,
+) -> None:
+    binder = _binder_from_rows([{"id": "STRIKE_SILENT", "name": "Strike"}], tmp_path)
+    deck_box = DeckBox()
+    metric = CharacterPredictionMetric(binder, deck_box, tmp_path / "out.parquet")
+
+    metric.accumulate(_run_row(character="CHARACTER.SOME_FUTURE_ADDITION"))
+    metric.finalize()
+
+    table = pq.read_table(tmp_path / "out.parquet")
+    assert table.to_pylist()[0]["character"] == "OTHER"
+
+
+def test_character_prediction_label_values_includes_other() -> None:
+    assert "OTHER" in CharacterPredictionMetric.LABEL_VALUES

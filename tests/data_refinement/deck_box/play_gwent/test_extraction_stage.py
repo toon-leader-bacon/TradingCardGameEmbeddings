@@ -206,7 +206,7 @@ class TestExtract:
 
         # Same guide id, content changed (a new card) AND the guide's
         # own title changed — the stored deck's name must stay as
-        # first seen (see _extract_guide()'s docstring: name is never
+        # first seen (see extract_one()'s docstring: name is never
         # refreshed on an update()).
         renamed_path = tmp_path / "guides_renamed.jsonl"
         _write_guides_jsonl(

@@ -1,0 +1,44 @@
+import torch
+
+from src.dojos.generic.multi_card_binary_classification.decoder_head import (
+    MultiCardBinaryClassificationDecoderHead,
+)
+from src.dojos.generic.pooling import MeanEmbeddingPooler
+
+
+class _StubPooler:
+    """Always returns a fixed vector - isolates the decoder head's own
+    stack/MLP/squeeze wiring from MeanEmbeddingPooler's actual math."""
+
+    def pool(self, embeddings):
+        return torch.zeros(embeddings[0].shape[0])
+
+
+class TestForward:
+    def test_returns_one_raw_logit_per_deck(self) -> None:
+        head = MultiCardBinaryClassificationDecoderHead(card_embedding_size=4)
+        embeddings = [
+            [torch.randn(4), torch.randn(4)],  # a 2-card deck
+            [torch.randn(4)],  # a 1-card deck - decks vary in size
+        ]
+
+        output = head(embeddings)
+
+        assert output.shape == (2,)
+
+    def test_uses_injected_pooler_by_default_mean(self) -> None:
+        default_head = MultiCardBinaryClassificationDecoderHead(card_embedding_size=4)
+        stub_head = MultiCardBinaryClassificationDecoderHead(
+            card_embedding_size=4, pooler=_StubPooler()
+        )
+        assert isinstance(default_head.pooler, MeanEmbeddingPooler)
+        assert isinstance(stub_head.pooler, _StubPooler)
+
+
+class TestForwardSingle:
+    def test_returns_scalar(self) -> None:
+        head = MultiCardBinaryClassificationDecoderHead(card_embedding_size=4)
+
+        result = head.forward_single([torch.randn(4), torch.randn(4)])
+
+        assert result.shape == ()

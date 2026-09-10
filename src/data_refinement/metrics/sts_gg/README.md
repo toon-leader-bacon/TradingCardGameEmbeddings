@@ -55,9 +55,10 @@ metrics" below for how the two families relate.
   `CardWinRateAtAct2Metric`'s act-2-conditioned version above).
 - `card_character_prediction_metric.py` — `CardCharacterPredictionMetric`
   (accumulation): the per-card frequency-table version of
-  `CharacterPredictionMetric` — one row per (card, character) pair
-  actually seen, not one scalar per card, so it does NOT subclass
-  `CardAverageMetric` (see its own module docstring).
+  `CharacterPredictionMetric` — one row per card, carrying every
+  character actually seen for it as parallel `characters: list[str]` /
+  `probabilities: list[float]` columns, not one scalar per card, so it
+  does NOT subclass `CardAverageMetric` (see its own module docstring).
 - `BRAINSTORM.md` — candidate metrics not yet built from this raw
   source.
 
@@ -139,9 +140,10 @@ accumulation shape is needed for it.
 `CardCharacterPredictionMetric` (`card_character_prediction_metric.py`)
 is the per-card mirror of `CharacterPredictionMetric`, but does NOT
 subclass `CardAverageMetric` — a card's output here is a whole
-frequency table (one row per `(card, character)` pair actually seen,
-each carrying its own `probability`), not a single running average, so
-reusing `CardAverageMetric`'s single-sum/count shape would force an
+frequency table (one row per card, with parallel `characters`/
+`probabilities` lists covering every character actually seen for it),
+not a single running average, so reusing `CardAverageMetric`'s
+single-sum/count shape would force an
 abstraction over what's only a superficially similar problem. It
 duplicates the per-copy iteration and card-id resolution rule directly
 instead, consistent with this container's existing convention of
@@ -162,10 +164,12 @@ total_count)` pairs from one run's raw JSON dict — no output exists
 until `finalize()` divides those tallies and writes one parquet row
 per card (`nocab_uuid`, a rate/average column, `sample_count`).
 `CardCharacterPredictionMetric` tallies the same way, but keyed by
-`(card, character)` instead of `card` alone, so `finalize()` writes
-one row per pair rather than one row per card. Across all of these, a
-card copy present multiple times in one run counts as that many
-independent samples, not deduplicated to one per run.
+`(card, character)` instead of `card` alone; `finalize()` still writes
+one row per card, collecting every character tallied for that card
+into that row's parallel `characters`/`probabilities` lists rather
+than writing a separate row per `(card, character)` pair. Across all
+of these, a card copy present multiple times in one run counts as that
+many independent samples, not deduplicated to one per run.
 
 Every `DeckLabelMetric` subclass is streaming instead: a run's deck and
 its label are both already present on that one row, so `accumulate()`

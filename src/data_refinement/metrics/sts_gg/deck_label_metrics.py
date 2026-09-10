@@ -19,9 +19,11 @@ default, so this is written as a real null, not a sentinel string.
 """
 
 from pathlib import Path
+from typing import ClassVar
 
 import pyarrow as pa
 
+from src.data_refinement.metrics.masked_field_metric import OTHER_LABEL
 from src.data_refinement.metrics.sts_gg.deck_label_metric import DeckLabelMetric
 
 
@@ -49,14 +51,34 @@ class CharacterPredictionMetric(DeckLabelMetric):
     Label is the raw "CHARACTER.<id>" string as sts_gg writes it (e.g.
     "CHARACTER.SILENT") - unlike a card id, this is never looked up
     against a CardBinder, so there's no reason to strip its prefix.
+
+    LABEL_VALUES, confirmed against data/raw/sts_gg/runs.jsonl (full
+    925-row scan, 2026-09-10): exactly five distinct "character" values
+    appear - DEFECT, IRONCLAD, NECROBINDER, REGENT, SILENT - no others.
+    OTHER_LABEL is included anyway (masked_field_metric.OTHER_LABEL,
+    shared sentinel - see gwent_one's masked-field metrics for the same
+    convention) as a safety net for a playable character added after
+    this list was written, not because one was observed; see
+    _label_for_run()'s fallback.
     """
 
     LABEL_COLUMN = "character"
     LABEL_TYPE = pa.string()
     DEFAULT_OUTPUT_PATH = Path("data/metrics/sts_gg/character_prediction.parquet")
+    LABEL_VALUES: ClassVar[tuple[str, ...]] = (
+        "CHARACTER.DEFECT",
+        "CHARACTER.IRONCLAD",
+        "CHARACTER.NECROBINDER",
+        "CHARACTER.REGENT",
+        "CHARACTER.SILENT",
+        OTHER_LABEL,
+    )
 
     def _label_for_run(self, row: dict) -> str:
-        return row["character"]
+        character = row["character"]
+        if character not in self.LABEL_VALUES:
+            return OTHER_LABEL
+        return character
 
 
 class TotalDamageTakenMetric(DeckLabelMetric):

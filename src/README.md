@@ -29,16 +29,17 @@ containers rather than passing objects in memory directly:
    directly into a `CardBinder` (owning its own duplicate-detection
    and collision-resolution against it), saved to
    `data/final/cards/<game>.jsonl`.
-2. **Metric → dojo:** `data_retrieval/` writes a raw dump, one of the
-   `seventeenlands/*_metrics/` pipelines' `*MetricScanner` streams it
-   (resolving card identity through the *same* `CardBinder` file flow
-   1 produced) and writes per-card `MetricResult` rows to a parquet
-   file under `data/final/metrics/`. A `Dojo` (`dojos/`) then reads
-   that parquet file as its label source, and separately reads the
-   `CardBinder` file again (via `CardLookup`) to turn each label's
-   `nocab_uuid` into an actual card. `docs/metric_dojo_inventory.csv`
-   at the project root tracks every metric class ↔ dojo class pairing
-   that exists today.
+2. **Metric → dojo:** `data_retrieval/` writes a raw dump, and one of
+   `data_refinement/metrics/`'s metric classes (either the
+   `Metric[RawRowT]` accumulator/streaming shape or the
+   `CorpusScanMetric` shape - see
+   [`data_refinement/metrics/README.md`](data_refinement/metrics/README.md))
+   resolves card identity through the *same* `CardBinder` file flow 1
+   produced and writes a per-card/per-deck training-data parquet file
+   under `data/metrics/<source>/`. A `Dojo` (`dojos/`) then reads that
+   parquet file as its label source, and separately reads the
+   `CardBinder` file again to turn each label's `nocab_uuid` into an
+   actual card.
 
 Flow 2 depends on flow 1 having already run for whichever game a
 metric's raw data belongs to — a dojo can't resolve a card it has no
@@ -67,23 +68,35 @@ binder entry for.
   only provide images. No implementation exists yet. See
   [`image_processing/README.md`](image_processing/README.md).
 
-- **`encoder_model/`** — *in progress.* Defines the embedding network
-  architecture(s) themselves (PyTorch model code only) — no knowledge
-  of dojos, training loops, or data loading. `SingleCardModel` and a
-  first implementation exist; `MultiCardModel` doesn't yet. See
-  [`encoder_model/README.md`](encoder_model/README.md).
+- **`encoder_model/`** — *in progress, no README yet.* Defines the
+  embedding network architecture(s) themselves (PyTorch model code
+  only) — no knowledge of dojos, training loops, or data loading.
+  `SingleCardModel` and `MultiCardModel` both exist, dispatching on
+  `src/schema/type_hints.py`'s `InputShape`; `MultiCardModel`'s
+  internal embedder is a placeholder (a hashed `nn.Embedding` + a
+  self-attention stand-in, not a real card-content encoder yet), and
+  `SingleCardModel`'s is unimplemented (`internal_model = None`).
 
 - **`dojos/`** — *in progress.* Houses pluggable auxiliary training
-  tasks (e.g. "predict which card doesn't belong in a deck") behind a
-  shared `Dojo` Strategy interface. One dojo (`GameClassificationDojo`)
-  and a shared `Loss` library exist. See
-  [`dojos/README.md`](dojos/README.md).
+  tasks. Two generations side by side: `seventeenlands/`'s two
+  hand-copied per-metric dojo packages (v1, legacy, not migrated), and
+  a growing set of generic `(input shape, task shape)` dojo cells under
+  `generic/` plus thin per-metric wrapper packages (v2, in progress —
+  five cells, `single_card_regression`,
+  `single_card_fixed_classification`, `multi_card_regression`,
+  `multi_card_binary_classification`, and
+  `multi_card_fixed_classification`, and four metric families,
+  `CardAverageMetric`, `MaskedFieldMetric`, `DeckLabelMetric` (fully
+  covered except `KilledByMetric`, skipped as dead data), and
+  `DeckCardMaskMetric` (`LeaderMaskedFromDeckMetric`, its one concrete
+  subclass so far), implemented so far). See
+  [`dojos/README.md`](dojos/README.md) for current state and
+  `plans/dojo_v2.md` for the remaining cells/families still to build.
 
-- **`training/`** — *in progress.* Orchestrates `encoder_model` +
-  one `Dojo` through an actual training run. `SingleCardTrainer` is
-  built and tested end to end; `MultiCardTrainer` and a `TrainingRegime`
-  for multi-dojo runs don't exist yet. See
-  [`training/README.md`](training/README.md).
+- **`training/`** — *not started.* `demo_training_loop.py` is a
+  non-functional sketch (imports classes that don't exist) of how
+  `encoder_model` + a dojo + an optimizer would be driven through a
+  train/test/validate loop — no real trainer is implemented yet.
 
 - **`evaluation/`** — *not started.* Will score a trained encoder
   against dojos' held-out splits without backpropagating, plus

@@ -14,7 +14,7 @@ guide's own "id" (int, e.g. 407697 — this row's own identity, distinct
 from the nested "deck"."id"), an optional "name" (the guide's human
 title, e.g. "Unorganised crime" — some guides may have none/empty; used
 verbatim as the stored GenericDeck.name when present — see
-_extract_guide()'s docstring for the empty/missing fallback), and
+extract_one()'s docstring for the empty/missing fallback), and
 "deck"."srcCardTemplates": a flat list[int] of every card template id
 in the deck, INCLUDING the leader and stratagem, with duplicates
 already representing copy counts (e.g. a card appearing twice in the
@@ -80,8 +80,13 @@ _DECK_NAMESPACE = UUID("8f1c2b3a-4d5e-4f60-9a7b-1c2d3e4f5061")
 class PlayGwentDeckExtractionStage:
     """Translates playgwent.com's guides.jsonl directly into a DeckBox.
 
-    Single-consumer to src/data_refinement/deck_box/ — no other
-    container depends on this class directly.
+    extract() (whole-file) is single-consumer to
+    src/data_refinement/deck_box/, but extract_one() and
+    deck_uuid_for_guide() are also called directly by
+    src/data_refinement/metrics/play_gwent/'s deck-masking metrics, so
+    every raw guide row becomes a deck the same way regardless of
+    caller — see those two methods' own docstrings and
+    plans/deck_card_masking.md.
     """
 
     SOURCE_GAME: ClassVar[GameId] = GameId.GWENT
@@ -94,7 +99,7 @@ class PlayGwentDeckExtractionStage:
     ) -> list[UUID]:
         """Parse playgwent.com's guides.jsonl, creating/updating decks on box.
 
-        One _extract_guide() call per line of raw_path — no additional
+        One extract_one() call per line of raw_path — no additional
         logic beyond calling that and collecting the non-None results.
 
         Inputs:
@@ -135,21 +140,27 @@ class PlayGwentDeckExtractionStage:
                 if not line.strip():
                     continue
                 guide = json.loads(line)
-                result = self._extract_guide(guide, box, card_lookup)
+                result = self.extract_one(guide, box, card_lookup)
                 if result is not None:
                     changed_uuids.append(result)
         return changed_uuids
 
-    def _extract_guide(
+    def extract_one(
         self, guide: dict, box: DeckBox, card_lookup: CardLookup
     ) -> UUID | None:
         """Create-or-update one playgwent.com guide directly against box.
 
-        Private helper — single consumer is extract(). THIS METHOD IS
-        WHERE IDEMPOTENCY HAPPENS: deck_uuid is a pure function of
+        Public per-row entry point — extract() itself is just this
+        method called in a loop over every line of raw_path. Also
+        called directly by src/data_refinement/metrics/play_gwent/'s
+        deck-masking metrics, which need this exact same "one raw
+        guide -> its deck exists in box" side effect on every raw row
+        they see (see plans/deck_card_masking.md) without duplicating
+        this class's card-resolution/uuid-minting logic. THIS METHOD
+        IS WHERE IDEMPOTENCY HAPPENS: deck_uuid is a pure function of
         guide["id"] (see module docstring's IDEMPOTENT RE-RUNS
-        section), so re-processing the same guide always targets the
-        same stored deck.
+        section, and deck_uuid_for_guide()), so re-processing the same
+        guide always targets the same stored deck.
 
         Inputs:
             guide: one parsed JSON object from raw_path (one guide),
@@ -174,7 +185,7 @@ class PlayGwentDeckExtractionStage:
             propagates.
         """
         guide_id = guide["id"]
-        deck_uuid = self._deck_uuid(guide_id)
+        deck_uuid = self.deck_uuid_for_guide(guide_id)
 
         # Resolve every deck entry's card template id — never None,
         # falls back to the Unknown sentinel on a miss (see
@@ -221,7 +232,7 @@ class PlayGwentDeckExtractionStage:
     def _card_uuid(self, raw_card_id: int, card_lookup: CardLookup) -> UUID:
         """Look up the nocab_uuid for one gwent.one card template id.
 
-        Private helper — single consumer is _extract_guide(). Looks
+        Private helper — single consumer is extract_one(). Looks
         raw_card_id up directly against gwent.one's own registered
         aliases (see module docstring's CARD RESOLUTION section). On a
         miss, logs loudly and falls back to the Unknown sentinel's uuid
@@ -261,14 +272,18 @@ class PlayGwentDeckExtractionStage:
         return unknown_card.nocab_uuid
 
     @staticmethod
-    def _deck_uuid(guide_id: int) -> UUID:
+    def deck_uuid_for_guide(guide_id: int) -> UUID:
         """Compute the deterministic nocab_uuid for one playgwent.com guide.
 
-        Private helper — single consumer is _extract_guide(). uuid5
-        (not uuid4): the same guide_id must always produce the same
-        uuid, across every extract() call, so a re-seen guide updates
-        rather than duplicates (see module docstring's IDEMPOTENT
-        RE-RUNS section).
+        Public — called from extract_one() above, and directly by
+        src/data_refinement/metrics/play_gwent/'s deck-masking metrics,
+        which need this exact id (independent of whether extract_one()
+        found this guide's deck already up to date and returned None)
+        for every raw row they process — see
+        plans/deck_card_masking.md. uuid5 (not uuid4): the same
+        guide_id must always produce the same uuid, across every call,
+        so a re-seen guide updates rather than duplicates (see module
+        docstring's IDEMPOTENT RE-RUNS section).
 
         Inputs:
             guide_id: one guide's own "id" field.

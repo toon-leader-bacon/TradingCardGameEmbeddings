@@ -59,12 +59,35 @@ avoid re-reading one large external file once per metric, and
 First (and currently only) consumer: [`gwent_one/README.md`](gwent_one/README.md)'s
 eight masking metrics.
 
+## `DeckCardMaskMetric` (`deck_card_mask_metric.py`)
+
+A `Metric[dict]`-shaped Template Method base (mirrors `sts_gg`'s
+accumulator/streaming shape, not `CorpusScanMetric`) for masking one
+whole *card* out of a *deck*, chosen via game-specific logic - distinct
+from `MaskedFieldMetric`'s "mask one field of one card" shape. Each
+metric's `accumulate(row)` is driven directly off a raw source's rows
+(e.g. `play_gwent/`'s guide objects), never off an already-built
+`DeckBox` - `GenericDeck`/`DeckBox` are deliberately game-agnostic
+(a plain card multiset, no role/slot info), so a stored deck alone
+can't answer a game-specific question like "which card was the
+leader." A subclass fixes `_deck_uuid_for_row()` (ensures the row's
+deck exists in a `DeckBox`, as a side effect, by delegating to the
+game's own `DeckExtractionStage`), `_target_card_uuid_for_row()` (the
+game-aware masking target, read directly off the raw row), and
+`_label_for_card()` (per-metric label semantics - deliberately not
+standardized the way `MaskedFieldMetric`'s `MASKED_FIELD` path is).
+Output columns: `deck_uuid: str`, `target_card_uuid: str`, `label: str`.
+
+First (and currently only) consumer: [`play_gwent/README.md`](play_gwent/README.md)'s
+`LeaderMaskedFromDeckMetric`.
+
 ## Files
 
 - `metric.py` - `Metric[RawRowT]`, the accumulator-family Protocol.
 - `corpus_scan_metric.py` - `CorpusScanMetric`, the corpus-scan-family
   Protocol.
 - `masked_field_metric.py` - `MaskedFieldMetric`, described above.
+- `deck_card_mask_metric.py` - `DeckCardMaskMetric`, described above.
 - `hash_utils.py` - content-addressed deck-id hashing shared across
   `Metric[RawRowT]`-family containers (see its own module docstring);
   not used by the `CorpusScanMetric` family, which has no deck concept.
@@ -81,5 +104,9 @@ implementation yet). Implemented today:
 - **`gwent_one/`** - eight `MaskedFieldMetric` masking metrics over
   gwent.one card data - this project's first `CorpusScanMetric`-family
   consumer. See [`gwent_one/README.md`](gwent_one/README.md).
+- **`play_gwent/`** - `LeaderMaskedFromDeckMetric`, this project's
+  first `DeckCardMaskMetric` consumer, driven directly off
+  playgwent.com's community deck guides. See
+  [`play_gwent/README.md`](play_gwent/README.md).
 
 This file grows as more raw sources get real metric implementations.

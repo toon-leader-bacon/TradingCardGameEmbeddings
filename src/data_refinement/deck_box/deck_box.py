@@ -15,6 +15,7 @@ in this file — a save()/load() round-trip returns the exact same uuid
 for the exact same deck, always (see load()'s docstring).
 """
 
+import copy
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -226,8 +227,16 @@ class DeckBox:
 
         Inputs:
             nocab_uuid: identity to look up.
-        Output: the matching GenericDeck, or None if no deck has this
-            nocab_uuid.
+        Output: a deep copy of the matching GenericDeck, or None if no
+            deck has this nocab_uuid. A copy, not this box's own stored
+            object - mirrors CardBinder.get_by_uuid()'s same reasoning
+            (see GenericDeck's docstring in src/schema/card.py): frozen
+            doesn't protect card_nocab_uuids' contents, so a caller
+            mutating what it gets back can't corrupt this box's
+            canonical copy or any other caller's independently-returned
+            copy. Less pressing here than for GenericCard today (no mod
+            currently mutates a deck's card list in place), but kept
+            symmetric on purpose.
         Side effects: none.
         Exceptions: none.
 
@@ -235,7 +244,8 @@ class DeckBox:
             >>> box = DeckBox.load([Path("data/final/decks/mtg.jsonl")])
             >>> box.get_by_uuid(some_uuid)
         """
-        return self._decks_by_uuid.get(nocab_uuid)
+        deck = self._decks_by_uuid.get(nocab_uuid)
+        return copy.deepcopy(deck) if deck is not None else None
 
     def all_uuids(self, source_game: GameId | None = None) -> Iterable[UUID]:
         """Every nocab_uuid currently stored in this box.
@@ -266,8 +276,9 @@ class DeckBox:
 
         Inputs:
             source_game: which game's decks to enumerate.
-        Output: every GenericDeck in source_game, in no particular
-            guaranteed order.
+        Output: a deep copy of every GenericDeck in source_game, in no
+            particular guaranteed order. Copies, not this box's own
+            stored objects - see get_by_uuid()'s docstring.
         Side effects: none.
         Exceptions: none.
 
@@ -276,7 +287,7 @@ class DeckBox:
             >>> list(box.all_decks(GameId.MTG))
         """
         return [
-            deck
+            copy.deepcopy(deck)
             for deck in self._decks_by_uuid.values()
             if deck.source_game == source_game
         ]

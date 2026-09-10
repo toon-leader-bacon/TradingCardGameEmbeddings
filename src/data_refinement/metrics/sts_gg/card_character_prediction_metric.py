@@ -4,8 +4,9 @@ that card was ever seen paired with.
 
 NOT A CardAverageMetric: unlike card_average_metrics.py's nine
 siblings, a card's output here isn't one scalar but a whole
-distribution (one row per (card, character) pair actually observed),
-so this doesn't fit CardAverageMetric's Template Method (a single
+distribution (one row per card, carrying every character actually
+observed for it as parallel characters/probabilities lists), so this
+doesn't fit CardAverageMetric's Template Method (a single
 running sum/count per card) - reusing that base over a genuinely
 different output shape would be forcing an abstraction over only
 superficial similarity. The per-copy iteration and card-id resolution
@@ -39,7 +40,9 @@ _STS_GG_CARD_ID_PREFIX = "CARD."
 
 class CardCharacterPredictionMetric:
     """Per-card character frequency table: P(character | card in final
-    deck), one row per (card, character) combination actually seen.
+    deck), one row per card - each row carrying every character
+    actually seen for that card as parallel characters/probabilities
+    lists (see finalize()'s own docstring for the exact schema).
 
     Satisfies the Metric[dict] Protocol (../metric.py) structurally.
     accumulate() only tallies in-memory per-(card, character) counts;
@@ -116,18 +119,20 @@ class CardCharacterPredictionMetric:
             self._character_count[key] = self._character_count.get(key, 0) + 1
 
     def finalize(self) -> Path:
-        """Compute every seen (card, character) pair's probability and
-        write one row per pair to self._output_path.
+        """Compute every seen card's full character distribution and
+        write one row per card to self._output_path.
 
         Inputs: none (uses accumulated state).
         Output: self._output_path.
         Side effects: creates self._output_path's parent directories
             if missing; writes self._output_path (a parquet file with
-            columns nocab_uuid: str, character: str, probability:
-            float, sample_count: int - sample_count is the CARD's
-            total count, shared across every character row for that
-            card, so every row for one card sums its probability
-            column to 1.0).
+            columns nocab_uuid: str, characters: list[str],
+            probabilities: list[float] - parallel lists, one entry per
+            character actually observed for that card, probabilities
+            summing to 1.0 for that card - and sample_count: int, that
+            card's total tally, written once per card rather than once
+            per (card, character) row as before - see
+            plans/card_character_prediction_metric_output_shape.md).
         Exceptions: whatever pandas.DataFrame.to_parquet raises.
 
         Example:
@@ -135,36 +140,44 @@ class CardCharacterPredictionMetric:
             PosixPath('data/metrics/sts_gg/card_character_prediction.parquet')
         """
         result: list[dict] = [
-            self._character_row(card_uuid, character)
-            for (card_uuid, character) in self._character_count
+            self._card_row(card_uuid) for card_uuid in self._total_count
         ]
 
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(result).to_parquet(self._output_path, index=False)
         return self._output_path
 
-    def _character_row(self, card_uuid: UUID, character: str) -> dict:
-        """Build one output row for a single already-tallied
-        (card, character) pair.
+    def _card_row(self, card_uuid: UUID) -> dict:
+        """Build one output row for a single already-tallied card,
+        collecting every character observed for it into parallel
+        characters/probabilities lists.
 
         Private helper - single consumer is finalize().
 
         Inputs:
             card_uuid: a key already present in self._total_count.
-            character: a character already tallied for card_uuid.
-        Output: a dict with keys "nocab_uuid" (str), "character" (str),
-            "probability" (float, this pair's count divided by
-            card_uuid's total count), and "sample_count" (int,
-            card_uuid's total count).
+        Output: a dict with keys "nocab_uuid" (str), "characters"
+            (list[str]), "probabilities" (list[float], parallel with
+            characters - probabilities[i] is characters[i]'s observed
+            count divided by card_uuid's total count, summing to 1.0
+            across the list), and "sample_count" (int, card_uuid's
+            total count).
         Side effects: none.
         Exceptions: none.
         """
         total = self._total_count[card_uuid]
-        count = self._character_count[(card_uuid, character)]
+        characters: list[str] = []
+        probabilities: list[float] = []
+        for (uuid, character), count in self._character_count.items():
+            if uuid != card_uuid:
+                continue
+            characters.append(character)
+            probabilities.append(count / total)
+
         return {
             "nocab_uuid": str(card_uuid),
-            "character": character,
-            "probability": count / total,
+            "characters": characters,
+            "probabilities": probabilities,
             "sample_count": total,
         }
 

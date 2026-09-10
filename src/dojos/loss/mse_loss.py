@@ -31,4 +31,5 @@ class MseLoss(NocabLoss[List[torch.Tensor], List[float]]):
         if not all(isinstance(label, float) for label in labels):
             raise ValueError("All labels must be floats")
         func = nn.MSELoss()
-        return func(decoder_output, labels)
+        target = torch.tensor(labels, dtype=torch.float32)
+        return func(decoder_output, target)

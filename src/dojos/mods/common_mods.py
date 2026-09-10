@@ -15,7 +15,8 @@ class NoOpMod(Mod):
 
 
 class MaskTargetKeyMod(Mod):
-    def __init__(self, key: str):
+    def __init__(self, key: str, train_only: bool = True):
+        super().__init__(train_only=train_only)
         self.key = key
 
     def apply_single(self, data: TrainingDatum) -> TrainingDatum:

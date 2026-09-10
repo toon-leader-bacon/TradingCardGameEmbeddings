@@ -42,7 +42,7 @@ class Provenance:
     fetched_at: datetime
 
 
-@dataclass
+@dataclass(frozen=True)
 class GenericCard:
     """One card, in any onboarded trading card game.
 
@@ -51,6 +51,25 @@ class GenericCard:
     power/toughness, HP, rules text, etc., all un-normalized). The
     embedding model's primary input is expected to be a text
     serialization of raw_content.
+
+    frozen=True only blocks reassigning a field on an existing instance
+    (`card.name = ...`) — it does NOT make raw_content itself immutable,
+    since raw_content is still a plain, mutable dict. Mutating it in
+    place (`card.raw_content[key] = ...`) silently corrupts every other
+    holder of the same GenericCard object (e.g. CardBinder's own
+    canonical copy, if a caller ever gets a reference to it) without
+    frozen catching it. Never mutate raw_content in place — build a new
+    dict and use dataclasses.replace() to get a new GenericCard instead.
+    CardBinder's own read accessors (get_by_uuid() etc.) return a deep
+    copy for exactly this reason, so a caller mutating what it got back
+    can't reach the binder's own stored card either way.
+
+    One more frozen gotcha: frozen=True + the default eq=True makes
+    Python auto-generate a __hash__ for this class, but that __hash__
+    will raise TypeError the moment it's actually called, since
+    raw_content (a dict) isn't hashable. Don't put a GenericCard in a
+    set or use one as a dict key — it isn't genuinely hashable despite
+    looking like it should be.
 
     Inputs: none (data holder).
     Output: n/a.
@@ -65,9 +84,17 @@ class GenericCard:
     provenance: Provenance
 
 
-@dataclass
+@dataclass(frozen=True)
 class GenericDeck:
     """One deck, in any onboarded trading card game.
+
+    frozen=True only blocks reassigning a field on an existing instance
+    — card_nocab_uuids is still a plain, mutable list, so the same
+    in-place-mutation caveat GenericCard's docstring describes for
+    raw_content applies here too (e.g. don't `deck.card_nocab_uuids
+    .append(...)` on a shared instance; use dataclasses.replace()).
+    DeckBox's own read accessors (get_by_uuid() etc.) return a deep
+    copy for the same reason CardBinder's do.
 
     Inputs: none (data holder).
     Output: n/a.
