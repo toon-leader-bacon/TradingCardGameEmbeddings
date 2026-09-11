@@ -3,6 +3,9 @@ from typing import List, Union, cast
 import torch
 import torch.nn as nn
 
+from src.encoder_model.card_serialization import serialize_card_to_json
+from src.encoder_model.embedding_head import EmbeddingHead
+from src.encoder_model.text_encoder import TextEncoder
 from src.schema.card import GenericCard
 from src.schema.type_hints import (
     BatchedMultiCardEmbedding,
@@ -24,19 +27,21 @@ from src.schema.type_hints import (
 
 class MultiCardModel(nn.Module):
     def __init__(
-        self, card_embedding_size: int, num_heads: int = 4, num_layers: int = 2
+        self,
+        text_encoder: TextEncoder,
+        embedding_head: EmbeddingHead,
+        card_embedding_size: int,
+        num_heads: int = 4,
+        num_layers: int = 2,
     ):
         super().__init__()
+        # Strategy + dependency injection, same seam as SingleCardModel:
+        # text_encoder/embedding_head turn each card into a base embedding
+        # (card_embedding_size wide) before self_attention below lets every
+        # card in the group attend to every other card.
+        self.text_encoder: TextEncoder = text_encoder
+        self.embedding_head: EmbeddingHead = embedding_head
         self.card_embedding_size = card_embedding_size
-
-        # TODO: replace with the real embedder - a text serialization of
-        # GenericCard.raw_content run through a text encoder. Placeholder
-        # so self_attention below has something concrete to contextualize:
-        # one learned vector per distinct card uuid, hashed into a fixed
-        # vocab. Doesn't generalize to cards it hasn't seen during
-        # training, unlike a real text encoder would.
-        self.card_vocab_size = 100_000
-        self.base_embedder = nn.Embedding(self.card_vocab_size, card_embedding_size)
 
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=card_embedding_size,
@@ -51,10 +56,9 @@ class MultiCardModel(nn.Module):
         """One contextualized embedding per input card, same order - every
         card attends to every other card in `cards` before its embedding
         is returned."""
-        indices = torch.tensor(
-            [card.nocab_uuid.int % self.card_vocab_size for card in cards]
-        )
-        base = self.base_embedder(indices)  # (num_cards, embedding_dim)
+        texts = [serialize_card_to_json(card) for card in cards]
+        encoding = self.text_encoder.encode(texts)
+        base = self.embedding_head(encoding)  # (num_cards, card_embedding_size)
 
         # nn.TransformerEncoder expects a batch dim; treat this one group
         # of cards as its own batch of size 1, then drop it back off.

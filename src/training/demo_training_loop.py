@@ -11,7 +11,8 @@ class DemoTrainingLoop:
 
     def example_training_usage(self):
         model: SingleCardModel = SingleCardModel()  # example
-        # In the future there may be many multiple dojos per training loop, so this should be a list.
+        # In the future there may be many multiple dojos per training
+        # loop, so this should be a list.
         # But it's not clear how to handle multiple dojos per loop. Some are
         # much larger than others, some have a richer signal-to-noise ratio than others.
         # some are easier than others etc.

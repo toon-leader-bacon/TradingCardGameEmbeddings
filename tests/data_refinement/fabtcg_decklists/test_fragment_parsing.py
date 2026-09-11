@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from src.data_refinement.metrics.legacy.fabtcg_decklists.fragment_parsing import (
+from src.data_refinement.fabtcg_decklists.fragment_parsing import (
     iter_card_quantities_and_names,
 )
 

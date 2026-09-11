@@ -12,7 +12,8 @@ boundary the way card_win_rate_at_act2_metric.py does, since every
 label here is a whole-run scalar, not a value tied to a specific point
 in the run.
 
-WARNING: KilledBy seems to be only null for the current data source. So it's not a good metric to use.
+WARNING: KilledBy seems to be only null for the current data source.
+So it's not a good metric to use.
 NULLABLE LABEL: KilledByMetric's label is None on a win (killed_by is
 only ever set on a loss) - pyarrow's string type is nullable by
 default, so this is written as a real null, not a sentinel string.
@@ -162,7 +163,8 @@ class TotalCombatsMetric(DeckLabelMetric):
 
 class KilledByMetric(DeckLabelMetric):
     """
-    WARNING: KilledBy seems to be only null for the current data source. So it's not a good metric to use.
+    WARNING: KilledBy seems to be only null for the current data
+    source. So it's not a good metric to use.
 
     Deck -> killedBy (BRAINSTORM.md multi-group #1's per-run
     analogue - null on a win, an encounter/event id string on a loss).
