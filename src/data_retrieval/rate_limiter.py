@@ -49,7 +49,7 @@ class RateLimiter:
             >>> limiter.wait()  # returns immediately, first call
             >>> limiter.wait()  # blocks up to 5 seconds if called again immediately
         """
-        now = time.monotonic()
+        now = time.perf_counter()
         if self._last_call_monotonic is not None:
             elapsed = now - self._last_call_monotonic
             remaining = self._min_interval_seconds - elapsed
@@ -59,6 +59,6 @@ class RateLimiter:
                 # toward the next call's elapsed-time calculation, or
                 # paced calls silently lose their spacing (the sleep
                 # duration would otherwise vanish from the bookkeeping).
-                now = time.monotonic()
+                now = time.perf_counter()
 
         self._last_call_monotonic = now

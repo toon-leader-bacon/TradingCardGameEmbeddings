@@ -9,7 +9,7 @@ class TestRateLimiter:
 
         with patch("src.data_retrieval.rate_limiter.time.sleep") as mock_sleep:
             with patch(
-                "src.data_retrieval.rate_limiter.time.monotonic", return_value=100.0
+                "src.data_retrieval.rate_limiter.time.perf_counter", return_value=100.0
             ):
                 limiter.wait()
 
@@ -21,7 +21,7 @@ class TestRateLimiter:
 
         with patch("src.data_retrieval.rate_limiter.time.sleep") as mock_sleep:
             with patch(
-                "src.data_retrieval.rate_limiter.time.monotonic",
+                "src.data_retrieval.rate_limiter.time.perf_counter",
                 # 1st call: now=100.0 (no sleep). 2nd call: now=102.0
                 # (needs to sleep 3s), then re-read post-sleep -> 105.0.
                 side_effect=[100.0, 102.0, 105.0],
@@ -40,7 +40,7 @@ class TestRateLimiter:
 
         with patch("src.data_retrieval.rate_limiter.time.sleep") as mock_sleep:
             with patch(
-                "src.data_retrieval.rate_limiter.time.monotonic",
+                "src.data_retrieval.rate_limiter.time.perf_counter",
                 # call 1: now=0.0, no prior call -> no sleep, last=0.0
                 # call 2: now=0.0 (immediate), elapsed=0 -> sleeps 5s,
                 #   re-read post-sleep -> 5.0, last=5.0
@@ -59,7 +59,7 @@ class TestRateLimiter:
 
         with patch("src.data_retrieval.rate_limiter.time.sleep") as mock_sleep:
             with patch(
-                "src.data_retrieval.rate_limiter.time.monotonic",
+                "src.data_retrieval.rate_limiter.time.perf_counter",
                 side_effect=[100.0, 106.0],
             ):
                 limiter.wait()  # first call at t=100.0
