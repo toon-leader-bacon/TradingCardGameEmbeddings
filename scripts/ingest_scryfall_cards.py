@@ -2,8 +2,9 @@
 
 Ingests a Scryfall oracle-cards .jsonl dump into a CardBinder, writing
 the binder's card store plus its sibling alias-ledger file. Safe to
-rerun: build_or_update_card_binder() is idempotent, and reports what
-actually changed rather than succeeding silently (see IngestSummary).
+rerun: build_or_update_card_binder() is idempotent, and returns the
+nocab_uuid of every card it created or content-changed rather than
+succeeding silently.
 
 Usage (from the project root):
 
@@ -30,7 +31,6 @@ from src.data_refinement.card_binder.build import build_or_update_card_binder
 from src.data_refinement.card_binder.scryfall.ingestion_stage import (
     ScryfallCardIngestionStage,
 )
-from src.schema.game_id import GameId
 
 
 def parse_args() -> argparse.Namespace:
@@ -54,17 +54,12 @@ def main() -> None:
     args = parse_args()
 
     print(f"Ingesting {args.scryfall_jsonl} -> {args.binder_path}")
-    summary = build_or_update_card_binder(
+    changed_uuids = build_or_update_card_binder(
         raw_path=args.scryfall_jsonl,
-        source_game=GameId.MTG,
         ingestion_stage=ScryfallCardIngestionStage(),
         binder_path=args.binder_path,
     )
-    print(
-        f"inserted={summary.inserted} "
-        f"content_updated={summary.content_updated} "
-        f"kept_existing={summary.kept_existing}"
-    )
+    print(f"created or content-changed {len(changed_uuids)} cards")
 
 
 if __name__ == "__main__":
