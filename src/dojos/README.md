@@ -49,8 +49,9 @@ metric family that shares its `(input shape, task shape)` cell.
 - `MaskedFieldDataConstructor` - for `MaskedFieldMetric`'s family
   - Single card training datum, where the specified card data json field is masked out before returning. Classification output (guess what the field was masked out, like rarity, card type, power, cost, etc).
 - `DeckLabelDataConstructor` - for `DeckLabelMetric`'s family
-  - A multi-card input (a deck of some type) with
+  - A multi-card input (a deck of some type) with a classification output
 - `DeckCardMaskDataConstructor` - for `DeckCardMaskMetric`'s family
+  - A multi-card input where one card is targeted for exclusion. The training task is to guess what the missing card is.
 - Other custom data constructors, etc.
 
 ### `generic/single_card_regression/` - single card in, scalar out

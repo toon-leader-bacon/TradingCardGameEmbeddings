@@ -3,12 +3,10 @@
 A personal/portfolio project to build a generic card embedding model
 that represents a card from any trading card game (MTG, Pokemon,
 Yu-Gi-Oh, Hearthstone, etc.) in a shared embedding space. The model is
-trained via a suite of pluggable auxiliary tasks ("dojos") and
-evaluated independently of any single dojo. The primary artifact of
-value is the embedding model itself (possibly published), not
-performance on any one training task — breadth of dojos/data sources
-is a deliberate feature of this project, not scope creep to be
-trimmed.
+trained via a suite of pluggable auxiliary tasks ("dojos" and "metrics").
+The primary artifact of
+value is the embedding model itself, not
+performance on any one training task.
 
 This file is a map: one paragraph per top-level container, its current
 status, and a link to that container's own `README.md` for depth. Data
@@ -23,12 +21,11 @@ containers rather than passing objects in memory directly:
 1. **Card ingestion:** `data_retrieval/` writes a raw dump to
    `data/raw/`, and `card_binder/build.py`'s
    `build_or_update_card_binder()` hands it to a `CardIngestionStage`
-   implementation (e.g.
-   `data_refinement/card_binder/scryfall/ScryfallCardIngestionStage`,
-   `.../pokemon_tcg/PokemonTcgCardIngestionStage`), which writes
+   implementation, which writes
    directly into a `CardBinder` (owning its own duplicate-detection
    and collision-resolution against it), saved to
-   `data/final/cards/<game>.jsonl`.
+   `data/final/cards/<game>.jsonl`. There is a similar flow for "deck" data
+   that is stored in a "Deck Box", mirroring the "Card Binder" flow described.
 2. **Metric → dojo:** `data_retrieval/` writes a raw dump, and one of
    `data_refinement/metrics/`'s metric classes (either the
    `Metric[RawRowT]` accumulator/streaming shape or the
@@ -37,7 +34,7 @@ containers rather than passing objects in memory directly:
    resolves card identity through the *same* `CardBinder` file flow 1
    produced and writes a per-card/per-deck training-data parquet file
    under `data/metrics/<source>/`. A `Dojo` (`dojos/`) then reads that
-   parquet file as its label source, and separately reads the
+   parquet file as its (training input, true label) source, and separately reads the
    `CardBinder` file again to turn each label's `nocab_uuid` into an
    actual card.
 
@@ -53,55 +50,42 @@ binder entry for.
   behavior — no README of its own (nothing to document beyond the
   types themselves).
 
-- **`data_retrieval/`** — *in progress.* Collects raw card/deck data
-  from external sources and writes it untouched to `data/raw`. Four
-  sources implemented and tested today; more are planned. See
+- **`data_retrieval/`** — Collects raw card/deck data
+  from external sources and writes it to `data/raw`. These classes may 'unwrap'
+  the raw data, but typically logic related to cleaning, validating, transforming
+  or merging the data should be done as a dedicated metric class. See
   [`data_retrieval/README.md`](data_retrieval/README.md).
 
-- **`data_refinement/`** — *in progress.* Converts raw data into the
-  standardized `GenericCard`/`GenericDeck` schema and 17lands-derived
-  per-card metrics, landing results under `data/final`. See
+- **`data_refinement/`** — There are 3 main types of data refinement: card_binder (extract card data from raw data),
+  deck_box (extract deck lists from raw data), and metrics (extrat training data inputs and true labels for consumption by a dojo later)
   [`data_refinement/README.md`](data_refinement/README.md).
 
-- **`image_processing/`** — *not started.* Optional, lower-priority
-  effort to extract structured text from card images for sources that
-  only provide images. No implementation exists yet. See
-  [`image_processing/README.md`](image_processing/README.md).
-
-- **`encoder_model/`** — *in progress, no README yet.* Defines the
+- **`encoder_model/`** — Defines the
   embedding network architecture(s) themselves (PyTorch model code
-  only) — no knowledge of dojos, training loops, or data loading.
-  `SingleCardModel` and `MultiCardModel` both exist, dispatching on
-  `src/schema/type_hints.py`'s `InputShape`; `MultiCardModel`'s
-  internal embedder is a placeholder (a hashed `nn.Embedding` + a
-  self-attention stand-in, not a real card-content encoder yet), and
-  `SingleCardModel`'s is unimplemented (`internal_model = None`).
+  only)
 
-- **`dojos/`** — *in progress.* Houses pluggable auxiliary training
-  tasks. Two generations side by side: `seventeenlands/`'s two
-  hand-copied per-metric dojo packages (v1, legacy, not migrated), and
-  a growing set of generic `(input shape, task shape)` dojo cells under
-  `generic/` plus thin per-metric wrapper packages (v2, in progress —
-  five cells, `single_card_regression`,
-  `single_card_fixed_classification`, `multi_card_regression`,
-  `multi_card_binary_classification`, and
-  `multi_card_fixed_classification`, and four metric families,
-  `CardAverageMetric`, `MaskedFieldMetric`, `DeckLabelMetric` (fully
-  covered except `KilledByMetric`, skipped as dead data), and
-  `DeckCardMaskMetric` (`LeaderMaskedFromDeckMetric`, its one concrete
-  subclass so far), implemented so far). See
-  [`dojos/README.md`](dojos/README.md) for current state and
-  `plans/dojo_v2.md` for the remaining cells/families still to build.
+- **`dojos/`** — Houses pluggable auxiliary training
+  tasks, one dojo per metric. Dojos consume training data produces by metrics, split the data into
+  train/test/validate sets, apply modifications (as appropriate), yield the data
+  to the training loop, receive the embedding vectors back from the encoder_model,
+  and compute the loss. To convert the card(s) embeddings(s) into a loss, typically
+  the dojo will use a dedicated shallow decoder head model, and the loss signal
+  will flow through that into the actual embedding model we're training.
+  [`dojos/README.md`](dojos/README.md) for current state.
 
-- **`training/`** — *not started.* `demo_training_loop.py` is a
-  non-functional sketch (imports classes that don't exist) of how
-  `encoder_model` + a dojo + an optimizer would be driven through a
-  train/test/validate loop — no real trainer is implemented yet.
+- **`training/`** — `demo_training_loop.py` is a
+  sketch of how encoder_model` + a dojo + an optimizer would be driven through a
+  train/test/validate loop.
 
-- **`evaluation/`** — *not started.* Will score a trained encoder
-  against dojos' held-out splits without backpropagating, plus
-  dojo-independent embedding-space exploration. No evaluation runner
-  exists yet. See [`evaluation/README.md`](evaluation/README.md).
+- **`evaluation/`** — This is NOT the typical Train/Test/Validation concept that
+  the dojo is responsible for. This evaluation is for post-training to determine
+  how effective the embedding model is. This may include intrinsic validation
+  (measuring how much of the embedding space is actually used by the model;
+  attempting to identify reasonable clusters of card embeddings; what parts of
+  the inputs actually activate certain regions of the model; etc) and extrinsic
+  validation (evaluate how the embedding works for new dojos not present durring training at all;
+  evaluate how the embedding works for new cards not present during training;
+  evaluate how the embedding works for new card games not present during training; etc.)
 
 ## A naming note: `Dojo` vs. `Gym`
 

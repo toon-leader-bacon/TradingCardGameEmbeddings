@@ -15,7 +15,7 @@ is (LABEL_VALUES), and two decisions:
 scan() owns the shared sequence (iterate the corpus, filter, look up
 labels, write parquet) - that part is not a subclass's job to repeat.
 
-NOT A Metric[RawRowT] (metric.py): satisfies CorpusScanMetric
+NOT A Metric[RawRowT] (../metric.py): satisfies CorpusScanMetric
 (corpus_scan_metric.py) instead. See that module's docstring for why -
 in short, a CardBinder is already fully loaded by scan() time, so
 there's no external per-row source to accumulate() over.
@@ -76,7 +76,7 @@ class MaskedFieldMetric(ABC):
         Inputs:
             card_lookup: already-populated registry to scan - must
                 already have self.SOURCE_GAME's cards ingested. Typed
-                as CardLookup (card_binder/card_lookup.py), not the
+                as CardLookup (../../card_binder/card_lookup.py), not the
                 full CardBinder, since this class only ever calls
                 all_cards() - see plans/masking_metrics.md's
                 constructor rationale (a real CardBinder satisfies

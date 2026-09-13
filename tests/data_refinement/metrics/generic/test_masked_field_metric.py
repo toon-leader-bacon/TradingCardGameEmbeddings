@@ -6,7 +6,7 @@ from uuid import uuid4
 import pandas as pd
 import pytest
 
-from src.data_refinement.metrics.masked_field_metric import MaskedFieldMetric
+from src.data_refinement.metrics.generic.masked_field_metric import MaskedFieldMetric
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId

@@ -8,7 +8,7 @@ import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.data_refinement.metrics.masked_field_metric import OTHER_LABEL
+from src.data_refinement.metrics.generic.masked_field_metric import OTHER_LABEL
 from src.data_refinement.metrics.play_gwent.leader_labels import LEADER_NAMES
 from src.data_refinement.metrics.play_gwent.leader_masked_from_deck_metric import (
     LeaderMaskedFromDeckMetric,

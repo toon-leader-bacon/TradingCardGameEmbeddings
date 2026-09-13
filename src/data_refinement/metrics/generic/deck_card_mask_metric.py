@@ -6,7 +6,7 @@ domain logic a subclass owns, e.g. "the leader").
 
 See plans/deck_card_masking.md for the full design, in particular why
 this is raw-row-driven (Metric[dict]-shaped, mirroring
-sts_gg/deck_label_metric.py::DeckLabelMetric) rather than driven by
+../sts_gg/deck_label_metric.py::DeckLabelMetric) rather than driven by
 iterating an already-populated DeckBox: GenericDeck/DeckBox are
 deliberately game-agnostic (a plain card_nocab_uuids multiset, no
 role/slot information), so a deck already sitting in a DeckBox has
@@ -35,7 +35,7 @@ A subclass fixes:
 accumulate() owns the shared per-row sequence; finalize() just closes
 the writer. Mirrors DeckLabelMetric's streaming shape exactly - see
 that class's own docstring for why this satisfies Metric[dict]
-(metric.py) structurally rather than CorpusScanMetric.
+(../metric.py) structurally rather than CorpusScanMetric.
 """
 
 from abc import ABC, abstractmethod
@@ -58,7 +58,7 @@ class DeckCardMaskMetric(ABC):
     accumulate() sees it. Also ensures every row's deck exists in
     deck_box, regardless of whether that row has a valid target.
 
-    Structural Metric[dict] (metric.py) - every concrete subclass
+    Structural Metric[dict] (../metric.py) - every concrete subclass
     satisfies it, since accumulate()/finalize() are defined here and
     inherited unchanged.
     """

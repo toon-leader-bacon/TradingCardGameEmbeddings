@@ -24,7 +24,7 @@ from typing import ClassVar
 
 import pyarrow as pa
 
-from src.data_refinement.metrics.masked_field_metric import OTHER_LABEL
+from src.data_refinement.metrics.generic.masked_field_metric import OTHER_LABEL
 from src.data_refinement.metrics.sts_gg.deck_label_metric import DeckLabelMetric
 
 

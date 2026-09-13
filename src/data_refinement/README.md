@@ -13,40 +13,17 @@ not something fixed by this container's structure.
 
 ## Containers
 
-- **`card_binder/`** *(stable)* — the standardized, multi-game card
+- **`card_binder/`** the standardized, multi-game card
   store every other stage (and `training`, downstream) reads from and
-  writes into. See [`card_binder/README.md`](card_binder/README.md).
-- **`deck_box/`** *(in progress)* — the standardized, multi-game deck
-  store: `DeckBox` (mirroring `card_binder`'s CRUD-by-uuid shape, minus
-  the alias-ledger/collision machinery decks don't need) plus the
+  writes into. We only need one data source per game to ingest into dedicated
+  cards.
+  See [`card_binder/README.md`](card_binder/README.md).
+- **`deck_box/`** the standardized, multi-game deck
+  store: `DeckBox` (mirroring `card_binder`'s CRUD-by-uuid shape) plus the
   `DeckExtractionStage` Strategy Protocol every raw deck source will
-  implement. No source implementation exists yet. See
-  [`deck_box/README.md`](deck_box/README.md).
-- **`seventeenlands/`** *(in progress)* — everything specific to the
-  17lands raw source: three sibling metric-engine pipelines over
-  17lands' `draft_data`/`game_data`/`replay_data` CSVs. See
-  [`seventeenlands/README.md`](seventeenlands/README.md).
-- **`sts_gg/`** *(technology demonstration)* — a single streaming
-  metric (`DeckOutcomeMetric`) converting sts_gg's raw Slay the Spire 2
-  run data into a per-run deck/outcome row, resolving card references
-  through the same `CardBinder` a *different* source (`spire_codex`)
-  built — this project's first metric spanning two independent raw
-  sources for one game. See [`sts_gg/README.md`](sts_gg/README.md).
-- **`fabtcg_decklists/`** — a single streaming metric
-  (`DecklistCardsMetric`) converting one fabtcg.com decklist HTML
-  fragment (as saved by `data_retrieval/fabtcg_decklists/`) into a
-  per-deck `(deck_slug, card_nocab_uuids)` row, resolving each card's
-  name against an already-loaded `CardBinder` (populated from
-  `cardvault_fabtcg`'s ingestion). Multiple copies of the same card
-  appear as repeated uuids in `card_nocab_uuids`, not a count field.
-  Structurally a sibling to `sts_gg/` (same streaming-metric-plus-
-  directory-scanner shape: `DecklistCardsMetric.accumulate()`/
-  `finalize()` plus a separate `scan_decklists_dir()`), not a
-  `card_binder/<source>/ingestion_stage.py` — this stage never
-  creates or replaces a `GenericCard`, only resolves existing ones.
-  This first version deliberately flattens every card group (Hero /
-  Weapon / Equipment, Pitch 1/2/3) into one flat list — see
-  [`fabtcg_decklists/TODO.md`](fabtcg_decklists/TODO.md) for a
-  deferred structured/grouped follow-up.
-
-This file grows as more top-level stages get added.
+  implement. Not ever data source provides deck data to be consumed here.
+  See [`deck_box/README.md`](deck_box/README.md).
+- **metrics/** Each data source should have dedicated, game-specific or data-source
+  specific metrics associated with it. The logic for transforming raw data into
+  these more rich game-specific metrics are to be stored here. One directory
+  per data source.
