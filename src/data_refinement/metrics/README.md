@@ -108,5 +108,9 @@ implementation yet). Implemented today:
   first `DeckCardMaskMetric` consumer, driven directly off
   playgwent.com's community deck guides. See
   [`play_gwent/README.md`](play_gwent/README.md).
+- **`seventeenlands/`** - `Metric[dict]` metrics over 17lands' MTG
+  draft/game/replay data exports; `draft_data/`, `game_data/`, and
+  `replay_data/` are all implemented today. See
+  [`seventeenlands/README.md`](seventeenlands/README.md).
 
 This file grows as more raw sources get real metric implementations.

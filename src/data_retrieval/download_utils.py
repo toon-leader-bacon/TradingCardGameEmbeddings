@@ -17,11 +17,19 @@ alongside it once a two-phase downloader (sts_gg) needed to inspect a
 paginated list endpoint's parsed body before deciding whether to keep
 paging — a case download_to_file's "URL in, file on disk out" contract
 can't serve directly. Both functions share the same attempt-counting/
-backoff loop via _call_with_retries() rather than duplicating it, since
+backoff loop via call_with_retries() rather than duplicating it, since
 the only real difference between them (streaming straight to disk vs.
 buffering the whole body as text) lives entirely inside each one's own
 attempt closure. See src/data_retrieval/TODO.md's note on migrating
 other sources' private retry loops onto these shared functions.
+
+call_with_retries() itself is exported (not just an internal helper of
+this module) for a caller whose attempt doesn't fit either
+download_to_file's or download_to_string's contract but still wants
+the same attempt-counting/backoff behavior — e.g.
+SpireCodexRunDownloader._fetch_page, which needs a response header
+(X-Next-Cursor) alongside the streamed-to-disk body, something neither
+function surfaces.
 
 read_manifest()/append_with_manifest() were extracted once the same
 "read a manifest file's ids, else empty set" plus "append a data row,
@@ -55,20 +63,22 @@ _RETRY_BACKOFF_SECONDS = 2.0
 _AttemptResult = TypeVar("_AttemptResult")
 
 
-def _call_with_retries(
+def call_with_retries(
     attempt: Callable[[], _AttemptResult], *, max_attempts: int
 ) -> _AttemptResult:
     """Call attempt(), retrying up to max_attempts total times if it
     raises requests.RequestException, with a fixed
     _RETRY_BACKOFF_SECONDS pause between attempts.
 
-    Private helper — shared by download_to_file() and
-    download_to_string(), this module's two GET helpers, so both retry
-    identically without duplicating the attempt-counting/backoff loop.
-    Each caller's attempt() closure owns whatever's specific to it
-    (streamed writing plus partial-file cleanup for download_to_file,
-    plain body buffering for download_to_string) — this function only
-    knows about retrying a zero-arg callable.
+    Shared by download_to_file() and download_to_string(), this
+    module's two GET helpers, so both retry identically without
+    duplicating the attempt-counting/backoff loop. Each caller's
+    attempt() closure owns whatever's specific to it (streamed writing
+    plus partial-file cleanup for download_to_file, plain body
+    buffering for download_to_string) — this function only knows about
+    retrying a zero-arg callable. Also exported for a caller whose
+    attempt doesn't fit either of those two contracts (see this
+    module's docstring) but still wants the same retry behavior.
 
     Inputs:
         attempt: zero-arg callable performing one full attempt end to
@@ -82,6 +92,13 @@ def _call_with_retries(
     Exceptions: raises the last attempt's requests.RequestException
         once max_attempts attempts have all failed. Any other exception
         attempt() raises propagates immediately, without retrying.
+
+    Example:
+        >>> def _attempt() -> str:
+        ...     response = requests.get(url, timeout=60)
+        ...     response.raise_for_status()
+        ...     return response.text
+        >>> body = call_with_retries(_attempt, max_attempts=3)
     """
     last_error: requests.RequestException | None = None
 
@@ -154,7 +171,7 @@ def download_to_file(
             destination_path.unlink(missing_ok=True)
             raise
 
-    _call_with_retries(_attempt, max_attempts=max_attempts)
+    call_with_retries(_attempt, max_attempts=max_attempts)
 
 
 def read_manifest(manifest_path: Path) -> set[str]:
@@ -291,4 +308,4 @@ def download_to_string(
         response.raise_for_status()
         return response.text
 
-    return _call_with_retries(_attempt, max_attempts=max_attempts)
+    return call_with_retries(_attempt, max_attempts=max_attempts)

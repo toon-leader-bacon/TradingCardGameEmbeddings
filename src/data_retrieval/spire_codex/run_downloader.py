@@ -86,11 +86,15 @@ from typing import ClassVar
 import requests
 from tqdm import tqdm
 
+from src.data_retrieval.download_utils import call_with_retries
 from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.rate_limiter import RateLimiter
 
 _REQUEST_TIMEOUT_SECONDS = 60
 _DEFAULT_CHUNK_SIZE_BYTES = 1024 * 1024  # 1 MiB, matches download_to_file
+_PAGE_FETCH_MAX_ATTEMPTS = (
+    3  # 1 initial try + up to 2 retries, matches download_to_file's default
+)
 _NEXT_CURSOR_HEADER = "X-Next-Cursor"
 _PAGE_FILENAME_TEMPLATE = "page_{page_index:05d}.jsonl.gz"
 _NEXT_CURSOR_SIDECAR_TEMPLATE = "page_{page_index:05d}.next_cursor"
@@ -443,7 +447,17 @@ class SpireCodexRunDownloader(Downloader):
         download_to_file: that helper's contract is "URL in, whole
         file on disk, no response metadata out" — this needs the
         X-Next-Cursor response header before/while streaming the body,
-        which download_to_file has no way to surface.
+        which download_to_file has no way to surface. It does share
+        download_to_file's retry loop directly, via
+        download_utils.call_with_retries: a page can take several
+        minutes to stream (see this module's docstring on page size),
+        long enough for a transient mid-stream failure (e.g.
+        requests.exceptions.ChunkedEncodingError from a dropped
+        connection) to be likely over a multi-hour walk, and without a
+        retry here that failure would abort the whole call instead of
+        just this one page — _run_phase_1() would still resume from the
+        last complete page on a later call, but only after the caller
+        noticed the crash and re-invoked it.
 
         Inputs:
             page_index: which page this is, used to name both the page
@@ -454,12 +468,17 @@ class SpireCodexRunDownloader(Downloader):
             end: passed through as the `end` query param.
         Output: the page's on-disk path plus the cursor for the
             following page (None if this was the last page).
-        Side effects: one paced network request; writes the page's
-            gzip file and its cursor sidecar file. Any partially-
-            written page file is removed before the exception
-            propagates (same convention as download_to_file).
-        Exceptions: raises on network failure (e.g. connection error,
-            non-2xx response) or on failure to write either file.
+        Side effects: up to _PAGE_FETCH_MAX_ATTEMPTS paced network
+            requests (one per attempt); sleeps between attempts on
+            retry (see call_with_retries); writes the page's gzip file
+            and its cursor sidecar file. Any partially-written page
+            file is removed before an attempt's exception propagates to
+            the next retry or, on the last attempt, to the caller (same
+            convention as download_to_file).
+        Exceptions: raises requests.RequestException (e.g. connection
+            error, non-2xx response) if every attempt fails, or raises
+            on failure to write either file (not retried — see
+            call_with_retries).
         """
         params = self._page_request_params(cursor=cursor, start=start, end=end)
 
@@ -470,24 +489,28 @@ class SpireCodexRunDownloader(Downloader):
             page_index=page_index
         )
 
-        self.rate_limiter.wait()
-        try:
-            with requests.get(
-                self.export_url,
-                params=params,
-                stream=True,
-                timeout=_REQUEST_TIMEOUT_SECONDS,
-            ) as response:
-                response.raise_for_status()
-                next_cursor = response.headers.get(_NEXT_CURSOR_HEADER)
-                with open(page_path, "wb") as page_file:
-                    for chunk in response.iter_content(
-                        chunk_size=_DEFAULT_CHUNK_SIZE_BYTES
-                    ):
-                        page_file.write(chunk)
-        except Exception:
-            page_path.unlink(missing_ok=True)
-            raise
+        def _attempt() -> str | None:
+            self.rate_limiter.wait()
+            try:
+                with requests.get(
+                    self.export_url,
+                    params=params,
+                    stream=True,
+                    timeout=_REQUEST_TIMEOUT_SECONDS,
+                ) as response:
+                    response.raise_for_status()
+                    next_cursor = response.headers.get(_NEXT_CURSOR_HEADER)
+                    with open(page_path, "wb") as page_file:
+                        for chunk in response.iter_content(
+                            chunk_size=_DEFAULT_CHUNK_SIZE_BYTES
+                        ):
+                            page_file.write(chunk)
+                return next_cursor
+            except Exception:
+                page_path.unlink(missing_ok=True)
+                raise
+
+        next_cursor = call_with_retries(_attempt, max_attempts=_PAGE_FETCH_MAX_ATTEMPTS)
 
         cursor_sidecar_path.write_text(next_cursor or "", encoding="utf-8")
         return _FetchedPage(path=page_path, next_cursor=next_cursor)
