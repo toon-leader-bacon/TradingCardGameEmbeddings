@@ -5,6 +5,7 @@ single-purpose class; more are added here as later dojo_v2 slices consume
 more metric families (MaskedFieldMetric, DeckCardMaskMetric, DeckLabelMetric).
 """
 
+import math
 from typing import Callable, Dict, List
 from uuid import UUID
 
@@ -110,12 +111,19 @@ class CardAverageDataConstructor:
             raw_label: a row's label-column cell (float, int, or bool -
                 see CardAverageMetric's WIN RATE IS AN AVERAGE note for
                 why a bool is a legitimate input here).
-        Output: raw_label as a float, or None if it doesn't convert.
+        Output: raw_label as a float, or None if it doesn't convert, or
+            if it's NaN - a metric's own nullable-output convention
+            (e.g. OnPlayWinRateDeltaMetric's None for a card never seen
+            on one side) round-trips through a float64 parquet column
+            as NaN, not None, so it's treated the same as an
+            unparseable label rather than becoming a NaN training
+            label.
         Side effects: none.
         Exceptions: none - all failures collapse to None.
         """
         if isinstance(raw_label, (float, int, bool)):
-            return float(raw_label)
+            value = float(raw_label)
+            return None if math.isnan(value) else value
         return None
 
 
@@ -207,10 +215,20 @@ class DeckLabelDataConstructor:
         # all, but tolerate individual unresolved cards within an
         # otherwise-resolvable deck.
         for _, row in chunk.iterrows():
+            raw_label = row[self._label_column]
+            if isinstance(raw_label, float) and math.isnan(raw_label):
+                # A metric's own nullable-output convention (e.g.
+                # OnPlayWinRateSensitivityByDeckMetric's None for a deck
+                # never seen on one side) round-trips through a float64
+                # parquet column as NaN, not None - skip it the same way
+                # an unresolvable deck is skipped, rather than casting a
+                # NaN into a training label (see DataConstructor
+                # Protocol's "resolution failure is expected" contract).
+                continue
             deck_cards = self._deck_cards_for_uuid(row["deck_uuid"])
             if not deck_cards:
                 continue
-            results.append((deck_cards, self._label_caster(row[self._label_column])))
+            results.append((deck_cards, self._label_caster(raw_label)))
 
         return results
 

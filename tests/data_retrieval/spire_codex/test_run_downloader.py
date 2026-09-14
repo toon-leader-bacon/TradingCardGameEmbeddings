@@ -11,6 +11,7 @@ from src.data_retrieval.spire_codex.run_downloader import (
     _ExportComplete,
     _FetchedPage,
     _PagesRemaining,
+    _PAGE_FETCH_MAX_ATTEMPTS,
 )
 
 _EXPORT_URL = "https://example.test/api/exports/runs"
@@ -242,10 +243,14 @@ class TestFetchPage:
         response = _mock_page_response([b"first-chunk"], next_cursor="cursor-1")
         response.iter_content.side_effect = requests.ConnectionError("dropped")
 
-        with patch("requests.get", return_value=response):
+        with patch("requests.get", return_value=response) as mock_get:
             with pytest.raises(requests.ConnectionError):
                 downloader._fetch_page(0, None, start=None, end=None)
 
+        # Every attempt hit the same persistent failure, so all retries
+        # were exhausted (see test_retries_on_transient_failure_then_succeeds
+        # for the case where a later attempt succeeds).
+        assert mock_get.call_count == _PAGE_FETCH_MAX_ATTEMPTS
         assert not (tmp_path / "page_00000.jsonl.gz").exists()
         assert not (tmp_path / "page_00000.next_cursor").exists()
 
@@ -258,6 +263,28 @@ class TestFetchPage:
         with patch("requests.get", return_value=response):
             with pytest.raises(requests.HTTPError):
                 downloader._fetch_page(0, None, start=None, end=None)
+
+    def test_retries_on_transient_failure_then_succeeds(self, tmp_path: Path) -> None:
+        # A mid-stream drop (this project's motivating case: a
+        # ChunkedEncodingError several hours into a run export walk)
+        # shouldn't abort the whole walk if a retry would have
+        # succeeded.
+        downloader = _make_downloader(tmp_path)
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        failing_response = _mock_page_response([b"partial"], next_cursor="cursor-1")
+        failing_response.iter_content.side_effect = (
+            requests.exceptions.ChunkedEncodingError("Response ended prematurely")
+        )
+        succeeding_response = _mock_page_response([b"gz-bytes"], next_cursor="cursor-1")
+
+        with patch(
+            "requests.get", side_effect=[failing_response, succeeding_response]
+        ) as mock_get:
+            page = downloader._fetch_page(0, None, start=None, end=None)
+
+        assert mock_get.call_count == 2
+        assert page.next_cursor == "cursor-1"
+        assert page.path.read_bytes() == b"gz-bytes"
 
 
 class TestPhase1:
