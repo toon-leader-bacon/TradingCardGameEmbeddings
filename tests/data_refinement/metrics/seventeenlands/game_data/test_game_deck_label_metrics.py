@@ -16,7 +16,7 @@ import pyarrow.parquet as pq
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.data_refinement.metrics.masked_field_metric import OTHER_LABEL
+from src.data_refinement.metrics.generic.masked_field_metric import OTHER_LABEL
 from src.data_refinement.metrics.seventeenlands.game_data.game_deck_label_metrics import (
     DeckGameLengthPredictionMetric,
     DeckRankTierPredictionMetric,

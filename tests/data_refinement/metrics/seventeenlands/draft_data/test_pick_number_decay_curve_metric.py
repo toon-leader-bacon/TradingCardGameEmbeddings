@@ -94,6 +94,28 @@ class TestFinalize:
         assert row["take_rate_by_pick_number"][1] is None
         assert row["take_rate_by_pick_number"][4] == 1.0
 
+    def test_pick_numbers_past_max_bucket_count_fold_into_last_bucket(
+        self, tmp_path: Path
+    ) -> None:
+        binder = _binder_with_cards(["Owlbear"])
+        metric = PickNumberDecayCurveMetric(
+            binder, _HEADER, GameId.MTG, output_path=tmp_path / "out.parquet"
+        )
+
+        metric.accumulate(_row("Owlbear", 1, pick_number=14))
+        metric.accumulate(_row("Some Other Pick", 1, pick_number=19))
+        metric.accumulate(_row("Owlbear", 1, pick_number=25))
+        metric.finalize()
+
+        table = pq.read_table(tmp_path / "out.parquet")
+        row = table.to_pylist()[0]
+        # Never more than MAX_BUCKET_COUNT (15) buckets, regardless of
+        # how large a pack's real pick_number gets.
+        assert len(row["sample_count_by_pick_number"]) == 15
+        # pick_number 14, 19, and 25 all tally into bucket 14.
+        assert row["sample_count_by_pick_number"][14] == 3
+        assert row["take_rate_by_pick_number"][14] == 2 / 3
+
     def test_no_rows_seen_writes_empty_file(self, tmp_path: Path) -> None:
         binder = _binder_with_cards(["Owlbear"])
         metric = PickNumberDecayCurveMetric(

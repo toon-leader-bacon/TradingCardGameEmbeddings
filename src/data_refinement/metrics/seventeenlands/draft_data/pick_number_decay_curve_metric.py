@@ -41,17 +41,35 @@ from src.data_refinement.metrics.seventeenlands.draft_data.pack_card_tally_metri
 
 
 class PickNumberDecayCurveMetric(PackCardTallyMetric):
-    """Card -> take rate, as a vector indexed by pick_number."""
+    """Card -> take rate, as a vector indexed by pick_number.
+
+    MAX_BUCKET_COUNT clamps every pack's tail: pick_number >=
+    MAX_BUCKET_COUNT - 1 folds into the last bucket rather than growing
+    it (a 20-card pack's pick_numbers 14-19 all tally into bucket 14,
+    same self._times_in_pack/_times_picked counters, rather than each
+    getting its own sparse bucket). This is a deliberate saturation
+    cutoff for PickNumberDecayCurveDojo's fixed-width vector output
+    (src/dojos/seventeenlands/draft_data/pick_number_decay_curve_dojo.py)
+    - unlike the module docstring's BUCKET COUNT IS DERIVED note (which
+    warns against assuming a wrong pack size), this doesn't drop or
+    misattribute any tail pick: it folds it into the nearest real
+    bucket rather than discarding it, so a format with larger packs
+    still contributes its late-pick signal instead of losing it to
+    buckets the dojo would never read past.
+    """
 
     KEY_COLUMNS: ClassVar[tuple[str, ...]] = ("pick_number",)
+    MAX_BUCKET_COUNT: ClassVar[int] = 15
     DEFAULT_OUTPUT_PATH = Path(
         "data/metrics/seventeenlands/draft_data/pick_number_decay_curve.parquet"
     )
 
     def _tally_key(self, row: dict, card_uuid: UUID) -> tuple:
         """See PackCardTallyMetric._tally_key(). Key = (card_uuid,
-        row["pick_number"])."""
-        return (card_uuid, row["pick_number"])
+        min(row["pick_number"], MAX_BUCKET_COUNT - 1)) - see class
+        docstring for why pick_number is clamped here."""
+        clamped_pick_number = min(row["pick_number"], self.MAX_BUCKET_COUNT - 1)
+        return (card_uuid, clamped_pick_number)
 
     def finalize(self) -> Path:
         """Build one row per card, bucketing every tallied pick_number
