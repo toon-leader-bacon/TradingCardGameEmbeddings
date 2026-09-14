@@ -1,7 +1,7 @@
 """Masking metric: a gwent deck's leader card, masked out and
 predicted by IDENTITY (which leader), not by a field of the leader.
 
-See src/data_refinement/metrics/deck_card_mask_metric.py for the
+See src/data_refinement/metrics/generic/deck_card_mask_metric.py for the
 shared accumulate()/finalize() sequence this fixes SOURCE_GAME/
 LABEL_VALUES/deck-registration/target-selection/labeling for, and
 plans/deck_card_masking.md for the full design (this class's own
@@ -32,8 +32,8 @@ from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.deck_box.play_gwent.extraction_stage import (
     PlayGwentDeckExtractionStage,
 )
-from src.data_refinement.metrics.deck_card_mask_metric import DeckCardMaskMetric
-from src.data_refinement.metrics.masked_field_metric import OTHER_LABEL
+from src.data_refinement.metrics.generic.deck_card_mask_metric import DeckCardMaskMetric
+from src.data_refinement.metrics.generic.masked_field_metric import OTHER_LABEL
 from src.data_refinement.metrics.play_gwent.leader_labels import LEADER_NAMES
 from src.schema.card import GenericCard
 from src.schema.data_source import DataSource

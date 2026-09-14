@@ -268,7 +268,7 @@ class DeckLabelDataConstructor:
 
 class DeckCardMaskDataConstructor:
     """DataConstructor for the DeckCardMaskMetric family (see
-    src/data_refinement/metrics/deck_card_mask_metric.py) - whole deck
+    src/data_refinement/metrics/generic/deck_card_mask_metric.py) - whole deck
     in, minus one masked-out target card, single raw string label out.
     Every concrete DeckCardMaskMetric subclass (e.g.
     LeaderMaskedFromDeckMetric) shares the SAME fixed output schema
@@ -413,7 +413,7 @@ class DeckCardMaskDataConstructor:
 
 class MaskedFieldDataConstructor:
     """DataConstructor for the MaskedFieldMetric family (see
-    src/data_refinement/metrics/masked_field_metric.py) - single card
+    src/data_refinement/metrics/generic/masked_field_metric.py) - single card
     in, single raw string label out. Every concrete MaskedFieldMetric
     subclass (e.g. gwent_one's 8) shares the same fixed row shape
     (nocab_uuid, masked_field, label) - unlike CardAverageDataConstructor,
@@ -457,7 +457,7 @@ class MaskedFieldDataConstructor:
                 output parquet file.
         Output: one (GenericCard, str) TrainingDatum per row whose
             nocab_uuid looks up a card - the label is passed through
-            unchanged (masked_field_metric.py's scan() always writes a
+            unchanged (generic/masked_field_metric.py's scan() always writes a
             genuine str). Rows whose nocab_uuid doesn't look up a card
             are skipped.
         Side effects: none.

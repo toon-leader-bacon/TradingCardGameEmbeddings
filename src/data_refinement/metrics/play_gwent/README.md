@@ -7,10 +7,10 @@ deck-masking metric family live here.
 
 ## `DeckCardMaskMetric` — game-aware whole-card deck masking
 
-[`../deck_card_mask_metric.py`](../deck_card_mask_metric.py) is a
+[`../generic/deck_card_mask_metric.py`](../generic/deck_card_mask_metric.py) is a
 `Metric[dict]`-shaped (`accumulate()`/`finalize()`, [`../metric.py`](../metric.py))
 Template Method base for masking one whole card out of a deck, chosen
-via game-specific logic — distinct from `../masked_field_metric.py`'s
+via game-specific logic — distinct from `../generic/masked_field_metric.py`'s
 `MaskedFieldMetric` family, which masks one *field* of one *card*, not
 a whole card out of a deck.
 

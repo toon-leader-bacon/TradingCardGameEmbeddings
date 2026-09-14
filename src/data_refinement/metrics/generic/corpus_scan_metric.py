@@ -2,9 +2,9 @@
 satisfies structurally.
 
 See plans/masking_metrics.md for the design rationale: unlike
-metric.py's Metric[RawRowT] Protocol (driven per-row by an external
+../metric.py's Metric[RawRowT] Protocol (driven per-row by an external
 scanner over a large raw file it can't hold in memory all at once,
-e.g. sts_gg/scanner.py's scan_runs_jsonl), a masking metric's source
+e.g. ../sts_gg/scanner.py's scan_runs_jsonl), a masking metric's source
 is a CardBinder that's already fully loaded by the time it runs -
 there's nothing to stream, so there's no accumulate()/finalize()
 split. One scan() call walks the whole corpus and writes the result.

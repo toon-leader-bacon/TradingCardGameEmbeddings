@@ -128,46 +128,46 @@ Confirmed by sampling one build (`205031.json`, 30,306 rows):
 
 ### Multi-card (9, mixing single-build and cross-build)
 
-14. **Hero-Class Legality Pairing** — Input: multi-card (pair). Label:
+ 1. **Hero-Class Legality Pairing** — Input: multi-card (pair). Label:
     probability. `P(pair_can_share_a_deck | cardClass_1, cardClass_2)`
     — trivial deck-legality baseline (class + Neutral only), same
     role as other sources' equivalent idea.
-15. **Mechanic Co-Occurrence / Synergy Signal** — Input: multi-card
+ 2. **Mechanic Co-Occurrence / Synergy Signal** — Input: multi-card
     (pair). Label: probability. `P(share_a_mechanic | card_1,
     card_2)` — a card-text-derived synergy proxy, no real deck data
     exists in this container.
-16. **Race/Tribe Synergy Pairing** — Input: multi-card (pair). Label:
+ 3. **Race/Tribe Synergy Pairing** — Input: multi-card (pair). Label:
     probability. `P(share_a_race | card_1, card_2)` — tribal-synergy
     detection, comparable to `pokemon_tcg`'s evolution-chain idea in
     spirit but for Hearthstone's tribal-typal structure.
-17. **Hero + Hero Power Invariance Check** — Input: multi-card (a
+ 4. **Hero + Hero Power Invariance Check** — Input: multi-card (a
     Hero card and its linked Hero Power, via `heroPowerDbfId`).
     Label: none (embedding-relationship evaluation, not a strict
     supervised target) — flag as a structural-consistency check
     rather than a prediction task.
-18. **Cross-Build Stat-Change Detection** — Input: multi-card (the
+ 5. **Cross-Build Stat-Change Detection** — Input: multi-card (the
     same `dbfId` across two builds). Label: probability. `P(card's
     attack/health/cost changed between build_1 and build_2 | card,
     build_1, build_2)` — this source's unique advantage: real balance-
     patch history already on disk, unlike any other card-only source
     in this project. Depends on confirming build chronological
     ordering (flagged above).
-19. **Cross-Build Nerf/Buff Direction Classification** — Input:
+ 6. **Cross-Build Nerf/Buff Direction Classification** — Input:
     multi-card (same `dbfId`, two builds where a change is confirmed
     via #18). Label: classification (fixed-set: nerf/buff/rework).
     Given the before/after stat+text diff, classify the direction of
     change.
-20. **Cost-Curve Complementarity** — Input: multi-card (pair). Label:
+ 7. **Cost-Curve Complementarity** — Input: multi-card (pair). Label:
     probability (deterministic sanity-check). `P(cost(card_1) +
     cost(card_2) <= a fixed mana-curve budget)` — an arithmetic
     baseline, same role as other sources' equivalent idea.
-21. **Class Representation in a Hypothetical Pool** — Input:
+ 8. **Class Representation in a Hypothetical Pool** — Input:
     multi-card (small synthetic group, since no real deck data exists
     in this container). Label: classification (fixed-set, plurality
     class). Predict the plurality `cardClass` across a synthetically-
     sampled small group — a stand-in until real deck/match data (not
     present in this project for Hearthstone) is available.
-22. **Reworked-Card Text Similarity** — Input: multi-card (same
+ 9. **Reworked-Card Text Similarity** — Input: multi-card (same
     `dbfId`, two builds with a confirmed text change beyond stat
     tweaks). Label: regression-continuous (a text-similarity score).
     How much a card's actual wording changes across a rework vs. a
@@ -175,36 +175,36 @@ Confirmed by sampling one build (`205031.json`, 30,306 rows):
 
 ### Multi-group / corpus-level (8)
 
-23. **Class Representation Balance** — Input: multi-group (one build,
+ 1. **Class Representation Balance** — Input: multi-group (one build,
     collectible cards only). Label: count (distribution). Count of
     cards per `cardClass` — a dataset-balance stat before training #3.
-24. **Mechanic Representation Balance** — Input: multi-group (one
+ 2. **Mechanic Representation Balance** — Input: multi-group (one
     build). Label: count (distribution). Frequency of each mechanic
     tag across the corpus — needed before training #7.
-25. **Cost Curve by Set** — Input: multi-group (one build, split by
+ 3. **Cost Curve by Set** — Input: multi-group (one build, split by
     `set`). Label: count (distribution). Whether newer expansions
     ship a different mana-cost distribution than older ones — a
     power-creep/design-trend sanity check.
-26. **Attack+Health-per-Cost Trend Across Builds** — Input:
+ 4. **Attack+Health-per-Cost Trend Across Builds** — Input:
     multi-group (all builds, each build's collectible Minions as a
     group). Label: regression-continuous (per-build averages).
     Whether average stats-per-mana creep upward release over release
     — the clearest power-creep metric this project can build, given
     this source's unique multi-snapshot history.
-27. **Nerf/Buff Frequency by Class Over Time** — Input: multi-group
+ 5. **Nerf/Buff Frequency by Class Over Time** — Input: multi-group
     (all cross-build changes detected by #18, grouped by `cardClass`
     and build-sequence position). Label: count (distribution). Which
     classes get balance-patched most often — a design/balance-history
     study.
-28. **Non-Collectible Card Share by Set** — Input: multi-group (one
+ 6. **Non-Collectible Card Share by Set** — Input: multi-group (one
     build, split by `set`). Label: probability (per-set rate).
     `P(collectible=false | set)` — informs the filtering policy noted
     above before trusting any other metric's training data.
-29. **Race Representation Balance** — Input: multi-group (one build,
+ 7. **Race Representation Balance** — Input: multi-group (one build,
     Minions only). Label: count (distribution). Count of Minions per
     `race`, including "no tribe" as its own bucket — a dataset-balance
     stat before training #6.
-30. **Rarity Distribution by Set** — Input: multi-group (one build,
+ 8. **Rarity Distribution by Set** — Input: multi-group (one build,
     split by `set`). Label: count (distribution). Whether rarity mix
     (e.g. Legendary density) shifts across sets/expansion types
     (core set vs. expansion vs. mini-set) — a sanity check for #4.

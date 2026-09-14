@@ -8,7 +8,7 @@ deferring cross-container deck/metric-plumbing dedup to a later,
 comprehensive pass rather than centralizing on first duplication.
 
 DECK BOX IS NOT THIS FILE'S CONCERN: a metric writes into its own
-DeckBox during accumulate() (see deck_card_mask_metric.py) - this
+DeckBox during accumulate() (see generic/deck_card_mask_metric.py) - this
 function only ever calls accumulate()/finalize() on already-
 constructed Metric[dict] instances.
 """

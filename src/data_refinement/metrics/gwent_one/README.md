@@ -1,6 +1,6 @@
 # gwent_one
 
-Eight `MaskedFieldMetric` ([`../masked_field_metric.py`](../masked_field_metric.py))
+Eight `MaskedFieldMetric` ([`../generic/masked_field_metric.py`](../generic/masked_field_metric.py))
 masking metrics over gwent.one card data, resolving cards through the
 same `CardBinder` [`../../card_binder/gwent_one/`](../../card_binder/gwent_one/)'s
 `GwentOneCardIngestionStage` populates - this project's first
