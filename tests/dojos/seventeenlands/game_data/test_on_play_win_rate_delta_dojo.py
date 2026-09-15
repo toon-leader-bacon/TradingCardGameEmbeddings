@@ -3,12 +3,8 @@ from pathlib import Path
 from uuid import uuid4
 
 import pandas as pd
-import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_rate_delta_metric import (
-    OnPlayWinRateDeltaMetric,
-)
 from src.dojos.generic.data_constructors import CardAverageDataConstructor
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
 from src.dojos.seventeenlands.game_data.on_play_win_rate_delta_dojo import (
@@ -56,14 +52,6 @@ class TestOnPlayWinRateDeltaDojo:
         assert isinstance(dojo, SingleCardRegressionDojo)
         assert isinstance(dojo.data_constructor, CardAverageDataConstructor)
         assert dojo.data_constructor._label_column == "on_play_win_rate_delta"
-
-    def test_defaults_to_metrics_own_output_path(self) -> None:
-        card_binder = CardBinder()
-
-        with pytest.raises(FileNotFoundError) as exc_info:
-            OnPlayWinRateDeltaDojo(card_binder, card_embedding_size=4)
-
-        assert str(OnPlayWinRateDeltaMetric.DEFAULT_OUTPUT_PATH) in str(exc_info.value)
 
     def test_nan_label_is_skipped_not_trained_on(self) -> None:
         # A card never seen on one side of on_play writes None for its

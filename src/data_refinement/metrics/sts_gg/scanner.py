@@ -22,6 +22,8 @@ import json
 import logging
 from pathlib import Path
 
+from tqdm import tqdm
+
 from src.data_refinement.metrics.metric import Metric
 
 _logger = logging.getLogger(__name__)
@@ -41,7 +43,10 @@ def scan_runs_jsonl(raw_path: Path, metrics: list[Metric[dict]]) -> None:
     Side effects: reads raw_path once; calls accumulate() on every
         metric for every line, then finalize() on every metric. Logs
         loudly (via the stdlib logging module) on any per-metric
-        accumulate()/finalize() failure, rather than raising.
+        accumulate()/finalize() failure, rather than raising. Prints a
+        tqdm progress bar to stderr, sized against raw_path's byte size
+        (not its line count, which isn't known up front without a
+        separate full read).
     Exceptions: raises if raw_path doesn't exist, or if any line isn't
         valid JSON - only a per-metric accumulate()/finalize() failure
         is caught and isolated, not a raw-file-level failure.
@@ -58,8 +63,15 @@ def scan_runs_jsonl(raw_path: Path, metrics: list[Metric[dict]]) -> None:
         ...     GameId.SLAY_THE_SPIRE_2,
         ... )  # this function never does this - the driver's own job
     """
-    with open(raw_path, "r", encoding="utf-8") as raw_file:
+    total_bytes = raw_path.stat().st_size
+    with open(raw_path, "r", encoding="utf-8") as raw_file, tqdm(
+        total=total_bytes,
+        unit="B",
+        unit_scale=True,
+        desc=f"scan_runs_jsonl: {raw_path.name}",
+    ) as progress:
         for line in raw_file:
+            progress.update(len(line.encode("utf-8")))
             if not line.strip():
                 continue
             row = json.loads(line)

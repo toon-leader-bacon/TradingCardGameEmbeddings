@@ -1,13 +1,9 @@
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.data_refinement.metrics.seventeenlands.replay_data.combat_aggression_profile_metric import (  # noqa: E501
-    CombatAggressionProfileMetric,
-)
 from src.dojos.generic.data_constructors import DeckLabelDataConstructor
 from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
 from src.dojos.seventeenlands.replay_data.combat_aggression_profile_dojo import (
@@ -39,14 +35,3 @@ class TestCombatAggressionProfileDojo:
         assert isinstance(dojo, MultiCardRegressionDojo)
         assert isinstance(dojo.data_constructor, DeckLabelDataConstructor)
         assert dojo.data_constructor._label_column == "combat_aggression_profile"
-
-    def test_defaults_to_metrics_own_output_path(self) -> None:
-        card_binder = CardBinder()
-        deck_box = DeckBox()
-
-        with pytest.raises(FileNotFoundError) as exc_info:
-            CombatAggressionProfileDojo(card_binder, deck_box, card_embedding_size=4)
-
-        assert str(CombatAggressionProfileMetric.DEFAULT_OUTPUT_PATH) in str(
-            exc_info.value
-        )

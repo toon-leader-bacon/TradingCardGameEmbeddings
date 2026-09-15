@@ -43,6 +43,8 @@ from pathlib import Path
 from typing import ClassVar
 from uuid import UUID, uuid4
 
+from tqdm import tqdm
+
 from src.data_refinement.card_binder import merge_strategies
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.schema.card import GenericCard, Provenance
@@ -80,7 +82,10 @@ class SpireCodexCardIngestionStage:
             matched an existing card but changed nothing (an
             exact-duplicate re-fetch) is NOT included.
         Side effects: reads raw_path; creates/updates cards and
-            registers aliases directly on binder.
+            registers aliases directly on binder. Prints a tqdm
+            progress bar to stderr, one tick per row (raw_path is
+            already fully loaded as one JSON array before this loop
+            starts, so its total is known up front).
         Exceptions: raises if raw_path doesn't exist, isn't valid
             JSON, isn't a JSON array, or an element is missing "id" or
             "name".
@@ -96,7 +101,7 @@ class SpireCodexCardIngestionStage:
             rows = json.load(raw_file)
 
         changed_uuids = []
-        for row in rows:
+        for row in tqdm(rows, desc="spire_codex ingest", unit="card"):
             result = self._ingest_row(row, binder)
             if result is not None:
                 changed_uuids.append(result)

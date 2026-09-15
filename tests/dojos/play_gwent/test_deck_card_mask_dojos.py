@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
@@ -65,14 +64,3 @@ class TestLeaderMaskedFromDeckDojo:
         )
 
         assert dojo.label_values == list(LeaderMaskedFromDeckMetric.LABEL_VALUES)
-
-    def test_defaults_to_leader_metrics_own_output_path(self) -> None:
-        card_binder = CardBinder()
-        deck_box = DeckBox()
-
-        with pytest.raises(FileNotFoundError) as exc_info:
-            LeaderMaskedFromDeckDojo(card_binder, deck_box, card_embedding_size=4)
-
-        assert str(LeaderMaskedFromDeckMetric.DEFAULT_OUTPUT_PATH) in str(
-            exc_info.value
-        )

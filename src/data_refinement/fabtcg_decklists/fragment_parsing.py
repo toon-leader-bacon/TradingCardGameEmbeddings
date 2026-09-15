@@ -26,6 +26,38 @@ collapse an internal one, and a long name plus a trailing pitch-color
 marker on its own line would otherwise fail to match
 _QUANTITY_AND_NAME_PATTERN.
 
+PITCH-COLOR MARKER: fabtcg.com appends a literal " (red)"/" (yel)"/
+" (blu)" suffix to a card-name div's text whenever that deck includes
+more than one pitch-printing of the same card name (confirmed live —
+every occurrence across data/raw/fabtcg_decklists/decklists/*.html is
+exactly one of those three strings; card-name divs for a name with only
+one pitch-printing in the deck carry no suffix at all). This is
+fabtcg.com UI disambiguation, not part of the card's actual name — the
+card_binder's stored name for e.g. "Herald of Triumph (blu)" is plainly
+"Herald of Triumph" — so _parse_quantity_and_name() strips it via
+_TRAILING_PITCH_COLOR_PATTERN before returning the name. A caller doing
+an exact-name card_lookup would otherwise miss on every card name that
+carries this suffix.
+
+MANGLED UNICODE ESCAPES: fabtcg.com's own page template drops the
+backslash off any \\uXXXX JSON-style escape it embeds into a
+card-name div's text, so e.g. the card actually named "Olé" (stored in
+card_binder as "Olé") shows up literally as "Olu00e9" in the
+fragment, and "Twelve Petal Kāṣāya" as "Twelve Petal
+Ku0101u1e63u0101ya" — CONFIRMED LIVE by fetching
+https://fabtcg.com/decklists/34eb2711-34f9-4f94-9058-2a8e1cd27160/
+directly (curl, browser User-Agent) and finding the exact same
+"Ku0101u1e63u0101ya" bytes already present on the wire — this is
+fabtcg.com's own bug, not something src/data_retrieval/fabtcg_decklists/
+introduces or could avoid by fetching differently. It's mechanically
+reversible: _parse_quantity_and_name() restores every "u" + 4 lowercase
+hex digits run via _MANGLED_UNICODE_ESCAPE_PATTERN, the same
+reconstruction a leading backslash would have triggered. Deliberately
+lowercase-hex-only (matching every confirmed occurrence) — real card
+name text has no other plausible reason to contain "u" immediately
+followed by 4 lowercase hex digits, so this never fires on a genuine
+name.
+
 FIRST ITERATION FLATTENS GROUPS: which group each card came from is
 discarded by iter_card_quantities_and_names() — every caller today only
 wants a flat per-deck card list. See fabtcg_decklists/TODO.md for the
@@ -42,6 +74,8 @@ _LIST_VIEW_CONTAINER_SELECTOR = "div.list-view-container"
 _CARD_ITEM_SELECTOR = "li.card-item"
 _CARD_NAME_SELECTOR = "div.card-name"
 _QUANTITY_AND_NAME_PATTERN = re.compile(r"^(\d+)x\s+(.+)$")
+_TRAILING_PITCH_COLOR_PATTERN = re.compile(r"\s+\((?:red|yel|blu)\)$")
+_MANGLED_UNICODE_ESCAPE_PATTERN = re.compile(r"u([0-9a-f]{4})")
 
 
 def iter_card_quantities_and_names(fragment_html: str) -> Iterator[tuple[int, str]]:
@@ -98,17 +132,24 @@ def iter_card_quantities_and_names(fragment_html: str) -> Iterator[tuple[int, st
 
 def _parse_quantity_and_name(name_div_text: str) -> tuple[int, str]:
     """Split one card-name div's flattened text into its quantity and
-    card name.
+    card name, with any trailing pitch-color marker removed and any
+    mangled unicode escape repaired.
 
     Private helper — single consumer is
     iter_card_quantities_and_names(). E.g. "1x Dorinthea Ironsong" ->
-    (1, "Dorinthea Ironsong").
+    (1, "Dorinthea Ironsong"); "3x Herald of Triumph (blu)" -> (3,
+    "Herald of Triumph") — see module docstring's PITCH-COLOR MARKER
+    section for why that suffix is stripped rather than kept; "1x
+    Olu00e9" -> (1, "Olé") — see module docstring's MANGLED UNICODE
+    ESCAPES section.
 
     Inputs:
         name_div_text: a `div.card-name` element's text, with every run
             of whitespace (including any internal newline) already
             collapsed to a single space.
-    Output: (quantity, name).
+    Output: (quantity, name), name never carrying a trailing " (red)"/
+        " (yel)"/" (blu)" marker, and with every mangled "u" + 4
+        lowercase hex digit run restored to its real character.
     Side effects: none.
     Exceptions: raises ValueError if name_div_text doesn't match
         _QUANTITY_AND_NAME_PATTERN.
@@ -121,4 +162,8 @@ def _parse_quantity_and_name(name_div_text: str) -> tuple[int, str]:
         )
 
     quantity, name = match.groups()
+    name = _TRAILING_PITCH_COLOR_PATTERN.sub("", name)
+    name = _MANGLED_UNICODE_ESCAPE_PATTERN.sub(
+        lambda escape: chr(int(escape.group(1), 16)), name
+    )
     return int(quantity), name

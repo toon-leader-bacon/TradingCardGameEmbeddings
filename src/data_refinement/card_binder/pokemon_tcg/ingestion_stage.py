@@ -58,6 +58,8 @@ from pathlib import Path
 from typing import ClassVar
 from uuid import UUID, uuid4
 
+from tqdm import tqdm
+
 from src.data_refinement.card_binder import merge_strategies
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.schema.card import GenericCard, Provenance
@@ -99,7 +101,10 @@ class PokemonTcgCardIngestionStage:
             identical rules text — see this module's docstring) is NOT
             included.
         Side effects: reads raw_path's *.json files; creates/updates
-            cards and registers aliases directly on binder.
+            cards and registers aliases directly on binder. Prints a
+            tqdm progress bar to stderr, one tick per set file (not
+            per card, since a file's card count isn't known until it's
+            already been read).
         Exceptions: raises if raw_path doesn't exist, isn't a
             directory, contains no *.json files, or a file isn't a
             JSON array of objects each carrying "id" and "name".
@@ -121,7 +126,7 @@ class PokemonTcgCardIngestionStage:
             )
 
         changed_uuids = []
-        for set_path in set_paths:
+        for set_path in tqdm(set_paths, desc="pokemon_tcg ingest", unit="file"):
             with open(set_path, "r", encoding="utf-8") as set_file:
                 rows = json.load(set_file)
             for row in rows:

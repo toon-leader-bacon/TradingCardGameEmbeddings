@@ -22,6 +22,44 @@ DecklistCardsMetric (a global name collision across the whole Flesh
 and Blood card pool can't be ruled out; see that module's CARD
 RESOLUTION AND FAILURE POLICY section).
 
+TWO-FACED CARDS: fabtcg.com's decklist HTML names a two-faced card
+(e.g. "Path Well Traveled") by its front face alone, but
+CardVaultFabtcgCardIngestionStage stores it under the combined
+"Path Well Traveled // Inner Chi" name (matching Scryfall's DFC naming
+convention — see that stage's _build_card() docstring), so the exact
+lookup above misses on every two-faced card. When it does,
+_card_uuid() falls back to card_lookup.get_by_name_regex(source_game,
+f"^{re.escape(name)}( //.*)?$") — the same front-face-match fallback
+src/data_refinement/metrics/seventeenlands/draft_data/
+pack_pool_columns.py's _match_uuid() already established for MTG's own
+split/MDFC cards — using its result only if it's unambiguous (exactly
+one match); 2+ matches is treated the same as no match, never guessed
+at.
+
+SPELLING DRIFT BETWEEN fabtcg.com's OWN TWO DATA SOURCES: fabtcg.com's
+decklist page text and cardvault.fabtcg.com's public_card_data.csv
+disagree, letter-for-letter, on a handful of card names — e.g. the
+decklist page says "Sawbones, Dockhand" where cardvault's true_name is
+"Sawbones, Dock Hand" (a dropped space), and "Smash With Big Tree"
+where cardvault has "Smash with Big Tree" (different capitalization
+of "with"). CONFIRMED against the live raw HTML
+(data/raw/fabtcg_decklists/decklists/*.html) and the live
+data/raw/cardvault_fabtcg/public_card_data.csv — both sides are
+fabtcg.com's own text, this project introduces neither difference, and
+it isn't a fragment_parsing.py bug. When the exact lookup and the
+two-faced fallback above both miss, _card_uuid() tries one more
+fallback: every stored card whose name, with all whitespace removed
+and casefolded, equals name's own whitespace-removed/casefolded form
+(_fuzzy_name_key()) — picking one arbitrarily if more than one
+matches (e.g. fabtcg prints some generic actions once per pitch color
+as distinct cards sharing one exact name, like "Smash with Big Tree"),
+the same non-strict policy as the plain exact-name lookup above (see
+CARD RESOLUTION), NOT the two-faced fallback's stricter
+unambiguous-only policy — this fallback's match target is the same
+full name as the exact lookup, just case/whitespace-normalized, so the
+same "a same-name collision can't be ruled out, pick one" reasoning
+applies.
+
 UNRESOLVED CARDS: unlike DecklistCardsMetric (which drops an
 unresolved card name from that deck's list and logs it), this stage
 substitutes the Unknown sentinel card's nocab_uuid instead (see
@@ -54,13 +92,23 @@ DecklistCardsMetric's FIRST ITERATION FLATTENS GROUPS — GenericDeck has
 no per-slot structure field (see
 src/data_refinement/deck_box/README.md's multiset/no-metadata
 section).
+
+PROVENANCE: each created/updated deck carries a Provenance
+(DataSource.FABTCG_DECKLISTS, source_id=deck_slug, fetched_at=now) —
+deck_slug rather than a fresher per-fragment id, since that's this
+stage's own deck identity (see IDEMPOTENT RE-RUNS above). Refreshed on
+every content-changing update(), not just on first create().
 """
 
 import logging
+import re
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import ClassVar
 from uuid import UUID, uuid5
+
+from tqdm import tqdm
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.card_lookup import CardLookup
@@ -69,7 +117,8 @@ from src.data_refinement.fabtcg_decklists.fragment_parsing import (
     iter_card_quantities_and_names,
 )
 from src.data_retrieval.fabtcg_decklists.downloader import FabtcgDecklistDownloader
-from src.schema.card import GenericDeck
+from src.schema.card import GenericDeck, Provenance
+from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 
 _logger = logging.getLogger(__name__)
@@ -120,7 +169,10 @@ class FabtcgDecklistsExtractionStage:
         Side effects: reads every `*.html` file directly under
             raw_path; creates/updates decks directly on box; emits one
             logging.error() per card name that falls back to the
-            Unknown sentinel.
+            Unknown sentinel. Prints a tqdm progress bar to stderr, one
+            tick per fragment file (the full file list is already known
+            up front via glob, so its total is known before this loop
+            starts).
         Exceptions: raises if raw_path doesn't exist. Whatever
             _extract_deck() raises (see its own Exceptions) propagates.
 
@@ -135,7 +187,10 @@ class FabtcgDecklistsExtractionStage:
         path = raw_path or self.DEFAULT_RAW_PATH
 
         changed_uuids = []
-        for fragment_path in sorted(path.glob("*.html")):
+        fragment_paths = sorted(path.glob("*.html"))
+        for fragment_path in tqdm(
+            fragment_paths, desc="fabtcg_decklists extract", unit="deck"
+        ):
             deck_slug = fragment_path.stem
             fragment_html = fragment_path.read_text(encoding="utf-8")
             result = self._extract_deck(deck_slug, fragment_html, box, card_lookup)
@@ -166,12 +221,20 @@ class FabtcgDecklistsExtractionStage:
         Output: deck_uuid if this call caused a create() or an actual
             content-changing update(); None if this slug matched an
             already-stored deck with an identical resolved card list.
-        Side effects: creates or updates exactly one deck on box.
+        Side effects: creates or updates exactly one deck on box, with
+            a freshly-computed Provenance (see module docstring's
+            PROVENANCE section) — set on create(), and refreshed on a
+            content-changing update() too.
         Exceptions: whatever _card_uuids_in_fragment() raises
             propagates.
         """
         deck_uuid = self._deck_uuid(deck_slug)
         card_nocab_uuids = self._card_uuids_in_fragment(fragment_html, card_lookup)
+        provenance = Provenance(
+            data_source=DataSource.FABTCG_DECKLISTS,
+            source_id=deck_slug,
+            fetched_at=datetime.now(timezone.utc),
+        )
 
         existing = box.get_by_uuid(deck_uuid)
         if existing is None:
@@ -182,6 +245,7 @@ class FabtcgDecklistsExtractionStage:
                     source_game=self.SOURCE_GAME,
                     name=f"fabtcg decklist {deck_slug}",
                     card_nocab_uuids=card_nocab_uuids,
+                    provenance=provenance,
                 )
             )
             return deck_uuid
@@ -192,7 +256,9 @@ class FabtcgDecklistsExtractionStage:
         # equality (loses duplicate/copy-count information).
         if Counter(existing.card_nocab_uuids) != Counter(card_nocab_uuids):
             # Re-seen slug whose resolved list changed — update in place.
-            box.update(deck_uuid, card_nocab_uuids=card_nocab_uuids)
+            box.update(
+                deck_uuid, card_nocab_uuids=card_nocab_uuids, provenance=provenance
+            )
             return deck_uuid
 
         # Re-seen slug, identical resolved multiset — no-op.
@@ -255,8 +321,14 @@ class FabtcgDecklistsExtractionStage:
 
         Inputs:
             name: one card-item's parsed card name, e.g. "Dorinthea
-                Ironsong".
-        Output: the matching nocab_uuid, or (on a miss) the Unknown
+                Ironsong" or a two-faced card's front face alone, e.g.
+                "Path Well Traveled" (see module docstring's TWO-FACED
+                CARDS section).
+        Output: the matching nocab_uuid — from an exact name match, or
+            (failing that) an unambiguous front-face match, or (failing
+            that) a case/whitespace-insensitive match, one of several
+            picked arbitrarily if more than one (see module docstring's
+            SPELLING DRIFT section) — or (on a miss) the Unknown
             sentinel's nocab_uuid.
         Side effects: emits one logging.error() call on a miss.
         Exceptions: raises RuntimeError if even the Unknown sentinel
@@ -266,6 +338,21 @@ class FabtcgDecklistsExtractionStage:
         card = card_lookup.get_by_name_single(self.SOURCE_GAME, name, strict=False)
         if card is not None:
             return card.nocab_uuid
+
+        front_face_matches = card_lookup.get_by_name_regex(
+            self.SOURCE_GAME, f"^{re.escape(name)}( //.*)?$"
+        )
+        if len(front_face_matches) == 1:
+            return front_face_matches[0].nocab_uuid
+
+        fuzzy_key = self._fuzzy_name_key(name)
+        fuzzy_matches = [
+            candidate
+            for candidate in card_lookup.all_cards(self.SOURCE_GAME)
+            if self._fuzzy_name_key(candidate.name) == fuzzy_key
+        ]
+        if fuzzy_matches:
+            return fuzzy_matches[0].nocab_uuid
 
         _logger.error(
             "FabtcgDecklistsExtractionStage: unresolved card name %r — "
@@ -282,6 +369,27 @@ class FabtcgDecklistsExtractionStage:
                 "CardBinder.ensure_unknown_card() before extract()"
             )
         return unknown_card.nocab_uuid
+
+    @staticmethod
+    def _fuzzy_name_key(name: str) -> str:
+        """Fold one card name down to a case/whitespace-insensitive key.
+
+        Private helper — single consumer is _card_uuid()'s last-resort
+        fallback (see module docstring's SPELLING DRIFT section). All
+        whitespace is stripped (not just collapsed) rather than merely
+        casefolded, since the confirmed drift includes a dropped space
+        ("Dockhand" vs "Dock Hand"), not just a case difference.
+
+        Inputs:
+            name: a card name, from either fabtcg.com's decklist HTML
+                or cardvault.fabtcg.com's true_name.
+        Output: name with every whitespace run removed and the result
+            casefolded — equal for two names differing only in case or
+            in whitespace placement.
+        Side effects: none.
+        Exceptions: none.
+        """
+        return re.sub(r"\s+", "", name).casefold()
 
     @staticmethod
     def _deck_uuid(deck_slug: str) -> UUID:

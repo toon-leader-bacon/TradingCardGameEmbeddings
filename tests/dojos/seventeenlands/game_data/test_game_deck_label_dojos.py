@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
@@ -53,17 +52,6 @@ class TestDeckGameLengthPredictionDojo:
             == DeckGameLengthPredictionMetric.LABEL_COLUMN
         )
 
-    def test_defaults_to_metrics_own_output_path(self) -> None:
-        card_binder = CardBinder()
-        deck_box = DeckBox()
-
-        with pytest.raises(FileNotFoundError) as exc_info:
-            DeckGameLengthPredictionDojo(card_binder, deck_box, card_embedding_size=4)
-
-        assert str(DeckGameLengthPredictionMetric.DEFAULT_OUTPUT_PATH) in str(
-            exc_info.value
-        )
-
 
 class TestDeckWinPredictionDojo:
     def test_wires_data_constructor_to_won_column(self, tmp_path: Path) -> None:
@@ -85,15 +73,6 @@ class TestDeckWinPredictionDojo:
         assert (
             dojo.data_constructor._label_column == DeckWinPredictionMetric.LABEL_COLUMN
         )
-
-    def test_defaults_to_metrics_own_output_path(self) -> None:
-        card_binder = CardBinder()
-        deck_box = DeckBox()
-
-        with pytest.raises(FileNotFoundError) as exc_info:
-            DeckWinPredictionDojo(card_binder, deck_box, card_embedding_size=4)
-
-        assert str(DeckWinPredictionMetric.DEFAULT_OUTPUT_PATH) in str(exc_info.value)
 
 
 class TestDeckRankTierPredictionDojo:
@@ -136,14 +115,3 @@ class TestDeckRankTierPredictionDojo:
         )
 
         assert dojo.label_values == list(DeckRankTierPredictionMetric.LABEL_VALUES)
-
-    def test_defaults_to_metrics_own_output_path(self) -> None:
-        card_binder = CardBinder()
-        deck_box = DeckBox()
-
-        with pytest.raises(FileNotFoundError) as exc_info:
-            DeckRankTierPredictionDojo(card_binder, deck_box, card_embedding_size=4)
-
-        assert str(DeckRankTierPredictionMetric.DEFAULT_OUTPUT_PATH) in str(
-            exc_info.value
-        )

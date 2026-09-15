@@ -175,3 +175,33 @@ class TestExtract:
 
         with pytest.raises(RuntimeError):
             stage.extract(raw_path, box, binder)
+
+    def test_created_deck_carries_sts_gg_provenance(self, tmp_path: Path) -> None:
+        binder = _spire_codex_card_binder(["STRIKE"])
+        box = DeckBox()
+        raw_path = tmp_path / "runs.jsonl"
+        _write_runs_jsonl(raw_path, [_run_row("run-1", ["STRIKE"])])
+        stage = StsGgDeckExtractionStage()
+
+        changed_uuids = stage.extract(raw_path, box, binder)
+
+        deck = box.get_by_uuid(changed_uuids[0])
+        assert deck.provenance is not None
+        assert deck.provenance.data_source == DataSource.STS_GG
+        assert deck.provenance.source_id == "run-1"
+
+    def test_content_changing_update_refreshes_provenance(self, tmp_path: Path) -> None:
+        binder = _spire_codex_card_binder(["STRIKE", "DEFEND"])
+        box = DeckBox()
+        raw_path = tmp_path / "runs.jsonl"
+        _write_runs_jsonl(raw_path, [_run_row("run-1", ["STRIKE"])])
+        stage = StsGgDeckExtractionStage()
+        first = stage.extract(raw_path, box, binder)
+        first_fetched_at = box.get_by_uuid(first[0]).provenance.fetched_at
+
+        _write_runs_jsonl(raw_path, [_run_row("run-1", ["STRIKE", "DEFEND"])])
+        second = stage.extract(raw_path, box, binder)
+
+        assert second == first
+        second_fetched_at = box.get_by_uuid(second[0]).provenance.fetched_at
+        assert second_fetched_at >= first_fetched_at

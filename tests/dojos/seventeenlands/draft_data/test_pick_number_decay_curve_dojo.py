@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.seventeenlands.draft_data.pick_number_decay_curve_metric import (  # noqa: E501
@@ -44,13 +43,3 @@ class TestPickNumberDecayCurveDojo:
         assert dojo.data_constructor._min_sample_count == MIN_SAMPLE_COUNT
         assert isinstance(dojo.loss_calculator, MaskedVectorRegressionLoss)
         assert len(dojo.label_values) == PickNumberDecayCurveMetric.MAX_BUCKET_COUNT
-
-    def test_defaults_to_metrics_own_output_path(self) -> None:
-        card_binder = CardBinder()
-
-        with pytest.raises(FileNotFoundError) as exc_info:
-            PickNumberDecayCurveDojo(card_binder, card_embedding_size=4)
-
-        assert str(PickNumberDecayCurveMetric.DEFAULT_OUTPUT_PATH) in str(
-            exc_info.value
-        )

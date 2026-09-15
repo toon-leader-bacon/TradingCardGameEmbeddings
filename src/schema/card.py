@@ -5,7 +5,8 @@ plus a free-form raw_content blob, rather than a rigid shared schema
 that would force semantically different per-game concepts (MTG mana
 cost vs. Pokemon HP) into shared fields.
 
-Provenance describes only where the CURRENTLY STORED raw_content came
+Provenance describes only where the CURRENTLY STORED raw_content (for a
+GenericCard) or resolved card_nocab_uuids list (for a GenericDeck) came
 from; it is not a general identity mapping, since a single card can
 carry several external identifiers across several DataSources at once
 (e.g. Scryfall's oracle_id AND Arena's numeric id) — that general
@@ -24,12 +25,18 @@ from src.schema.game_id import GameId
 
 @dataclass(frozen=True)
 class Provenance:
-    """Where a GenericCard's CURRENT raw_content snapshot came from.
+    """Where a GenericCard's or GenericDeck's CURRENT content snapshot came from.
 
     Single current snapshot only — no history of past sources a card's
-    content has ever come from. A future need for that history would
-    be a new, separate design decision, not an extension of this
-    dataclass.
+    or deck's content has ever come from. A future need for that
+    history would be a new, separate design decision, not an extension
+    of this dataclass.
+
+    Shared verbatim by GenericCard (raw_content's source) and
+    GenericDeck (the resolved card_nocab_uuids list's source) — both
+    are "this row came from one external system, fetched once" the
+    same way, so one dataclass serves both rather than two
+    near-identical ones.
 
     Inputs: none (data holder).
     Output: n/a.
@@ -96,6 +103,13 @@ class GenericDeck:
     DeckBox's own read accessors (get_by_uuid() etc.) return a deep
     copy for the same reason CardBinder's do.
 
+    provenance is optional (unlike GenericCard's required field)
+    because a deck already stored before provenance existed on this
+    class has no source to backfill — DeckBox.load() reads such a row
+    as provenance=None rather than raising or guessing. A
+    DeckExtractionStage extracting a deck for the first time always has
+    a real raw source at hand, so it always supplies one.
+
     Inputs: none (data holder).
     Output: n/a.
     Side effects: none.
@@ -108,3 +122,4 @@ class GenericDeck:
     card_nocab_uuids: list[
         UUID
     ]  # multiset: unordered, duplicates meaningful (copy count)
+    provenance: Provenance | None = None

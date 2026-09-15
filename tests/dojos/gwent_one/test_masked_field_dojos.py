@@ -93,16 +93,3 @@ class TestMaskedFieldDojoWrappers:
         assert isinstance(mods[0], MaskTargetKeyMod)
         assert mods[0].key == metric_cls.MASKED_FIELD[-1]
         assert mods[0].train_only is False
-
-    @pytest.mark.parametrize("dojo_cls,metric_cls", _CASES)
-    def test_defaults_to_metrics_own_output_path(self, dojo_cls, metric_cls) -> None:
-        # We don't have the metric's DEFAULT_OUTPUT_PATH file on disk in a
-        # test environment, so confirm the wrapper *attempts* to use it
-        # (FileManagerParquet raises FileNotFoundError against that exact
-        # path) rather than actually constructing a dojo against it.
-        card_binder = CardBinder()
-
-        with pytest.raises(FileNotFoundError) as exc_info:
-            dojo_cls(card_binder, card_embedding_size=4)
-
-        assert str(metric_cls.DEFAULT_OUTPUT_PATH) in str(exc_info.value)

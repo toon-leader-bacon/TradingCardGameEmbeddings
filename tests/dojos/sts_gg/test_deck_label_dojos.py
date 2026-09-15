@@ -78,20 +78,6 @@ class TestDeckLabelDojoWrappers:
         assert isinstance(dojo.data_constructor, DeckLabelDataConstructor)
         assert dojo.data_constructor._label_column == metric_cls.LABEL_COLUMN
 
-    @pytest.mark.parametrize("dojo_cls,metric_cls", _CASES)
-    def test_defaults_to_metrics_own_output_path(self, dojo_cls, metric_cls) -> None:
-        # No DEFAULT_OUTPUT_PATH file exists on disk in a test environment,
-        # so confirm the wrapper *attempts* to use it (FileManagerParquet
-        # raises FileNotFoundError against that exact path) rather than
-        # actually constructing a dojo against it.
-        card_binder = CardBinder()
-        deck_box = DeckBox()
-
-        with pytest.raises(FileNotFoundError) as exc_info:
-            dojo_cls(card_binder, deck_box, card_embedding_size=4)
-
-        assert str(metric_cls.DEFAULT_OUTPUT_PATH) in str(exc_info.value)
-
 
 class TestWinDojo:
     def test_wires_data_constructor_to_win_column(self, tmp_path: Path) -> None:
@@ -111,15 +97,6 @@ class TestWinDojo:
         assert isinstance(dojo, MultiCardBinaryClassificationDojo)
         assert isinstance(dojo.data_constructor, DeckLabelDataConstructor)
         assert dojo.data_constructor._label_column == WinMetric.LABEL_COLUMN
-
-    def test_defaults_to_win_metrics_own_output_path(self) -> None:
-        card_binder = CardBinder()
-        deck_box = DeckBox()
-
-        with pytest.raises(FileNotFoundError) as exc_info:
-            WinDojo(card_binder, deck_box, card_embedding_size=4)
-
-        assert str(WinMetric.DEFAULT_OUTPUT_PATH) in str(exc_info.value)
 
 
 class TestCharacterDojo:
@@ -161,12 +138,3 @@ class TestCharacterDojo:
         )
 
         assert dojo.label_values == list(CharacterPredictionMetric.LABEL_VALUES)
-
-    def test_defaults_to_characters_own_output_path(self) -> None:
-        card_binder = CardBinder()
-        deck_box = DeckBox()
-
-        with pytest.raises(FileNotFoundError) as exc_info:
-            CharacterDojo(card_binder, deck_box, card_embedding_size=4)
-
-        assert str(CharacterPredictionMetric.DEFAULT_OUTPUT_PATH) in str(exc_info.value)

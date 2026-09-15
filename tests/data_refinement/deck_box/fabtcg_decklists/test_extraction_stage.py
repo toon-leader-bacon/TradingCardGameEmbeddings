@@ -81,6 +81,100 @@ class TestExtract:
         assert deck.card_nocab_uuids.count(dorinthea_uuid) == 1
         assert deck.card_nocab_uuids.count(cnc_uuid) == 2
 
+    def test_card_name_with_pitch_color_marker_resolves_against_bare_name(
+        self, tmp_path: Path
+    ) -> None:
+        binder = _fabtcg_card_binder(["Herald of Triumph"])
+        box = DeckBox()
+        _write_fragment(tmp_path, "deck-1", _fragment([(3, "Herald of Triumph (blu)")]))
+        stage = FabtcgDecklistsExtractionStage()
+
+        changed_uuids = stage.extract(tmp_path, box, binder)
+
+        deck = box.get_by_uuid(changed_uuids[0])
+        herald_uuid = binder.get_by_name_single(
+            GameId.FLESH_AND_BLOOD, "Herald of Triumph"
+        ).nocab_uuid
+        assert deck.card_nocab_uuids.count(herald_uuid) == 3
+
+    def test_two_faced_card_named_by_front_face_alone_resolves(
+        self, tmp_path: Path
+    ) -> None:
+        binder = _fabtcg_card_binder(["Path Well Traveled // Inner Chi"])
+        box = DeckBox()
+        _write_fragment(tmp_path, "deck-1", _fragment([(1, "Path Well Traveled")]))
+        stage = FabtcgDecklistsExtractionStage()
+
+        changed_uuids = stage.extract(tmp_path, box, binder)
+
+        deck = box.get_by_uuid(changed_uuids[0])
+        dfc_uuid = binder.get_by_name_single(
+            GameId.FLESH_AND_BLOOD, "Path Well Traveled // Inner Chi"
+        ).nocab_uuid
+        assert deck.card_nocab_uuids.count(dfc_uuid) == 1
+
+    def test_card_name_differing_only_by_case_or_whitespace_resolves(
+        self, tmp_path: Path
+    ) -> None:
+        binder = _fabtcg_card_binder(["Sawbones, Dock Hand", "Smash with Big Tree"])
+        box = DeckBox()
+        _write_fragment(
+            tmp_path,
+            "deck-1",
+            _fragment([(1, "Sawbones, Dockhand"), (1, "Smash With Big Tree")]),
+        )
+        stage = FabtcgDecklistsExtractionStage()
+
+        changed_uuids = stage.extract(tmp_path, box, binder)
+
+        deck = box.get_by_uuid(changed_uuids[0])
+        sawbones_uuid = binder.get_by_name_single(
+            GameId.FLESH_AND_BLOOD, "Sawbones, Dock Hand"
+        ).nocab_uuid
+        smash_uuid = binder.get_by_name_single(
+            GameId.FLESH_AND_BLOOD, "Smash with Big Tree"
+        ).nocab_uuid
+        assert deck.card_nocab_uuids.count(sawbones_uuid) == 1
+        assert deck.card_nocab_uuids.count(smash_uuid) == 1
+
+    def test_ambiguous_fuzzy_name_match_picks_one_rather_than_unknown_sentinel(
+        self, tmp_path: Path
+    ) -> None:
+        # fabtcg prints some generic actions once per pitch color as
+        # distinct cards sharing one exact name (e.g. "Smash with Big
+        # Tree") — this fallback mirrors the plain exact-name lookup's
+        # own non-strict "pick one" policy, not the two-faced
+        # fallback's stricter unambiguous-only policy.
+        binder = _fabtcg_card_binder(["Dock Hand", "Dock Hand"])
+        unknown = binder.ensure_unknown_card(GameId.FLESH_AND_BLOOD)
+        box = DeckBox()
+        _write_fragment(tmp_path, "deck-1", _fragment([(1, "DockHand")]))
+        stage = FabtcgDecklistsExtractionStage()
+
+        changed_uuids = stage.extract(tmp_path, box, binder)
+
+        deck = box.get_by_uuid(changed_uuids[0])
+        dock_hand_uuids = {
+            card.nocab_uuid
+            for card in binder.get_by_name(GameId.FLESH_AND_BLOOD, "Dock Hand")
+        }
+        assert deck.card_nocab_uuids[0] in dock_hand_uuids
+        assert deck.card_nocab_uuids != [unknown.nocab_uuid]
+
+    def test_ambiguous_front_face_match_falls_back_to_unknown_sentinel(
+        self, tmp_path: Path
+    ) -> None:
+        binder = _fabtcg_card_binder(["Path // Alpha", "Path // Beta"])
+        unknown = binder.ensure_unknown_card(GameId.FLESH_AND_BLOOD)
+        box = DeckBox()
+        _write_fragment(tmp_path, "deck-1", _fragment([(1, "Path")]))
+        stage = FabtcgDecklistsExtractionStage()
+
+        changed_uuids = stage.extract(tmp_path, box, binder)
+
+        deck = box.get_by_uuid(changed_uuids[0])
+        assert deck.card_nocab_uuids == [unknown.nocab_uuid]
+
     def test_unresolvable_card_falls_back_to_unknown_sentinel(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -198,3 +292,18 @@ class TestExtract:
 
         with pytest.raises(ValueError):
             stage.extract(tmp_path, box, binder)
+
+    def test_created_deck_carries_fabtcg_decklists_provenance(
+        self, tmp_path: Path
+    ) -> None:
+        binder = _fabtcg_card_binder(["Dorinthea Ironsong"])
+        box = DeckBox()
+        _write_fragment(tmp_path, "deck-1", _fragment([(1, "Dorinthea Ironsong")]))
+        stage = FabtcgDecklistsExtractionStage()
+
+        changed_uuids = stage.extract(tmp_path, box, binder)
+
+        deck = box.get_by_uuid(changed_uuids[0])
+        assert deck.provenance is not None
+        assert deck.provenance.data_source == DataSource.FABTCG_DECKLISTS
+        assert deck.provenance.source_id == "deck-1"

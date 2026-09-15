@@ -32,6 +32,23 @@ anything richer (a win/loss label, a run id, per-slot structure) is a
 separate metric's own output, referencing the deck's `nocab_uuid`, not a
 field on `GenericDeck` itself.
 
+## `GenericDeck.provenance` is optional, unlike `GenericCard`'s
+
+`GenericDeck` carries a `provenance: Provenance | None` field (see
+`src/schema/card.py`), mirroring `GenericCard`'s own `provenance` —
+which `DataSource`, which raw id, and when it was last fetched.
+Optional (defaulting to `None`), unlike `GenericCard.provenance`
+(required): a deck already stored before this field existed has no
+source to backfill, so `DeckBox.load()` reads such a row as
+`provenance=None` rather than raising or guessing. Every
+`DeckExtractionStage` in this container supplies a real `Provenance` on
+every `create()`/content-changing `update()` it performs, using its own
+raw source's `DataSource` member (e.g. `DataSource.STS_GG`,
+`DataSource.PLAY_GWENT`) — distinct from whatever `DataSource` its
+cards were resolved against (e.g. `DataSource.SPIRE_CODEX`,
+`DataSource.GWENT_ONE`), since the deck's raw source and its cards' raw
+source are frequently two different systems.
+
 ## Other `DeckBox` instances beyond this container's published one
 
 `DeckBox` is just a store — nothing in this class ties an instance to

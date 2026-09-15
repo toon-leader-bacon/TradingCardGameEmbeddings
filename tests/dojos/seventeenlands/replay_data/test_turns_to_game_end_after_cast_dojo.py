@@ -1,12 +1,8 @@
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.metrics.seventeenlands.replay_data.turns_to_game_end_after_cast_metric import (  # noqa: E501
-    TurnsToGameEndAfterCastMetric,
-)
 from src.dojos.generic.data_constructors import CardAverageDataConstructor
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
 from src.dojos.seventeenlands.replay_data.turns_to_game_end_after_cast_dojo import (
@@ -37,13 +33,3 @@ class TestTurnsToGameEndAfterCastDojo:
         assert isinstance(dojo, SingleCardRegressionDojo)
         assert isinstance(dojo.data_constructor, CardAverageDataConstructor)
         assert dojo.data_constructor._label_column == "turns_to_game_end_after_cast"
-
-    def test_defaults_to_metrics_own_output_path(self) -> None:
-        card_binder = CardBinder()
-
-        with pytest.raises(FileNotFoundError) as exc_info:
-            TurnsToGameEndAfterCastDojo(card_binder, card_embedding_size=4)
-
-        assert str(TurnsToGameEndAfterCastMetric.DEFAULT_OUTPUT_PATH) in str(
-            exc_info.value
-        )

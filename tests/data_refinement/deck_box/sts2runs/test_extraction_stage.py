@@ -206,3 +206,17 @@ class TestExtract:
         deck_card_sets = [set(deck.card_nocab_uuids) for deck in decks]
         assert {strike_uuid} in deck_card_sets
         assert {defend_uuid} in deck_card_sets
+
+    def test_created_deck_carries_sts2runs_provenance(self, tmp_path: Path) -> None:
+        binder = _spire_codex_card_binder(["STRIKE"])
+        box = DeckBox()
+        raw_path = tmp_path / "runs.json.gz"
+        _write_runs_gz(raw_path, [_run_row(1, [_player(["STRIKE"])])])
+        stage = Sts2RunsDeckExtractionStage()
+
+        changed_uuids = stage.extract(raw_path, box, binder)
+
+        deck = box.get_by_uuid(changed_uuids[0])
+        assert deck.provenance is not None
+        assert deck.provenance.data_source == DataSource.STS2RUNS
+        assert deck.provenance.source_id == "1:0"

@@ -84,6 +84,32 @@ class TestExtract:
         ).nocab_uuid
         assert deck.card_nocab_uuids == [card_338_uuid, card_376_uuid, card_376_uuid]
 
+    def test_dict_shaped_src_card_templates_resolves_by_value_not_key(
+        self, tmp_path: Path
+    ) -> None:
+        # Older guides encode srcCardTemplates as {deck_slot_index_str:
+        # card_id}, not a plain list — see module docstring's TWO
+        # OBSERVED SHAPES section. The dict's small-integer-looking
+        # KEYS (e.g. "24") must never be treated as card ids.
+        binder = _gwent_one_card_binder([202338, 162315])
+        box = DeckBox()
+        raw_path = tmp_path / "guides.jsonl"
+        row = _guide_row(407697, [], "Old Format Deck")
+        row["deck"]["srcCardTemplates"] = {"0": 202338, "24": 162315}
+        _write_guides_jsonl(raw_path, [row])
+        stage = PlayGwentDeckExtractionStage()
+
+        changed_uuids = stage.extract(raw_path, box, binder)
+
+        deck = box.get_by_uuid(changed_uuids[0])
+        card_338_uuid = binder.get_by_alias(
+            GameId.GWENT, DataSource.GWENT_ONE, "202338"
+        ).nocab_uuid
+        card_162315_uuid = binder.get_by_alias(
+            GameId.GWENT, DataSource.GWENT_ONE, "162315"
+        ).nocab_uuid
+        assert set(deck.card_nocab_uuids) == {card_338_uuid, card_162315_uuid}
+
     def test_missing_or_empty_name_falls_back_to_synthetic_name(
         self, tmp_path: Path
     ) -> None:
@@ -230,3 +256,17 @@ class TestExtract:
 
         with pytest.raises(RuntimeError):
             stage.extract(raw_path, box, binder)
+
+    def test_created_deck_carries_play_gwent_provenance(self, tmp_path: Path) -> None:
+        binder = _gwent_one_card_binder([202338])
+        box = DeckBox()
+        raw_path = tmp_path / "guides.jsonl"
+        _write_guides_jsonl(raw_path, [_guide_row(407697, [202338])])
+        stage = PlayGwentDeckExtractionStage()
+
+        changed_uuids = stage.extract(raw_path, box, binder)
+
+        deck = box.get_by_uuid(changed_uuids[0])
+        assert deck.provenance is not None
+        assert deck.provenance.data_source == DataSource.PLAY_GWENT
+        assert deck.provenance.source_id == "407697"

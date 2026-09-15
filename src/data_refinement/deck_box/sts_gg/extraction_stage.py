@@ -40,20 +40,30 @@ GenericDeck has no metadata field (see
 src/data_refinement/deck_box/README.md's multiset/no-metadata section).
 Carrying win/outcome forward as a separate metric keyed by this stage's
 deck nocab_uuid is future work, not this file's concern.
+
+PROVENANCE: each created/updated deck carries a Provenance
+(DataSource.STS_GG, source_id=run_id, fetched_at=now) — this stage's
+own deck identity (see IDEMPOTENT RE-RUNS above), not SPIRE_CODEX
+(that's each card's own data source, used only for card resolution).
+Refreshed on every content-changing update(), not just on first
+create().
 """
 
 import json
 import logging
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import ClassVar
 from uuid import UUID, uuid5
+
+from tqdm import tqdm
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_retrieval.sts_gg.run_downloader import STSGGRunDownloader
-from src.schema.card import GenericDeck
+from src.schema.card import GenericDeck, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 
@@ -102,7 +112,10 @@ class StsGgDeckExtractionStage:
             is identical to what's already stored is NOT included.
         Side effects: reads raw_path; creates/updates decks directly
             on box; emits one logging.error() per card that falls back
-            to the Unknown sentinel.
+            to the Unknown sentinel. Prints a tqdm progress bar to
+            stderr, sized against raw_path's byte size (not its line
+            count, which isn't known up front without a separate full
+            read).
         Exceptions: raises if raw_path doesn't exist, isn't valid
             JSONL, or a line is missing "id" or "deck". Raises
             RuntimeError if self.SOURCE_GAME's Unknown sentinel card
@@ -120,8 +133,15 @@ class StsGgDeckExtractionStage:
         path = raw_path or self.DEFAULT_RAW_PATH
 
         changed_uuids = []
-        with open(path, "r", encoding="utf-8") as raw_file:
+        total_bytes = path.stat().st_size
+        with open(path, "r", encoding="utf-8") as raw_file, tqdm(
+            total=total_bytes,
+            unit="B",
+            unit_scale=True,
+            desc=f"sts_gg extract: {path.name}",
+        ) as progress:
             for line in raw_file:
+                progress.update(len(line.encode("utf-8")))
                 if not line.strip():
                     continue
                 row = json.loads(line)
@@ -151,7 +171,10 @@ class StsGgDeckExtractionStage:
         Output: deck_uuid if this call caused a create() or an actual
             content-changing update(); None if this run matched an
             already-stored deck with an identical resolved card list.
-        Side effects: creates or updates exactly one deck on box.
+        Side effects: creates or updates exactly one deck on box, with
+            a freshly-computed Provenance (see module docstring's
+            PROVENANCE section) — set on create(), and refreshed on a
+            content-changing update() too.
         Exceptions: raises if row is missing "id" or "deck". Whatever
             _card_uuid() raises (see its own Exceptions) propagates.
         """
@@ -163,6 +186,11 @@ class StsGgDeckExtractionStage:
         card_nocab_uuids = [
             self._card_uuid(card_entry["id"], card_lookup) for card_entry in row["deck"]
         ]
+        provenance = Provenance(
+            data_source=DataSource.STS_GG,
+            source_id=run_id,
+            fetched_at=datetime.now(timezone.utc),
+        )
 
         existing = box.get_by_uuid(deck_uuid)
         if existing is None:
@@ -173,6 +201,7 @@ class StsGgDeckExtractionStage:
                     source_game=self.SOURCE_GAME,
                     name=f"sts_gg run {run_id}",
                     card_nocab_uuids=card_nocab_uuids,
+                    provenance=provenance,
                 )
             )
             return deck_uuid
@@ -183,7 +212,9 @@ class StsGgDeckExtractionStage:
         # equality (loses duplicate/copy-count information).
         if Counter(existing.card_nocab_uuids) != Counter(card_nocab_uuids):
             # Re-seen run whose resolved list changed — update in place.
-            box.update(deck_uuid, card_nocab_uuids=card_nocab_uuids)
+            box.update(
+                deck_uuid, card_nocab_uuids=card_nocab_uuids, provenance=provenance
+            )
             return deck_uuid
 
         # Re-seen run, identical resolved multiset — no-op.

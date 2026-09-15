@@ -56,22 +56,33 @@ decompressed sibling STS2RunsDownloader.extract()/phase_1() produce —
 the .gz is the one artifact guaranteed to exist and be current after
 just download(), whereas the decompressed sibling depends on
 extract()/phase_1() having also been run and not since gone stale.
+
+PROVENANCE: each created/updated deck carries a Provenance
+(DataSource.STS2RUNS, source_id=f"{run_id}:{player_index}",
+fetched_at=now) — this stage's own deck identity (see IDEMPOTENT
+RE-RUNS above), not SPIRE_CODEX (that's each card's own data source,
+used only for card resolution). Refreshed on every content-changing
+update(), not just on first create().
 """
 
 import gzip
+import io
 import json
 import logging
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import ClassVar
 from urllib.parse import urlparse
 from uuid import UUID, uuid5
 
+from tqdm import tqdm
+
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_retrieval.sts2runs.downloader import STS2RunsDownloader
-from src.schema.card import GenericDeck
+from src.schema.card import GenericDeck, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 
@@ -138,7 +149,11 @@ class Sts2RunsDeckExtractionStage:
         Side effects: reads raw_path, one line at a time, decompressing
             as it goes; creates/updates decks directly on box; emits
             one logging.error() per card that falls back to the
-            Unknown sentinel.
+            Unknown sentinel. Prints a tqdm progress bar to stderr,
+            sized against raw_path's COMPRESSED byte size and advanced
+            by compressed bytes actually consumed (not decompressed
+            bytes, which aren't known up front without decompressing
+            the whole file first) - still reaches exactly 100% at EOF.
         Exceptions: raises if raw_path doesn't exist, isn't a valid
             gzip file, isn't valid NDJSON once decompressed, or a line
             is missing "_serverId" or "players". Raises RuntimeError if
@@ -158,16 +173,32 @@ class Sts2RunsDeckExtractionStage:
         path = raw_path or self.DEFAULT_RAW_PATH
 
         changed_uuids: list[UUID] = []
-        # gzip.open in text mode gives us line-by-line iteration
-        # straight over the compressed file — no separate decompress
-        # step, no full-file read (see module docstring's STREAMING
-        # section).
-        with gzip.open(path, "rt", encoding="utf-8") as raw_file:
-            for line in raw_file:
-                if not line.strip():
-                    continue
-                row = json.loads(line)
-                changed_uuids.extend(self._extract_run(row, box, card_lookup))
+        total_compressed_bytes = path.stat().st_size
+        # Wrap the raw compressed file ourselves (rather than
+        # gzip.open(path, "rt") directly) so we can track compressed
+        # bytes actually consumed via compressed_file.tell() -
+        # GzipFile.tell() alone would report the DECOMPRESSED position,
+        # which has no known total without decompressing everything
+        # first (see docstring above).
+        with open(path, "rb") as compressed_file, tqdm(
+            total=total_compressed_bytes,
+            unit="B",
+            unit_scale=True,
+            desc=f"sts2runs extract: {path.name}",
+        ) as progress:
+            with io.TextIOWrapper(
+                gzip.GzipFile(fileobj=compressed_file), encoding="utf-8"
+            ) as raw_file:
+                bytes_read = 0
+                for line in raw_file:
+                    position = compressed_file.tell()
+                    progress.update(position - bytes_read)
+                    bytes_read = position
+
+                    if not line.strip():
+                        continue
+                    row = json.loads(line)
+                    changed_uuids.extend(self._extract_run(row, box, card_lookup))
         return changed_uuids
 
     def _extract_run(
@@ -196,7 +227,9 @@ class Sts2RunsDeckExtractionStage:
             (e.g. a "players" list that's empty, though not observed
             in practice).
         Side effects: creates or updates one deck per entry in
-            row["players"].
+            row["players"], each with a freshly-computed Provenance
+            (see module docstring's PROVENANCE section) — set on
+            create(), and refreshed on a content-changing update() too.
         Exceptions: raises if row is missing "_serverId" or "players",
             or a player entry is missing "deck". Whatever _card_uuid()
             raises propagates.
@@ -219,6 +252,11 @@ class Sts2RunsDeckExtractionStage:
             ]
 
             deck_name = f"sts2runs run {run_id} player {player_index}"
+            provenance = Provenance(
+                data_source=DataSource.STS2RUNS,
+                source_id=f"{run_id}:{player_index}",
+                fetched_at=datetime.now(timezone.utc),
+            )
 
             existing = box.get_by_uuid(deck_uuid)
             if existing is None:
@@ -229,6 +267,7 @@ class Sts2RunsDeckExtractionStage:
                         source_game=self.SOURCE_GAME,
                         name=deck_name,
                         card_nocab_uuids=card_nocab_uuids,
+                        provenance=provenance,
                     )
                 )
                 changed_uuids.append(deck_uuid)
@@ -238,7 +277,9 @@ class Sts2RunsDeckExtractionStage:
             # Counter, never list/set equality (same reasoning as
             # StsGgDeckExtractionStage._extract_row).
             if Counter(existing.card_nocab_uuids) != Counter(card_nocab_uuids):
-                box.update(deck_uuid, card_nocab_uuids=card_nocab_uuids)
+                box.update(
+                    deck_uuid, card_nocab_uuids=card_nocab_uuids, provenance=provenance
+                )
                 changed_uuids.append(deck_uuid)
             # else: re-seen (run, player), identical resolved multiset
             # — no-op, nothing appended.

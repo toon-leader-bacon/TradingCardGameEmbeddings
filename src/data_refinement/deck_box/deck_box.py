@@ -18,11 +18,13 @@ for the exact same deck, always (see load()'s docstring).
 import copy
 import json
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 from typing import ClassVar, Iterable
 from uuid import UUID
 
-from src.schema.card import GenericDeck
+from src.schema.card import GenericDeck, Provenance
+from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 
 
@@ -124,16 +126,23 @@ class DeckBox:
         nocab_uuid: UUID,
         card_nocab_uuids: list[UUID] | None = None,
         name: str | None = None,
+        provenance: Provenance | None = None,
     ) -> GenericDeck:
         """Selectively overwrite fields of an already-stored deck.
 
         Unlike CardBinder.update() (which shallow-merges into a
         raw_content dict), GenericDeck has no dict-shaped field to
         merge — so "update" here means "overwrite whichever of
-        card_nocab_uuids/name are given (not None), leave the rest
-        untouched," the closest equivalent for a dataclass with only
-        scalar/list fields. This is the "leave other fields alone"
-        counterpart to replace()'s full swap.
+        card_nocab_uuids/name/provenance are given (not None), leave
+        the rest untouched," the closest equivalent for a dataclass
+        with only scalar/list fields. This is the "leave other fields
+        alone" counterpart to replace()'s full swap.
+
+        provenance itself is optional on GenericDeck (see its
+        docstring), so "leave provenance unchanged" and "explicitly
+        clear provenance to None" are indistinguishable through this
+        parameter — a caller needing the latter must use replace()
+        instead.
 
         Inputs:
             nocab_uuid: identity of the deck to update. MUST already
@@ -144,6 +153,8 @@ class DeckBox:
                 REPLACES the existing list wholesale; it is not a
                 merge/append.
             name: new name, or None (default) to leave unchanged.
+            provenance: new provenance, or None (default) to leave
+                unchanged.
         Output: the updated GenericDeck as now stored.
         Side effects: mutates this box's in-memory store.
         Exceptions: raises KeyError if nocab_uuid isn't stored.
@@ -165,6 +176,7 @@ class DeckBox:
                 else existing.card_nocab_uuids
             ),
             name=name if name is not None else existing.name,
+            provenance=(provenance if provenance is not None else existing.provenance),
         )
         self._upsert_deck(updated)
         return updated
@@ -330,6 +342,7 @@ class DeckBox:
             with open(path, "r", encoding="utf-8") as box_file:
                 for line in box_file:
                     row = json.loads(line)
+                    provenance_row = row.get("provenance")
                     deck = GenericDeck(
                         nocab_uuid=UUID(row["nocab_uuid"]),
                         source_game=GameId(row["source_game"]),
@@ -337,6 +350,17 @@ class DeckBox:
                         card_nocab_uuids=[
                             UUID(uuid_str) for uuid_str in row["card_nocab_uuids"]
                         ],
+                        provenance=(
+                            Provenance(
+                                data_source=DataSource(provenance_row["data_source"]),
+                                source_id=provenance_row["source_id"],
+                                fetched_at=datetime.fromisoformat(
+                                    provenance_row["fetched_at"]
+                                ),
+                            )
+                            if provenance_row is not None
+                            else None
+                        ),
                     )
                     box._upsert_deck(deck)
         return box
@@ -392,6 +416,15 @@ class DeckBox:
                     "card_nocab_uuids": [
                         str(nocab_uuid) for nocab_uuid in deck.card_nocab_uuids
                     ],
+                    "provenance": (
+                        {
+                            "data_source": deck.provenance.data_source.value,
+                            "source_id": deck.provenance.source_id,
+                            "fetched_at": deck.provenance.fetched_at.isoformat(),
+                        }
+                        if deck.provenance is not None
+                        else None
+                    ),
                 }
                 box_file.write(json.dumps(row) + "\n")
 

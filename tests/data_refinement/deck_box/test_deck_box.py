@@ -1,11 +1,14 @@
+import json
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
 
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.schema.card import GenericDeck
+from src.schema.card import GenericDeck, Provenance
+from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 
 
@@ -13,12 +16,22 @@ def _deck(
     name: str,
     card_nocab_uuids: list[UUID],
     source_game: GameId = GameId.MTG,
+    provenance: Provenance | None = None,
 ) -> GenericDeck:
     return GenericDeck(
         nocab_uuid=uuid4(),
         source_game=source_game,
         name=name,
         card_nocab_uuids=card_nocab_uuids,
+        provenance=provenance,
+    )
+
+
+def _provenance(source_id: str = "deck-1") -> Provenance:
+    return Provenance(
+        data_source=DataSource.STS_GG,
+        source_id=source_id,
+        fetched_at=datetime.now(timezone.utc),
     )
 
 
@@ -86,15 +99,27 @@ class TestUpdate:
         assert updated.name == "Burn"
         assert box.get_by_uuid(deck.nocab_uuid).name == "Burn"
 
+    def test_overrides_provenance_when_given(self) -> None:
+        box = DeckBox()
+        deck = _deck("Mono Red", [uuid4()], provenance=_provenance("old"))
+        box.create(deck)
+        new_provenance = _provenance("new")
+
+        updated = box.update(deck.nocab_uuid, provenance=new_provenance)
+
+        assert updated.provenance == new_provenance
+        assert box.get_by_uuid(deck.nocab_uuid).provenance == new_provenance
+
     def test_leaves_fields_untouched_when_not_given(self) -> None:
         box = DeckBox()
-        deck = _deck("Mono Red", [uuid4(), uuid4()])
+        deck = _deck("Mono Red", [uuid4(), uuid4()], provenance=_provenance())
         box.create(deck)
 
         updated = box.update(deck.nocab_uuid)
 
         assert updated.card_nocab_uuids == deck.card_nocab_uuids
         assert updated.name == deck.name
+        assert updated.provenance == deck.provenance
 
     def test_card_nocab_uuids_replaced_wholesale_not_merged(self) -> None:
         box = DeckBox()
@@ -290,6 +315,44 @@ class TestSaveLoadRoundTrip:
         loaded = DeckBox.load([path])
         assert list(loaded.all_decks(GameId.MTG)) != []
         assert list(loaded.all_decks(GameId.POKEMON)) == []
+
+    def test_preserves_provenance_when_present(self, tmp_path: Path) -> None:
+        box = DeckBox()
+        provenance = _provenance("run-1")
+        deck = _deck("Mono Red", [uuid4()], provenance=provenance)
+        box.create(deck)
+        path = tmp_path / "mtg.jsonl"
+
+        box.save(path, GameId.MTG)
+        loaded = DeckBox.load([path])
+
+        reloaded_deck = loaded.get_by_uuid(deck.nocab_uuid)
+        assert reloaded_deck.provenance == provenance
+
+    def test_provenance_defaults_to_none_when_absent_from_row(
+        self, tmp_path: Path
+    ) -> None:
+        # A deck row saved by a version of this class before the
+        # "provenance" key existed at all — load() must not raise or
+        # guess, just treat it as unset.
+        legacy_uuid = uuid4()
+        path = tmp_path / "mtg.jsonl"
+        with open(path, "w", encoding="utf-8") as legacy_file:
+            legacy_file.write(
+                json.dumps(
+                    {
+                        "nocab_uuid": str(legacy_uuid),
+                        "source_game": GameId.MTG.value,
+                        "name": "Mono Red",
+                        "card_nocab_uuids": [],
+                    }
+                )
+                + "\n"
+            )
+
+        loaded = DeckBox.load([path])
+
+        assert loaded.get_by_uuid(legacy_uuid).provenance is None
 
     def test_creates_parent_directory_if_missing(self, tmp_path: Path) -> None:
         box = DeckBox()

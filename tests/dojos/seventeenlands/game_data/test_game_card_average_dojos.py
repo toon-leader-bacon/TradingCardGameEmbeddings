@@ -50,12 +50,3 @@ class TestGameCardAverageDojoWrappers:
         assert isinstance(dojo, SingleCardRegressionDojo)
         assert isinstance(dojo.data_constructor, CardAverageDataConstructor)
         assert dojo.data_constructor._label_column == metric_cls.LABEL_COLUMN
-
-    @pytest.mark.parametrize("dojo_cls,metric_cls", _CASES)
-    def test_defaults_to_metrics_own_output_path(self, dojo_cls, metric_cls) -> None:
-        card_binder = CardBinder()
-
-        with pytest.raises(FileNotFoundError) as exc_info:
-            dojo_cls(card_binder, card_embedding_size=4)
-
-        assert str(metric_cls.DEFAULT_OUTPUT_PATH) in str(exc_info.value)

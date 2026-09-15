@@ -54,3 +54,20 @@ pull card data only — no deck-shaped raw data exists for any of them
 (gwent.one's card data is what `play_gwent`'s decks already resolve
 against; HearthstoneJSON has no public deck dump). 17Lands' `draft_data`
 CSVs are picks, not decks, and are also out of scope here.
+
+
+## Bug fixes:
+
+- Fix this: `FabtcgDecklistsExtractionStage: unresolved card name 'Sawbones, Dockhand' — substituting the Unknown sentinel card`
+- Fix this: `FabtcgDecklistsExtractionStage: unresolved card name 'Smash With Big Tree' — substituting the Unknown sentinel card`
+
+- PlayGwentDeckExtractionStage is broken `PlayGwentDeckExtractionStage: unresolved card template id '24' — substituting the Unknown sentinel card` for example. But, strangely, after ~3GB of processing the guides.jsonl it seems to start working? Weird. 
+
+- STS cards missin:
+  - CARD.FOLLOW_THROUGH
+  - CARD.UNDERWORLD
+  - CARD.GRAPPLE
+  - CARD.ABUNDANCE
+  - CARD.SIDESTEP
+  - CARD.PREPARE
+- Sts_GG deck builder created 0 decks? 

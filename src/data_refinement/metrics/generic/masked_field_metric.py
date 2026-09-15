@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import ClassVar
 
 import pandas as pd
+from tqdm import tqdm
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.schema.card import GenericCard
@@ -104,7 +105,11 @@ class MaskedFieldMetric(ABC):
             native pyarrow list<string> column, inferred automatically
             from a python list value per cell, not a JSON-encoded
             string - and label: str). One row per eligible card; no
-            sample_count column, since this isn't an aggregate.
+            sample_count column, since this isn't an aggregate. Prints
+            a tqdm progress bar to stderr, sized against the card
+            count (self._card_lookup is already fully loaded, so the
+            total is known up front, unlike a streamed raw-file
+            scanner).
         Exceptions: whatever pandas.DataFrame.to_parquet raises.
 
         Example:
@@ -116,7 +121,8 @@ class MaskedFieldMetric(ABC):
 
         # Walk every card of this metric's game, keeping only the
         # ones this subclass considers a valid sample for its field.
-        for card in self._card_lookup.all_cards(self.SOURCE_GAME):
+        cards = list(self._card_lookup.all_cards(self.SOURCE_GAME))
+        for card in tqdm(cards, desc=type(self).__name__, unit="card"):
             if not self._is_eligible(card):
                 continue
             result.append(self._mask_row(card))

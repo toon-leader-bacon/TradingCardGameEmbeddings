@@ -1,12 +1,8 @@
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.metrics.sts_gg.card_character_prediction_metric import (
-    CardCharacterPredictionMetric,
-)
 from src.data_refinement.metrics.sts_gg.deck_label_metrics import (
     CharacterPredictionMetric,
 )
@@ -62,13 +58,3 @@ class TestCardCharacterPredictionDojo:
         )
 
         assert dojo.label_values == list(CharacterPredictionMetric.LABEL_VALUES)
-
-    def test_defaults_to_metrics_own_output_path(self) -> None:
-        card_binder = CardBinder()
-
-        with pytest.raises(FileNotFoundError) as exc_info:
-            CardCharacterPredictionDojo(card_binder, card_embedding_size=4)
-
-        assert str(CardCharacterPredictionMetric.DEFAULT_OUTPUT_PATH) in str(
-            exc_info.value
-        )

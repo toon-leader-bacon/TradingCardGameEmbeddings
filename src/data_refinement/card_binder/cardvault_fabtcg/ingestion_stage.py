@@ -43,10 +43,13 @@ get_by_alias(card_id) lookup can never miss.
 """
 
 import csv
+import io
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import ClassVar
 from uuid import UUID, uuid4
+
+from tqdm import tqdm
 
 from src.data_refinement.card_binder import merge_strategies
 from src.data_refinement.card_binder.card_binder import CardBinder
@@ -95,6 +98,9 @@ class CardVaultFabtcgCardIngestionStage:
             docstring.
         Side effects: reads raw_path (twice — once per pass); creates/
             updates cards and registers aliases directly on binder.
+            Prints one tqdm progress bar to stderr per pass, each sized
+            against raw_path's byte size (not its row count, which
+            isn't known up front without a separate full read).
         Exceptions: raises if raw_path doesn't exist, isn't a
             well-formed CSV with the expected header, or a row is
             missing "card_id", "print_id", "print_language", or
@@ -109,22 +115,51 @@ class CardVaultFabtcgCardIngestionStage:
             ... )
         """
         changed_uuids = []
+        total_bytes = raw_path.stat().st_size
 
         # Pass 1: English rows only — all content creation/merging happens here.
-        with open(raw_path, "r", encoding="utf-8") as raw_file:
-            for row in csv.DictReader(raw_file):
-                if row["print_language"] != _ENGLISH_PRINT_LANGUAGE:
-                    continue
-                result = self._ingest_content_row(row, binder)
-                if result is not None:
-                    changed_uuids.append(result)
+        # Opened in binary + wrapped in TextIOWrapper ourselves (rather than
+        # open(..., "r") directly) so we can track raw_bytes.tell() - the
+        # TextIOWrapper csv.DictReader actually iterates disables .tell()
+        # once next() has been called on it (OSError: "telling position
+        # disabled by next() call"), but the underlying binary buffer has
+        # no such restriction.
+        with open(raw_path, "rb") as raw_bytes, tqdm(
+            total=total_bytes,
+            unit="B",
+            unit_scale=True,
+            desc=f"cardvault_fabtcg ingest (pass 1/2): {raw_path.name}",
+        ) as progress:
+            with io.TextIOWrapper(raw_bytes, encoding="utf-8") as raw_file:
+                bytes_read = 0
+                for row in csv.DictReader(raw_file):
+                    position = raw_bytes.tell()
+                    progress.update(position - bytes_read)
+                    bytes_read = position
+
+                    if row["print_language"] != _ENGLISH_PRINT_LANGUAGE:
+                        continue
+                    result = self._ingest_content_row(row, binder)
+                    if result is not None:
+                        changed_uuids.append(result)
 
         # Pass 2: every other language — alias-only, no content changes.
-        with open(raw_path, "r", encoding="utf-8") as raw_file:
-            for row in csv.DictReader(raw_file):
-                if row["print_language"] == _ENGLISH_PRINT_LANGUAGE:
-                    continue
-                self._register_print_alias(row, binder)
+        with open(raw_path, "rb") as raw_bytes, tqdm(
+            total=total_bytes,
+            unit="B",
+            unit_scale=True,
+            desc=f"cardvault_fabtcg ingest (pass 2/2): {raw_path.name}",
+        ) as progress:
+            with io.TextIOWrapper(raw_bytes, encoding="utf-8") as raw_file:
+                bytes_read = 0
+                for row in csv.DictReader(raw_file):
+                    position = raw_bytes.tell()
+                    progress.update(position - bytes_read)
+                    bytes_read = position
+
+                    if row["print_language"] == _ENGLISH_PRINT_LANGUAGE:
+                        continue
+                    self._register_print_alias(row, binder)
 
         return changed_uuids
 

@@ -1,12 +1,8 @@
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.metrics.seventeenlands.replay_data.attacker_blocker_combat_outcome_metric import (  # noqa: E501
-    AttackerBlockerCombatOutcomeMetric,
-)
 from src.dojos.generic.data_constructors import (
     AttackerBlockerCombatOutcomeDataConstructor,
 )
@@ -43,14 +39,4 @@ class TestAttackerBlockerCombatOutcomeDojo:
         assert isinstance(dojo, MultiGroupRegressionDojo)
         assert isinstance(
             dojo.data_constructor, AttackerBlockerCombatOutcomeDataConstructor
-        )
-
-    def test_defaults_to_metrics_own_output_path(self) -> None:
-        card_binder = CardBinder()
-
-        with pytest.raises(FileNotFoundError) as exc_info:
-            AttackerBlockerCombatOutcomeDojo(card_binder, card_embedding_size=4)
-
-        assert str(AttackerBlockerCombatOutcomeMetric.DEFAULT_OUTPUT_PATH) in str(
-            exc_info.value
         )

@@ -55,6 +55,8 @@ from pathlib import Path
 from typing import ClassVar
 from uuid import UUID, uuid4
 
+from tqdm import tqdm
+
 from src.data_refinement.card_binder import merge_strategies
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.schema.card import GenericCard, Provenance
@@ -105,6 +107,9 @@ class ScryfallCardIngestionStage:
             _ingest_row()'s docstring.
         Side effects: reads raw_path; creates/updates cards and
             registers aliases directly on binder, once per line.
+            Prints a tqdm progress bar to stderr, sized against
+            raw_path's byte size (not its line count, which isn't
+            known up front without a separate full read).
         Exceptions: raises if raw_path doesn't exist, isn't valid
             JSONL, or a line is missing "oracle_id" or "name" (see
             _ingest_row()).
@@ -118,8 +123,15 @@ class ScryfallCardIngestionStage:
             ... )
         """
         changed_uuids = []
-        with open(raw_path, "r", encoding="utf-8") as raw_file:
+        total_bytes = raw_path.stat().st_size
+        with open(raw_path, "r", encoding="utf-8") as raw_file, tqdm(
+            total=total_bytes,
+            unit="B",
+            unit_scale=True,
+            desc=f"scryfall ingest: {raw_path.name}",
+        ) as progress:
             for line in raw_file:
+                progress.update(len(line.encode("utf-8")))
                 row = json.loads(line)
                 result = self._ingest_row(row, binder)
                 if result is not None:

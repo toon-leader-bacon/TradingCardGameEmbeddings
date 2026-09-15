@@ -51,6 +51,31 @@ class TestIterCardQuantitiesAndNames:
         fragment = _fragment(("Hero", [_card_item("12x Some Card")]))
         assert list(iter_card_quantities_and_names(fragment)) == [(12, "Some Card")]
 
+    @pytest.mark.parametrize("color", ["red", "yel", "blu"])
+    def test_strips_trailing_pitch_color_marker(self, color: str) -> None:
+        fragment = _fragment(
+            ("Pitch 1", [_card_item(f"3x Herald of Triumph ({color})")])
+        )
+        assert list(iter_card_quantities_and_names(fragment)) == [
+            (3, "Herald of Triumph")
+        ]
+
+    def test_does_not_strip_a_name_that_only_resembles_the_marker(self) -> None:
+        fragment = _fragment(("Hero", [_card_item("1x Cindra (blur)")]))
+        assert list(iter_card_quantities_and_names(fragment)) == [(1, "Cindra (blur)")]
+
+    def test_repairs_mangled_unicode_escapes(self) -> None:
+        fragment = _fragment(("Hero", [_card_item("1x Olu00e9")]))
+        assert list(iter_card_quantities_and_names(fragment)) == [(1, "Olé")]
+
+    def test_repairs_multiple_mangled_unicode_escapes_in_one_name(self) -> None:
+        fragment = _fragment(
+            ("Pitch 1", [_card_item("1x Twelve Petal Ku0101u1e63u0101ya")])
+        )
+        assert list(iter_card_quantities_and_names(fragment)) == [
+            (1, "Twelve Petal Kāṣāya")
+        ]
+
     def test_raises_on_non_matching_text(self) -> None:
         fragment = _fragment(("Hero", [_card_item("no quantity prefix here")]))
         with pytest.raises(ValueError):
@@ -79,4 +104,5 @@ class TestIterCardQuantitiesAndNames:
 
         names = [name for _, name in pairs]
         assert "Dorinthea Ironsong" in names
-        assert any(name.startswith("Enlightened Strike") for name in names)
+        assert "Enlightened Strike" in names
+        assert not any(name.endswith(("(red)", "(yel)", "(blu)")) for name in names)

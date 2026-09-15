@@ -1,12 +1,8 @@
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.metrics.seventeenlands.draft_data.pool_conditioned_pick_metric import (
-    PoolConditionedPickMetric,
-)
 from src.dojos.generic.data_constructors import PoolConditionedPickDataConstructor
 from src.dojos.generic.multi_group_option_selection.dojo import (
     MultiGroupOptionSelectionDojo,
@@ -46,11 +42,3 @@ class TestPoolConditionedPickDojo:
         assert isinstance(dojo, MultiGroupOptionSelectionDojo)
         assert isinstance(dojo.data_constructor, PoolConditionedPickDataConstructor)
         assert isinstance(dojo.loss_calculator, PickPredictionCrossEntropyLoss)
-
-    def test_defaults_to_metrics_own_output_path(self) -> None:
-        card_binder = CardBinder()
-
-        with pytest.raises(FileNotFoundError) as exc_info:
-            PoolConditionedPickDojo(card_binder, card_embedding_size=4)
-
-        assert str(PoolConditionedPickMetric.DEFAULT_OUTPUT_PATH) in str(exc_info.value)

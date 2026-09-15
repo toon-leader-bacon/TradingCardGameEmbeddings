@@ -24,6 +24,7 @@ import logging
 from pathlib import Path
 
 import pandas as pd
+from tqdm import tqdm
 
 from src.data_refinement.metrics.metric import Metric
 
@@ -52,7 +53,9 @@ def scan_game_csv(
         any per-metric accumulate()/finalize() failure, rather than
         raising - isolates one metric's bug from every other metric in
         the list, same contract as draft_data/scanner.py's
-        scan_draft_csv().
+        scan_draft_csv(). Prints a tqdm progress bar to stderr, sized
+        against raw_csv_path's byte size and advanced by the
+        underlying file handle's position after each chunk.
     Exceptions: raises if raw_csv_path doesn't exist or isn't parsable
         as CSV - only a per-metric accumulate()/finalize() failure is
         caught and isolated, not a raw-file-level failure.
@@ -66,12 +69,24 @@ def scan_game_csv(
         ... ]
         >>> scan_game_csv(raw_csv_path, metrics)
     """
-    for chunk in pd.read_csv(raw_csv_path, chunksize=chunk_size):
-        # Hand every metric one row at a time, never the chunk itself
-        # (see module docstring).
-        for row in chunk.to_dict(orient="records"):
-            for metric in metrics:
-                _accumulate_isolated(metric, row)
+    total_bytes = raw_csv_path.stat().st_size
+    with open(raw_csv_path, "rb") as raw_file, tqdm(
+        total=total_bytes,
+        unit="B",
+        unit_scale=True,
+        desc=f"scan_game_csv: {raw_csv_path.name}",
+    ) as progress:
+        bytes_read = 0
+        for chunk in pd.read_csv(raw_file, chunksize=chunk_size):
+            position = raw_file.tell()
+            progress.update(position - bytes_read)
+            bytes_read = position
+
+            # Hand every metric one row at a time, never the chunk
+            # itself (see module docstring).
+            for row in chunk.to_dict(orient="records"):
+                for metric in metrics:
+                    _accumulate_isolated(metric, row)
 
     # Finalize every metric, isolating one metric's finalize() failure
     # from the rest of the list.

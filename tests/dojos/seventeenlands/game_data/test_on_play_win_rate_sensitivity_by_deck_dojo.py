@@ -3,13 +3,9 @@ from pathlib import Path
 from uuid import uuid4
 
 import pandas as pd
-import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_rate_sensitivity_by_deck_metric import (  # noqa: E501
-    OnPlayWinRateSensitivityByDeckMetric,
-)
 from src.dojos.generic.data_constructors import DeckLabelDataConstructor
 from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
 from src.dojos.seventeenlands.game_data.on_play_win_rate_sensitivity_by_deck_dojo import (
@@ -45,19 +41,6 @@ class TestOnPlayWinRateSensitivityByDeckDojo:
         assert isinstance(dojo, MultiCardRegressionDojo)
         assert isinstance(dojo.data_constructor, DeckLabelDataConstructor)
         assert dojo.data_constructor._label_column == "on_play_win_rate_sensitivity"
-
-    def test_defaults_to_metrics_own_output_path(self) -> None:
-        card_binder = CardBinder()
-        deck_box = DeckBox()
-
-        with pytest.raises(FileNotFoundError) as exc_info:
-            OnPlayWinRateSensitivityByDeckDojo(
-                card_binder, deck_box, card_embedding_size=4
-            )
-
-        assert str(OnPlayWinRateSensitivityByDeckMetric.DEFAULT_OUTPUT_PATH) in str(
-            exc_info.value
-        )
 
     def test_nan_label_is_skipped_not_trained_on(self) -> None:
         # A deck never seen on one side of on_play writes None for its

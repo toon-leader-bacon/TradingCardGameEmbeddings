@@ -17,6 +17,8 @@ import json
 import logging
 from pathlib import Path
 
+from tqdm import tqdm
+
 from src.data_refinement.metrics.metric import Metric
 
 _logger = logging.getLogger(__name__)
@@ -36,7 +38,10 @@ def scan_guides_jsonl(raw_path: Path, metrics: list[Metric[dict]]) -> None:
     Side effects: reads raw_path once; calls accumulate() on every
         metric for every line, then finalize() on every metric. Logs
         loudly (via the stdlib logging module) on any per-metric
-        accumulate()/finalize() failure, rather than raising.
+        accumulate()/finalize() failure, rather than raising. Prints a
+        tqdm progress bar to stderr, sized against raw_path's byte size
+        (guides.jsonl runs to several GB, so a line-count total isn't
+        worth a separate full read to compute).
     Exceptions: raises if raw_path doesn't exist - a per-metric
         accumulate()/finalize() failure is caught and isolated, not a
         raw-file-level failure. A line that isn't valid JSON is
@@ -49,8 +54,15 @@ def scan_guides_jsonl(raw_path: Path, metrics: list[Metric[dict]]) -> None:
         >>> scan_guides_jsonl(Path("data/raw/play_gwent/guides.jsonl"), metrics)
         >>> box.save(Path("data/final/decks/gwent.jsonl"), GameId.GWENT)
     """
-    with open(raw_path, "r", encoding="utf-8") as raw_file:
+    total_bytes = raw_path.stat().st_size
+    with open(raw_path, "r", encoding="utf-8") as raw_file, tqdm(
+        total=total_bytes,
+        unit="B",
+        unit_scale=True,
+        desc=f"scan_guides_jsonl: {raw_path.name}",
+    ) as progress:
         for line in raw_file:
+            progress.update(len(line.encode("utf-8")))
             if not line.strip():
                 continue
             try:

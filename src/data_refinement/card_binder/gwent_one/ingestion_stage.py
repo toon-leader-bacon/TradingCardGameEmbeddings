@@ -39,6 +39,7 @@ from typing import ClassVar
 from uuid import UUID, uuid4
 
 from bs4 import BeautifulSoup, Tag
+from tqdm import tqdm
 
 from src.data_refinement.card_binder import merge_strategies
 from src.data_refinement.card_binder.card_binder import CardBinder
@@ -85,6 +86,10 @@ class GwentOneCardIngestionStage:
             two fetched pages) is NOT included.
         Side effects: reads raw_path's page_*.html files; creates/
             updates cards and registers aliases directly on binder.
+            Prints a tqdm progress bar to stderr, one tick per card
+            block (the full list is already built by
+            _find_card_blocks() before this loop starts, so its total
+            is known up front).
         Exceptions: raises if raw_path doesn't exist, isn't a
             directory, or contains no page_*.html files (see
             _find_card_blocks); raises if a found card-wrap block is
@@ -106,7 +111,7 @@ class GwentOneCardIngestionStage:
         """
         card_blocks = self._find_card_blocks(raw_path)
         changed_uuids = []
-        for card_block in card_blocks:
+        for card_block in tqdm(card_blocks, desc="gwent_one ingest", unit="card"):
             result = self._ingest_card_block(card_block, binder)
             if result is not None:
                 changed_uuids.append(result)
