@@ -58,6 +58,9 @@ class DataSource(str, Enum):
     STS_GG = "sts_gg"  # sts_gg's runs.jsonl run data (see
     # src/data_retrieval/sts_gg/run_downloader.py and
     # src/data_refinement/deck_box/sts_gg/extraction_stage.py).
+    DOMINIONTABS = "dominiontabs"  # sumpfork/dominiontabs' card_db_src
+    # JSON files (see src/data_retrieval/dominiontabs/downloader.py and
+    # src/data_refinement/card_binder/dominiontabs/ingestion_stage.py).
     SYSTEM = "system"  # minted internally by CardBinder itself for
     # synthetic sentinel cards (e.g. the "Unknown" fallback card — see
     # CardBinder.ensure_unknown_card()), never fetched from an external

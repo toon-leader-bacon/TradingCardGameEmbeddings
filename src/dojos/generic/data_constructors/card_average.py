@@ -1,13 +1,15 @@
 """DataConstructor for the CardAverageMetric family - see
 src/data_refinement/metrics/sts_gg/card_average_metric.py."""
 
-import math
 from typing import List
 
 import pandas as pd
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.dojos.generic.data_constructors._uuid_resolution import _card_for_uuid
+from src.dojos.generic.data_constructors._uuid_resolution import (
+    _card_for_uuid,
+    _label_as_float,
+)
 from src.schema.type_hints import TrainingDatum
 
 
@@ -78,33 +80,9 @@ class CardAverageDataConstructor:
             card = _card_for_uuid(self._card_binder, row[self._uuid_column])
             if card is None:
                 continue
-            label = self._label_as_float(row[self._label_column])
+            label = _label_as_float(row[self._label_column])
             if label is None:
                 continue
             results.append((card, label))
 
         return results
-
-    def _label_as_float(self, raw_label: object) -> float | None:
-        """Parse one row's raw label cell as a float.
-
-        Private helper - single consumer is build().
-
-        Inputs:
-            raw_label: a row's label-column cell (float, int, or bool -
-                see CardAverageMetric's WIN RATE IS AN AVERAGE note for
-                why a bool is a legitimate input here).
-        Output: raw_label as a float, or None if it doesn't convert, or
-            if it's NaN - a metric's own nullable-output convention
-            (e.g. OnPlayWinRateDeltaMetric's None for a card never seen
-            on one side) round-trips through a float64 parquet column
-            as NaN, not None, so it's treated the same as an
-            unparseable label rather than becoming a NaN training
-            label.
-        Side effects: none.
-        Exceptions: none - all failures collapse to None.
-        """
-        if isinstance(raw_label, (float, int, bool)):
-            value = float(raw_label)
-            return None if math.isnan(value) else value
-        return None

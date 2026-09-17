@@ -6,6 +6,7 @@ generic dojo shape packages (e.g. _card_for_uuid backs constructors for
 both single_card_regression and single_card_fixed_classification).
 """
 
+import math
 from typing import List, Tuple, cast
 from uuid import UUID
 
@@ -19,6 +20,35 @@ def _cast_to_float(raw_label: object) -> float:
     against object rather than its builtin overloads, so it satisfies
     Callable[[object], Label]."""
     return float(raw_label)  # type: ignore[arg-type]
+
+
+def _label_as_float(raw_label: object) -> float | None:
+    """Parse one row's raw label cell as a float, rejecting NaN.
+
+    Shared by CardAverageDataConstructor and
+    MaskedFieldRegressionDataConstructor - both families read a plain
+    float64 label column and need the same NaN handling: a metric's own
+    nullable-output convention (e.g. CardAverageMetric's None for a
+    card never observed) round-trips through a float64 parquet column
+    as NaN, not None, so it must be treated the same as an unparseable
+    label rather than becoming a NaN training label. Unlike
+    _cast_to_float above (DeckLabelDataConstructor's caster, raises on
+    a bad value by design), every failure here collapses to None so a
+    build() loop can skip the row.
+
+    Inputs:
+        raw_label: a row's label-column cell (float, int, or bool - see
+            CardAverageMetric's WIN RATE IS AN AVERAGE note for why a
+            bool is a legitimate input here).
+    Output: raw_label as a float, or None if it isn't a float/int/bool,
+        or is NaN.
+    Side effects: none.
+    Exceptions: none - all failures collapse to None.
+    """
+    if isinstance(raw_label, (float, int, bool)):
+        value = float(raw_label)
+        return None if math.isnan(value) else value
+    return None
 
 
 def _card_for_uuid(

@@ -1,11 +1,15 @@
 # dojos
 
-Pluggable auxiliary training tasks for the card embedding model. Each
-dojo presents the same contract to a training loop - `training_data()`/
+Pluggable auxiliary training tasks for the card embedding model. Most
+dojos present the same contract to a training loop - `training_data()`/
 `test_data()`/`validation_data()` generators yielding `Batch` (see
 `[batch.py](batch.py)`), plus `compute_loss(embeddings, labels)` - while
 reading its own labels from a parquet file produced by one of
-`../data_refinement/metrics/`'s metric classes.
+`../data_refinement/metrics/`'s metric classes. An "exotic" dojo whose
+task shape genuinely doesn't fit that contract (e.g. `[contrastive/](contrastive/)`,
+below) presents its own split-generator + loss shape instead, sourced
+directly from `../data_refinement/`'s stores rather than a metric's
+parquet output.
 
 A small set of reusable generic dojo classes, one per `(input shape, task shape)` cell, plus
 thin per-metric subclasses that configure and inject a
@@ -198,6 +202,81 @@ zero vector is semantically neutral. Same group-0-must-be-non-empty
 ordering rule as `multi_group_option_selection` (`input_shape_of()`
 peeks group 0 only). Loss is always `MseLoss`. Today's only consumer:
 `AttackerBlockerCombatOutcomeDojo`.
+
+## `contrastive/` - exotic dojo for CLIP/InfoNCE-style contrastive training
+
+Trains the card embedding model directly on co-occurrence-in-a-deck,
+sourced straight from `../data_refinement/deck_box/`'s `DeckBox` and
+`../data_refinement/card_binder/`'s `CardLookup` - no metric, no
+parquet file, no learned decoder head. Doesn't fit the generic dojo
+cell pattern above: contrastive loss (InfoNCE) needs every item's
+embedding in a batch jointly (to build the similarity comparison
+across in-batch positives and negatives), not the row-independent
+`decoder_output, labels -> loss` shape every generic cell assumes.
+
+- `[deck_box_dealer.py](contrastive/deck_box_dealer.py)` - `DeckBoxDealer`,
+  a `FileManagerParquet`-equivalent for `DeckBox`: partitions one
+  game's decks into a seeded train/test/validation split at
+  construction, and `training_decks()`/`test_decks()`/`validation_decks()`
+  yield fixed-size groups of raw, unmodified `GenericDeck` objects per
+  split (a "deck sample" - deliberately not "batch," which is reserved
+  for `ContrastiveBatch` below). Mechanical, non-swappable.
+- `[pair_constructor.py](contrastive/pair_constructor.py)` - `ContrastivePairConstructor`
+  Strategy: turns one deck sample into one `ContrastiveBatch`, deciding
+  what counts as a positive pair and how items are sampled. This is the
+  actual research surface - a different positive-pair definition (same-
+  color, same-archetype, etc.) or item shape (single-card vs. multi-
+  card group) is a new class here, not a change to `ContrastiveDojo`.
+  `SingleCardPairConstructor` is the only concrete implementation so
+  far: single-card items, `items_per_deck` sampled per deck (skipping
+  and logging a deck with fewer known cards than that), every same-deck
+  item marked mutually positive.
+- `[contrastive_batch.py](contrastive/contrastive_batch.py)` - `ContrastiveBatch`,
+  the `(items, identities, positive_cliques)` container a
+  `ContrastivePairConstructor` builds: `items` is one flat pool (every
+  item acts as both anchor and candidate for every other item in the
+  same batch), `identities` is a tuple of card uuid(s) per item -
+  positionally parallel to that item's own card order, not deduplicated
+  or reordered - so exact-duplicate cards can be excluded from the
+  negative pool at loss time without being precomputed or stored, and
+  `positive_cliques` is index groups - each entry a set of item indices
+  that are all mutually positive (one entry per surviving source deck
+  for `SingleCardPairConstructor`). Enforces one shared `InputShape`
+  across `items` the same way `Batch` does today.
+- `[contrastive_loss.py](contrastive/contrastive_loss.py)` - `ContrastiveLoss`
+  Strategy, sibling to but distinct from `NocabLoss` (batch-level, not
+  row-independent). Takes `item_embeddings: BatchedModelOutput` -
+  a concrete implementation validates its own expected per-item shape
+  (via `src/schema/type_hints.py`'s `output_shape_of()`) immediately and
+  raises `ValueError` on a mismatch, rather than a caller pooling to one
+  fixed shape first. `SingleCardInfoNCELoss` is the only concrete
+  implementation so far: single-positive InfoNCE via a numerically
+  stable `log_softmax` over cosine similarity, computed once across the
+  whole flat item pool (so every pairwise deck comparison falls out of
+  one similarity matrix, never special-cased per deck pair), excluding
+  exact-identity duplicates from a given anchor's negative pool.
+- `[dojo.py](contrastive/dojo.py)` - `ContrastiveDojo`, wiring a
+  `DeckBoxDealer` + `ContrastivePairConstructor` + `CardLookup` into
+  `training_data()`/`test_data()`/`validation_data()` generators
+  yielding `ContrastiveBatch` (skipping and logging a degenerate batch
+  - no positive clique of size >= 2 - rather than letting it fail deep
+  inside the loss), plus `compute_loss(item_embeddings, batch)` - a
+  batch-level entry point, not `Dojo`'s `compute_loss(embeddings,
+  labels)`, since this task shape has no per-example label at all.
+  Owns its `ContrastiveLoss` internally (an injected collaborator with a
+  sensible default), same convention as every generic dojo cell. A
+  future item-embedding-pooling need is a `ContrastiveLoss` Decorator
+  (PATTERNS.md) wrapping another `ContrastiveLoss`, not a separate
+  strategy `ContrastiveDojo` owns - there is no `ItemEmbeddingStrategy`
+  here.
+
+No training loop drives this yet - `../training/demo_training_loop.py`
+is stale and unrelated (it targets `Dojo`'s row-independent shape).
+Single-card items only; a multi-card item shape, alternate
+`ContrastivePairConstructor`/`ContrastiveLoss` implementations
+(multi-positive SupCon, a pooling `ContrastiveLoss` Decorator), and a
+mixed contrastive + label-based training loop are all future work, not
+yet built.
 
 ## Thin per-metric wrapper convention
 

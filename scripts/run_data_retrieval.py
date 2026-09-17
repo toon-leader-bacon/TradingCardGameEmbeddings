@@ -59,6 +59,7 @@ from typing import Callable
 from src.data_retrieval.cardvault_fabtcg.card_downloader import (
     CardVaultFabtcgCardDownloader,
 )
+from src.data_retrieval.dominiontabs.downloader import DominionTabsCardDownloader
 from src.data_retrieval.download_utils import download_to_string
 from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.fabtcg_decklists.downloader import FabtcgDecklistDownloader
@@ -163,6 +164,10 @@ def run_cardvault_fabtcg() -> None:
     _run_standard(CardVaultFabtcgCardDownloader())
 
 
+def run_dominiontabs() -> None:
+    _run_standard(DominionTabsCardDownloader())
+
+
 def run_pitchstack() -> None:
     _run_standard(PitchstackDeckDownloader())
 
@@ -186,6 +191,7 @@ def run_seventeenlands() -> None:
 
 DOWNLOADERS: dict[str, Callable[[], None]] = {
     "cardvault_fabtcg": run_cardvault_fabtcg,
+    "dominiontabs": run_dominiontabs,
     "fabtcg_decklists": run_fabtcg_decklists,
     "gwent_one": run_gwent_one,
     "hearthstonejson": run_hearthstonejson,

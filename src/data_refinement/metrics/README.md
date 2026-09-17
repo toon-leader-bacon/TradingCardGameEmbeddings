@@ -76,5 +76,11 @@ implementation yet). Implemented today:
   draft/game/replay data exports; `draft_data/`, `game_data/`, and
   `replay_data/` are all implemented today. See
   [`seventeenlands/README.md`](seventeenlands/README.md).
+- **`dominiontabs/`** - three single-card metrics over Dominion card
+  data: `CostRegressionMetric` (this project's first
+  `MaskedFieldRegressionMetric` consumer), `TypeMaskMetric`, and
+  `SetMaskMetric` (a bespoke `CorpusScanMetric` reading raw
+  `cards_db.json` directly, not `raw_content`). See
+  [`dominiontabs/README.md`](dominiontabs/README.md).
 
 This file grows as more raw sources get real metric implementations.

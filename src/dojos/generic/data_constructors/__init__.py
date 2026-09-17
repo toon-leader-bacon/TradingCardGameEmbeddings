@@ -26,6 +26,9 @@ from src.dojos.generic.data_constructors.deck_label import DeckLabelDataConstruc
 from src.dojos.generic.data_constructors.masked_field import (
     MaskedFieldDataConstructor,
 )
+from src.dojos.generic.data_constructors.masked_field_regression import (
+    MaskedFieldRegressionDataConstructor,
+)
 from src.dojos.generic.data_constructors.pack_to_pick_choice_set import (
     PackToPickChoiceSetDataConstructor,
 )
@@ -43,6 +46,7 @@ __all__ = [
     "DeckCardMaskDataConstructor",
     "DeckLabelDataConstructor",
     "MaskedFieldDataConstructor",
+    "MaskedFieldRegressionDataConstructor",
     "PackToPickChoiceSetDataConstructor",
     "PickNumberDecayCurveDataConstructor",
     "PoolConditionedPickDataConstructor",

@@ -105,3 +105,38 @@ BatchedModelOutput = Union[
     BatchedSingleCardEmbedding, BatchedMultiCardEmbedding, BatchedMultiGroupEmbedding
 ]
 # endregion Outputs
+
+
+def output_shape_of(
+    x: Union[ModelOutput, BatchedMultiGroupEmbedding],
+) -> InputShape:
+    """Classify a value by torch.Tensor-list nesting depth.
+
+    Symmetric to input_shape_of, for the output/embedding side of the
+    same three-shape taxonomy (bottoms out on torch.Tensor instead of
+    GenericCard). Called on one representative element (e.g. one item's
+    embedding), the same way input_shape_of is - not on a whole batched
+    list, unless that list is itself the thing being classified.
+
+    Inputs: x, a torch.Tensor optionally nested in 0-3 levels of list.
+    Output: the matching InputShape.
+    Side effects: none.
+    Exceptions: ValueError if x bottoms out in something other than a
+        torch.Tensor, or an empty list is encountered before reaching one
+        (depth is then ambiguous).
+
+    Example:
+        >>> output_shape_of([torch.zeros(4), torch.zeros(4)])
+        <InputShape.MULTI_CARD: 1>
+    """
+    depth = 0
+    probe: Any = x
+    while isinstance(probe, list):
+        if not probe:
+            raise ValueError("Cannot classify the shape of an empty list output")
+        probe = probe[0]
+        depth += 1
+
+    if not isinstance(probe, torch.Tensor):
+        raise ValueError(f"Not a valid ModelOutput shape: {x}")
+    return InputShape(depth)

@@ -52,6 +52,25 @@ repeats the sequence itself.
 First (and currently only) consumer: [`../gwent_one/README.md`](../gwent_one/README.md)'s
 eight masking metrics.
 
+## `MaskedFieldRegressionMetric` (`masked_field_regression_metric.py`)
+
+`MaskedFieldMetric`'s regression-flavored twin: same `scan()` sequence
+and same `_is_eligible()` philosophy, but `_label_for_card()` becomes
+`_value_for_card(card) -> float` and there's no `LABEL_VALUES`/
+`OTHER_LABEL` - a fixed-set label vocabulary with a catch-all bucket is
+a classification-only concept with no regression equivalent. A
+subclass's only tool for excluding a card whose field value can't be
+treated as a number is `_is_eligible()` itself. Output columns:
+`nocab_uuid: str`, `masked_field: list[str]`, `label: float`.
+
+Deliberately a separate class from `MaskedFieldMetric` rather than one
+generic base parameterized over label dtype - unifying them would need
+to thread the OTHER-bucket concept through a regression path that has
+no use for it.
+
+First (and currently only) consumer: [`../dominiontabs/README.md`](../dominiontabs/README.md)'s
+`CostRegressionMetric`.
+
 ## `DeckCardMaskMetric` (`deck_card_mask_metric.py`)
 
 A `Metric[dict]`-shaped Template Method base (mirrors `sts_gg`'s
@@ -78,4 +97,6 @@ First (and currently only) consumer: [`../play_gwent/README.md`](../play_gwent/R
 
 - `corpus_scan_metric.py` - `CorpusScanMetric`, the shared Protocol.
 - `masked_field_metric.py` - `MaskedFieldMetric`, described above.
+- `masked_field_regression_metric.py` - `MaskedFieldRegressionMetric`,
+  described above.
 - `deck_card_mask_metric.py` - `DeckCardMaskMetric`, described above.
