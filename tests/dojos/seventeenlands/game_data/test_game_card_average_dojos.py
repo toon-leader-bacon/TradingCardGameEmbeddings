@@ -16,6 +16,7 @@ from src.dojos.seventeenlands.game_data.game_card_average_dojos import (
     OpeningHandWinRateDojo,
     WinRateWhenInDeckDojo,
 )
+from src.schema.holdout import HoldoutSpec
 
 _CASES = [
     (WinRateWhenInDeckDojo, WinRateWhenInDeckMetric),
@@ -42,6 +43,7 @@ class TestGameCardAverageDojoWrappers:
 
         dojo = dojo_cls(
             card_binder,
+            HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             path_to_training_data=source,
             rng_seed=0,

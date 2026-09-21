@@ -6,10 +6,11 @@ generic dojo shape packages (e.g. _card_for_uuid backs constructors for
 both single_card_regression and single_card_fixed_classification).
 """
 
+import math
 from typing import List, Tuple, cast
 from uuid import UUID
 
-from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.schema.card import GenericCard
 from src.schema.type_hints import MultiCardInput
 
@@ -21,9 +22,36 @@ def _cast_to_float(raw_label: object) -> float:
     return float(raw_label)  # type: ignore[arg-type]
 
 
-def _card_for_uuid(
-    card_binder: CardBinder, raw_nocab_uuid: object
-) -> GenericCard | None:
+def _label_as_float(raw_label: object) -> float | None:
+    """Parse one row's raw label cell as a float, rejecting NaN.
+
+    Shared by CardAverageDataConstructor and
+    MaskedFieldRegressionDataConstructor - both families read a plain
+    float64 label column and need the same NaN handling: a metric's own
+    nullable-output convention (e.g. CardAverageMetric's None for a
+    card never observed) round-trips through a float64 parquet column
+    as NaN, not None, so it must be treated the same as an unparseable
+    label rather than becoming a NaN training label. Unlike
+    _cast_to_float above (DeckLabelDataConstructor's caster, raises on
+    a bad value by design), every failure here collapses to None so a
+    build() loop can skip the row.
+
+    Inputs:
+        raw_label: a row's label-column cell (float, int, or bool - see
+            CardAverageMetric's WIN RATE IS AN AVERAGE note for why a
+            bool is a legitimate input here).
+    Output: raw_label as a float, or None if it isn't a float/int/bool,
+        or is NaN.
+    Side effects: none.
+    Exceptions: none - all failures collapse to None.
+    """
+    if isinstance(raw_label, (float, int, bool)):
+        value = float(raw_label)
+        return None if math.isnan(value) else value
+    return None
+
+
+def _card_for_uuid(lookup: CardLookup, raw_nocab_uuid: object) -> GenericCard | None:
     """Look up a card for one row's raw nocab_uuid value.
 
     Shared by every DataConstructor in this package that resolves a
@@ -32,12 +60,12 @@ def _card_for_uuid(
     PickNumberDecayCurveDataConstructor).
 
     Inputs:
-        card_binder: registry to resolve raw_nocab_uuid against. Never
+        lookup: registry to resolve raw_nocab_uuid against. Never
             written to.
         raw_nocab_uuid: a row's "nocab_uuid" cell, expected to be a str
             parseable as a UUID.
     Output: the matching GenericCard, or None if raw_nocab_uuid doesn't
-        parse as a UUID or card_binder has no card for it.
+        parse as a UUID or lookup has no card for it.
     Side effects: none.
     Exceptions: none - all failures collapse to None.
     """
@@ -45,10 +73,10 @@ def _card_for_uuid(
         card_uuid = UUID(str(raw_nocab_uuid))
     except (TypeError, ValueError):
         return None
-    return card_binder.get_by_uuid(card_uuid)
+    return lookup.get_by_uuid(card_uuid)
 
 
-def _cards_for_uuids(card_binder: CardBinder, raw_uuids: object) -> List[GenericCard]:
+def _cards_for_uuids(lookup: CardLookup, raw_uuids: object) -> List[GenericCard]:
     """Look up cards for a raw list of uuid strings, dropping any that
     don't match a card.
 
@@ -60,7 +88,7 @@ def _cards_for_uuids(card_binder: CardBinder, raw_uuids: object) -> List[Generic
     tolerate silently dropping an unmatched entry.
 
     Inputs:
-        card_binder: registry to resolve each uuid against. Never
+        lookup: registry to resolve each uuid against. Never
             written to.
         raw_uuids: a row's list[str] cell (e.g. "pool_uuids").
     Output: every uuid in raw_uuids that resolves to a card, same
@@ -75,7 +103,7 @@ def _cards_for_uuids(card_binder: CardBinder, raw_uuids: object) -> List[Generic
     """
     cards: List[GenericCard] = []
     for raw_uuid in cast(List[str], raw_uuids):
-        card = _card_for_uuid(card_binder, raw_uuid)
+        card = _card_for_uuid(lookup, raw_uuid)
         if card is None:
             continue
         cards.append(card)
@@ -83,7 +111,7 @@ def _cards_for_uuids(card_binder: CardBinder, raw_uuids: object) -> List[Generic
 
 
 def _option_cards_and_pick_index(
-    card_binder: CardBinder,
+    lookup: CardLookup,
     raw_pack_option_uuids: object,
     raw_pick_uuid: object,
 ) -> Tuple[MultiCardInput, int] | None:
@@ -96,7 +124,7 @@ def _option_cards_and_pick_index(
     whether a second (pool) group is also attached to the result.
 
     Inputs:
-        card_binder: registry to resolve every option's uuid against.
+        lookup: registry to resolve every option's uuid against.
             Never written to.
         raw_pack_option_uuids: a row's "pack_option_uuids" cell
             (list[str]).
@@ -108,7 +136,7 @@ def _option_cards_and_pick_index(
         if raw_pick_uuid is null/unparseable, doesn't appear in
         raw_pack_option_uuids, or ANY option uuid in
         raw_pack_option_uuids fails to parse or to resolve against
-        card_binder. That last condition is a deliberate
+        lookup. That last condition is a deliberate
         divergence from DeckLabelDataConstructor's convention of
         dropping individual unresolved cards and keeping the row: here
         the label is a POSITION in this exact list, so silently
@@ -137,7 +165,7 @@ def _option_cards_and_pick_index(
 
     option_cards: MultiCardInput = []
     for option_uuid in option_uuids:
-        card = card_binder.get_by_uuid(option_uuid)
+        card = lookup.get_by_uuid(option_uuid)
         if card is None:
             return None
         option_cards.append(card)

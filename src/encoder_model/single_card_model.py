@@ -1,4 +1,4 @@
-from typing import List, Union, cast
+from typing import List, Mapping, Union, cast
 
 import torch
 import torch.nn as nn
@@ -35,6 +35,15 @@ class SingleCardModel(nn.Module):
         # touching this class.
         self.text_encoder: TextEncoder = text_encoder
         self.embedding_head: EmbeddingHead = embedding_head
+
+    def encoder_only_state_dict(self) -> Mapping[str, torch.Tensor]:
+        """Every weight of this model (dojo decoder heads live in their
+        dojos, not here): the artifact to publish.
+
+        Inputs: none. Output: Mapping[str, Tensor], same as state_dict().
+        Side effects: none. Exceptions: none.
+        """
+        return self.state_dict()
 
     def internal_model(self, cards: List[GenericCard]) -> List[torch.Tensor]:
         """One embedding per input card, same order - every card is

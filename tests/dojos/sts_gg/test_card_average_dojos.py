@@ -28,6 +28,7 @@ from src.dojos.sts_gg.card_average_dojos import (
     CardTotalTurnsDojo,
     CardWinRateDojo,
 )
+from src.schema.holdout import HoldoutSpec
 
 _CASES = [
     (CardRelicCountDojo, CardRelicCountMetric),
@@ -59,6 +60,7 @@ class TestCardAverageDojoWrappers:
 
         dojo = dojo_cls(
             card_binder,
+            HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             path_to_training_data=source,
             rng_seed=0,

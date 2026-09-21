@@ -37,9 +37,9 @@ class TestCardCharacterPredictionDataConstructorBuild:
                 "sample_count": [1],
             }
         )
-        constructor = CardCharacterPredictionDataConstructor(binder)
+        constructor = CardCharacterPredictionDataConstructor()
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == [(card, {"CHARACTER.SILENT": 1.0})]
 
@@ -55,9 +55,9 @@ class TestCardCharacterPredictionDataConstructorBuild:
                 "sample_count": [5],
             }
         )
-        constructor = CardCharacterPredictionDataConstructor(binder)
+        constructor = CardCharacterPredictionDataConstructor()
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == [(card, {"CHARACTER.SILENT": 0.6, "CHARACTER.REGENT": 0.4})]
 
@@ -71,9 +71,9 @@ class TestCardCharacterPredictionDataConstructorBuild:
                 "sample_count": [1],
             }
         )
-        constructor = CardCharacterPredictionDataConstructor(binder)
+        constructor = CardCharacterPredictionDataConstructor()
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == []
 
@@ -91,9 +91,9 @@ class TestCardCharacterPredictionDataConstructorBuild:
                 "sample_count": [1, 1],
             }
         )
-        constructor = CardCharacterPredictionDataConstructor(binder)
+        constructor = CardCharacterPredictionDataConstructor()
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == [
             (card1, {"CHARACTER.SILENT": 1.0}),
@@ -110,8 +110,8 @@ class TestCardCharacterPredictionDataConstructorBuild:
                 "sample_count": [],
             }
         )
-        constructor = CardCharacterPredictionDataConstructor(binder)
+        constructor = CardCharacterPredictionDataConstructor()
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == []

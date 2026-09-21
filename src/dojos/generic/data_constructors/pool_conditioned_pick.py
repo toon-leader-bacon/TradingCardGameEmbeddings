@@ -6,7 +6,7 @@ from typing import List
 
 import pandas as pd
 
-from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.dojos.generic.data_constructors._uuid_resolution import (
     _cards_for_uuids,
     _option_cards_and_pick_index,
@@ -35,19 +35,15 @@ class PoolConditionedPickDataConstructor:
     function's own docstring before "fixing" this ordering.
     """
 
-    def __init__(self, card_binder: CardBinder) -> None:
+    def __init__(self) -> None:
         """
         Inputs:
-            card_binder: registry to resolve each row's pool_uuids,
-                pack_option_uuids, and pick_uuid against. Never written
-                to.
         Output: none (constructor).
         Side effects: none.
         Exceptions: none.
         """
-        self._card_binder = card_binder
 
-    def build(self, chunk: pd.DataFrame) -> List[TrainingDatum]:
+    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
         """Convert a chunk of (pool_uuids, pack_option_uuids, pick_uuid)
         rows into (MultiGroupInput, int) TrainingDatum pairs.
 
@@ -69,8 +65,8 @@ class PoolConditionedPickDataConstructor:
             package).
 
         Example:
-            >>> constructor = PoolConditionedPickDataConstructor(card_binder)
-            >>> constructor.build(chunk)
+            >>> constructor = PoolConditionedPickDataConstructor()
+            >>> constructor.build(chunk, lookup)
             [([[<GenericCard>, <GenericCard>], [<GenericCard>]], 0), ...]
         """
         results: List[TrainingDatum] = []
@@ -81,12 +77,12 @@ class PoolConditionedPickDataConstructor:
         # being empty - see class/build() docstrings.
         for _, row in chunk.iterrows():
             option_pick = _option_cards_and_pick_index(
-                self._card_binder, row["pack_option_uuids"], row["pick_uuid"]
+                lookup, row["pack_option_uuids"], row["pick_uuid"]
             )
             if option_pick is None:
                 continue
             option_cards, pick_index = option_pick
-            pool_cards = _cards_for_uuids(self._card_binder, row["pool_uuids"])
+            pool_cards = _cards_for_uuids(lookup, row["pool_uuids"])
             group: MultiGroupInput = [option_cards, pool_cards]
             results.append((group, pick_index))
 

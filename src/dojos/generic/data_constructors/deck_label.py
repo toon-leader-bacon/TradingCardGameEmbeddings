@@ -7,7 +7,7 @@ from uuid import UUID
 
 import pandas as pd
 
-from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.dojos.generic.data_constructors._uuid_resolution import _cast_to_float
 from src.schema.type_hints import Label, MultiCardInput, TrainingDatum
@@ -31,15 +31,12 @@ class DeckLabelDataConstructor:
 
     def __init__(
         self,
-        card_binder: CardBinder,
         deck_box: DeckBox,
         label_column: str,
         label_caster: Callable[[object], Label] = _cast_to_float,
     ) -> None:
         """
         Inputs:
-            card_binder: registry to resolve each deck's card
-                nocab_uuids against. Never written to.
             deck_box: registry to look up each row's deck_uuid against.
                 Never written to.
             label_column: the column name holding this metric's label
@@ -61,12 +58,11 @@ class DeckLabelDataConstructor:
         Side effects: none.
         Exceptions: none.
         """
-        self._card_binder = card_binder
         self._deck_box = deck_box
         self._label_column = label_column
         self._label_caster = label_caster
 
-    def build(self, chunk: pd.DataFrame) -> List[TrainingDatum]:
+    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
         """Convert a chunk of (run_id, deck_uuid, <label_column>) rows
         into (MultiCardInput, float) TrainingDatum pairs.
 
@@ -90,8 +86,8 @@ class DeckLabelDataConstructor:
             skipped, not raised - mirrors CardAverageDataConstructor.build()).
 
         Example:
-            >>> constructor = DeckLabelDataConstructor(card_binder, deck_box, "relic_count")
-            >>> constructor.build(chunk)
+            >>> constructor = DeckLabelDataConstructor(deck_box, "relic_count")
+            >>> constructor.build(chunk, lookup)
             [([<GenericCard>, <GenericCard>], 3.0), ...]
         """
         results: List[TrainingDatum] = []
@@ -111,24 +107,27 @@ class DeckLabelDataConstructor:
                 # NaN into a training label (see DataConstructor
                 # Protocol's "resolution failure is expected" contract).
                 continue
-            deck_cards = self._deck_cards_for_uuid(row["deck_uuid"])
+            deck_cards = self._deck_cards_for_uuid(lookup, row["deck_uuid"])
             if not deck_cards:
                 continue
             results.append((deck_cards, self._label_caster(raw_label)))
 
         return results
 
-    def _deck_cards_for_uuid(self, raw_deck_uuid: object) -> MultiCardInput:
+    def _deck_cards_for_uuid(
+        self, lookup: CardLookup, raw_deck_uuid: object
+    ) -> MultiCardInput:
         """Look up and build the card list for one row's raw deck_uuid value.
 
         Private helper - single consumer is build().
 
         Inputs:
+            lookup: the split's holdout-filtered card lookup.
             raw_deck_uuid: a row's "deck_uuid" cell, expected to be a
                 str parseable as a UUID.
         Output: the resolved deck's cards, as a MultiCardInput -
             omitting any of the deck's card_nocab_uuids that don't
-            resolve against self._card_binder. Empty (not None) if
+            resolve against lookup. Empty (not None) if
             raw_deck_uuid doesn't parse, self._deck_box has no deck for
             it, or every one of the deck's cards fails to resolve - an
             empty result is build()'s own signal to skip the row.
@@ -145,7 +144,7 @@ class DeckLabelDataConstructor:
 
         deck_cards: MultiCardInput = []
         for card_uuid in deck.card_nocab_uuids:
-            card = self._card_binder.get_by_uuid(card_uuid)
+            card = lookup.get_by_uuid(card_uuid)
             if card is None:
                 continue
             deck_cards.append(card)

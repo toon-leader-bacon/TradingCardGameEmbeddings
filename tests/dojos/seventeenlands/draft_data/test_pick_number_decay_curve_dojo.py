@@ -15,6 +15,7 @@ from src.dojos.seventeenlands.draft_data.pick_number_decay_curve_dojo import (
     MIN_SAMPLE_COUNT,
     PickNumberDecayCurveDojo,
 )
+from src.schema.holdout import HoldoutSpec
 
 
 def _write_source(path: Path) -> None:
@@ -33,6 +34,7 @@ class TestPickNumberDecayCurveDojo:
 
         dojo = PickNumberDecayCurveDojo(
             card_binder,
+            HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             path_to_training_data=source,
             rng_seed=0,

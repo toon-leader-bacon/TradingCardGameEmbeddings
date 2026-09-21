@@ -64,6 +64,16 @@ class DataSource(str, Enum):
     # src/data_refinement/deck_box/seventeenlands_game_data/extraction_stage.py)
     # — distinct from each deck's own cards' data source (SCRYFALL, via
     # card_binder/scryfall/).
+    DOMINIONTABS = "dominiontabs"  # sumpfork/dominiontabs' card_db_src
+    # JSON files (see src/data_retrieval/dominiontabs/downloader.py and
+    # src/data_refinement/card_binder/dominiontabs/ingestion_stage.py).
+    ISOTROPIC = "isotropic"  # isotropic.org's Wayback-salvaged Dominion
+    # gamelog summary JSON (see
+    # src/data_retrieval/isotropic/downloader.py and
+    # src/data_refinement/metrics/isotropic/BRAINSTORM.md) — this
+    # source's decks/kingdoms are minted by its own metrics directly
+    # (no card_binder ingestion stage: card names resolve against the
+    # already-ingested DOMINIONTABS binder instead).
     SYSTEM = "system"  # minted internally by CardBinder itself for
     # synthetic sentinel cards (e.g. the "Unknown" fallback card — see
     # CardBinder.ensure_unknown_card()), never fetched from an external

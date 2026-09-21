@@ -36,9 +36,9 @@ class TestMaskedFieldDataConstructorBuild:
                 "label": ["northern_realms"],
             }
         )
-        constructor = MaskedFieldDataConstructor(binder, "label")
+        constructor = MaskedFieldDataConstructor("label")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == [(card, "northern_realms")]
 
@@ -51,9 +51,9 @@ class TestMaskedFieldDataConstructorBuild:
                 "label": ["northern_realms"],
             }
         )
-        constructor = MaskedFieldDataConstructor(binder, "label")
+        constructor = MaskedFieldDataConstructor("label")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == []
 
@@ -66,17 +66,17 @@ class TestMaskedFieldDataConstructorBuild:
                 "label": ["northern_realms"],
             }
         )
-        constructor = MaskedFieldDataConstructor(binder, "label")
+        constructor = MaskedFieldDataConstructor("label")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == []
 
     def test_empty_chunk_returns_empty_list(self) -> None:
         binder = CardBinder()
         chunk = pd.DataFrame({"nocab_uuid": [], "masked_field": [], "label": []})
-        constructor = MaskedFieldDataConstructor(binder, "label")
+        constructor = MaskedFieldDataConstructor("label")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == []

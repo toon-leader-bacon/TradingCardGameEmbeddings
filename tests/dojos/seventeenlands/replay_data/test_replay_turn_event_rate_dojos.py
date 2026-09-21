@@ -14,6 +14,7 @@ from src.dojos.seventeenlands.replay_data.replay_turn_event_rate_dojos import (
     CombatDamagePushThroughRateDojo,
     CombatKillInvolvementRateDojo,
 )
+from src.schema.holdout import HoldoutSpec
 
 _CASES = [
     (CombatKillInvolvementRateDojo, CombatKillInvolvementRateMetric),
@@ -39,6 +40,7 @@ class TestReplayTurnEventRateDojoWrappers:
 
         dojo = dojo_cls(
             card_binder,
+            HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             path_to_training_data=source,
             rng_seed=0,

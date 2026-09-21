@@ -17,6 +17,7 @@ from src.dojos.generic.data_constructors import (
 )
 from src.dojos.generic.multi_group_regression.dojo import MultiGroupRegressionDojo
 from src.dojos.generic.pooling import EmbeddingPooler
+from src.schema.holdout import HoldoutSpec
 
 
 class AttackerBlockerCombatOutcomeDojo(MultiGroupRegressionDojo):
@@ -26,15 +27,18 @@ class AttackerBlockerCombatOutcomeDojo(MultiGroupRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         pooler: EmbeddingPooler | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or AttackerBlockerCombatOutcomeMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=AttackerBlockerCombatOutcomeDataConstructor(card_binder),
+            data_constructor=AttackerBlockerCombatOutcomeDataConstructor(),
             card_embedding_size=card_embedding_size,
             pooler=pooler,
             rng_seed=rng_seed,

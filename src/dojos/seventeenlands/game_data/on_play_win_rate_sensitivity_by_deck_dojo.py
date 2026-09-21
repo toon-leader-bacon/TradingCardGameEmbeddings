@@ -25,6 +25,7 @@ from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_rate_sensi
 )
 from src.dojos.generic.data_constructors import DeckLabelDataConstructor
 from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
+from src.schema.holdout import HoldoutSpec
 
 
 class OnPlayWinRateSensitivityByDeckDojo(MultiCardRegressionDojo):
@@ -34,16 +35,19 @@ class OnPlayWinRateSensitivityByDeckDojo(MultiCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         deck_box: DeckBox,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or OnPlayWinRateSensitivityByDeckMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=DeckLabelDataConstructor(
-                card_binder, deck_box, "on_play_win_rate_sensitivity"
+                deck_box, "on_play_win_rate_sensitivity"
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,

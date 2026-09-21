@@ -17,6 +17,7 @@ from src.data_refinement.metrics.seventeenlands.replay_data.average_turn_cast_me
 )
 from src.dojos.generic.data_constructors import CardAverageDataConstructor
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
+from src.schema.holdout import HoldoutSpec
 
 
 class AverageTurnCastDojo(SingleCardRegressionDojo):
@@ -25,16 +26,17 @@ class AverageTurnCastDojo(SingleCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or AverageTurnCastMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=CardAverageDataConstructor(
-                card_binder, "average_turn_cast"
-            ),
+            data_constructor=CardAverageDataConstructor("average_turn_cast"),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
         )

@@ -25,6 +25,7 @@ from src.data_refinement.metrics.seventeenlands.game_data.game_card_average_metr
 )
 from src.dojos.generic.data_constructors import CardAverageDataConstructor
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
+from src.schema.holdout import HoldoutSpec
 
 
 class WinRateWhenInDeckDojo(SingleCardRegressionDojo):
@@ -33,15 +34,18 @@ class WinRateWhenInDeckDojo(SingleCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or WinRateWhenInDeckMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=CardAverageDataConstructor(
-                card_binder, WinRateWhenInDeckMetric.LABEL_COLUMN
+                WinRateWhenInDeckMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -54,15 +58,18 @@ class OpeningHandWinRateDojo(SingleCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or OpeningHandWinRateMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=CardAverageDataConstructor(
-                card_binder, OpeningHandWinRateMetric.LABEL_COLUMN
+                OpeningHandWinRateMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -75,15 +82,18 @@ class DrawnWinRateDojo(SingleCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or DrawnWinRateMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=CardAverageDataConstructor(
-                card_binder, DrawnWinRateMetric.LABEL_COLUMN
+                DrawnWinRateMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,

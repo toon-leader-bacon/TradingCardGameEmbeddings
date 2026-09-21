@@ -76,5 +76,29 @@ implementation yet). Implemented today:
   draft/game/replay data exports; `draft_data/`, `game_data/`, and
   `replay_data/` are all implemented today. See
   [`seventeenlands/README.md`](seventeenlands/README.md).
+- **`dominiontabs/`** - three single-card metrics over Dominion card
+  data: `CostRegressionMetric` (this project's first
+  `MaskedFieldRegressionMetric` consumer), `TypeMaskMetric`, and
+  `SetMaskMetric` (a bespoke `CorpusScanMetric` reading raw
+  `cards_db.json` directly, not `raw_content`). See
+  [`dominiontabs/README.md`](dominiontabs/README.md).
+- **`isotropic/summary/`** - thirteen `Metric[dict]` metrics over
+  isotropic.org's Wayback-salvaged Dominion gameplay data (real
+  played games - kingdoms, vetoes, final decks, outcomes), resolving
+  card names against `dominiontabs`' `CardBinder`; this project's
+  second `DeckCardMaskMetric` consumer, after `play_gwent/`. See
+  [`isotropic/summary/README.md`](isotropic/summary/README.md).
+- **`isotropic/games/`** - eleven metrics over isotropic's other raw
+  flavor - turn-by-turn game-log HTML files, parsed via BeautifulSoup and
+  sharing `isotropic/card_resolution.py`'s card-name resolution with
+  `isotropic/summary/`. Six `Metric[GameHeader]` header metrics (opening
+  buys, pile exhaustion/game-ending type) plus five `Metric[GameLog]`
+  mid-game metrics (next buy, next trashed card, next-turn action count,
+  eventual win probability, deck-pair winner) built on a full log parser
+  and a per-player partial-deck reconstruction. See
+  [`isotropic/games/README.md`](isotropic/games/README.md) (and its
+  `TODO.md` for the known partial-deck accuracy gap). Resignation metrics
+  from this same source are still unbuilt - see
+  [`isotropic/BRAINSTORM.md`](isotropic/BRAINSTORM.md).
 
 This file grows as more raw sources get real metric implementations.

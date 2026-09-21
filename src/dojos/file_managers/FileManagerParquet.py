@@ -1,6 +1,6 @@
 import contextlib
-from pathlib import Path
 import random
+from pathlib import Path
 from typing import List
 
 import pandas as pd
@@ -8,10 +8,13 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from src.dojos.file_managers.utils.split_postfix import get_split_file_postfix
-from src.dojos.file_managers.utils.TTVSplits import TTVSplits
 from src.schema.splits import Split
+from src.schema.ttv_splits import TTVSplits
 
 MAX_INT = 2**31 - 1
+
+# Split file order written by make_splits (see get_split_file_postfix).
+_SPLIT_INDEX = {Split.TRAIN: 0, Split.TEST: 1, Split.VALIDATION: 2}
 
 
 class ParquetChunkReader:
@@ -145,6 +148,27 @@ class FileManagerParquet:
         )
         return [ParquetChunkReader(path, batch_size) for path in output_paths]
 
+    def reader_for(self, split: Split, batch_size: int = 32) -> ParquetChunkReader:
+        """Open a fresh chunked reader over one already-written split file.
+
+        Inputs:
+            split: which split to read.
+            batch_size: rows per chunk in the returned reader.
+        Output: a ParquetChunkReader positioned at the split's first row.
+        Side effects: opens the split file for reading.
+        Exceptions: FileNotFoundError if make_splits hasn't been run yet.
+        """
+        return ParquetChunkReader(self._split_path(_SPLIT_INDEX[split]), batch_size)
+
+    def row_count(self, split: Split) -> int:
+        """Number of rows in one already-written split file.
+
+        Inputs: split (Split). Output: int, from parquet metadata (no data
+        read). Side effects: none. Exceptions: FileNotFoundError if
+        make_splits hasn't been run yet.
+        """
+        return pq.ParquetFile(self._split_path(_SPLIT_INDEX[split])).metadata.num_rows
+
     def shuffle_split(self, split: Split, batch_size: int = 32) -> ParquetChunkReader:
         """Convenience wrapper around shuffle_split_index taking the real
         Split enum (src.schema.splits.Split) instead of a raw index — the
@@ -158,14 +182,15 @@ class FileManagerParquet:
         Side effects: see shuffle_split_index.
         Exceptions: ValueError for an unrecognized split.
         """
-        if split == Split.TRAIN:
-            return self.shuffle_split_index(0, batch_size)
-        elif split == Split.TEST:
-            return self.shuffle_split_index(1, batch_size)
-        elif split == Split.VALIDATION:
-            return self.shuffle_split_index(2, batch_size)
-        else:
+        if split not in _SPLIT_INDEX:
             raise ValueError(f"Unsupported split: {split}")
+        return self.shuffle_split_index(_SPLIT_INDEX[split], batch_size)
+
+    def _split_path(self, split_index: int) -> Path:
+        return (
+            self.output_directory
+            / f"{self.output_file_prefix}_{get_split_file_postfix(split_index)}.parquet"
+        )
 
     def shuffle_split_index(
         self, split_index: int, batch_size: int = 32
@@ -186,10 +211,7 @@ class FileManagerParquet:
         shuffle-and-rewrite round trip can't drift the file's on-disk
         schema away from self._schema over repeated epochs.
         """
-        target_file = (
-            self.output_directory
-            / f"{self.output_file_prefix}_{get_split_file_postfix(split_index)}.parquet"
-        )
+        target_file = self._split_path(split_index)
         df = pd.read_parquet(target_file, dtype_backend="pyarrow")
         df = df.sample(frac=1, random_state=self.rng.randint(0, MAX_INT)).reset_index(
             drop=True

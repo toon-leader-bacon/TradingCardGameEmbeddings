@@ -6,7 +6,7 @@ from uuid import UUID
 
 import pandas as pd
 
-from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.schema.type_hints import MultiCardInput, TrainingDatum
 
@@ -35,13 +35,9 @@ class DeckCardMaskDataConstructor:
     label encoding lives in the generic dojo, not the DataConstructor").
     """
 
-    def __init__(
-        self, card_binder: CardBinder, deck_box: DeckBox, label_column: str
-    ) -> None:
+    def __init__(self, deck_box: DeckBox, label_column: str) -> None:
         """
         Inputs:
-            card_binder: registry to resolve each deck's remaining
-                (non-target) card nocab_uuids against. Never written to.
             deck_box: registry to look up each row's deck_uuid against.
                 Never written to.
             label_column: the column name holding this metric's label -
@@ -52,11 +48,10 @@ class DeckCardMaskDataConstructor:
         Side effects: none.
         Exceptions: none.
         """
-        self._card_binder = card_binder
         self._deck_box = deck_box
         self._label_column = label_column
 
-    def build(self, chunk: pd.DataFrame) -> List[TrainingDatum]:
+    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
         """Convert a chunk of (deck_uuid, target_card_uuid,
         <label_column>) rows into (MultiCardInput, str) TrainingDatum
         pairs, with each row's target card masked out of its deck's
@@ -82,8 +77,8 @@ class DeckCardMaskDataConstructor:
             skipped, not raised - mirrors DeckLabelDataConstructor.build()).
 
         Example:
-            >>> constructor = DeckCardMaskDataConstructor(card_binder, deck_box, "label")
-            >>> constructor.build(chunk)
+            >>> constructor = DeckCardMaskDataConstructor(deck_box, "label")
+            >>> constructor.build(chunk, lookup)
             [([<GenericCard>, <GenericCard>], "Geralt"), ...]
         """
         results: List[TrainingDatum] = []
@@ -94,7 +89,7 @@ class DeckCardMaskDataConstructor:
         # convention as DeckLabelDataConstructor.build().
         for _, row in chunk.iterrows():
             deck_cards = self._deck_cards_excluding_target(
-                row["deck_uuid"], row["target_card_uuid"]
+                lookup, row["deck_uuid"], row["target_card_uuid"]
             )
             if not deck_cards:
                 continue
@@ -103,13 +98,14 @@ class DeckCardMaskDataConstructor:
         return results
 
     def _deck_cards_excluding_target(
-        self, raw_deck_uuid: object, raw_target_uuid: object
+        self, lookup: CardLookup, raw_deck_uuid: object, raw_target_uuid: object
     ) -> MultiCardInput:
         """Look up one row's deck, with its target card masked out.
 
         Private helper - single consumer is build().
 
         Inputs:
+            lookup: the split's holdout-filtered card lookup.
             raw_deck_uuid: a row's "deck_uuid" cell, expected to be a
                 str parseable as a UUID.
             raw_target_uuid: a row's "target_card_uuid" cell, expected
@@ -121,7 +117,7 @@ class DeckCardMaskDataConstructor:
                 approach).
         Output: the resolved deck's cards minus the target card, as a
             MultiCardInput - omitting any remaining card_nocab_uuid
-            that doesn't resolve against self._card_binder. Empty (not
+            that doesn't resolve against lookup. Empty (not
             None) if raw_deck_uuid doesn't parse, self._deck_box has no
             deck for it, or every remaining card fails to resolve - an
             empty result is build()'s own signal to skip the row.
@@ -149,7 +145,7 @@ class DeckCardMaskDataConstructor:
         for card_uuid in deck.card_nocab_uuids:
             if card_uuid == target_uuid:
                 continue
-            card = self._card_binder.get_by_uuid(card_uuid)
+            card = lookup.get_by_uuid(card_uuid)
             if card is None:
                 continue
             deck_cards.append(card)

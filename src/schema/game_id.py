@@ -34,3 +34,6 @@ class GameId(str, Enum):
     FLESH_AND_BLOOD = "flesh_and_blood"  # Flesh and Blood (see
     # src/data_retrieval/cardvault_fabtcg/card_downloader.py and
     # src/data_refinement/card_binder/cardvault_fabtcg/ingestion_stage.py).
+    DOMINION = "dominion"  # Dominion, the board/deckbuilding game (see
+    # src/data_retrieval/dominiontabs/downloader.py and
+    # src/data_refinement/card_binder/dominiontabs/ingestion_stage.py).

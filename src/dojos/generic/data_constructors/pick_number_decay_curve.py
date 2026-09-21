@@ -6,7 +6,7 @@ from typing import Dict, List, cast
 
 import pandas as pd
 
-from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.dojos.generic.data_constructors._uuid_resolution import _card_for_uuid
 from src.schema.type_hints import TrainingDatum
 
@@ -39,11 +39,9 @@ class PickNumberDecayCurveDataConstructor:
     per-example mask.
     """
 
-    def __init__(self, card_binder: CardBinder, min_sample_count: int) -> None:
+    def __init__(self, min_sample_count: int) -> None:
         """
         Inputs:
-            card_binder: registry to resolve each row's nocab_uuid
-                against. Never written to.
             min_sample_count: minimum sample_count_by_pick_number value
                 a bucket needs before its take_rate is trusted enough to
                 train on - a bucket below this threshold is dropped from
@@ -61,10 +59,9 @@ class PickNumberDecayCurveDataConstructor:
         """
         if min_sample_count < 1:
             raise ValueError(f"min_sample_count must be >= 1, got {min_sample_count}")
-        self._card_binder = card_binder
         self._min_sample_count = min_sample_count
 
-    def build(self, chunk: pd.DataFrame) -> List[TrainingDatum]:
+    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
         """Convert a chunk of (nocab_uuid, take_rate_by_pick_number,
         sample_count_by_pick_number) rows into (SingleCardInput,
         Dict[int, float]) TrainingDatum pairs.
@@ -92,9 +89,9 @@ class PickNumberDecayCurveDataConstructor:
 
         Example:
             >>> constructor = PickNumberDecayCurveDataConstructor(
-            ...     card_binder, min_sample_count=10
+            ...     min_sample_count=10
             ... )
-            >>> constructor.build(chunk)
+            >>> constructor.build(chunk, lookup)
             [(<GenericCard>, {0: 0.05, 1: 0.12, 14: 0.83}), ...]
         """
         results: List[TrainingDatum] = []
@@ -102,7 +99,7 @@ class PickNumberDecayCurveDataConstructor:
         # Resolve each row's card and its per-bucket label dict
         # independently; skip rows that fail either.
         for _, row in chunk.iterrows():
-            card = _card_for_uuid(self._card_binder, row["nocab_uuid"])
+            card = _card_for_uuid(lookup, row["nocab_uuid"])
             if card is None:
                 continue
             label = self._label_for_row(

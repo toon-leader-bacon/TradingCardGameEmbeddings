@@ -20,6 +20,7 @@ from src.data_refinement.metrics.seventeenlands.replay_data.replay_turn_event_ra
 )
 from src.dojos.generic.data_constructors import CardAverageDataConstructor
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
+from src.schema.holdout import HoldoutSpec
 
 
 class CombatKillInvolvementRateDojo(SingleCardRegressionDojo):
@@ -29,15 +30,18 @@ class CombatKillInvolvementRateDojo(SingleCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or CombatKillInvolvementRateMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=CardAverageDataConstructor(
-                card_binder, CombatKillInvolvementRateMetric.LABEL_COLUMN
+                CombatKillInvolvementRateMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -51,15 +55,18 @@ class CombatDamagePushThroughRateDojo(SingleCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or CombatDamagePushThroughRateMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=CardAverageDataConstructor(
-                card_binder, CombatDamagePushThroughRateMetric.LABEL_COLUMN
+                CombatDamagePushThroughRateMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,

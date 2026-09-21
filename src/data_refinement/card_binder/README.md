@@ -266,6 +266,25 @@ guarding against a mistake a stage has no reason to make.
   its `print_id` as a secondary alias against whichever card pass 1
   already created — safe by construction since every `card_id` in the
   corpus has at least one `en` row.
+- `dominiontabs/ingestion_stage.py` — `DominionTabsCardIngestionStage`
+  (`SOURCE_GAME = GameId.DOMINION`), reading a *directory* containing
+  two raw files: `cards_db.json` (819 entries, a JSON array of
+  language-neutral fields) and `cards_en_us.json` (884 entries, a JSON
+  dict of English text keyed by card name) — see
+  `src/data_retrieval/dominiontabs/downloader.py` for why this source
+  splits a card's data across two files. Identity is `get_by_alias(
+  GameId.DOMINION, DataSource.DOMINIONTABS, card_tag)` — `card_tag` is
+  a perfect natural key, unique across all 819 `cards_db.json` entries.
+  No secondary identifier system exists in this data. Iteration is
+  driven by `cards_db.json`, not `cards_en_us.json` — the latter's 117
+  keys with no `card_tag` match are group/category header text and
+  split-card alternate spellings, not cards, and are never visited.
+  Per explicit instruction, `raw_content` is deliberately trimmed to
+  six fields only (`name`, `types`, `cost`, `description`, `potcost`,
+  `debtcost`); `cost`/`potcost`/`debtcost` are kept as dominiontabs'
+  own raw strings (e.g. `"6*"` for a variable-cost card), not parsed
+  into `int`, and `description`'s `<br>`/`<n>` tokens are left
+  untouched — no text cleanup at this stage.
 
 ## How it works
 
@@ -361,6 +380,22 @@ changed_uuids = build_or_update_card_binder(
     Path("data/raw/cardvault_fabtcg/public_card_data.csv"),
     CardVaultFabtcgCardIngestionStage(),
     Path("data/final/cards/flesh_and_blood.jsonl"),
+)
+```
+
+```python
+# dominiontabs: raw_path is a directory containing both cards_db.json
+# and cards_en_us.json.
+from pathlib import Path
+from src.data_refinement.card_binder.build import build_or_update_card_binder
+from src.data_refinement.card_binder.dominiontabs.ingestion_stage import (
+    DominionTabsCardIngestionStage,
+)
+
+changed_uuids = build_or_update_card_binder(
+    Path("data/raw/dominiontabs"),
+    DominionTabsCardIngestionStage(),
+    Path("data/final/cards/dominion.jsonl"),
 )
 ```
 

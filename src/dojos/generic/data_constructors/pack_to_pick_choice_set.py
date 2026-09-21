@@ -6,7 +6,7 @@ from typing import List
 
 import pandas as pd
 
-from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.dojos.generic.data_constructors._uuid_resolution import (
     _option_cards_and_pick_index,
 )
@@ -28,18 +28,15 @@ class PackToPickChoiceSetDataConstructor:
     no label_column to parameterize, unlike CardAverageDataConstructor.
     """
 
-    def __init__(self, card_binder: CardBinder) -> None:
+    def __init__(self) -> None:
         """
         Inputs:
-            card_binder: registry to resolve each row's pack_option_uuids
-                and pick_uuid against. Never written to.
         Output: none (constructor).
         Side effects: none.
         Exceptions: none.
         """
-        self._card_binder = card_binder
 
-    def build(self, chunk: pd.DataFrame) -> List[TrainingDatum]:
+    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
         """Convert a chunk of (pack_option_uuids, pick_uuid) rows into
         (MultiCardInput, int) TrainingDatum pairs.
 
@@ -56,8 +53,8 @@ class PackToPickChoiceSetDataConstructor:
             package).
 
         Example:
-            >>> constructor = PackToPickChoiceSetDataConstructor(card_binder)
-            >>> constructor.build(chunk)
+            >>> constructor = PackToPickChoiceSetDataConstructor()
+            >>> constructor.build(chunk, lookup)
             [([<GenericCard>, <GenericCard>, <GenericCard>], 1), ...]
         """
         results: List[TrainingDatum] = []
@@ -68,7 +65,7 @@ class PackToPickChoiceSetDataConstructor:
         # that fail.
         for _, row in chunk.iterrows():
             option_pick = _option_cards_and_pick_index(
-                self._card_binder, row["pack_option_uuids"], row["pick_uuid"]
+                lookup, row["pack_option_uuids"], row["pick_uuid"]
             )
             if option_pick is None:
                 continue

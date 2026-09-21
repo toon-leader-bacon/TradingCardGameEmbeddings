@@ -16,6 +16,7 @@ from src.dojos.seventeenlands.draft_data.pack_card_tally_dojos import (
     FirstPickRateDojo,
     RankStratifiedTakeRateDojo,
 )
+from src.schema.holdout import HoldoutSpec
 
 _CASES = [
     (CardTakeRateDojo, CardTakeRateMetric),
@@ -42,6 +43,7 @@ class TestPackCardTallyDojoWrappers:
 
         dojo = dojo_cls(
             card_binder,
+            HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             path_to_training_data=source,
             rng_seed=0,

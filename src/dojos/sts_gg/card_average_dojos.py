@@ -27,6 +27,7 @@ from src.data_refinement.metrics.sts_gg.card_average_metrics import (
 )
 from src.dojos.generic.data_constructors import CardAverageDataConstructor
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
+from src.schema.holdout import HoldoutSpec
 
 
 class CardRelicCountDojo(SingleCardRegressionDojo):
@@ -35,15 +36,18 @@ class CardRelicCountDojo(SingleCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or CardRelicCountMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=CardAverageDataConstructor(
-                card_binder, CardRelicCountMetric.LABEL_COLUMN
+                CardRelicCountMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -56,15 +60,18 @@ class CardTotalDamageTakenDojo(SingleCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or CardTotalDamageTakenMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=CardAverageDataConstructor(
-                card_binder, CardTotalDamageTakenMetric.LABEL_COLUMN
+                CardTotalDamageTakenMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -77,15 +84,18 @@ class CardDeckSizeDojo(SingleCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or CardDeckSizeMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=CardAverageDataConstructor(
-                card_binder, CardDeckSizeMetric.LABEL_COLUMN
+                CardDeckSizeMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -98,15 +108,18 @@ class CardTotalCardsPickedDojo(SingleCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or CardTotalCardsPickedMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=CardAverageDataConstructor(
-                card_binder, CardTotalCardsPickedMetric.LABEL_COLUMN
+                CardTotalCardsPickedMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -119,15 +132,18 @@ class CardTotalTurnsDojo(SingleCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or CardTotalTurnsMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=CardAverageDataConstructor(
-                card_binder, CardTotalTurnsMetric.LABEL_COLUMN
+                CardTotalTurnsMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -140,15 +156,18 @@ class CardElitesKilledDojo(SingleCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or CardElitesKilledMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=CardAverageDataConstructor(
-                card_binder, CardElitesKilledMetric.LABEL_COLUMN
+                CardElitesKilledMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -161,15 +180,18 @@ class CardFloorsClearedDojo(SingleCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or CardFloorsClearedMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=CardAverageDataConstructor(
-                card_binder, CardFloorsClearedMetric.LABEL_COLUMN
+                CardFloorsClearedMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -182,15 +204,18 @@ class CardTotalCombatsDojo(SingleCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or CardTotalCombatsMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=CardAverageDataConstructor(
-                card_binder, CardTotalCombatsMetric.LABEL_COLUMN
+                CardTotalCombatsMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -210,16 +235,17 @@ class CardWinRateDojo(SingleCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or CardWinRateMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=CardAverageDataConstructor(
-                card_binder, CardWinRateMetric.LABEL_COLUMN
-            ),
+            data_constructor=CardAverageDataConstructor(CardWinRateMetric.LABEL_COLUMN),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
         )

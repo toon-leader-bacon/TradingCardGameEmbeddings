@@ -12,6 +12,7 @@ from src.dojos.generic.multi_card_fixed_classification.dojo import (
     MultiCardFixedClassificationDojo,
 )
 from src.dojos.play_gwent.deck_card_mask_dojos import LeaderMaskedFromDeckDojo
+from src.schema.holdout import HoldoutSpec
 
 
 def _write_source(path: Path) -> None:
@@ -36,6 +37,7 @@ class TestLeaderMaskedFromDeckDojo:
 
         dojo = LeaderMaskedFromDeckDojo(
             card_binder,
+            HoldoutSpec.no_holdout(),
             deck_box,
             card_embedding_size=4,
             path_to_training_data=source,
@@ -44,7 +46,6 @@ class TestLeaderMaskedFromDeckDojo:
 
         assert isinstance(dojo, MultiCardFixedClassificationDojo)
         assert isinstance(dojo.data_constructor, DeckCardMaskDataConstructor)
-        assert dojo.data_constructor._card_binder is card_binder
         assert dojo.data_constructor._deck_box is deck_box
 
     def test_label_values_is_leader_metrics_own_label_values(
@@ -57,6 +58,7 @@ class TestLeaderMaskedFromDeckDojo:
 
         dojo = LeaderMaskedFromDeckDojo(
             card_binder,
+            HoldoutSpec.no_holdout(),
             deck_box,
             card_embedding_size=4,
             path_to_training_data=source,

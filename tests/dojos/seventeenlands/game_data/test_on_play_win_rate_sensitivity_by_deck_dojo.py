@@ -14,6 +14,7 @@ from src.dojos.seventeenlands.game_data.on_play_win_rate_sensitivity_by_deck_doj
 from src.schema.card import GenericCard, GenericDeck, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
+from src.schema.holdout import HoldoutSpec
 
 
 def _write_source(path: Path) -> None:
@@ -32,6 +33,7 @@ class TestOnPlayWinRateSensitivityByDeckDojo:
 
         dojo = OnPlayWinRateSensitivityByDeckDojo(
             card_binder,
+            HoldoutSpec.no_holdout(),
             deck_box,
             card_embedding_size=4,
             path_to_training_data=source,
@@ -77,7 +79,7 @@ class TestOnPlayWinRateSensitivityByDeckDojo:
         )
 
         result = DeckLabelDataConstructor(
-            card_binder, deck_box, "on_play_win_rate_sensitivity"
-        ).build(chunk)
+            deck_box, "on_play_win_rate_sensitivity"
+        ).build(chunk, card_binder)
 
         assert result == []

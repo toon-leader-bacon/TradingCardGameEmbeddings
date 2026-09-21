@@ -8,6 +8,7 @@ from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDo
 from src.dojos.seventeenlands.game_data.game_length_association_dojo import (
     GameLengthAssociationDojo,
 )
+from src.schema.holdout import HoldoutSpec
 
 
 def _write_source(path: Path) -> None:
@@ -25,6 +26,7 @@ class TestGameLengthAssociationDojo:
 
         dojo = GameLengthAssociationDojo(
             card_binder,
+            HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             path_to_training_data=source,
             rng_seed=0,

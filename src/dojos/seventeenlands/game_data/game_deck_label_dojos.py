@@ -48,6 +48,7 @@ from src.dojos.generic.multi_card_fixed_classification.dojo import (
     MultiCardFixedClassificationDojo,
 )
 from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
+from src.schema.holdout import HoldoutSpec
 
 
 class DeckGameLengthPredictionDojo(MultiCardRegressionDojo):
@@ -56,16 +57,19 @@ class DeckGameLengthPredictionDojo(MultiCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         deck_box: DeckBox,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or DeckGameLengthPredictionMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=DeckLabelDataConstructor(
-                card_binder, deck_box, DeckGameLengthPredictionMetric.LABEL_COLUMN
+                deck_box, DeckGameLengthPredictionMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -78,16 +82,19 @@ class DeckWinPredictionDojo(MultiCardBinaryClassificationDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         deck_box: DeckBox,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or DeckWinPredictionMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=DeckLabelDataConstructor(
-                card_binder, deck_box, DeckWinPredictionMetric.LABEL_COLUMN
+                deck_box, DeckWinPredictionMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -103,16 +110,18 @@ class DeckRankTierPredictionDojo(MultiCardFixedClassificationDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         deck_box: DeckBox,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or DeckRankTierPredictionMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=DeckLabelDataConstructor(
-                card_binder,
                 deck_box,
                 DeckRankTierPredictionMetric.LABEL_COLUMN,
                 label_caster=str,

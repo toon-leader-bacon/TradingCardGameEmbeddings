@@ -5,7 +5,7 @@ from typing import Dict, List
 
 import pandas as pd
 
-from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.dojos.generic.data_constructors._uuid_resolution import _card_for_uuid
 from src.schema.type_hints import TrainingDatum
 
@@ -33,18 +33,15 @@ class CardCharacterPredictionDataConstructor:
     there instead.
     """
 
-    def __init__(self, card_binder: CardBinder) -> None:
+    def __init__(self) -> None:
         """
         Inputs:
-            card_binder: registry to resolve each row's nocab_uuid
-                against. Never written to.
         Output: none (constructor).
         Side effects: none.
         Exceptions: none.
         """
-        self._card_binder = card_binder
 
-    def build(self, chunk: pd.DataFrame) -> List[TrainingDatum]:
+    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
         """Convert a chunk of (nocab_uuid, characters, probabilities,
         sample_count) rows into (SingleCardInput, Dict[str, float])
         TrainingDatum pairs.
@@ -65,8 +62,8 @@ class CardCharacterPredictionDataConstructor:
             not raised - mirrors CardAverageDataConstructor.build()).
 
         Example:
-            >>> constructor = CardCharacterPredictionDataConstructor(card_binder)
-            >>> constructor.build(chunk)
+            >>> constructor = CardCharacterPredictionDataConstructor()
+            >>> constructor.build(chunk, lookup)
             [(<GenericCard>, {"CHARACTER.SILENT": 0.6, "CHARACTER.REGENT": 0.4}), ...]
         """
         results: List[TrainingDatum] = []
@@ -76,7 +73,7 @@ class CardCharacterPredictionDataConstructor:
         # CardAverageDataConstructor.build() - a metric's output may
         # contain the odd unresolvable card id.
         for _, row in chunk.iterrows():
-            card = _card_for_uuid(self._card_binder, row["nocab_uuid"])
+            card = _card_for_uuid(lookup, row["nocab_uuid"])
             if card is None:
                 continue
             distribution: Dict[str, float] = dict(

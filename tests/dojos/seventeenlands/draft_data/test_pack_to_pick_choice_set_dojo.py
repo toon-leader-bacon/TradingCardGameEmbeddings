@@ -13,6 +13,7 @@ from src.dojos.loss.pick_prediction_cross_entropy_loss import (
 from src.dojos.seventeenlands.draft_data.pack_to_pick_choice_set_dojo import (
     PackToPickChoiceSetDojo,
 )
+from src.schema.holdout import HoldoutSpec
 
 
 def _write_source(path: Path) -> None:
@@ -33,6 +34,7 @@ class TestPackToPickChoiceSetDojo:
 
         dojo = PackToPickChoiceSetDojo(
             card_binder,
+            HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             path_to_training_data=source,
             rng_seed=0,

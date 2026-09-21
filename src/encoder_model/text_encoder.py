@@ -70,6 +70,14 @@ class PretrainedTextEncoder(TextEncoder):
             for parameter in self.model.parameters():
                 parameter.requires_grad = False
 
+    def train(self, mode: bool = True) -> "PretrainedTextEncoder":
+        """Set train/eval mode, but keep a frozen LM in eval so its dropout
+        stays off (it is a fixed feature extractor, not being trained)."""
+        super().train(mode)
+        if not self.trainable:
+            self.model.eval()
+        return self
+
     def encode(self, texts: List[str]) -> TokenEncoding:
         device = next(self.model.parameters()).device
         tokenized = self.tokenizer(

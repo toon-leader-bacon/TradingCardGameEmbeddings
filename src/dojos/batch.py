@@ -16,6 +16,10 @@ class Batch:
         self._validate_structure()
         self.structure_type = self._determine_structure_type()
 
+    def __len__(self) -> int:
+        """Example count (not card count)."""
+        return len(self.inputs)
+
     @staticmethod
     def from_training_datum(training_datum: TrainingDatum) -> "Batch":
         # A one-element batch; see from_training_data's cast for why mypy

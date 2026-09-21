@@ -22,6 +22,7 @@ from src.dojos.seventeenlands.game_data.game_deck_label_dojos import (
     DeckRankTierPredictionDojo,
     DeckWinPredictionDojo,
 )
+from src.schema.holdout import HoldoutSpec
 
 
 def _write_source(path: Path, label_column: str, value) -> None:
@@ -39,6 +40,7 @@ class TestDeckGameLengthPredictionDojo:
 
         dojo = DeckGameLengthPredictionDojo(
             card_binder,
+            HoldoutSpec.no_holdout(),
             deck_box,
             card_embedding_size=4,
             path_to_training_data=source,
@@ -62,6 +64,7 @@ class TestDeckWinPredictionDojo:
 
         dojo = DeckWinPredictionDojo(
             card_binder,
+            HoldoutSpec.no_holdout(),
             deck_box,
             card_embedding_size=4,
             path_to_training_data=source,
@@ -86,6 +89,7 @@ class TestDeckRankTierPredictionDojo:
 
         dojo = DeckRankTierPredictionDojo(
             card_binder,
+            HoldoutSpec.no_holdout(),
             deck_box,
             card_embedding_size=4,
             path_to_training_data=source,
@@ -108,6 +112,7 @@ class TestDeckRankTierPredictionDojo:
 
         dojo = DeckRankTierPredictionDojo(
             card_binder,
+            HoldoutSpec.no_holdout(),
             deck_box,
             card_embedding_size=4,
             path_to_training_data=source,

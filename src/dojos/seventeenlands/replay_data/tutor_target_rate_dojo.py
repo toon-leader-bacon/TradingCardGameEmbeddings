@@ -23,6 +23,7 @@ from src.data_refinement.metrics.seventeenlands.replay_data.tutor_target_rate_me
 )
 from src.dojos.generic.data_constructors import CardAverageDataConstructor
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
+from src.schema.holdout import HoldoutSpec
 
 
 class TutorTargetRateDojo(SingleCardRegressionDojo):
@@ -32,16 +33,17 @@ class TutorTargetRateDojo(SingleCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or TutorTargetRateMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=CardAverageDataConstructor(
-                card_binder, "tutor_target_rate"
-            ),
+            data_constructor=CardAverageDataConstructor("tutor_target_rate"),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
         )

@@ -37,9 +37,9 @@ class TestPickNumberDecayCurveDataConstructorBuild:
                 "sample_count_by_pick_number": [[10, 5]],
             }
         )
-        constructor = PickNumberDecayCurveDataConstructor(binder, min_sample_count=10)
+        constructor = PickNumberDecayCurveDataConstructor(min_sample_count=10)
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         # bucket 0 clears the threshold (10 >= 10); bucket 1 (5 samples)
         # does not, so it's absent from the dict entirely, not included
@@ -57,9 +57,9 @@ class TestPickNumberDecayCurveDataConstructorBuild:
                 "sample_count_by_pick_number": [[10, 0]],
             }
         )
-        constructor = PickNumberDecayCurveDataConstructor(binder, min_sample_count=10)
+        constructor = PickNumberDecayCurveDataConstructor(min_sample_count=10)
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == [(card, {0: 0.2})]
 
@@ -74,9 +74,9 @@ class TestPickNumberDecayCurveDataConstructorBuild:
                 "sample_count_by_pick_number": [[3, 5]],
             }
         )
-        constructor = PickNumberDecayCurveDataConstructor(binder, min_sample_count=10)
+        constructor = PickNumberDecayCurveDataConstructor(min_sample_count=10)
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == []
 
@@ -89,9 +89,9 @@ class TestPickNumberDecayCurveDataConstructorBuild:
                 "sample_count_by_pick_number": [[10]],
             }
         )
-        constructor = PickNumberDecayCurveDataConstructor(binder, min_sample_count=10)
+        constructor = PickNumberDecayCurveDataConstructor(min_sample_count=10)
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == []
 
@@ -104,14 +104,12 @@ class TestPickNumberDecayCurveDataConstructorBuild:
                 "sample_count_by_pick_number": [],
             }
         )
-        constructor = PickNumberDecayCurveDataConstructor(binder, min_sample_count=10)
+        constructor = PickNumberDecayCurveDataConstructor(min_sample_count=10)
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == []
 
     def test_raises_on_min_sample_count_below_one(self) -> None:
-        binder = CardBinder()
-
         with pytest.raises(ValueError):
-            PickNumberDecayCurveDataConstructor(binder, min_sample_count=0)
+            PickNumberDecayCurveDataConstructor(min_sample_count=0)

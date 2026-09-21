@@ -37,6 +37,7 @@ from src.dojos.generic.single_card_fixed_classification.dojo import (
     SingleCardFixedClassificationDojo,
 )
 from src.dojos.loss.masked_vector_regression_loss import MaskedVectorRegressionLoss
+from src.schema.holdout import HoldoutSpec
 
 MIN_SAMPLE_COUNT = 10
 
@@ -50,15 +51,18 @@ class PickNumberDecayCurveDojo(SingleCardFixedClassificationDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or PickNumberDecayCurveMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=PickNumberDecayCurveDataConstructor(
-                card_binder, min_sample_count=MIN_SAMPLE_COUNT
+                min_sample_count=MIN_SAMPLE_COUNT
             ),
             label_values=[
                 str(bucket)
