@@ -46,6 +46,9 @@ from src.data_refinement.deck_box.play_gwent.extraction_stage import (
 from src.data_refinement.deck_box.sts2runs.extraction_stage import (
     Sts2RunsDeckExtractionStage,
 )
+from src.data_refinement.deck_box.seventeenlands_game_data.extraction_stage import (
+    SeventeenLandsGameDataDeckExtractionStage,
+)
 from src.data_refinement.deck_box.sts_gg.extraction_stage import (
     StsGgDeckExtractionStage,
 )
@@ -68,6 +71,10 @@ _STAGES: dict[str, tuple[DeckExtractionStage, Callable[[], Path]]] = {
     "sts2runs": (
         Sts2RunsDeckExtractionStage(),
         lambda: Sts2RunsDeckExtractionStage.DEFAULT_RAW_PATH,
+    ),
+    "seventeenlands_game_data": (
+        SeventeenLandsGameDataDeckExtractionStage(),
+        lambda: SeventeenLandsGameDataDeckExtractionStage.DEFAULT_RAW_PATH,
     ),
 }
 

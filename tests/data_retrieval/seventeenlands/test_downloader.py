@@ -1,4 +1,6 @@
 import gzip
+import io
+import tarfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -28,6 +30,18 @@ def _make_downloader(raw_data_dir: Path) -> SeventeenLandsDownloader:
     return SeventeenLandsDownloader(
         raw_data_dir=raw_data_dir, rate_limiter=_fast_rate_limiter()
     )
+
+
+def _tar_wrapped_gzip(member_name: str, content: bytes) -> bytes:
+    # Reproduces the shape CONFIRMED on the live 17Lands bucket for a
+    # handful of older sets (AFR/KHM/MID/STX/VOW): a gzip of a tar
+    # archive with one member, rather than a plain gzip of the CSV.
+    tar_buffer = io.BytesIO()
+    with tarfile.open(fileobj=tar_buffer, mode="w") as tar:
+        info = tarfile.TarInfo(name=member_name)
+        info.size = len(content)
+        tar.addfile(info, io.BytesIO(content))
+    return gzip.compress(tar_buffer.getvalue())
 
 
 def _mock_streaming_response(chunks: list[bytes]) -> MagicMock:
@@ -174,6 +188,29 @@ class TestDownloadOne:
         destination_path = tmp_path / "game_data" / "MSH.PremierDraft.csv"
         assert not destination_path.exists()
         assert not destination_path.with_suffix(".csv.gz").exists()
+
+    def test_tar_wrapped_object_is_extracted_to_plain_csv(self, tmp_path: Path) -> None:
+        downloader = _make_downloader(tmp_path)
+        content = b"expansion,event_type\nAFR,PremierDraft\n"
+        wrapped = _tar_wrapped_gzip("game_data_public.AFR.PremierDraft.csv", content)
+        response = _mock_streaming_response([wrapped])
+
+        with patch("requests.get", return_value=response):
+            result_path = downloader.download_one(_GAME_MSH_PREMIER)
+
+        assert result_path.read_bytes() == content
+
+    def test_tar_wrapped_object_intermediate_csv_gz_still_removed(
+        self, tmp_path: Path
+    ) -> None:
+        downloader = _make_downloader(tmp_path)
+        wrapped = _tar_wrapped_gzip("game_data_public.AFR.PremierDraft.csv", b"data")
+        response = _mock_streaming_response([wrapped])
+
+        with patch("requests.get", return_value=response):
+            result_path = downloader.download_one(_GAME_MSH_PREMIER)
+
+        assert not result_path.with_suffix(".csv.gz").exists()
 
 
 class TestDownload:

@@ -69,7 +69,13 @@ an extensible metric engine over raw rows, not a client for what
     not raised — a large batch always finishes.
   - `download_one(ref: SeventeenLandsFileRef) -> Path` — downloads +
     decompresses a single ref; used internally by `download()`, but
-    also usable directly.
+    also usable directly. Most objects are a plain gzip of the CSV,
+    but a handful of older sets' objects (CONFIRMED: `AFR`/`KHM`/
+    `MID`/`STX`/`VOW`) are instead a gzip of a TAR archive wrapping one
+    CSV member — `download_one()` detects this per-object (peeking the
+    decompressed stream's own ustar magic, not a fixed table of
+    expansions) and un-tars it, so the CSV this method writes to
+    `raw_data_dir` is always a plain CSV either way.
 
 ## How it works
 

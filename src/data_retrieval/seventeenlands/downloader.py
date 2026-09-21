@@ -16,6 +16,7 @@ those when given no refs (or an empty refs list).
 
 import gzip
 import shutil
+import tarfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
@@ -26,6 +27,12 @@ from src.data_retrieval.download_utils import download_to_file
 from src.data_retrieval.rate_limiter import RateLimiter
 from src.data_retrieval.seventeenlands.known_files import list_known_refs
 from src.data_retrieval.seventeenlands.refs import DataType, SeventeenLandsFileRef
+
+# POSIX ustar header layout: the "ustar" magic sits at byte offset 257
+# of every 512-byte tar header. See SeventeenLandsDownloader.download_one()'s
+# TAR-WRAPPED OBJECTS section for why this project checks for it here.
+_TAR_MAGIC_OFFSET = 257
+_TAR_MAGIC = b"ustar"
 
 
 @dataclass(frozen=True)
@@ -217,6 +224,21 @@ class SeventeenLandsDownloader:
         only ever want the extracted CSV, never the intermediate
         .csv.gz.
 
+        TAR-WRAPPED OBJECTS: CONFIRMED against the live bucket — most
+        17Lands S3 objects are a plain gzip of the CSV, but a handful of
+        older sets' objects (observed: AFR, KHM, MID, STX, VOW) are
+        instead a gzip of a TAR archive containing one member (named
+        e.g. "game_data_public.AFR.PremierDraft.csv"). Decompressing one
+        of these with gzip alone (the old behavior here) wrote the raw
+        tar bytes — a 512-byte ustar header followed by 512-byte-padded
+        CSV data — straight into destination_path, silently corrupting
+        it for any downstream CSV reader. _copy_decompressed() below
+        detects this per-file (peeking the decompressed stream's own
+        ustar magic, not the ref/expansion — 17Lands hasn't published
+        which sets are affected) and un-tars when needed, so every
+        destination_path this method produces is always a genuine CSV
+        regardless of which shape the source object used.
+
         Inputs:
             ref: which file to download.
         Output: path to the extracted, decompressed CSV file.
@@ -227,8 +249,9 @@ class SeventeenLandsDownloader:
             extracted) is removed before an exception propagates, same
             convention as download_to_file/ScryfallOracleDownloader.
         Exceptions: raises on network failure (e.g. connection error,
-            non-2xx response), on failure to write either file, or if
-            the downloaded content isn't valid gzip.
+            non-2xx response), on failure to write either file, if the
+            downloaded content isn't valid gzip, or (for a tar-wrapped
+            object) if the decompressed tar has no members.
 
         Example:
             >>> downloader = SeventeenLandsDownloader(
@@ -246,9 +269,7 @@ class SeventeenLandsDownloader:
         download_to_file(ref.url, compressed_path)
 
         try:
-            with gzip.open(compressed_path, "rb") as compressed_file:
-                with open(destination_path, "wb") as destination_file:
-                    shutil.copyfileobj(compressed_file, destination_file)
+            self._copy_decompressed(compressed_path, destination_path)
         except Exception:
             destination_path.unlink(missing_ok=True)
             raise
@@ -256,6 +277,70 @@ class SeventeenLandsDownloader:
             compressed_path.unlink(missing_ok=True)
 
         return destination_path
+
+    def _copy_decompressed(self, compressed_path: Path, destination_path: Path) -> None:
+        """Write compressed_path's decompressed CSV content to destination_path.
+
+        Private helper — single consumer is download_one(). Peeks the
+        decompressed stream's first 512 bytes for a ustar magic (offset
+        257, per the POSIX tar header layout) to decide between a plain
+        copy and a tar-member extraction — see download_one()'s own
+        TAR-WRAPPED OBJECTS section for why this per-file check exists
+        rather than a per-ref/expansion table.
+
+        Inputs:
+            compressed_path: the downloaded .csv.gz to decompress.
+            destination_path: where the resulting CSV is written.
+        Output: none.
+        Side effects: writes/overwrites destination_path.
+        Exceptions: raises if compressed_path isn't valid gzip, or (for
+            a tar-wrapped stream) if the tar has no members.
+        """
+        with gzip.open(compressed_path, "rb") as probe_file:
+            header = probe_file.read(512)
+
+        with gzip.open(compressed_path, "rb") as compressed_file:
+            if (
+                header[_TAR_MAGIC_OFFSET : _TAR_MAGIC_OFFSET + len(_TAR_MAGIC)]
+                == _TAR_MAGIC
+            ):
+                self._extract_tar_member(compressed_file, destination_path)
+            else:
+                with open(destination_path, "wb") as destination_file:
+                    shutil.copyfileobj(compressed_file, destination_file)
+
+    @staticmethod
+    def _extract_tar_member(decompressed_stream, destination_path: Path) -> None:
+        """Copy a tar-wrapped decompressed stream's one CSV member to destination_path.
+
+        Private helper — single consumer is _copy_decompressed(). Reads
+        decompressed_stream in tarfile's streaming mode ("r|", forward-
+        only) since it's a gzip.GzipFile, not a seekable file — every
+        17Lands tar-wrapped object observed so far carries exactly one
+        member, so only the first is used.
+
+        Inputs:
+            decompressed_stream: the already gzip-decompressed,
+                tar-formatted byte stream.
+            destination_path: where the extracted member is written.
+        Output: none.
+        Side effects: writes/overwrites destination_path.
+        Exceptions: raises ValueError if the tar has no members, or its
+            first member isn't a regular file.
+        """
+        with tarfile.open(fileobj=decompressed_stream, mode="r|") as tar:
+            member = tar.next()
+            if member is None:
+                raise ValueError(
+                    "_extract_tar_member: tar-wrapped stream has no members"
+                )
+            member_file = tar.extractfile(member)
+            if member_file is None:
+                raise ValueError(
+                    f"_extract_tar_member: {member.name!r} isn't a regular file"
+                )
+            with open(destination_path, "wb") as destination_file:
+                shutil.copyfileobj(member_file, destination_file)
 
     def _destination_path(self, ref: SeventeenLandsFileRef) -> Path:
         """Compute the extracted CSV's on-disk path for a given ref.

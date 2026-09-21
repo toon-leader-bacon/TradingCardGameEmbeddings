@@ -190,6 +190,41 @@ merged or cross-referenced.
   and mints one `GenericDeck` per entry, keyed by
   `uuid5(namespace, f"{run_id}:{player_index}")`, rather than assuming
   index 0 is the only one that will ever exist.
+- **`seventeenlands_game_data/`** — `SeventeenLandsGameDataDeckExtractionStage`.
+  Translates 17Lands' `game_data/<Expansion>.<FormatCode>.csv` dumps
+  (~133 files, up to several GB each) into full constructed-deck
+  `GenericDeck`s for `GameId.MTG`. Unlike every other source above,
+  there's no per-row card list to walk: each CSV's HEADER carries one
+  `deck_<CardName>` column per card ever legal for that set, and a
+  row's value under it is that card's own COPY COUNT (not a presence
+  flag), so extraction expands each count into that many repeated
+  `nocab_uuid` entries — the same header-derived column shape
+  [`../metrics/seventeenlands/game_data/game_card_columns.py`](../metrics/seventeenlands/game_data/game_card_columns.py)'s
+  `GameCardColumns` already parses for that sibling container's
+  metrics, but sampled here for full copy counts rather than mere
+  presence. Each distinct `<CardName>` is matched against
+  `card_lookup` via that same module's exact/regex-front-face-fallback
+  policy, re-implemented here rather than imported (`deck_box` never
+  imports from `metrics/`); an unresolved column falls back to
+  `CardBinder.UNKNOWN_CARD_NAME`'s sentinel card at that row's own
+  copy count, same `ensure_unknown_card(GameId.MTG)` bootstrap
+  precondition as every source above. Deck identity is
+  `uuid5(namespace, f"{draft_id}:{match_number}:{game_number}")` — the
+  composite key this raw source has no single unique column for (same
+  convention `metrics/seventeenlands/game_data/README.md` already
+  established) — deterministic, so re-running extraction over the same
+  CSV(s) updates rather than duplicates. `raw_path` may be a single CSV
+  or (its default) the whole `data/raw/17lands/game_data/` directory,
+  processed file by file, each with its own header-derived column
+  index (a set's legal card pool differs per file). Also transparently
+  handles a data quirk CONFIRMED on 10 of the 133 live files (every
+  `AFR`/`KHM`/`MID`/`STX`/`VOW` format): a since-fixed bug in
+  `SeventeenLandsDownloader.download_one()`
+  (`src/data_retrieval/seventeenlands/downloader.py`) had written
+  these ones' decompressed bytes to disk without un-tarring them first
+  — `extract()` detects this per file (peeking for the tar header's
+  ustar magic) and reads through the tar member instead, so the
+  already-downloaded files don't need a network re-fetch.
 
 ## How it works
 
