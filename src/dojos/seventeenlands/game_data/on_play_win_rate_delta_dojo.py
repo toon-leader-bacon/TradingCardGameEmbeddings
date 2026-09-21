@@ -27,6 +27,7 @@ from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_rate_delta
 )
 from src.dojos.generic.data_constructors import CardAverageDataConstructor
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
+from src.schema.holdout import HoldoutSpec
 
 
 class OnPlayWinRateDeltaDojo(SingleCardRegressionDojo):
@@ -36,16 +37,17 @@ class OnPlayWinRateDeltaDojo(SingleCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or OnPlayWinRateDeltaMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=CardAverageDataConstructor(
-                card_binder, "on_play_win_rate_delta"
-            ),
+            data_constructor=CardAverageDataConstructor("on_play_win_rate_delta"),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
         )

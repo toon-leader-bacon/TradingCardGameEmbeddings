@@ -13,6 +13,7 @@ from src.dojos.seventeenlands.game_data.on_play_win_rate_delta_dojo import (
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
+from src.schema.holdout import HoldoutSpec
 
 
 def _card() -> GenericCard:
@@ -44,6 +45,7 @@ class TestOnPlayWinRateDeltaDojo:
 
         dojo = OnPlayWinRateDeltaDojo(
             card_binder,
+            HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             path_to_training_data=source,
             rng_seed=0,
@@ -69,8 +71,8 @@ class TestOnPlayWinRateDeltaDojo:
             }
         )
 
-        result = CardAverageDataConstructor(
-            card_binder, "on_play_win_rate_delta"
-        ).build(chunk)
+        result = CardAverageDataConstructor("on_play_win_rate_delta").build(
+            chunk, card_binder
+        )
 
         assert result == []

@@ -52,7 +52,7 @@ class TestBuild:
 
         batch = constructor.build([deck_a, deck_b], binder)
 
-        assert len(batch.items) == 6
+        assert len(batch.inputs) == 6
         assert len(batch.identities) == 6
         assert batch.positive_cliques == [[0, 1, 2], [3, 4, 5]]
 
@@ -65,7 +65,7 @@ class TestBuild:
 
         batch = constructor.build([small_deck, big_deck], binder)
 
-        assert len(batch.items) == 3
+        assert len(batch.inputs) == 3
         assert batch.positive_cliques == [[0, 1, 2]]
 
     def test_excludes_an_unresolvable_card_uuid(self) -> None:
@@ -77,7 +77,7 @@ class TestBuild:
 
         batch = constructor.build([deck], binder)
 
-        assert len(batch.items) == 3
+        assert len(batch.inputs) == 3
         sampled_uuids = {identity[0] for identity in batch.identities}
         assert unknown_uuid not in sampled_uuids
 
@@ -89,7 +89,7 @@ class TestBuild:
 
         batch = constructor.build([tiny_deck], binder)
 
-        assert batch.items == []
+        assert batch.inputs == []
         assert batch.identities == []
         assert batch.positive_cliques == []
 

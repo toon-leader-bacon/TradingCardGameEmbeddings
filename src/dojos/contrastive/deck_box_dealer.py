@@ -18,6 +18,7 @@ from uuid import UUID
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.schema.card import GenericDeck
 from src.schema.game_id import GameId
+from src.schema.splits import Split
 
 
 class DeckBoxDealer:
@@ -70,6 +71,37 @@ class DeckBoxDealer:
         self._train_uuids, self._test_uuids, self._validation_uuids = (
             self._partition_uuids(all_uuids, split_ratios)
         )
+
+    def decks_for(
+        self, split: Split, decks_per_sample: int, shuffle: bool = True
+    ) -> Iterator[list[GenericDeck]]:
+        """Yield any split's decks, grouped into samples.
+
+        Inputs: split (Split), plus training_decks()'s decks_per_sample
+            and shuffle.
+        Output: a generator of lists of GenericDeck, each of length
+            decks_per_sample.
+        Side effects: none beyond reading from self._deck_box.
+        Exceptions: ValueError if decks_per_sample <= 0.
+        """
+        yield from self._decks_for_split(
+            self._uuids_of(split), decks_per_sample, shuffle
+        )
+
+    def deck_count(self, split: Split) -> int:
+        """Number of decks partitioned into a split.
+
+        Inputs: split (Split). Output: int. Side effects: none.
+        Exceptions: none.
+        """
+        return len(self._uuids_of(split))
+
+    def _uuids_of(self, split: Split) -> list[UUID]:
+        return {
+            Split.TRAIN: self._train_uuids,
+            Split.TEST: self._test_uuids,
+            Split.VALIDATION: self._validation_uuids,
+        }[split]
 
     def training_decks(
         self, decks_per_sample: int, shuffle: bool = True

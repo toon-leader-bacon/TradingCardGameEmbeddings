@@ -29,21 +29,21 @@ class TestPostInit:
         identities = [(uuid4(),) for _ in cards]
 
         batch = ContrastiveBatch(
-            items=cards, identities=identities, positive_cliques=[[0, 1]]
+            inputs=cards, identities=identities, positive_cliques=[[0, 1]]
         )
 
-        assert batch.items == cards
+        assert batch.inputs == cards
 
     def test_accepts_an_empty_batch(self) -> None:
-        batch = ContrastiveBatch(items=[], identities=[], positive_cliques=[])
+        batch = ContrastiveBatch(inputs=[], identities=[], positive_cliques=[])
 
-        assert batch.items == []
+        assert batch.inputs == []
 
     def test_raises_on_items_identities_length_mismatch(self) -> None:
         cards = [_card(), _card()]
 
         with pytest.raises(ValueError):
-            ContrastiveBatch(items=cards, identities=[(uuid4(),)], positive_cliques=[])
+            ContrastiveBatch(inputs=cards, identities=[(uuid4(),)], positive_cliques=[])
 
     def test_raises_on_mixed_input_shapes(self) -> None:
         single_card = _card()
@@ -51,7 +51,7 @@ class TestPostInit:
 
         with pytest.raises(ValueError):
             ContrastiveBatch(
-                items=[single_card, multi_card],  # type: ignore[list-item]
+                inputs=[single_card, multi_card],  # type: ignore[list-item]
                 identities=[(uuid4(),), (uuid4(),)],
                 positive_cliques=[],
             )
@@ -62,7 +62,7 @@ class TestPostInit:
 
         with pytest.raises(ValueError):
             ContrastiveBatch(
-                items=cards, identities=identities, positive_cliques=[[0, 5]]
+                inputs=cards, identities=identities, positive_cliques=[[0, 5]]
             )
 
     def test_raises_on_duplicate_index_within_a_group(self) -> None:
@@ -71,5 +71,5 @@ class TestPostInit:
 
         with pytest.raises(ValueError):
             ContrastiveBatch(
-                items=cards, identities=identities, positive_cliques=[[0, 0]]
+                inputs=cards, identities=identities, positive_cliques=[[0, 0]]
             )

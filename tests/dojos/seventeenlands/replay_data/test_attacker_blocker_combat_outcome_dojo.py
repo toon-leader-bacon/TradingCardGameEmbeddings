@@ -10,6 +10,7 @@ from src.dojos.generic.multi_group_regression.dojo import MultiGroupRegressionDo
 from src.dojos.seventeenlands.replay_data.attacker_blocker_combat_outcome_dojo import (
     AttackerBlockerCombatOutcomeDojo,
 )
+from src.schema.holdout import HoldoutSpec
 
 
 def _write_source(path: Path) -> None:
@@ -31,6 +32,7 @@ class TestAttackerBlockerCombatOutcomeDojo:
 
         dojo = AttackerBlockerCombatOutcomeDojo(
             card_binder,
+            HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             path_to_training_data=source,
             rng_seed=0,

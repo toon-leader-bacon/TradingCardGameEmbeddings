@@ -1,4 +1,4 @@
-"""The (items, identities, positive_cliques) container a ContrastivePairConstructor builds.
+"""The (inputs, identities, positive_cliques) container a ContrastivePairConstructor builds.
 
 See plans/contrastive_dojo.md's "ContrastiveBatch" section. Deliberately
 not a two-list anchor/candidate split: every item acts as both an
@@ -17,7 +17,7 @@ from src.schema.type_hints import BatchedTrainingInput, input_shape_of
 class ContrastiveBatch:
     """One contrastive training step's flat pool of items.
 
-    items: every sampled item, one flat pool (not split by source deck).
+    inputs: every sampled item, one flat pool (not split by source deck).
     identities: parallel to items - one tuple of card uuid(s) per item,
         positionally parallel to that item's own card order (a 1-tuple
         for a single-card item; one uuid per card, same order as the
@@ -37,36 +37,40 @@ class ContrastiveBatch:
         pair_constructor.py's skip-a-too-small-deck policy).
     """
 
-    items: BatchedTrainingInput
+    inputs: BatchedTrainingInput
     identities: list[tuple[UUID, ...]]
     positive_cliques: list[list[int]]
+
+    def __len__(self) -> int:
+        """Example count: one per surviving source deck (positive clique)."""
+        return len(self.positive_cliques)
 
     def __post_init__(self) -> None:
         """Enforce this batch's structural invariants.
 
         Mirrors Batch._validate_input_structure()'s one-shared-
         InputShape check (via input_shape_of()), plus an equal-length
-        items/identities check this dataclass adds.
+        inputs/identities check this dataclass adds.
 
         Inputs: none (runs on the fields already set by __init__).
         Output: none.
         Side effects: none.
-        Exceptions: ValueError if items and identities aren't the same
+        Exceptions: ValueError if inputs and identities aren't the same
             length, if items is non-empty and its elements don't all
             share one InputShape, or if any positive_cliques entry
             indexes outside items.
         """
-        if len(self.items) != len(self.identities):
+        if len(self.inputs) != len(self.identities):
             raise ValueError(
-                f"items ({len(self.items)}) and identities "
+                f"inputs ({len(self.inputs)}) and identities "
                 f"({len(self.identities)}) must be the same length"
             )
-        if self.items:
+        if self.inputs:
             self._validate_shared_input_shape()
         self._validate_positive_cliques()
 
     def _validate_shared_input_shape(self) -> None:
-        """Raise ValueError unless every item in self.items shares one InputShape.
+        """Raise ValueError unless every item in self.inputs shares one InputShape.
 
         Private helper - single caller is __post_init__.
 
@@ -76,10 +80,12 @@ class ContrastiveBatch:
         Exceptions: ValueError on a shape mismatch, or whatever
             input_shape_of() itself raises (e.g. on an empty item).
         """
-        first_shape = input_shape_of(self.items[0])
-        for item in self.items:
+        first_shape = input_shape_of(self.inputs[0])
+        for item in self.inputs:
             if input_shape_of(item) != first_shape:
-                raise ValueError("ContrastiveBatch.items must all share one InputShape")
+                raise ValueError(
+                    "ContrastiveBatch.inputs must all share one InputShape"
+                )
 
     def _validate_positive_cliques(self) -> None:
         """Raise ValueError if any positive_cliques entry indexes outside items.
@@ -92,7 +98,7 @@ class ContrastiveBatch:
         Exceptions: ValueError on an out-of-range index, or on a
             duplicate index within one group.
         """
-        item_count = len(self.items)
+        item_count = len(self.inputs)
         for group in self.positive_cliques:
             seen_indices: set[int] = set()
             for index in group:

@@ -27,6 +27,7 @@ from src.dojos.generic.data_constructors import DeckCardMaskDataConstructor
 from src.dojos.generic.multi_card_fixed_classification.dojo import (
     MultiCardFixedClassificationDojo,
 )
+from src.schema.holdout import HoldoutSpec
 
 
 class LeaderMaskedFromDeckDojo(MultiCardFixedClassificationDojo):
@@ -38,17 +39,18 @@ class LeaderMaskedFromDeckDojo(MultiCardFixedClassificationDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         deck_box: DeckBox,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or LeaderMaskedFromDeckMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=DeckCardMaskDataConstructor(
-                card_binder, deck_box, "label"
-            ),
+            data_constructor=DeckCardMaskDataConstructor(deck_box, "label"),
             label_values=LeaderMaskedFromDeckMetric.LABEL_VALUES,
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,

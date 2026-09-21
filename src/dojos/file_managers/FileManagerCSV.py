@@ -1,13 +1,13 @@
-from pathlib import Path
 import random
+from pathlib import Path
 from typing import List, Optional
 
 import pandas as pd
 from pandas.io.parsers.readers import TextFileReader
 
-from src.dojos.file_managers.utils.TTVSplits import TTVSplits
 from src.dojos.file_managers.utils.split_postfix import get_split_file_postfix
 from src.schema.splits import Split
+from src.schema.ttv_splits import TTVSplits
 
 MAX_INT = 2**31 - 1
 

@@ -39,9 +39,9 @@ class TestAttackerBlockerCombatOutcomeDataConstructorBuild:
                 "net_kill_delta": [-1],
             }
         )
-        constructor = AttackerBlockerCombatOutcomeDataConstructor(binder)
+        constructor = AttackerBlockerCombatOutcomeDataConstructor()
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == [([[attacker], [blocker]], -1.0)]
 
@@ -58,9 +58,9 @@ class TestAttackerBlockerCombatOutcomeDataConstructorBuild:
                 "net_kill_delta": [2],
             }
         )
-        constructor = AttackerBlockerCombatOutcomeDataConstructor(binder)
+        constructor = AttackerBlockerCombatOutcomeDataConstructor()
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == [([[attacker], []], 2.0)]
 
@@ -73,9 +73,9 @@ class TestAttackerBlockerCombatOutcomeDataConstructorBuild:
                 "net_kill_delta": [0],
             }
         )
-        constructor = AttackerBlockerCombatOutcomeDataConstructor(binder)
+        constructor = AttackerBlockerCombatOutcomeDataConstructor()
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == []
 
@@ -92,9 +92,9 @@ class TestAttackerBlockerCombatOutcomeDataConstructorBuild:
                 "net_kill_delta": [0],
             }
         )
-        constructor = AttackerBlockerCombatOutcomeDataConstructor(binder)
+        constructor = AttackerBlockerCombatOutcomeDataConstructor()
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == [([[attacker], []], 0.0)]
 
@@ -110,8 +110,8 @@ class TestAttackerBlockerCombatOutcomeDataConstructorBuild:
                 "net_kill_delta": [1],
             }
         )
-        constructor = AttackerBlockerCombatOutcomeDataConstructor(binder)
+        constructor = AttackerBlockerCombatOutcomeDataConstructor()
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == [([[attacker], [blocker]], 1.0)]

@@ -36,9 +36,9 @@ class TestCardAverageDataConstructorBuild:
                 "sample_count": [10],
             }
         )
-        constructor = CardAverageDataConstructor(binder, "average_relic_count")
+        constructor = CardAverageDataConstructor("average_relic_count")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == [(card, 1.5)]
 
@@ -50,9 +50,9 @@ class TestCardAverageDataConstructorBuild:
                 "average_relic_count": [1.5],
             }
         )
-        constructor = CardAverageDataConstructor(binder, "average_relic_count")
+        constructor = CardAverageDataConstructor("average_relic_count")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == []
 
@@ -64,9 +64,9 @@ class TestCardAverageDataConstructorBuild:
                 "average_relic_count": [1.5],
             }
         )
-        constructor = CardAverageDataConstructor(binder, "average_relic_count")
+        constructor = CardAverageDataConstructor("average_relic_count")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == []
 
@@ -80,9 +80,9 @@ class TestCardAverageDataConstructorBuild:
                 "average_relic_count": ["not-a-float"],
             }
         )
-        constructor = CardAverageDataConstructor(binder, "average_relic_count")
+        constructor = CardAverageDataConstructor("average_relic_count")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == []
 
@@ -98,18 +98,18 @@ class TestCardAverageDataConstructorBuild:
                 "win_rate": [True],
             }
         )
-        constructor = CardAverageDataConstructor(binder, "win_rate")
+        constructor = CardAverageDataConstructor("win_rate")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == [(card, 1.0)]
 
     def test_empty_chunk_returns_empty_list(self) -> None:
         binder = CardBinder()
         chunk = pd.DataFrame({"nocab_uuid": [], "average_relic_count": []})
-        constructor = CardAverageDataConstructor(binder, "average_relic_count")
+        constructor = CardAverageDataConstructor("average_relic_count")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == []
 
@@ -126,9 +126,9 @@ class TestCardAverageDataConstructorBuild:
             }
         )
         constructor = CardAverageDataConstructor(
-            binder, "tutored", uuid_column="pool_card_uuid"
+            "tutored", uuid_column="pool_card_uuid"
         )
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == [(card, 1.0)]

@@ -8,7 +8,7 @@ to the same shapes instead of each re-deriving them.
 """
 
 from enum import Enum
-from typing import Any, List, Tuple, Union
+from typing import Any, Iterator, List, Tuple, Union
 
 import torch
 
@@ -82,6 +82,25 @@ def input_shape_of(
     if not isinstance(probe, GenericCard):
         raise ValueError(f"Not a valid TrainingInput shape: {x}")
     return InputShape(depth)
+
+
+def iter_cards(x: Union[TrainingInput, BatchedTrainingInput]) -> Iterator[GenericCard]:
+    """Yield every GenericCard in a (possibly nested, possibly batched) input.
+
+    Inputs: x, a GenericCard or any depth of list nesting of them.
+    Output: iterator of GenericCard, depth-first, in order; duplicates kept.
+    Side effects: none.
+    Exceptions: none (an empty list yields nothing).
+
+    Example:
+        >>> [c.name for c in iter_cards([[card_a], [card_b, card_a]])]
+        ['A', 'B', 'A']
+    """
+    if isinstance(x, GenericCard):
+        yield x
+        return
+    for element in x:
+        yield from iter_cards(element)
 
 
 Label = Any  # Typically a single scaler value, but could be a list of values

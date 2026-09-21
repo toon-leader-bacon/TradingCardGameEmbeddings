@@ -13,9 +13,7 @@ XDataConstructor` keeps working unchanged for every existing caller.
 from src.dojos.generic.data_constructors.attacker_blocker_combat_outcome import (
     AttackerBlockerCombatOutcomeDataConstructor,
 )
-from src.dojos.generic.data_constructors.card_average import (
-    CardAverageDataConstructor,
-)
+from src.dojos.generic.data_constructors.card_average import CardAverageDataConstructor
 from src.dojos.generic.data_constructors.card_character_prediction import (
     CardCharacterPredictionDataConstructor,
 )
@@ -23,9 +21,7 @@ from src.dojos.generic.data_constructors.deck_card_mask import (
     DeckCardMaskDataConstructor,
 )
 from src.dojos.generic.data_constructors.deck_label import DeckLabelDataConstructor
-from src.dojos.generic.data_constructors.masked_field import (
-    MaskedFieldDataConstructor,
-)
+from src.dojos.generic.data_constructors.masked_field import MaskedFieldDataConstructor
 from src.dojos.generic.data_constructors.masked_field_regression import (
     MaskedFieldRegressionDataConstructor,
 )

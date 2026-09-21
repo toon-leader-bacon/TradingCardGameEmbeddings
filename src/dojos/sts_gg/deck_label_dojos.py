@@ -64,6 +64,7 @@ from src.dojos.generic.multi_card_fixed_classification.dojo import (
     MultiCardFixedClassificationDojo,
 )
 from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
+from src.schema.holdout import HoldoutSpec
 
 
 class DeckRelicCountDojo(MultiCardRegressionDojo):
@@ -72,16 +73,19 @@ class DeckRelicCountDojo(MultiCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         deck_box: DeckBox,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or RelicCountMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=DeckLabelDataConstructor(
-                card_binder, deck_box, RelicCountMetric.LABEL_COLUMN
+                deck_box, RelicCountMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -94,16 +98,19 @@ class DeckTotalDamageTakenDojo(MultiCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         deck_box: DeckBox,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or TotalDamageTakenMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=DeckLabelDataConstructor(
-                card_binder, deck_box, TotalDamageTakenMetric.LABEL_COLUMN
+                deck_box, TotalDamageTakenMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -116,16 +123,19 @@ class DeckTotalCardsPickedDojo(MultiCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         deck_box: DeckBox,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or TotalCardsPickedMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=DeckLabelDataConstructor(
-                card_binder, deck_box, TotalCardsPickedMetric.LABEL_COLUMN
+                deck_box, TotalCardsPickedMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -138,16 +148,19 @@ class DeckTotalCardsSkippedDojo(MultiCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         deck_box: DeckBox,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or TotalCardsSkippedMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=DeckLabelDataConstructor(
-                card_binder, deck_box, TotalCardsSkippedMetric.LABEL_COLUMN
+                deck_box, TotalCardsSkippedMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -160,16 +173,19 @@ class DeckTotalTurnsDojo(MultiCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         deck_box: DeckBox,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or TotalTurnsMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=DeckLabelDataConstructor(
-                card_binder, deck_box, TotalTurnsMetric.LABEL_COLUMN
+                deck_box, TotalTurnsMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -182,16 +198,19 @@ class DeckElitesKilledDojo(MultiCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         deck_box: DeckBox,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or ElitesKilledMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=DeckLabelDataConstructor(
-                card_binder, deck_box, ElitesKilledMetric.LABEL_COLUMN
+                deck_box, ElitesKilledMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -204,16 +223,19 @@ class DeckFloorsClearedDojo(MultiCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         deck_box: DeckBox,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or FloorsClearedMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=DeckLabelDataConstructor(
-                card_binder, deck_box, FloorsClearedMetric.LABEL_COLUMN
+                deck_box, FloorsClearedMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -226,16 +248,19 @@ class DeckTotalCombatsDojo(MultiCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         deck_box: DeckBox,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or TotalCombatsMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=DeckLabelDataConstructor(
-                card_binder, deck_box, TotalCombatsMetric.LABEL_COLUMN
+                deck_box, TotalCombatsMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
@@ -248,17 +273,18 @@ class WinDojo(MultiCardBinaryClassificationDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         deck_box: DeckBox,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or WinMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=DeckLabelDataConstructor(
-                card_binder, deck_box, WinMetric.LABEL_COLUMN
-            ),
+            data_constructor=DeckLabelDataConstructor(deck_box, WinMetric.LABEL_COLUMN),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
         )
@@ -273,16 +299,18 @@ class CharacterDojo(MultiCardFixedClassificationDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         deck_box: DeckBox,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or CharacterPredictionMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=DeckLabelDataConstructor(
-                card_binder,
                 deck_box,
                 CharacterPredictionMetric.LABEL_COLUMN,
                 label_caster=str,

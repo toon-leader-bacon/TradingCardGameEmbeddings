@@ -17,6 +17,7 @@ from src.data_refinement.metrics.seventeenlands.replay_data.cast_rate_metric imp
 )
 from src.dojos.generic.data_constructors import CardAverageDataConstructor
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
+from src.schema.holdout import HoldoutSpec
 
 
 class CastRateDojo(SingleCardRegressionDojo):
@@ -26,14 +27,17 @@ class CastRateDojo(SingleCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or CastRateMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=CardAverageDataConstructor(card_binder, "cast_rate"),
+            data_constructor=CardAverageDataConstructor("cast_rate"),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
         )

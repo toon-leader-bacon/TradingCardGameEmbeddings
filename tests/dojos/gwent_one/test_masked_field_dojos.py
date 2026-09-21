@@ -29,6 +29,7 @@ from src.dojos.gwent_one.masked_field_dojos import (
     TypeMaskDojo,
 )
 from src.dojos.mods.common_mods import MaskTargetKeyMod
+from src.schema.holdout import HoldoutSpec
 
 _CASES = [
     (FactionMaskDojo, FactionMaskMetric),
@@ -64,6 +65,7 @@ class TestMaskedFieldDojoWrappers:
 
         dojo = dojo_cls(
             card_binder,
+            HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             path_to_training_data=source,
             rng_seed=0,
@@ -83,6 +85,7 @@ class TestMaskedFieldDojoWrappers:
 
         dojo = dojo_cls(
             card_binder,
+            HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             path_to_training_data=source,
             rng_seed=0,

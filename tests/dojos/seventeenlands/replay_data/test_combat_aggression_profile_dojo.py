@@ -9,6 +9,7 @@ from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
 from src.dojos.seventeenlands.replay_data.combat_aggression_profile_dojo import (
     CombatAggressionProfileDojo,
 )
+from src.schema.holdout import HoldoutSpec
 
 
 def _write_source(path: Path) -> None:
@@ -26,6 +27,7 @@ class TestCombatAggressionProfileDojo:
 
         dojo = CombatAggressionProfileDojo(
             card_binder,
+            HoldoutSpec.no_holdout(),
             deck_box,
             card_embedding_size=4,
             path_to_training_data=source,

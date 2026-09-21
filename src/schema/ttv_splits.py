@@ -1,5 +1,5 @@
 import random
-from typing import Tuple, TypeVar, Generic
+from typing import Generic, Tuple, TypeVar
 
 T = TypeVar("T")
 

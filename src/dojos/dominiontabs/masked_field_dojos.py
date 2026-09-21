@@ -22,6 +22,7 @@ from src.dojos.generic.single_card_fixed_classification.dojo import (
 )
 from src.dojos.mods.common_mods import MaskTargetKeyMod
 from src.dojos.mods.mod_pipeline import ModPipeline
+from src.schema.holdout import HoldoutSpec
 
 
 class TypeMaskDojo(SingleCardFixedClassificationDojo):
@@ -32,14 +33,17 @@ class TypeMaskDojo(SingleCardFixedClassificationDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or TypeMaskMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=MaskedFieldDataConstructor(card_binder, "label"),
+            data_constructor=MaskedFieldDataConstructor("label"),
             label_values=TypeMaskMetric.LABEL_VALUES,
             card_embedding_size=card_embedding_size,
             mod_pipeline=ModPipeline(
@@ -71,14 +75,17 @@ class SetMaskDojo(SingleCardFixedClassificationDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or SetMaskMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=MaskedFieldDataConstructor(card_binder, "label"),
+            data_constructor=MaskedFieldDataConstructor("label"),
             label_values=SetMaskMetric.LABEL_VALUES,
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,

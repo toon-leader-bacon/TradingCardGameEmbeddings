@@ -38,9 +38,9 @@ class TestPoolConditionedPickDataConstructorBuild:
                 "pick_uuid": [str(card_b.nocab_uuid)],
             }
         )
-        constructor = PoolConditionedPickDataConstructor(binder)
+        constructor = PoolConditionedPickDataConstructor()
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == [([[card_a, card_b], [pool_card]], 1)]
 
@@ -55,9 +55,9 @@ class TestPoolConditionedPickDataConstructorBuild:
                 "pick_uuid": [str(card_a.nocab_uuid)],
             }
         )
-        constructor = PoolConditionedPickDataConstructor(binder)
+        constructor = PoolConditionedPickDataConstructor()
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == [([[card_a], []], 0)]
 
@@ -74,9 +74,9 @@ class TestPoolConditionedPickDataConstructorBuild:
                 "pick_uuid": [str(card_a.nocab_uuid)],
             }
         )
-        constructor = PoolConditionedPickDataConstructor(binder)
+        constructor = PoolConditionedPickDataConstructor()
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == [([[card_a], [pool_card]], 0)]
 
@@ -91,9 +91,9 @@ class TestPoolConditionedPickDataConstructorBuild:
                 "pick_uuid": [None],
             }
         )
-        constructor = PoolConditionedPickDataConstructor(binder)
+        constructor = PoolConditionedPickDataConstructor()
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == []
 
@@ -108,8 +108,8 @@ class TestPoolConditionedPickDataConstructorBuild:
                 "pick_uuid": [str(card_a.nocab_uuid)],
             }
         )
-        constructor = PoolConditionedPickDataConstructor(binder)
+        constructor = PoolConditionedPickDataConstructor()
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == []

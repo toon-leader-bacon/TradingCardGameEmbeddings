@@ -6,7 +6,7 @@ from typing import List
 
 import pandas as pd
 
-from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.dojos.generic.data_constructors._uuid_resolution import _cards_for_uuids
 from src.schema.type_hints import MultiGroupInput, TrainingDatum
 
@@ -37,18 +37,15 @@ class AttackerBlockerCombatOutcomeDataConstructor:
     "resolve strictly or skip the whole row" helper needed.
     """
 
-    def __init__(self, card_binder: CardBinder) -> None:
+    def __init__(self) -> None:
         """
         Inputs:
-            card_binder: registry to resolve each row's attacker_uuids
-                and blocker_uuids against. Never written to.
         Output: none (constructor).
         Side effects: none.
         Exceptions: none.
         """
-        self._card_binder = card_binder
 
-    def build(self, chunk: pd.DataFrame) -> List[TrainingDatum]:
+    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
         """Convert a chunk of (attacker_uuids, blocker_uuids,
         net_kill_delta) rows into (MultiGroupInput, float) TrainingDatum
         pairs.
@@ -77,8 +74,8 @@ class AttackerBlockerCombatOutcomeDataConstructor:
             package).
 
         Example:
-            >>> constructor = AttackerBlockerCombatOutcomeDataConstructor(card_binder)
-            >>> constructor.build(chunk)
+            >>> constructor = AttackerBlockerCombatOutcomeDataConstructor()
+            >>> constructor.build(chunk, lookup)
             [([[<GenericCard>], [<GenericCard>, <GenericCard>]], -1.0), ...]
         """
         results: List[TrainingDatum] = []
@@ -86,10 +83,10 @@ class AttackerBlockerCombatOutcomeDataConstructor:
         # Attacker side must resolve to at least one card; blocker side
         # tolerates being empty - see build()'s own docstring.
         for _, row in chunk.iterrows():
-            attacker_cards = _cards_for_uuids(self._card_binder, row["attacker_uuids"])
+            attacker_cards = _cards_for_uuids(lookup, row["attacker_uuids"])
             if not attacker_cards:
                 continue
-            blocker_cards = _cards_for_uuids(self._card_binder, row["blocker_uuids"])
+            blocker_cards = _cards_for_uuids(lookup, row["blocker_uuids"])
             group: MultiGroupInput = [attacker_cards, blocker_cards]
             results.append((group, float(row["net_kill_delta"])))
 

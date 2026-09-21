@@ -5,7 +5,7 @@ from typing import List
 
 import pandas as pd
 
-from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.dojos.generic.data_constructors._uuid_resolution import (
     _card_for_uuid,
     _label_as_float,
@@ -33,11 +33,9 @@ class MaskedFieldRegressionDataConstructor:
     always passes label_column="label".
     """
 
-    def __init__(self, card_binder: CardBinder, label_column: str) -> None:
+    def __init__(self, label_column: str) -> None:
         """
         Inputs:
-            card_binder: registry to look up each row's nocab_uuid
-                against. Never written to.
             label_column: the column name holding this metric's label -
                 "label" for every MaskedFieldRegressionMetric subclass
                 today.
@@ -45,10 +43,9 @@ class MaskedFieldRegressionDataConstructor:
         Side effects: none.
         Exceptions: none.
         """
-        self._card_binder = card_binder
         self._label_column = label_column
 
-    def build(self, chunk: pd.DataFrame) -> List[TrainingDatum]:
+    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
         """Convert a chunk of (nocab_uuid, masked_field, <label_column>)
         rows into (SingleCardInput, float) TrainingDatum pairs.
 
@@ -68,7 +65,7 @@ class MaskedFieldRegressionDataConstructor:
         # that fail either resolution rather than raising, matching
         # every other DataConstructor in this package.
         for _, row in chunk.iterrows():
-            card = _card_for_uuid(self._card_binder, row["nocab_uuid"])
+            card = _card_for_uuid(lookup, row["nocab_uuid"])
             if card is None:
                 continue
             label = _label_as_float(row[self._label_column])

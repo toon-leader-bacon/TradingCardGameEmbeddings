@@ -50,9 +50,9 @@ class TestDeckCardMaskDataConstructorBuild:
                 "label": ["Geralt"],
             }
         )
-        constructor = DeckCardMaskDataConstructor(card_binder, deck_box, "label")
+        constructor = DeckCardMaskDataConstructor(deck_box, "label")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, card_binder)
 
         assert len(result) == 1
         deck_cards, label = result[0]
@@ -74,9 +74,9 @@ class TestDeckCardMaskDataConstructorBuild:
                 "label": ["OTHER"],
             }
         )
-        constructor = DeckCardMaskDataConstructor(card_binder, deck_box, "label")
+        constructor = DeckCardMaskDataConstructor(deck_box, "label")
 
-        _, label = constructor.build(chunk)[0]
+        _, label = constructor.build(chunk, card_binder)[0]
 
         assert label == "OTHER"
         assert isinstance(label, str)
@@ -91,9 +91,9 @@ class TestDeckCardMaskDataConstructorBuild:
                 "label": ["Geralt"],
             }
         )
-        constructor = DeckCardMaskDataConstructor(card_binder, deck_box, "label")
+        constructor = DeckCardMaskDataConstructor(deck_box, "label")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, card_binder)
 
         assert result == []
 
@@ -117,9 +117,9 @@ class TestDeckCardMaskDataConstructorBuild:
                 "label": ["Geralt"],
             }
         )
-        constructor = DeckCardMaskDataConstructor(card_binder, deck_box, "label")
+        constructor = DeckCardMaskDataConstructor(deck_box, "label")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, card_binder)
 
         assert len(result) == 1
         deck_cards, _ = result[0]
@@ -143,9 +143,9 @@ class TestDeckCardMaskDataConstructorBuild:
                 "label": ["Geralt"],
             }
         )
-        constructor = DeckCardMaskDataConstructor(card_binder, deck_box, "label")
+        constructor = DeckCardMaskDataConstructor(deck_box, "label")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, card_binder)
 
         assert result == []
 
@@ -166,9 +166,9 @@ class TestDeckCardMaskDataConstructorBuild:
                 "label": ["Geralt"],
             }
         )
-        constructor = DeckCardMaskDataConstructor(card_binder, deck_box, "label")
+        constructor = DeckCardMaskDataConstructor(deck_box, "label")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, card_binder)
 
         assert len(result) == 1
         deck_cards, _ = result[0]
@@ -192,9 +192,9 @@ class TestDeckCardMaskDataConstructorBuild:
                 "label": ["Geralt", "Ciri"],
             }
         )
-        constructor = DeckCardMaskDataConstructor(card_binder, deck_box, "label")
+        constructor = DeckCardMaskDataConstructor(deck_box, "label")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, card_binder)
 
         assert len(result) == 2
         (cards1, label1), (cards2, label2) = result
@@ -207,8 +207,8 @@ class TestDeckCardMaskDataConstructorBuild:
         card_binder = CardBinder()
         deck_box = DeckBox()
         chunk = pd.DataFrame({"deck_uuid": [], "target_card_uuid": [], "label": []})
-        constructor = DeckCardMaskDataConstructor(card_binder, deck_box, "label")
+        constructor = DeckCardMaskDataConstructor(deck_box, "label")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, card_binder)
 
         assert result == []

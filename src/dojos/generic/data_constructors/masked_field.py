@@ -5,7 +5,7 @@ from typing import List
 
 import pandas as pd
 
-from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.dojos.generic.data_constructors._uuid_resolution import _card_for_uuid
 from src.schema.type_hints import TrainingDatum
 
@@ -31,11 +31,9 @@ class MaskedFieldDataConstructor:
     the generic dojo, not the DataConstructor").
     """
 
-    def __init__(self, card_binder: CardBinder, label_column: str) -> None:
+    def __init__(self, label_column: str) -> None:
         """
         Inputs:
-            card_binder: registry to look up each row's nocab_uuid
-                against. Never written to.
             label_column: the column name holding this metric's label -
                 "label" for every MaskedFieldMetric subclass today (see
                 this class's own docstring for why it's still a
@@ -44,10 +42,9 @@ class MaskedFieldDataConstructor:
         Side effects: none.
         Exceptions: none.
         """
-        self._card_binder = card_binder
         self._label_column = label_column
 
-    def build(self, chunk: pd.DataFrame) -> List[TrainingDatum]:
+    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
         """Convert a chunk of (nocab_uuid, masked_field, <label_column>)
         rows into (SingleCardInput, str) TrainingDatum pairs.
 
@@ -70,7 +67,7 @@ class MaskedFieldDataConstructor:
         # CardAverageDataConstructor.build() - a metric's output may
         # contain the odd unresolvable card id.
         for _, row in chunk.iterrows():
-            card = _card_for_uuid(self._card_binder, row["nocab_uuid"])
+            card = _card_for_uuid(lookup, row["nocab_uuid"])
             if card is None:
                 continue
             results.append((card, row[self._label_column]))

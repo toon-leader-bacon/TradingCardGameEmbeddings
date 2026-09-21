@@ -36,6 +36,7 @@ from src.dojos.generic.single_card_fixed_classification.dojo import (
     SingleCardFixedClassificationDojo,
 )
 from src.dojos.loss.soft_classification_loss import SoftClassificationLoss
+from src.schema.holdout import HoldoutSpec
 
 
 class CardCharacterPredictionDojo(SingleCardFixedClassificationDojo):
@@ -47,14 +48,17 @@ class CardCharacterPredictionDojo(SingleCardFixedClassificationDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or CardCharacterPredictionMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=CardCharacterPredictionDataConstructor(card_binder),
+            data_constructor=CardCharacterPredictionDataConstructor(),
             label_values=CharacterPredictionMetric.LABEL_VALUES,
             card_embedding_size=card_embedding_size,
             loss_factory=SoftClassificationLoss,

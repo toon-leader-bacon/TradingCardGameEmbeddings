@@ -6,7 +6,10 @@ from uuid import uuid4
 import pandas as pd
 import torch
 
+from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.dojos.batch import Batch
+from src.dojos.dojo import BatchBudget
 from src.dojos.generic.single_card_fixed_classification.dojo import (
     SingleCardFixedClassificationDojo,
 )
@@ -16,7 +19,11 @@ from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
+from src.schema.holdout import HoldoutSpec
+from src.schema.splits import Split
 from src.schema.type_hints import TrainingDatum
+
+_BUDGET = BatchBudget(max_cost=1000, cost_of=lambda card: 1)
 
 
 def _card(name: str, raw_content: dict | None = None) -> GenericCard:
@@ -43,7 +50,7 @@ class _StubDataConstructor:
         self._card = card
         self._label = label
 
-    def build(self, chunk: pd.DataFrame) -> List[TrainingDatum]:
+    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
         return [(self._card, self._label) for _ in range(len(chunk))]
 
 
@@ -62,12 +69,14 @@ class TestSingleCardFixedClassificationDojoSplits:
         dojo = SingleCardFixedClassificationDojo(
             path_to_training_data=source,
             data_constructor=_StubDataConstructor(card, "monster"),
+            card_lookup=CardBinder(),
+            holdout=HoldoutSpec.no_holdout(),
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
             rng_seed=0,
         )
 
-        batches = list(dojo.training_data())
+        batches = list(dojo.batches(Split.TRAIN, _BUDGET))
 
         total_rows = sum(len(batch.labels) for batch in batches)
         assert total_rows == 80  # 8/1/1 split of 100 rows
@@ -82,14 +91,22 @@ class TestSingleCardFixedClassificationDojoSplits:
         dojo = SingleCardFixedClassificationDojo(
             path_to_training_data=source,
             data_constructor=_StubDataConstructor(card, "monster"),
+            card_lookup=CardBinder(),
+            holdout=HoldoutSpec.no_holdout(),
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
             rng_seed=0,
         )
 
-        train_rows = sum(len(batch.labels) for batch in dojo.training_data())
-        test_rows = sum(len(batch.labels) for batch in dojo.test_data())
-        validation_rows = sum(len(batch.labels) for batch in dojo.validation_data())
+        train_rows = sum(
+            len(batch.labels) for batch in dojo.batches(Split.TRAIN, _BUDGET)
+        )
+        test_rows = sum(
+            len(batch.labels) for batch in dojo.batches(Split.TEST, _BUDGET)
+        )
+        validation_rows = sum(
+            len(batch.labels) for batch in dojo.batches(Split.VALIDATION, _BUDGET)
+        )
 
         assert (train_rows, test_rows, validation_rows) == (80, 10, 10)
 
@@ -109,6 +126,8 @@ class TestSingleCardFixedClassificationDojoModPipeline:
         dojo = SingleCardFixedClassificationDojo(
             path_to_training_data=source,
             data_constructor=_StubDataConstructor(card, "monster"),
+            card_lookup=CardBinder(),
+            holdout=HoldoutSpec.no_holdout(),
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
             mod_pipeline=ModPipeline(
@@ -117,9 +136,9 @@ class TestSingleCardFixedClassificationDojoModPipeline:
             rng_seed=0,
         )
 
-        train_batches = list(dojo.training_data())
-        test_batches = list(dojo.test_data())
-        validation_batches = list(dojo.validation_data())
+        train_batches = list(dojo.batches(Split.TRAIN, _BUDGET))
+        test_batches = list(dojo.batches(Split.TEST, _BUDGET))
+        validation_batches = list(dojo.batches(Split.VALIDATION, _BUDGET))
 
         for batches in (train_batches, test_batches, validation_batches):
             for batch in batches:
@@ -135,6 +154,8 @@ class TestSingleCardFixedClassificationDojoComputeLoss:
         dojo = SingleCardFixedClassificationDojo(
             path_to_training_data=source,
             data_constructor=_StubDataConstructor(card, "monster"),
+            card_lookup=CardBinder(),
+            holdout=HoldoutSpec.no_holdout(),
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
             rng_seed=0,
@@ -142,7 +163,7 @@ class TestSingleCardFixedClassificationDojoComputeLoss:
         embeddings = [torch.randn(4), torch.randn(4)]
         labels = ["monster", "northern_realms"]
 
-        loss = dojo.compute_loss(embeddings, labels)
+        loss = dojo.compute_loss(embeddings, Batch([card] * len(labels), labels))
 
         assert loss.shape == ()
 
@@ -153,13 +174,21 @@ class TestSingleCardFixedClassificationDojoComputeLoss:
         dojo = SingleCardFixedClassificationDojo(
             path_to_training_data=source,
             data_constructor=_StubDataConstructor(card, "monster"),
+            card_lookup=CardBinder(),
+            holdout=HoldoutSpec.no_holdout(),
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
             rng_seed=0,
         )
 
         try:
-            dojo.compute_loss([torch.randn(4)], ["monster", "northern_realms"])
+            dojo.compute_loss(
+                [torch.randn(4)],
+                Batch(
+                    [card] * len(["monster", "northern_realms"]),
+                    ["monster", "northern_realms"],
+                ),
+            )
             assert False, "expected ValueError"
         except ValueError:
             pass
@@ -185,6 +214,8 @@ class TestSingleCardFixedClassificationDojoLossFactory:
         dojo = SingleCardFixedClassificationDojo(
             path_to_training_data=source,
             data_constructor=_StubDataConstructor(card, "monster"),
+            card_lookup=CardBinder(),
+            holdout=HoldoutSpec.no_holdout(),
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
             rng_seed=0,
@@ -201,6 +232,8 @@ class TestSingleCardFixedClassificationDojoLossFactory:
         dojo = SingleCardFixedClassificationDojo(
             path_to_training_data=source,
             data_constructor=_StubDataConstructor(card, "monster"),
+            card_lookup=CardBinder(),
+            holdout=HoldoutSpec.no_holdout(),
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
             loss_factory=_StubLoss,

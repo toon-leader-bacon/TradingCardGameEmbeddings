@@ -1,4 +1,4 @@
-from typing import List, Union, cast
+from typing import List, Mapping, Union, cast
 
 import torch
 import torch.nn as nn
@@ -51,6 +51,15 @@ class MultiCardModel(nn.Module):
         self.self_attention = nn.TransformerEncoder(
             encoder_layer, num_layers=num_layers
         )
+
+    def encoder_only_state_dict(self) -> Mapping[str, torch.Tensor]:
+        """Every weight of this model (dojo decoder heads live in their
+        dojos, not here): the artifact to publish.
+
+        Inputs: none. Output: Mapping[str, Tensor], same as state_dict().
+        Side effects: none. Exceptions: none.
+        """
+        return self.state_dict()
 
     def internal_model(self, cards: List[GenericCard]) -> List[torch.Tensor]:
         """One contextualized embedding per input card, same order - every

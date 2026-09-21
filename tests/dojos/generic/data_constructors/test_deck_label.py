@@ -44,9 +44,9 @@ class TestDeckLabelDataConstructorBuild:
         deck = _deck([card1, card2])
         deck_box.create(deck)
         chunk = pd.DataFrame({"deck_uuid": [str(deck.nocab_uuid)], "relic_count": [3]})
-        constructor = DeckLabelDataConstructor(card_binder, deck_box, "relic_count")
+        constructor = DeckLabelDataConstructor(deck_box, "relic_count")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, card_binder)
 
         assert len(result) == 1
         deck_cards, label = result[0]
@@ -65,9 +65,9 @@ class TestDeckLabelDataConstructorBuild:
         deck = _deck([resolvable_card, unresolvable_card])
         deck_box.create(deck)
         chunk = pd.DataFrame({"deck_uuid": [str(deck.nocab_uuid)], "relic_count": [3]})
-        constructor = DeckLabelDataConstructor(card_binder, deck_box, "relic_count")
+        constructor = DeckLabelDataConstructor(deck_box, "relic_count")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, card_binder)
 
         assert len(result) == 1
         deck_cards, label = result[0]
@@ -81,9 +81,9 @@ class TestDeckLabelDataConstructorBuild:
         deck = _deck([unresolvable_card])
         deck_box.create(deck)
         chunk = pd.DataFrame({"deck_uuid": [str(deck.nocab_uuid)], "relic_count": [3]})
-        constructor = DeckLabelDataConstructor(card_binder, deck_box, "relic_count")
+        constructor = DeckLabelDataConstructor(deck_box, "relic_count")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, card_binder)
 
         assert result == []
 
@@ -91,9 +91,9 @@ class TestDeckLabelDataConstructorBuild:
         card_binder = CardBinder()
         deck_box = DeckBox()
         chunk = pd.DataFrame({"deck_uuid": [str(uuid4())], "relic_count": [3]})
-        constructor = DeckLabelDataConstructor(card_binder, deck_box, "relic_count")
+        constructor = DeckLabelDataConstructor(deck_box, "relic_count")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, card_binder)
 
         assert result == []
 
@@ -101,9 +101,9 @@ class TestDeckLabelDataConstructorBuild:
         card_binder = CardBinder()
         deck_box = DeckBox()
         chunk = pd.DataFrame({"deck_uuid": ["not-a-uuid"], "relic_count": [3]})
-        constructor = DeckLabelDataConstructor(card_binder, deck_box, "relic_count")
+        constructor = DeckLabelDataConstructor(deck_box, "relic_count")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, card_binder)
 
         assert result == []
 
@@ -111,9 +111,9 @@ class TestDeckLabelDataConstructorBuild:
         card_binder = CardBinder()
         deck_box = DeckBox()
         chunk = pd.DataFrame({"deck_uuid": [], "relic_count": []})
-        constructor = DeckLabelDataConstructor(card_binder, deck_box, "relic_count")
+        constructor = DeckLabelDataConstructor(deck_box, "relic_count")
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, card_binder)
 
         assert result == []
 
@@ -125,9 +125,9 @@ class TestDeckLabelDataConstructorBuild:
         deck = _deck([card])
         deck_box.create(deck)
         chunk = pd.DataFrame({"deck_uuid": [str(deck.nocab_uuid)], "win": [True]})
-        constructor = DeckLabelDataConstructor(card_binder, deck_box, "win")
+        constructor = DeckLabelDataConstructor(deck_box, "win")
 
-        _, label = constructor.build(chunk)[0]
+        _, label = constructor.build(chunk, card_binder)[0]
 
         assert label == 1.0
         assert isinstance(label, float)
@@ -142,10 +142,8 @@ class TestDeckLabelDataConstructorBuild:
         chunk = pd.DataFrame(
             {"deck_uuid": [str(deck.nocab_uuid)], "character": ["CHARACTER.SILENT"]}
         )
-        constructor = DeckLabelDataConstructor(
-            card_binder, deck_box, "character", label_caster=str
-        )
+        constructor = DeckLabelDataConstructor(deck_box, "character", label_caster=str)
 
-        _, label = constructor.build(chunk)[0]
+        _, label = constructor.build(chunk, card_binder)[0]
 
         assert label == "CHARACTER.SILENT"

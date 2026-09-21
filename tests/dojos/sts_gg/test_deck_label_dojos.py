@@ -37,6 +37,7 @@ from src.dojos.sts_gg.deck_label_dojos import (
     DeckTotalTurnsDojo,
     WinDojo,
 )
+from src.schema.holdout import HoldoutSpec
 
 _CASES = [
     (DeckRelicCountDojo, RelicCountMetric),
@@ -68,6 +69,7 @@ class TestDeckLabelDojoWrappers:
 
         dojo = dojo_cls(
             card_binder,
+            HoldoutSpec.no_holdout(),
             deck_box,
             card_embedding_size=4,
             path_to_training_data=source,
@@ -88,6 +90,7 @@ class TestWinDojo:
 
         dojo = WinDojo(
             card_binder,
+            HoldoutSpec.no_holdout(),
             deck_box,
             card_embedding_size=4,
             path_to_training_data=source,
@@ -110,6 +113,7 @@ class TestCharacterDojo:
 
         dojo = CharacterDojo(
             card_binder,
+            HoldoutSpec.no_holdout(),
             deck_box,
             card_embedding_size=4,
             path_to_training_data=source,
@@ -131,6 +135,7 @@ class TestCharacterDojo:
 
         dojo = CharacterDojo(
             card_binder,
+            HoldoutSpec.no_holdout(),
             deck_box,
             card_embedding_size=4,
             path_to_training_data=source,

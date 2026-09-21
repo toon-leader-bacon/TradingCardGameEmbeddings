@@ -13,6 +13,7 @@ from src.dojos.loss.pick_prediction_cross_entropy_loss import (
 from src.dojos.seventeenlands.draft_data.pool_conditioned_pick_dojo import (
     PoolConditionedPickDojo,
 )
+from src.schema.holdout import HoldoutSpec
 
 
 def _write_source(path: Path) -> None:
@@ -34,6 +35,7 @@ class TestPoolConditionedPickDojo:
 
         dojo = PoolConditionedPickDojo(
             card_binder,
+            HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             path_to_training_data=source,
             rng_seed=0,

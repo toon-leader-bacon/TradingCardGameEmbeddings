@@ -82,6 +82,12 @@ class ContrastivePairConstructor(Protocol):
         own sampling-policy parameters on top (e.g. items_per_deck)."""
         ...
 
+    @property
+    def cards_per_deck(self) -> int:
+        """Cards one surviving deck contributes to a batch (items per deck
+        times cards per item). Lets a dojo size a deck sample to a budget."""
+        ...
+
     def build(
         self, decks: list[GenericDeck], card_lookup: CardLookup
     ) -> ContrastiveBatch:
@@ -121,6 +127,11 @@ class SingleCardPairConstructor:
             raise ValueError("items_per_deck must be positive")
         self._items_per_deck = items_per_deck
         self._rng = random.Random(rng_seed)
+
+    @property
+    def cards_per_deck(self) -> int:
+        """One card per item."""
+        return self._items_per_deck
 
     def build(
         self, decks: list[GenericDeck], card_lookup: CardLookup
@@ -172,7 +183,7 @@ class SingleCardPairConstructor:
             positive_cliques.append(list(range(start_index, len(items))))
 
         return ContrastiveBatch(
-            items=items, identities=identities, positive_cliques=positive_cliques
+            inputs=items, identities=identities, positive_cliques=positive_cliques
         )
 
 
@@ -212,6 +223,11 @@ class MultiCardPairConstructor:
         self._cards_per_item = cards_per_item
         self._items_per_deck = items_per_deck
         self._rng = random.Random(rng_seed)
+
+    @property
+    def cards_per_deck(self) -> int:
+        """cards_per_item cards in each of items_per_deck items."""
+        return self._cards_per_item * self._items_per_deck
 
     def build(
         self, decks: list[GenericDeck], card_lookup: CardLookup
@@ -262,7 +278,7 @@ class MultiCardPairConstructor:
             positive_cliques.append(list(range(start_index, len(items))))
 
         return ContrastiveBatch(
-            items=items, identities=identities, positive_cliques=positive_cliques
+            inputs=items, identities=identities, positive_cliques=positive_cliques
         )
 
     def _sample_one_item(

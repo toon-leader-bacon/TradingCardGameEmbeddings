@@ -22,6 +22,7 @@ from src.dojos.generic.data_constructors import MaskedFieldRegressionDataConstru
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
 from src.dojos.mods.common_mods import MaskTargetKeyMod
 from src.dojos.mods.mod_pipeline import ModPipeline
+from src.schema.holdout import HoldoutSpec
 
 
 class CostRegressionDojo(SingleCardRegressionDojo):
@@ -30,14 +31,17 @@ class CostRegressionDojo(SingleCardRegressionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or CostRegressionMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=MaskedFieldRegressionDataConstructor(card_binder, "label"),
+            data_constructor=MaskedFieldRegressionDataConstructor("label"),
             card_embedding_size=card_embedding_size,
             mod_pipeline=ModPipeline(
                 [

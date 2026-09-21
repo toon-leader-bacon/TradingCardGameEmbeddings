@@ -7,14 +7,21 @@ import pandas as pd
 import pytest
 import torch
 
+from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.dojos.batch import Batch
+from src.dojos.dojo import BatchBudget
 from src.dojos.generic.multi_group_option_selection.dojo import (
     MultiGroupOptionSelectionDojo,
 )
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
+from src.schema.holdout import HoldoutSpec
+from src.schema.splits import Split
 from src.schema.type_hints import MultiGroupInput, TrainingDatum
+
+_BUDGET = BatchBudget(max_cost=1000, cost_of=lambda card: 1)
 
 
 def _card(name: str) -> GenericCard:
@@ -40,7 +47,7 @@ class _StubDataConstructor:
         self._group = group
         self._pick_index = pick_index
 
-    def build(self, chunk: pd.DataFrame) -> List[TrainingDatum]:
+    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
         return [(self._group, self._pick_index) for _ in range(len(chunk))]
 
 
@@ -69,11 +76,13 @@ class TestMultiGroupOptionSelectionDojoSplits:
         dojo = MultiGroupOptionSelectionDojo(
             path_to_training_data=source,
             data_constructor=_StubDataConstructor(group, 1),
+            card_lookup=CardBinder(),
+            holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
         )
 
-        batches = list(dojo.training_data())
+        batches = list(dojo.batches(Split.TRAIN, _BUDGET))
 
         total_rows = sum(len(batch.labels) for batch in batches)
         assert total_rows == 80  # 8/1/1 split of 100 rows
@@ -88,13 +97,21 @@ class TestMultiGroupOptionSelectionDojoSplits:
         dojo = MultiGroupOptionSelectionDojo(
             path_to_training_data=source,
             data_constructor=_StubDataConstructor(group, 0),
+            card_lookup=CardBinder(),
+            holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
         )
 
-        train_rows = sum(len(batch.labels) for batch in dojo.training_data())
-        test_rows = sum(len(batch.labels) for batch in dojo.test_data())
-        validation_rows = sum(len(batch.labels) for batch in dojo.validation_data())
+        train_rows = sum(
+            len(batch.labels) for batch in dojo.batches(Split.TRAIN, _BUDGET)
+        )
+        test_rows = sum(
+            len(batch.labels) for batch in dojo.batches(Split.TEST, _BUDGET)
+        )
+        validation_rows = sum(
+            len(batch.labels) for batch in dojo.batches(Split.VALIDATION, _BUDGET)
+        )
 
         assert (train_rows, test_rows, validation_rows) == (80, 10, 10)
 
@@ -109,6 +126,8 @@ class TestMultiGroupOptionSelectionDojoScoringHeadAndPooler:
         dojo = MultiGroupOptionSelectionDojo(
             path_to_training_data=source,
             data_constructor=_StubDataConstructor(group, 0),
+            card_lookup=CardBinder(),
+            holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             scoring_head=stub_scoring_head,
             rng_seed=0,
@@ -125,6 +144,8 @@ class TestMultiGroupOptionSelectionDojoScoringHeadAndPooler:
         dojo = MultiGroupOptionSelectionDojo(
             path_to_training_data=source,
             data_constructor=_StubDataConstructor(group, 0),
+            card_lookup=CardBinder(),
+            holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             pooler=stub_pooler,
             rng_seed=0,
@@ -141,6 +162,8 @@ class TestMultiGroupOptionSelectionDojoComputeLoss:
         dojo = MultiGroupOptionSelectionDojo(
             path_to_training_data=source,
             data_constructor=_StubDataConstructor(group, 0),
+            card_lookup=CardBinder(),
+            holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
         )
@@ -152,7 +175,7 @@ class TestMultiGroupOptionSelectionDojoComputeLoss:
         ]
         labels = [1, 0]
 
-        loss = dojo.compute_loss(embeddings, labels)
+        loss = dojo.compute_loss(embeddings, Batch([group] * len(labels), labels))
 
         assert loss.shape == ()
 
@@ -163,9 +186,13 @@ class TestMultiGroupOptionSelectionDojoComputeLoss:
         dojo = MultiGroupOptionSelectionDojo(
             path_to_training_data=source,
             data_constructor=_StubDataConstructor(group, 0),
+            card_lookup=CardBinder(),
+            holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
         )
 
         with pytest.raises(ValueError):
-            dojo.compute_loss([[[torch.randn(4)], []]], [0, 1])
+            dojo.compute_loss(
+                [[[torch.randn(4)], []]], Batch([group] * len([0, 1]), [0, 1])
+            )

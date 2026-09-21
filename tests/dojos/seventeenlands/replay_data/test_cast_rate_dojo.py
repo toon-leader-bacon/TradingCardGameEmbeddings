@@ -6,6 +6,7 @@ from src.data_refinement.card_binder.card_binder import CardBinder
 from src.dojos.generic.data_constructors import CardAverageDataConstructor
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
 from src.dojos.seventeenlands.replay_data.cast_rate_dojo import CastRateDojo
+from src.schema.holdout import HoldoutSpec
 
 
 def _write_source(path: Path) -> None:
@@ -23,6 +24,7 @@ class TestCastRateDojo:
 
         dojo = CastRateDojo(
             card_binder,
+            HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             path_to_training_data=source,
             rng_seed=0,

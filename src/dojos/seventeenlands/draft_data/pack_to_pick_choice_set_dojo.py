@@ -18,6 +18,7 @@ from src.dojos.generic.multi_card_option_selection.dojo import (
     MultiCardOptionSelectionDojo,
 )
 from src.dojos.generic.option_scoring import OptionScoringHead
+from src.schema.holdout import HoldoutSpec
 
 
 class PackToPickChoiceSetDojo(MultiCardOptionSelectionDojo):
@@ -26,15 +27,18 @@ class PackToPickChoiceSetDojo(MultiCardOptionSelectionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         scoring_head: OptionScoringHead | None = None,
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or PackToPickChoiceSetMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=PackToPickChoiceSetDataConstructor(card_binder),
+            data_constructor=PackToPickChoiceSetDataConstructor(),
             card_embedding_size=card_embedding_size,
             scoring_head=scoring_head,
             rng_seed=rng_seed,

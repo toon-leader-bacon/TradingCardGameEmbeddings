@@ -12,6 +12,7 @@ from src.dojos.generic.single_card_fixed_classification.dojo import (
 )
 from src.dojos.loss.soft_classification_loss import SoftClassificationLoss
 from src.dojos.sts_gg.card_character_prediction_dojo import CardCharacterPredictionDojo
+from src.schema.holdout import HoldoutSpec
 
 
 def _write_source(path: Path) -> None:
@@ -34,6 +35,7 @@ class TestCardCharacterPredictionDojo:
 
         dojo = CardCharacterPredictionDojo(
             card_binder,
+            HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             path_to_training_data=source,
             rng_seed=0,
@@ -52,6 +54,7 @@ class TestCardCharacterPredictionDojo:
 
         dojo = CardCharacterPredictionDojo(
             card_binder,
+            HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             path_to_training_data=source,
             rng_seed=0,

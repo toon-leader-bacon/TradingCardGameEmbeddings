@@ -19,6 +19,7 @@ from src.dojos.generic.multi_group_option_selection.dojo import (
 )
 from src.dojos.generic.option_scoring import OptionScoringHead
 from src.dojos.generic.pooling import EmbeddingPooler
+from src.schema.holdout import HoldoutSpec
 
 
 class PoolConditionedPickDojo(MultiGroupOptionSelectionDojo):
@@ -28,6 +29,7 @@ class PoolConditionedPickDojo(MultiGroupOptionSelectionDojo):
     def __init__(
         self,
         card_binder: CardBinder,
+        holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         scoring_head: OptionScoringHead | None = None,
@@ -35,9 +37,11 @@ class PoolConditionedPickDojo(MultiGroupOptionSelectionDojo):
         rng_seed: int | None = None,
     ) -> None:
         super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
             path_to_training_data=path_to_training_data
             or PoolConditionedPickMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=PoolConditionedPickDataConstructor(card_binder),
+            data_constructor=PoolConditionedPickDataConstructor(),
             card_embedding_size=card_embedding_size,
             scoring_head=scoring_head,
             pooler=pooler,

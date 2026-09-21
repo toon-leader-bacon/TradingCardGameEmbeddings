@@ -42,9 +42,9 @@ class TestPackToPickChoiceSetDataConstructorBuild:
                 "pick_uuid": [str(card_b.nocab_uuid)],
             }
         )
-        constructor = PackToPickChoiceSetDataConstructor(binder)
+        constructor = PackToPickChoiceSetDataConstructor()
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == [([card_a, card_b, card_c], 1)]
 
@@ -58,9 +58,9 @@ class TestPackToPickChoiceSetDataConstructorBuild:
                 "pick_uuid": [None],
             }
         )
-        constructor = PackToPickChoiceSetDataConstructor(binder)
+        constructor = PackToPickChoiceSetDataConstructor()
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == []
 
@@ -74,9 +74,9 @@ class TestPackToPickChoiceSetDataConstructorBuild:
                 "pick_uuid": [str(uuid4())],
             }
         )
-        constructor = PackToPickChoiceSetDataConstructor(binder)
+        constructor = PackToPickChoiceSetDataConstructor()
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == []
 
@@ -90,8 +90,8 @@ class TestPackToPickChoiceSetDataConstructorBuild:
                 "pick_uuid": [str(card_a.nocab_uuid)],
             }
         )
-        constructor = PackToPickChoiceSetDataConstructor(binder)
+        constructor = PackToPickChoiceSetDataConstructor()
 
-        result = constructor.build(chunk)
+        result = constructor.build(chunk, binder)
 
         assert result == []

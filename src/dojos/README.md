@@ -1,15 +1,25 @@
 # dojos
 
-Pluggable auxiliary training tasks for the card embedding model. Most
-dojos present the same contract to a training loop - `training_data()`/
-`test_data()`/`validation_data()` generators yielding `Batch` (see
-`[batch.py](batch.py)`), plus `compute_loss(embeddings, labels)` - while
-reading its own labels from a parquet file produced by one of
-`../data_refinement/metrics/`'s metric classes. An "exotic" dojo whose
-task shape genuinely doesn't fit that contract (e.g. `[contrastive/](contrastive/)`,
-below) presents its own split-generator + loss shape instead, sourced
-directly from `../data_refinement/`'s stores rather than a metric's
-parquet output.
+Pluggable auxiliary training tasks for the card embedding model. Every
+dojo presents one interface to the training loop, the `Dojo` Protocol in
+`[dojo.py](dojo.py)`: `batches(split, budget, max_examples)` yields
+`DojoBatch`es (each has `inputs` for the encoder and `__len__`, the
+example count) whose card cost fits a `BatchBudget` the trainer sets from
+its hardware limit; `compute_loss(embeddings, batch)` returns a scalar
+per-example mean loss; `example_count(split)`, `trainable_parameters()`
+(the dojo's own decoder head, never the encoder) and `reset_head()`
+round it out. A dojo never owns its batch size - the budget is the
+trainer's. Most dojos read their labels from a parquet file produced by
+one of `../data_refinement/metrics/`'s metric classes; an "exotic" dojo
+whose task shape doesn't fit that (e.g. `[contrastive/](contrastive/)`,
+below) is sourced directly from `../data_refinement/`'s stores.
+
+Card holdout: each dojo is built with a `CardLookup` and a `HoldoutSpec`
+(`src/schema/holdout.py`) and reads cards through one `VisibleCardLookup`
+per split, so a TRAIN-split example can never contain a TEST or
+VALIDATION-tier card (TEST sees TRAIN+TEST; VALIDATION sees all). Row
+splits (8/1/1 by row, or by deck for contrastive) are unchanged and layer
+under it.
 
 A small set of reusable generic dojo classes, one per `(input shape, task shape)` cell, plus
 thin per-metric subclasses that configure and inject a
@@ -18,8 +28,11 @@ that family's task shape needs.
 
 ## Shared plumbing (used by both generations)
 
+- `[dojo.py](dojo.py)` - the `Dojo`, `DojoBatch` and `BatchBudget` contract.
 - `[batch.py](batch.py)` - `Batch`, the (inputs, labels) container every
-dojo's split generators yield.
+generic dojo yields.
+- `[budgeted_batching.py](budgeted_batching.py)` - `group_by_budget`, packs
+examples into batches within a `BatchBudget`.
 - `[mods/](mods/)` - `Mod`/`ModPipeline`, composable training-data
 transformations (e.g. masking) applied before batching. Each `Mod`
 declares its own `train_only: bool` at construction (default `True`)
@@ -42,7 +55,7 @@ callers never construct one directly.
 
 `[generic/data_constructor.py](generic/data_constructor.py)` defines  
 the `DataConstructor` Protocol every metric-family-specific constructor  
-satisfies: `build(chunk: pd.DataFrame) -> List[TrainingDatum]`, converting  
+satisfies: `build(chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]`, converting  
 one chunk of a metric's raw output rows into (input, label) pairs. A  
 generic dojo takes a `DataConstructor` as an injected collaborator  
 rather than owning one, so the same generic dojo class serves every  
@@ -232,8 +245,8 @@ across in-batch positives and negatives), not the row-independent
   and logging a deck with fewer known cards than that), every same-deck
   item marked mutually positive.
 - `[contrastive_batch.py](contrastive/contrastive_batch.py)` - `ContrastiveBatch`,
-  the `(items, identities, positive_cliques)` container a
-  `ContrastivePairConstructor` builds: `items` is one flat pool (every
+  the `(inputs, identities, positive_cliques)` container a
+  `ContrastivePairConstructor` builds: `inputs` is one flat pool (every
   item acts as both anchor and candidate for every other item in the
   same batch), `identities` is a tuple of card uuid(s) per item -
   positionally parallel to that item's own card order, not deduplicated
@@ -242,7 +255,7 @@ across in-batch positives and negatives), not the row-independent
   `positive_cliques` is index groups - each entry a set of item indices
   that are all mutually positive (one entry per surviving source deck
   for `SingleCardPairConstructor`). Enforces one shared `InputShape`
-  across `items` the same way `Batch` does today.
+  across `inputs` the same way `Batch` does today.
 - `[contrastive_loss.py](contrastive/contrastive_loss.py)` - `ContrastiveLoss`
   Strategy, sibling to but distinct from `NocabLoss` (batch-level, not
   row-independent). Takes `item_embeddings: BatchedModelOutput` -
@@ -257,12 +270,11 @@ across in-batch positives and negatives), not the row-independent
   exact-identity duplicates from a given anchor's negative pool.
 - `[dojo.py](contrastive/dojo.py)` - `ContrastiveDojo`, wiring a
   `DeckBoxDealer` + `ContrastivePairConstructor` + `CardLookup` into
-  `training_data()`/`test_data()`/`validation_data()` generators
-  yielding `ContrastiveBatch` (skipping and logging a degenerate batch
+  `Dojo.batches()` yielding `ContrastiveBatch` (skipping and logging a degenerate batch
   - no positive clique of size >= 2 - rather than letting it fail deep
-  inside the loss), plus `compute_loss(item_embeddings, batch)` - a
-  batch-level entry point, not `Dojo`'s `compute_loss(embeddings,
-  labels)`, since this task shape has no per-example label at all.
+  inside the loss), plus `compute_loss(item_embeddings, batch)`, which
+  reads identities and positive cliques off the batch since this task
+  shape has no per-example label at all.
   Owns its `ContrastiveLoss` internally (an injected collaborator with a
   sensible default), same convention as every generic dojo cell. A
   future item-embedding-pooling need is a `ContrastiveLoss` Decorator
@@ -270,8 +282,7 @@ across in-batch positives and negatives), not the row-independent
   strategy `ContrastiveDojo` owns - there is no `ItemEmbeddingStrategy`
   here.
 
-No training loop drives this yet - `../training/demo_training_loop.py`
-is stale and unrelated (it targets `Dojo`'s row-independent shape).
+It implements `Dojo` too: an example is one source deck, the budget becomes a deck count per batch (`ContrastivePairConstructor.cards_per_deck`), and it has no trainable parameters. `ContrastiveBatch.__len__` is its surviving deck count.
 Single-card items only; a multi-card item shape, alternate
 `ContrastivePairConstructor`/`ContrastiveLoss` implementations
 (multi-positive SupCon, a pooling `ContrastiveLoss` Decorator), and a
