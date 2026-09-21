@@ -37,9 +37,7 @@ class CostRegressionDojo(SingleCardRegressionDojo):
         super().__init__(
             path_to_training_data=path_to_training_data
             or CostRegressionMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=MaskedFieldRegressionDataConstructor(
-                card_binder, "label"
-            ),
+            data_constructor=MaskedFieldRegressionDataConstructor(card_binder, "label"),
             card_embedding_size=card_embedding_size,
             mod_pipeline=ModPipeline(
                 [

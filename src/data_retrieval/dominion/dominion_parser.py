@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 
-import getpass
 import re
 import sys
 import time
 
 import selenium.webdriver
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.wait import WebDriverWait
 import selenium.webdriver.support.expected_conditions as EC
@@ -97,8 +95,63 @@ def get_log(driver):
     return log
 
 
-def load_game(driver1, driver2, game_id, name1, swap):
+PROVINCE_PILE = '//div[contains(@style, "mini-province.webp")]/..'
 
+
+def wait_for_decision(driver):
+    """Block until the replay has loaded at least one decision."""
+    decision = driver.find_element(By.ID, "table-replay-decision")
+    while True:
+        try:
+            if int(driver.execute_script("return arguments[0].value", decision)) > 0:
+                return
+        except Exception:
+            pass
+        time.sleep(1)
+
+
+def game_ended(driver):
+    try:
+        wait_end(driver)
+    except Exception:
+        return False
+    return True
+
+
+def read_province_status(driver):
+    """Return (provinces_gone, maybe_provinces).
+
+    maybe_provinces is None when the provinces are already gone; otherwise it
+    says whether the last province could be bought with the coins left.
+    """
+    try:
+        driver.find_element(By.XPATH, f'{PROVINCE_PILE}/div[@class="empty-card-cross"]')
+    except Exception:
+        pass
+    else:
+        return True, None
+
+    provinces_left = int(
+        driver.find_element(
+            By.XPATH, f'{PROVINCE_PILE}/div[contains(@class, "counter-layer")]/*[1]'
+        ).text
+    )
+    province_cost = int(
+        driver.find_element(
+            By.XPATH,
+            f'{PROVINCE_PILE}/div[contains(@class, "coins-layer")]/*[1]/*[1]',
+        ).text
+    )
+    coins_left = int(
+        driver.find_element(
+            By.XPATH, '//counter-element[contains(@style, "coin.png")]/*[1]'
+        ).text
+    )
+    return False, provinces_left == 1 and coins_left >= province_cost
+
+
+def start_table(driver1, driver2, game_id, name1, swap):
+    """Load the old game on driver1 and seat driver2 as the opponent."""
     WebDriverWait(driver1, 10 if swap else 999).until(
         EC.presence_of_element_located(
             (By.XPATH, '//button[normalize-space()="New Table"]')
@@ -113,14 +166,7 @@ def load_game(driver1, driver2, game_id, name1, swap):
         EC.presence_of_element_located((By.ID, "table-replay-id"))
     ).send_keys(game_id)
     driver1.find_element(By.XPATH, '//div[normalize-space()="Load from End"]').click()
-    decision = driver1.find_element(By.ID, "table-replay-decision")
-    while True:
-        try:
-            if int(driver1.execute_script("return arguments[0].value", decision)) > 0:
-                break
-        except:
-            pass
-        time.sleep(1)
+    wait_for_decision(driver1)
 
     WebDriverWait(driver1, 10).until(
         EC.presence_of_element_located((By.XPATH, '//*[@class="table-add-bot-icon"]'))
@@ -132,18 +178,16 @@ def load_game(driver1, driver2, game_id, name1, swap):
         ).click()
         time.sleep(1)
 
+    friend_join_button = (
+        f'//td[@class="friend-activities-name-column" and .="{name1}"]/../*[2]/button'
+    )
     WebDriverWait(driver2, 10 if swap else 999).until(
         EC.presence_of_element_located(
             (By.XPATH, '//button[normalize-space()="Automatch"]')
         )
     ).click()
     WebDriverWait(driver2, 10).until(
-        EC.presence_of_element_located(
-            (
-                By.XPATH,
-                f'//td[@class="friend-activities-name-column" and .="{name1}"]/../*[2]/button',
-            )
-        )
+        EC.presence_of_element_located((By.XPATH, friend_join_button))
     ).click()
     WebDriverWait(driver2, 10).until(
         EC.presence_of_element_located((By.XPATH, '//div[normalize-space()="Ready"]'))
@@ -151,14 +195,11 @@ def load_game(driver1, driver2, game_id, name1, swap):
 
     driver1.find_element(By.XPATH, '//div[normalize-space()="Ready"]').click()
 
-    try:
-        wait_end(driver1)
-    except:
-        end = False
-    else:
-        end = True
 
-    if end:
+def load_game(driver1, driver2, game_id, name1, swap):
+    start_table(driver1, driver2, game_id, name1, swap)
+
+    if game_ended(driver1):
         wait_end(driver2)
         close_game(driver2)
         close_game(driver1)
@@ -171,33 +212,7 @@ def load_game(driver1, driver2, game_id, name1, swap):
         resign_game(driver1)
         return load_game(driver1, driver2, game_id, name1, True)
 
-    try:
-        driver1.find_element(
-            By.XPATH,
-            '//div[contains(@style, "mini-province.webp")]/../div[@class="empty-card-cross"]',
-        )
-        provinces = True
-        maybe_provinces = None
-    except:
-        provinces = False
-        provinces_left = int(
-            driver1.find_element(
-                By.XPATH,
-                '//div[contains(@style, "mini-province.webp")]/../div[contains(@class, "counter-layer")]/*[1]',
-            ).text
-        )
-        province_cost = int(
-            driver1.find_element(
-                By.XPATH,
-                '//div[contains(@style, "mini-province.webp")]/../div[contains(@class, "coins-layer")]/*[1]/*[1]',
-            ).text
-        )
-        coins_left = int(
-            driver1.find_element(
-                By.XPATH, '//counter-element[contains(@style, "coin.png")]/*[1]'
-            ).text
-        )
-        maybe_provinces = provinces_left == 1 and coins_left >= province_cost
+    provinces, maybe_provinces = read_province_status(driver1)
 
     leave_game(driver2)
     resign_game(driver1)
