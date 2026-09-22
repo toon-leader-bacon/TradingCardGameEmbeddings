@@ -33,11 +33,26 @@ records):
     arena_id/mtgo_id/multiverse_ids — no extra aliases are ever
     registered for this source, only each row's own id.
 
-Collision policy is merge_strategies.keep_longer_content, same as
-ScryfallCardIngestionStage.
+Collision policy is merge_strategies.keep_incoming_if_content_differs,
+same as ScryfallCardIngestionStage: id is a perfect natural key, so a newer
+dump is authoritative for its own ids.
+
+LEAN CONTENT: raw_content is not the raw row (see _lean_card_content and
+"What goes in raw_content" in card_binder/README.md). Most fields are null
+on most cards and are dropped; description_raw (the unrendered template
+of description), vars (internal template variables), powers_applied (a
+structured copy of the text), keywords_key/type_key/rarity_key (copies of
+keywords/type/rarity), compendium_order, image urls, spawns_cards and
+sources (references to other cards and monsters) are dropped too. upgrade
+(a structured diff) is kept only when upgrade_description, its rendered
+form, is missing. Color tags like [gold] are stripped; game symbols like
+[energy:1] are kept. can_be_generated_in_combat is tri-state (null is the
+default, an explicit false is meaningful), so a false is preserved. The
+raw row's id is still the identity/alias.
 """
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import ClassVar
@@ -47,9 +62,51 @@ from tqdm import tqdm
 
 from src.data_refinement.card_binder import merge_strategies
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.lean_content import (
+    JsonObject,
+    map_strings,
+    order_keys,
+    strip_noise,
+)
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
+
+# Dropped wherever they appear (image urls and ids are removed by
+# strip_noise already); see the module docstring for why each.
+_REDUNDANT_KEYS = frozenset(
+    {
+        "description_raw",
+        "vars",
+        "powers_applied",
+        "keywords_key",
+        "type_key",
+        "rarity_key",
+        "compendium_order",
+        "spawns_cards",
+        "sources",
+    }
+)
+# Short identifying fields first; rendered text and nested variants last.
+_LEADING_KEYS = (
+    "name",
+    "cost",
+    "star_cost",
+    "is_x_cost",
+    "type",
+    "rarity",
+    "color",
+    "target",
+    "keywords",
+    "tags",
+    "multiplayer_only",
+    "can_be_generated_in_combat",
+)
+_TRAILING_KEYS = ("description", "upgrade_description", "upgrade", "type_variants")
+# [gold]...[/gold], [blue]...[/blue]: color tags. [energy:1] has a colon and
+# stays: it is a game symbol, not styling.
+_COLOR_TAG = re.compile(r"\[/?[a-z]+\]")
+_TRI_STATE_KEY = "can_be_generated_in_combat"
 
 
 class SpireCodexCardIngestionStage:
@@ -121,8 +178,9 @@ class SpireCodexCardIngestionStage:
 
         If an existing card resolves: builds the same kind of
         GenericCard as a throwaway candidate, then calls
-        merge_strategies.keep_longer_content(existing, candidate).
-        Compares the result to existing BY VALUE (dataclass equality):
+        merge_strategies.keep_incoming_if_content_differs(existing,
+        candidate). Compares the result to existing BY VALUE (dataclass
+        equality):
         if different, calls binder.replace(existing.nocab_uuid,
         merged).
 
@@ -153,7 +211,9 @@ class SpireCodexCardIngestionStage:
             changed = True
         else:
             candidate = self._build_card(row, card_id)
-            merged = merge_strategies.keep_longer_content(existing, candidate)
+            merged = merge_strategies.keep_incoming_if_content_differs(
+                existing, candidate
+            )
             changed = merged != existing
             if changed:
                 binder.replace(existing.nocab_uuid, merged)
@@ -174,7 +234,8 @@ class SpireCodexCardIngestionStage:
         Inputs:
             row: one parsed JSON object from raw_path's array.
             card_id: row["id"], passed in rather than re-read.
-        Output: a new GenericCard with a freshly minted nocab_uuid.
+        Output: a new GenericCard with a freshly minted nocab_uuid and the
+            row's lean content (see _lean_card_content) as raw_content.
         Side effects: none.
         Exceptions: raises if row is missing "name".
         """
@@ -182,10 +243,36 @@ class SpireCodexCardIngestionStage:
             nocab_uuid=uuid4(),
             source_game=self.SOURCE_GAME,
             name=row["name"],
-            raw_content=row,
+            raw_content=_lean_card_content(row),
             provenance=Provenance(
                 data_source=DataSource.SPIRE_CODEX,
                 source_id=card_id,
                 fetched_at=datetime.now(timezone.utc),
             ),
         )
+
+
+def _lean_card_content(row: JsonObject) -> JsonObject:
+    """Reduce a spire-codex card row to what describes the card.
+
+    Inputs: row (JsonObject): one element of cards.json.
+    Output: a new JsonObject: nulls, ids, urls and the redundant keys
+        removed, color tags stripped from text, upgrade kept only when
+        upgrade_description is missing, an explicit
+        can_be_generated_in_combat=false preserved, identity keys first and
+        the rendered text last.
+    Side effects: none.
+    Exceptions: none.
+
+    Example:
+        >>> _lean_card_content({"id": "X", "name": "Strike", "cost": 1,
+        ...     "damage": None, "type_key": "Attack"})
+        {'name': 'Strike', 'cost': 1}
+    """
+    content = strip_noise(row, extra_noise_keys=_REDUNDANT_KEYS)
+    content = map_strings(content, lambda text: _COLOR_TAG.sub("", text))
+    if "upgrade_description" in content:
+        content.pop("upgrade", None)
+    if row.get(_TRI_STATE_KEY) is False:
+        content[_TRI_STATE_KEY] = False
+    return order_keys(content, _LEADING_KEYS, _TRAILING_KEYS)

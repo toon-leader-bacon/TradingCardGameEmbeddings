@@ -64,14 +64,114 @@ class TestIngest:
         assert card.provenance.source_id == _REAL_ROW["id"]
         assert card.provenance.data_source == DataSource.POKEMON_TCG
 
-    def test_raw_content_is_the_entire_row_unmodified(self, tmp_path: Path) -> None:
+    def test_raw_content_is_lean_and_gains_the_set_code(self, tmp_path: Path) -> None:
         _write_set_file(tmp_path / "base4.json", [_REAL_ROW])
         binder = CardBinder()
 
         PokemonTcgCardIngestionStage().ingest(tmp_path, binder)
 
         card = binder.get_by_alias(GameId.POKEMON, DataSource.POKEMON_TCG, "base4-1")
-        assert card.raw_content == _REAL_ROW
+        assert card.raw_content == {
+            "name": "Alakazam",
+            "supertype": "Pokémon",
+            "subtypes": ["Stage 2"],
+            "types": ["Psychic"],
+            "hp": "80",
+            "set": "base4",
+        }
+
+    def test_printing_level_and_redundant_fields_are_dropped(
+        self, tmp_path: Path
+    ) -> None:
+        row = {
+            "id": "sm2-1",
+            "name": "Garbodor",
+            "number": "1",
+            "artist": "Someone",
+            "rarity": "Rare",
+            "flavorText": "Smells.",
+            "images": {"small": "https://images.example.com/sm2/1.png"},
+            "legalities": {"unlimited": "Legal"},
+            "nationalPokedexNumbers": [569],
+            "evolvesFrom": "Trubbish",
+            "evolvesTo": ["Something"],
+            "retreatCost": ["Colorless", "Colorless"],
+            "convertedRetreatCost": 2,
+            "attacks": [
+                {
+                    "name": "Acid Spray",
+                    "cost": ["Psychic", "Colorless"],
+                    "convertedEnergyCost": 2,
+                    "damage": "70",
+                    "text": "Flip a coin.",
+                }
+            ],
+        }
+        _write_set_file(tmp_path / "sm2.json", [row])
+        binder = CardBinder()
+
+        PokemonTcgCardIngestionStage().ingest(tmp_path, binder)
+
+        card = binder.get_by_alias(GameId.POKEMON, DataSource.POKEMON_TCG, "sm2-1")
+        assert card.raw_content == {
+            "name": "Garbodor",
+            "evolvesFrom": "Trubbish",
+            "evolvesTo": ["Something"],
+            "set": "sm2",
+            "convertedRetreatCost": 2,
+            "attacks": [
+                {
+                    "name": "Acid Spray",
+                    "cost": ["Psychic", "Colorless"],
+                    "damage": "70",
+                    "text": "Flip a coin.",
+                }
+            ],
+        }
+
+    def test_long_text_keys_come_last(self, tmp_path: Path) -> None:
+        row = {
+            "id": "sm2-1",
+            "name": "Garbodor",
+            "rules": ["A rule."],
+            "attacks": [{"name": "Acid Spray"}],
+            "hp": "120",
+        }
+        _write_set_file(tmp_path / "sm2.json", [row])
+        binder = CardBinder()
+
+        PokemonTcgCardIngestionStage().ingest(tmp_path, binder)
+
+        card = binder.get_by_alias(GameId.POKEMON, DataSource.POKEMON_TCG, "sm2-1")
+        assert list(card.raw_content) == ["name", "hp", "set", "attacks", "rules"]
+
+    def test_identity_still_matches_across_runs_using_the_stored_set_code(
+        self, tmp_path: Path
+    ) -> None:
+        # The stored card no longer has "id"; the set-code half of its
+        # identity now comes from raw_content["set"].
+        binder = CardBinder()
+        stage = PokemonTcgCardIngestionStage()
+        first = tmp_path / "first"
+        first.mkdir()
+        _write_set_file(first / "swsh8.json", [{"id": "swsh8-113", "name": "Mew V"}])
+        stage.ingest(first, binder)
+
+        second = tmp_path / "second"
+        second.mkdir()
+        _write_set_file(
+            second / "swsh8.json",
+            [
+                {"id": "swsh8-250", "name": "Mew V"},
+                {"id": "swsh9-1", "name": "Mew V"},
+            ],
+        )
+        stage.ingest(second, binder)
+
+        sets = sorted(
+            c.raw_content["set"] for c in binder.get_by_name(GameId.POKEMON, "Mew V")
+        )
+        assert sets == ["swsh8", "swsh9"]
 
     def test_each_card_gets_a_distinct_uuid(self, tmp_path: Path) -> None:
         _write_set_file(
@@ -202,7 +302,12 @@ class TestReIngestDuplicates:
             GameId.POKEMON, DataSource.POKEMON_TCG, "swsh8-113"
         )
         assert updated.nocab_uuid == original.nocab_uuid
-        assert updated.raw_content == richer_row
+        assert updated.raw_content == {
+            "name": "Mew V",
+            "hp": "210",
+            "set": "swsh8",
+            "attacks": [{"name": "Energy Mix"}],
+        }
         assert changed == [original.nocab_uuid]
         # Both printing ids resolve to the same, now-merged card.
         assert (

@@ -23,6 +23,10 @@ hold for every game (Slay the Spire 2's per-character Strike/Defend,
 Pokemon's same-named-but-different reprints) — see
 plans/card_binder_v2.md's "Why".
 
+A stage also decides what goes into each card's raw_content, which a text
+encoder later reads verbatim: keep it lean and high-signal. See "What goes
+in raw_content" in src/data_refinement/card_binder/README.md.
+
 A stage always ingests exactly one game — SOURCE_GAME is a class
 constant, not an ingest() parameter, so a caller can never construct a
 nonsensical call (e.g. passing GameId.GWENT to a Scryfall stage).

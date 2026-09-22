@@ -31,9 +31,21 @@ Design, per plans/card_binder_v2.md:
     oracle_id), is a perfect natural key, so no name-based or
     heuristic fallback is needed (contrast pokemon_tcg's stage, which
     needs one since it has no equivalent natural key).
-  - COLLISION RESOLUTION: once a duplicate is found, the policy is
-    merge_strategies.keep_longer_content — a richness comparison
-    shared with any other stage that wants the same policy by name.
+  - COLLISION RESOLUTION: once a duplicate is found, the incoming row
+    wins (merge_strategies.keep_incoming_if_content_differs) whenever its
+    lean content differs from the stored card's: a Scryfall dump is the authority for
+    its own oracle_ids, and a byte-length richness comparison would be
+    decided by URLs and prices, not card text. Identical content is left
+    untouched, so re-ingesting the same dump reports no changes.
+  - LEAN CONTENT: raw_content is not the raw row. It keeps what
+    describes the card as a game object and drops printing, commerce,
+    image and API-envelope fields, all URLs/IDs/dates, other cards'
+    names (all_parts) and empty values, collapses legalities to the
+    non-default statuses, and puts short identifying keys first and rules
+    text last (see _lean_card_content and "What goes in raw_content" in
+    card_binder/README.md). Identity aliases are still read from the RAW
+    row, so dropping ids from raw_content loses no alias. The raw dump
+    stays on disk under data/raw/scryfall.
   - source_game is NOT a parameter anywhere in this class — a stage
     always ingests exactly one game, so it's a class constant
     (SOURCE_GAME) instead. Passing it as an argument would let a
@@ -59,6 +71,11 @@ from tqdm import tqdm
 
 from src.data_refinement.card_binder import merge_strategies
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.lean_content import (
+    JsonObject,
+    order_keys,
+    strip_noise,
+)
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
@@ -69,6 +86,63 @@ _SINGLE_VALUE_ALIAS_FIELDS = {
     "mtgo_id": DataSource.MTGO,
     "mtgo_foil_id": DataSource.MTGO,
 }
+
+# Keys dropped wherever they appear. The dump holds one arbitrary printing
+# per oracle_id, so these describe that printing, its commerce or the API
+# envelope, not the card's rules. Kept on purpose: set and rarity (what a
+# player reads on a card, and labels a masked-field dojo may want), digital,
+# reserved and game_changer (true-only flags, their presence is the signal),
+# produced_mana. Every id/uri/url key and every URL/UUID/date value is
+# already removed by strip_noise.
+_PRINTING_AND_ENVELOPE_KEYS = frozenset(
+    {
+        "object",
+        "lang",
+        "all_parts",  # names of other cards: noise, and leaks held-out cards
+        "artist",
+        "border_color",
+        "frame",
+        "frame_effects",
+        "security_stamp",
+        "finishes",
+        "games",
+        "collector_number",
+        "image_status",
+        "prices",
+        "edhrec_rank",
+        "penny_rank",
+        "promo_types",
+        "preview",
+        "watermark",
+        "flavor_text",
+        "set_name",  # would give away a masked "set"
+        "set_type",
+        "foil",
+        "nonfoil",
+        "reprint",
+        "booster",
+        "highres_image",
+        "story_spotlight",
+    }
+)
+_LEADING_KEYS = (
+    "name",
+    "mana_cost",
+    "cmc",
+    "type_line",
+    "power",
+    "toughness",
+    "loyalty",
+    "defense",
+    "colors",
+    "color_identity",
+    "keywords",
+    "layout",
+    "rarity",
+    "set",
+)
+_TRAILING_KEYS = ("oracle_text", "card_faces")
+_NOT_LEGAL = "not_legal"
 
 
 class ScryfallCardIngestionStage:
@@ -163,9 +237,11 @@ class ScryfallCardIngestionStage:
             stored_uuid = card.nocab_uuid
             changed = True
         else:
-            # Existing card: build a throwaway candidate and merge it.
+            # Existing card: the incoming row wins if its content differs.
             candidate = self._build_card(row, oracle_id)
-            merged = merge_strategies.keep_longer_content(existing, candidate)
+            merged = merge_strategies.keep_incoming_if_content_differs(
+                existing, candidate
+            )
             changed = merged != existing
             if changed:
                 binder.replace(existing.nocab_uuid, merged)
@@ -193,7 +269,8 @@ class ScryfallCardIngestionStage:
                 line.
             oracle_id: row["oracle_id"], passed in rather than
                 re-read, since callers already have it at hand.
-        Output: a new GenericCard with a freshly minted nocab_uuid.
+        Output: a new GenericCard with a freshly minted nocab_uuid and the
+            row's lean content (see _lean_card_content) as raw_content.
         Side effects: none.
         Exceptions: raises if row is missing "name".
         """
@@ -201,7 +278,7 @@ class ScryfallCardIngestionStage:
             nocab_uuid=uuid4(),
             source_game=self.SOURCE_GAME,
             name=row["name"],
-            raw_content=row,
+            raw_content=_lean_card_content(row),
             provenance=Provenance(
                 data_source=DataSource.SCRYFALL,
                 source_id=oracle_id,
@@ -239,3 +316,61 @@ class ScryfallCardIngestionStage:
             aliases.append((DataSource.GATHERER, str(multiverse_id)))
 
         return aliases
+
+
+def _lean_card_content(row: JsonObject) -> JsonObject:
+    """Reduce a Scryfall oracle-cards row to what describes the card.
+
+    Applies lean_content.strip_noise with this source's printing/envelope
+    keys, collapses legalities, and orders keys (identity and short fields
+    first, oracle_text and card_faces last), including inside each face.
+
+    Inputs: row (JsonObject): one parsed Scryfall oracle-cards line.
+    Output: a new JsonObject; row itself is not modified.
+    Side effects: none.
+    Exceptions: none.
+
+    Example:
+        >>> _lean_card_content({"name": "Bolt", "id": "x", "cmc": 1.0, "lang": "en"})
+        {'name': 'Bolt', 'cmc': 1}
+    """
+    content = strip_noise(row, extra_noise_keys=_PRINTING_AND_ENVELOPE_KEYS)
+    legalities = content.get("legalities")
+    if isinstance(legalities, dict):
+        legal_formats = _legal_formats_by_status(legalities)
+        if legal_formats:
+            content["legalities"] = legal_formats
+        else:
+            del content["legalities"]
+    faces = content.get("card_faces")
+    if isinstance(faces, list):
+        content["card_faces"] = [
+            (
+                order_keys(face, _LEADING_KEYS, _TRAILING_KEYS)
+                if isinstance(face, dict)
+                else face
+            )
+            for face in faces
+        ]
+    return order_keys(content, _LEADING_KEYS, _TRAILING_KEYS)
+
+
+def _legal_formats_by_status(legalities: dict) -> JsonObject:
+    """Invert {format: status} into {status: [formats]}, omitting not_legal.
+
+    Inputs: legalities (dict[str, str]): Scryfall's legalities object.
+    Output: JsonObject mapping status to a list of format names, e.g.
+        {"legal": ["modern"], "banned": ["legacy"]}; empty if nothing is
+        legal, banned or restricted.
+    Side effects: none.
+    Exceptions: none.
+
+    Example:
+        >>> _legal_formats_by_status({"modern": "legal", "pauper": "not_legal"})
+        {'legal': ['modern']}
+    """
+    formats_by_status: dict[str, list[str]] = {}
+    for format_name, status in legalities.items():
+        if status != _NOT_LEGAL:
+            formats_by_status.setdefault(status, []).append(format_name)
+    return {status: list(formats) for status, formats in formats_by_status.items()}

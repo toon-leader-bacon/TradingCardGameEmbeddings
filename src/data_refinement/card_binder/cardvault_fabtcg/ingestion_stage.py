@@ -27,13 +27,30 @@ set/reprint x print_language x finish):
     an MTG DFC).
   - Every card_id has at least one print_language == "en" row.
 
+LEAN CONTENT: raw_content is not the CSV row. Of its 56 columns only the
+face_N_true_* columns (plus the parsed classes/talents/subtypes/types,
+which repeat typebox) are card-level: every one is identical across all
+prints of a card_id. Everything else describes a print (print_id, set,
+product, artwork, artist, finish, flavor text) or is a per-print display
+variant of a true_* column (face_N_name, face_N_rules_text,
+face_N_typebox), so it is dropped. The one exception is rarity, which
+varies between prints of the same card (28% of cards; e.g. common, marvel
+and promo) but is a classic label for metrics: the stored "rarity" is the
+LEAST RESTRICTIVE rarity across the card's English prints (see
+_RARITY_BY_RESTRICTIVENESS), i.e. the "oracle" rarity, so it is
+deterministic and does not depend on which print's row is read last. It is
+found in a preliminary scan of the file, before pass 1. The lean content has short unprefixed
+keys (name, typebox, pitch, cost, ... textbox last) for the front face and,
+for a two-faced card, a nested back_face object. See _lean_card_content()
+and "What goes in raw_content" in card_binder/README.md. Identity and
+aliases are read from the RAW row.
+
 DELIBERATE TWO-PASS DEPARTURE from every other existing stage's
 single-pass shape (see e.g. ScryfallCardIngestionStage.ingest(), which
 is one pass over one JSONL line at a time): this source carries the
 same card's rules text/flavor text repeated once per print_language,
-and letting a non-English row win merge_strategies.keep_longer_content
-purely on serialized-byte-length would make the canonical stored
-name/rules_text non-English for no principled reason. So content
+and letting a non-English row win the merge would make the canonical
+stored name/rules_text non-English for no principled reason. So content
 (pass 1) is built/merged from print_language == "en" rows only; every
 other row (pass 2) only ever registers its own print_id as a secondary
 alias against whichever card pass 1 already resolved for that card_id
@@ -46,18 +63,64 @@ import csv
 import io
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Iterable
 from uuid import UUID, uuid4
 
 from tqdm import tqdm
 
 from src.data_refinement.card_binder import merge_strategies
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.lean_content import (
+    JsonObject,
+    order_keys,
+    strip_noise,
+)
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 
 _ENGLISH_PRINT_LANGUAGE = "en"
+
+# Lean key -> column name after "face_<n>_", in output order: identity and
+# short fields first, the long text box last. Only card-level columns; the
+# parsed types/classes/talents/subtypes columns are omitted because typebox
+# already says the same thing (91-99% are literally contained in it).
+_FACE_COLUMNS = {
+    "name": "true_name",
+    "typebox": "true_typebox",
+    "pitch": "true_pitch",
+    "pitch_chi": "true_pitch_chi",
+    "color": "true_color",
+    "cost": "true_cost",
+    "power": "true_power",
+    "defense": "true_defense",
+    "life": "true_life",
+    "intellect": "true_intellect",
+    "traitbox": "true_traitbox",
+    "textbox": "true_textbox",
+}
+_LINE_BREAK_MARKUP = "{br}"
+
+# From least to most restrictive: how hard a card at that rarity is to get.
+# A judgment call about FaB (edit here if it is wrong): tokens and basics are
+# free, then the booster rarities in order, then the limited treatments
+# (marvel, promo, gold) which are the most restrictive. A rarity not listed
+# (a future one) ranks after every listed one.
+_RARITY_BY_RESTRICTIVENESS = (
+    "token",
+    "basic",
+    "common",
+    "rare",
+    "super-rare",
+    "majestic",
+    "legendary",
+    "fabled",
+    "marvel",
+    "promo",
+    "promo-marvel",
+    "gold",
+    "gold-marvel",
+)
 
 
 class CardVaultFabtcgCardIngestionStage:
@@ -73,8 +136,9 @@ class CardVaultFabtcgCardIngestionStage:
         """Parse a cardvault.fabtcg.com public_card_data.csv file,
         creating/updating cards directly on binder as a side effect.
 
-        Two passes over raw_path's rows — see this module's docstring
-        for why. Pass 1 (English rows) does all content
+        A preliminary scan (no progress bar) collects each card's least
+        restrictive English rarity, then two passes over raw_path's rows,
+        see this module's docstring for why. Pass 1 (English rows) does all content
         creation/merging; pass 2 (every other language) only registers
         additional print_id aliases against whatever pass 1 already
         resolved.
@@ -116,6 +180,7 @@ class CardVaultFabtcgCardIngestionStage:
         """
         changed_uuids = []
         total_bytes = raw_path.stat().st_size
+        rarities = self._least_restrictive_rarities(raw_path)
 
         # Pass 1: English rows only — all content creation/merging happens here.
         # Opened in binary + wrapped in TextIOWrapper ourselves (rather than
@@ -139,7 +204,9 @@ class CardVaultFabtcgCardIngestionStage:
 
                     if row["print_language"] != _ENGLISH_PRINT_LANGUAGE:
                         continue
-                    result = self._ingest_content_row(row, binder)
+                    result = self._ingest_content_row(
+                        row, binder, rarities.get(row["card_id"], "")
+                    )
                     if result is not None:
                         changed_uuids.append(result)
 
@@ -163,13 +230,17 @@ class CardVaultFabtcgCardIngestionStage:
 
         return changed_uuids
 
-    def _ingest_content_row(self, row: dict, binder: CardBinder) -> UUID | None:
+    def _ingest_content_row(
+        self, row: dict, binder: CardBinder, rarity: str
+    ) -> UUID | None:
         """Create-or-merge one English cardvault.fabtcg.com row directly against binder.
 
         Private helper — single consumer is ingest()'s pass 1. Mirrors
         SpireCodexCardIngestionStage._ingest_row()'s shape: identity is
         get_by_alias(card_id), collision policy is
-        merge_strategies.keep_longer_content, and both card_id
+        merge_strategies.keep_incoming_if_content_differs (every English
+        print of a card has the same lean content, so it rarely matters),
+        and both card_id
         (primary) and this row's own print_id (secondary) are
         registered on every branch — including a no-op merge — per
         card_binder/README.md's AliasLedger "register on every branch"
@@ -179,6 +250,8 @@ class CardVaultFabtcgCardIngestionStage:
             row: one parsed CSV row (a dict, via csv.DictReader) with
                 print_language == "en".
             binder: the CardBinder to read from and write to.
+            rarity: the card's least restrictive English rarity ("" if
+                none of its rows has one).
         Output: the stored/canonical nocab_uuid for this row IF this
             call caused a create() or an actual content-changing
             replace(); None if this row matched an existing card but
@@ -194,13 +267,15 @@ class CardVaultFabtcgCardIngestionStage:
         )
 
         if existing is None:
-            card = self._build_card(row, card_id)
+            card = self._build_card(row, card_id, rarity)
             binder.create(card)
             stored_uuid = card.nocab_uuid
             changed = True
         else:
-            candidate = self._build_card(row, card_id)
-            merged = merge_strategies.keep_longer_content(existing, candidate)
+            candidate = self._build_card(row, card_id, rarity)
+            merged = merge_strategies.keep_incoming_if_content_differs(
+                existing, candidate
+            )
             changed = merged != existing
             if changed:
                 binder.replace(existing.nocab_uuid, merged)
@@ -214,6 +289,28 @@ class CardVaultFabtcgCardIngestionStage:
         )
 
         return stored_uuid if changed else None
+
+    def _least_restrictive_rarities(self, raw_path: Path) -> dict[str, str]:
+        """Each card_id's least restrictive rarity over its English rows.
+
+        Inputs: raw_path (Path): the public_card_data.csv file.
+        Output: dict[str, str]: card_id -> rarity. A card whose English rows
+            all have an empty rarity has no entry.
+        Side effects: reads raw_path once.
+        Exceptions: raises if raw_path is unreadable or a row lacks
+            "card_id", "print_language" or "rarity".
+        """
+        rarities_by_card: dict[str, set[str]] = {}
+        with open(raw_path, "r", newline="", encoding="utf-8") as raw_file:
+            for row in csv.DictReader(raw_file):
+                if row["print_language"] == _ENGLISH_PRINT_LANGUAGE and row["rarity"]:
+                    rarities_by_card.setdefault(row["card_id"], set()).add(
+                        row["rarity"]
+                    )
+        return {
+            card_id: _least_restrictive(rarities)
+            for card_id, rarities in rarities_by_card.items()
+        }
 
     def _register_print_alias(self, row: dict, binder: CardBinder) -> None:
         """Register one non-English row's print_id against its already-ingested card.
@@ -253,7 +350,7 @@ class CardVaultFabtcgCardIngestionStage:
             existing.nocab_uuid,
         )
 
-    def _build_card(self, row: dict, card_id: str) -> GenericCard:
+    def _build_card(self, row: dict, card_id: str, rarity: str) -> GenericCard:
         """Build a fresh GenericCard for one English cardvault.fabtcg.com row.
 
         Private helper — single consumer is _ingest_content_row(),
@@ -267,7 +364,9 @@ class CardVaultFabtcgCardIngestionStage:
                 print_language == "en".
             card_id: row["card_id"], passed in rather than re-read,
                 since callers already have it at hand.
-        Output: a new GenericCard with a freshly minted nocab_uuid.
+            rarity: the card's least restrictive English rarity.
+        Output: a new GenericCard with a freshly minted nocab_uuid and the
+            row's lean content (see _lean_card_content) as raw_content.
         Side effects: none.
         Exceptions: raises if row is missing "face_1_true_name".
         """
@@ -279,10 +378,76 @@ class CardVaultFabtcgCardIngestionStage:
             nocab_uuid=uuid4(),
             source_game=self.SOURCE_GAME,
             name=name,
-            raw_content=row,
+            raw_content=_lean_card_content(row, rarity),
             provenance=Provenance(
                 data_source=DataSource.CARDVAULT_FABTCG,
                 source_id=card_id,
                 fetched_at=datetime.now(timezone.utc),
             ),
         )
+
+
+def _least_restrictive(rarities: Iterable[str]) -> str:
+    """The rarity that is least restrictive (see _RARITY_BY_RESTRICTIVENESS).
+
+    Unlisted rarities rank after every listed one, and ties between them
+    break alphabetically, so the result never depends on input order.
+
+    Inputs: rarities (Iterable[str]): at least one rarity.
+    Output: str.
+    Side effects: none.
+    Exceptions: ValueError if rarities is empty.
+
+    Example:
+        >>> _least_restrictive(["promo", "marvel", "common"])
+        'common'
+    """
+
+    def restrictiveness(rarity: str) -> tuple[int, str]:
+        if rarity in _RARITY_BY_RESTRICTIVENESS:
+            return _RARITY_BY_RESTRICTIVENESS.index(rarity), rarity
+        return len(_RARITY_BY_RESTRICTIVENESS), rarity
+
+    return min(rarities, key=restrictiveness)
+
+
+def _lean_card_content(row: dict[str, str], rarity: str) -> JsonObject:
+    """Reduce one English CSV row to the card-level content of the card.
+
+    Inputs: row (dict[str, str]): one parsed CSV row. rarity (str): the
+        card's least restrictive English rarity, "" if it has none.
+    Output: a new JsonObject: the front face's fields under short keys
+        (see _FACE_COLUMNS), the rarity, plus a nested "back_face" object
+        when the card has a second face. Empty columns are omitted.
+    Side effects: none.
+    Exceptions: none.
+
+    Example:
+        >>> _lean_card_content(
+        ...     {"face_1_true_name": "Bolt", "face_1_true_cost": "1"}, "common"
+        ... )
+        {'name': 'Bolt', 'rarity': 'common', 'cost': '1'}
+    """
+    content = _face_content(row, 1)
+    if rarity:
+        content["rarity"] = rarity
+    if row.get("face_2_true_name"):
+        content["back_face"] = _face_content(row, 2)
+    return order_keys(
+        content,
+        leading=("name", "typebox", "rarity"),
+        trailing=("textbox", "back_face"),
+    )
+
+
+def _face_content(row: dict[str, str], face_number: int) -> JsonObject:
+    """One face's card-level fields, empties dropped, {br} turned into a
+    newline (the same convention gwent_one's stage uses for its text)."""
+    fields: JsonObject = {
+        lean_key: row.get(f"face_{face_number}_{column}", "")
+        for lean_key, column in _FACE_COLUMNS.items()
+    }
+    textbox = fields["textbox"]
+    if isinstance(textbox, str):
+        fields["textbox"] = textbox.replace(_LINE_BREAK_MARKUP, "\n")
+    return strip_noise(fields)

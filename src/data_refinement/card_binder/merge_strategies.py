@@ -97,3 +97,34 @@ def keep_longer_content(existing: GenericCard, candidate: GenericCard) -> Generi
     if candidate_size > existing_size:
         return keep_incoming(existing, candidate)
     return existing
+
+
+def keep_incoming_if_content_differs(
+    existing: GenericCard, candidate: GenericCard
+) -> GenericCard:
+    """The incoming card wins, but only if its content actually differs.
+
+    For a source that is authoritative for its own ids (a dump replaces
+    what an earlier dump said) but whose provenance carries a fresh
+    fetched_at every run: plain keep_incoming would make every re-ingest of
+    an unchanged card look like a change. "Content" is raw_content and name.
+
+    Inputs:
+        existing: the card currently stored under this identity.
+        candidate: the newly-seen card.
+    Output: keep_incoming(existing, candidate) if raw_content or name
+        differs, else existing unchanged (so its provenance is kept too).
+    Side effects: none.
+    Exceptions: none.
+
+    Example:
+        >>> keep_incoming_if_content_differs(existing_card, same_content_card)
+        ... == existing_card
+        True
+    """
+    if (
+        candidate.raw_content == existing.raw_content
+        and candidate.name == existing.name
+    ):
+        return existing
+    return keep_incoming(existing, candidate)

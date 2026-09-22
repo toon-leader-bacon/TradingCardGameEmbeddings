@@ -37,6 +37,9 @@ from src.data_refinement.card_binder.cardvault_fabtcg.ingestion_stage import (
     CardVaultFabtcgCardIngestionStage,
 )
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.dominiontabs.ingestion_stage import (
+    DominionTabsCardIngestionStage,
+)
 from src.data_refinement.card_binder.gwent_one.ingestion_stage import (
     GwentOneCardIngestionStage,
 )
@@ -53,6 +56,7 @@ from src.data_refinement.card_binder.spire_codex.ingestion_stage import (
 from src.data_retrieval.cardvault_fabtcg.card_downloader import (
     CardVaultFabtcgCardDownloader,
 )
+from src.data_retrieval.dominiontabs.downloader import DominionTabsCardDownloader
 from src.data_retrieval.gwent_one.downloader import GwentOneDownloader
 from src.data_retrieval.pokemon_tcg.downloader import PokemonTcgDataDownloader
 from src.data_retrieval.scryfall.downloader import ScryfallOracleDownloader
@@ -81,7 +85,7 @@ def _latest_scryfall_dump() -> Path:
 # One (ingestion_stage, default raw_path) pair per source — the default
 # raw_path matches what run_data_retrieval.py's own downloader for that
 # source writes.
-_STAGES: dict[str, tuple[CardIngestionStage, Callable[[], Path]]] = {
+STAGES: dict[str, tuple[CardIngestionStage, Callable[[], Path]]] = {
     "scryfall": (ScryfallCardIngestionStage(), _latest_scryfall_dump),
     "pokemon_tcg": (
         PokemonTcgCardIngestionStage(),
@@ -95,6 +99,10 @@ _STAGES: dict[str, tuple[CardIngestionStage, Callable[[], Path]]] = {
         SpireCodexCardIngestionStage(),
         lambda: SpireCodexCardDownloader.DEFAULT_RAW_DATA_DIR / "cards.json",
     ),
+    "dominiontabs": (
+        DominionTabsCardIngestionStage(),
+        lambda: DominionTabsCardDownloader.DEFAULT_RAW_DATA_DIR,
+    ),
     "cardvault_fabtcg": (
         CardVaultFabtcgCardIngestionStage(),
         lambda: CardVaultFabtcgCardDownloader.DEFAULT_RAW_DATA_DIR
@@ -106,7 +114,7 @@ _STAGES: dict[str, tuple[CardIngestionStage, Callable[[], Path]]] = {
 def run_one(name: str, raw_path: Path | None) -> None:
     """Ingest one source into its game's CardBinder file, printing how
     many cards were created or content-changed."""
-    stage, default_raw_path = _STAGES[name]
+    stage, default_raw_path = STAGES[name]
     resolved_raw_path = raw_path if raw_path is not None else default_raw_path()
     binder_path = CardBinder.default_output_path(stage.SOURCE_GAME)
 
@@ -126,7 +134,7 @@ def run_all() -> None:
     src/data_refinement/metrics/sts_gg/scanner.py) rather than letting
     one bad/missing raw dump abort every other source's run."""
     failed: list[str] = []
-    for name in sorted(_STAGES):
+    for name in sorted(STAGES):
         try:
             run_one(name, raw_path=None)
         except Exception:
@@ -148,7 +156,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--source",
-        choices=sorted(_STAGES),
+        choices=sorted(STAGES),
         help="Ingest just this one source into its game's CardBinder.",
     )
     parser.add_argument(
@@ -169,7 +177,7 @@ def main() -> None:
     args = parse_args()
 
     if args.list:
-        for name in sorted(_STAGES):
+        for name in sorted(STAGES):
             print(name)
         return
 

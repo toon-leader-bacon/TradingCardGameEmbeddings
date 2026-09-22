@@ -15,8 +15,8 @@ Confirmed by sampling both live raw files directly
     misses ("Soothsayer BB2DE", "Walled Village BB2DE") are German
     big-box promo variants of cards already ingested under their plain
     card_tag - not missing cards, just missing English text for these
-    two specific variant rows. Handled by falling back to no
-    description rather than raising - see _ingest_card().
+    two specific variant rows. Such entries are skipped, see SKIPPED
+    below.
   - cards_en_us.json's other 117 keys with no cards_db.json match are
     NOT cards: they're either group/category header text (e.g.
     "Boons", "menagerie events" - these match cards_db.json's
@@ -27,31 +27,55 @@ Confirmed by sampling both live raw files directly
     Since this stage iterates cards_db.json (not cards_en_us.json), none
     of these 117 keys are ever visited or ingested.
 
-Per explicit instruction: only six raw fields are kept verbatim in
-raw_content (name, types, cost, description, potcost, debtcost) - see
-_build_raw_content(). Every other field on either raw file
-(cardset_tags, group_tag, group_top, count, randomizer, image, extra,
-notes) is deliberately excluded from this stage - either
-divider-generator-specific bookkeeping with no use here (group_tag,
-group_top, count, randomizer, image), or text not judged useful
-(extra, notes). cardset_tags is left out of ingestion for now, not
-deleted from the raw file - a later stage that wants "which
-expansion(s) is this card in" can still read it directly from
-data/raw/dominiontabs/cards_db.json.
+LEAN CONTENT (see "What goes in raw_content" in card_binder/README.md).
+raw_content is built from a whitelist, since this source is two small,
+cleanly keyed files: name (the card_tag), types, cost, potcost, debtcost
+and description. Everything else is left out on purpose:
+  - cardset_tags: which expansion(s) a card is in. Not the card itself, and
+    SetMaskMetric reads it straight from the raw cards_db.json, so nothing
+    is lost. A good classification metric, not binder content.
+  - extra: the long rulings/clarifications (median 337 characters against a
+    106-character description). Not text on the card; a different kind of
+    data (like Scryfall's rulings, which are also left out).
+  - notes: only used to say which entries are unused or fan-made; see
+    "NOT DECIDED HERE" below.
+  - randomizer, group_tag, group_top, count, image: the divider generator's
+    own bookkeeping (kingdom-randomizer flag, pile grouping and sizes, an
+    image file name). randomizer is mostly implied by types (Events,
+    Landmarks, Ways... are never kingdom cards); group_tag names other
+    cards in a split pile, a cross-card reference.
+cost/potcost/debtcost are kept as dominiontabs' own strings (cost "6*" for
+a variable cost, "" for a card with no coin cost) and cost is ALWAYS
+present, even when empty: CostRegressionMetric indexes raw_content["cost"]
+directly and reads "" plus a potcost as a real coin cost of 0
+(Transmute, Vineyard), so dropping an empty cost would raise a KeyError
+there. types keeps its order, since TypeMaskMetric reads types[0].
+description is the card text with the divider generator's layout markup
+turned into plain text (see _clean_description): <br>, <n> and <line>
+become a newline, <left>/<center>/<justify> start a new line, <u>/<i>/<b>
+are removed, and the symbol tags <VP>, <*COIN*> and <*POTION*> become the
+words VP, Coin and Potion.
 
-`cost`/`potcost`/`debtcost` are kept as the raw strings dominiontabs
-itself uses (e.g. cost "6*" for a variable-cost card, "" for an
-uncosted Landmark/Way/Boon/etc.) - not parsed into int here, per
-explicit instruction not to reshape this data more than necessary.
-`description`'s `<br>`/`<n>` tokens are likewise left untouched.
+SKIPPED: a cards_db.json entry with no English text is not ingested. Today
+that is exactly two entries, "Soothsayer BB2DE" and "Walled Village BB2DE":
+German big-box duplicates of cards that are already ingested under their
+plain card_tag, which would otherwise become junk-named cards with no
+description. (SetMaskMetric skips raw entries that have no binder card, so
+it copes.)
+
+NOT DECIDED HERE, still ingested: the 3 fan-made "Animals" cards (notes say
+"Fan expansion") and the 13 count == "0" entries that are pile headers
+rather than cards (Augurs, Clashes, ... "Settlers - Bustling Village", plus
+"Start Deck").
 
 Design, matching scryfall/ingestion_stage.py's shape:
   - DEDUPLICATION: card_tag is dominiontabs' own perfect natural key
     (unique per cards_db.json entry) - the identity lookup is
     binder.get_by_alias(self.SOURCE_GAME, DataSource.DOMINIONTABS,
     card_tag). No name-based or heuristic fallback is needed.
-  - COLLISION RESOLUTION: merge_strategies.keep_longer_content, same
-    policy every other stage in this container uses.
+  - COLLISION RESOLUTION: merge_strategies.keep_incoming_if_content_differs.
+    card_tag is a perfect natural key, so a newer dump is authoritative
+    for its own cards; unchanged content is left alone.
   - Every entry's card_tag is registered as its alias on EVERY
     branch of _ingest_card() - including a no-op branch - per
     card_binder/README.md's "a losing/no-op row's identifier must
@@ -63,6 +87,7 @@ Design, matching scryfall/ingestion_stage.py's shape:
 """
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import ClassVar
@@ -73,6 +98,15 @@ from src.data_refinement.card_binder.card_binder import CardBinder
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
+
+_SYMBOL_TAG = re.compile(r"<\*?(VP|COIN|POTION)\*?>")
+_SYMBOL_WORDS = {"VP": "VP", "COIN": "Coin", "POTION": "Potion"}
+_LINE_BREAK_TAG = re.compile(r"<(?:br|n|line)>")
+_BLOCK_OPEN_TAG = re.compile(r"<(?:left|center|justify)>")
+_FORMATTING_TAG = re.compile(r"</?(?:u|i|b|left|center|justify)>")
+_SPACES = re.compile(r"[ \t\u00a0]+")
+_SPACES_AROUND_NEWLINE = re.compile(r" ?\n ?")
+_BLANK_LINES = re.compile(r"\n{3,}")
 
 _OPTIONAL_DB_FIELDS: tuple[str, ...] = ("potcost", "debtcost")
 # Present only on some cards_db.json entries (potcost: Alchemy cards;
@@ -121,7 +155,8 @@ class DominionTabsCardIngestionStage:
         Side effects: reads raw_path/CARDS_DB_FILENAME and
             raw_path/CARDS_EN_US_FILENAME; creates/updates cards and
             registers aliases directly on binder, once per
-            cards_db.json entry.
+            cards_db.json entry that has English text (entries without any
+            are skipped).
         Exceptions: raises if either file is missing under raw_path,
             isn't valid JSON, or a cards_db.json entry is missing
             "card_tag" or "types".
@@ -140,6 +175,8 @@ class DominionTabsCardIngestionStage:
 
         changed_uuids = []
         for db_entry in db_entries:
+            if db_entry["card_tag"] not in text_by_card_tag:
+                continue  # no English text: a German duplicate, see module doc
             result = self._ingest_card(db_entry, text_by_card_tag, binder)
             if result is not None:
                 changed_uuids.append(result)
@@ -157,9 +194,8 @@ class DominionTabsCardIngestionStage:
             db_entry: one parsed JSON object from cards_db.json.
             text_by_card_tag: the full parsed cards_en_us.json dict
                 (keyed by card name) — looked up by db_entry["card_tag"],
-                which misses for 2 of 819 entries (German promo
-                variants — see this module's docstring); a miss is
-                tolerated, not an error.
+                which ingest() has already checked is present (entries
+                without English text are skipped there).
             binder: the CardBinder to read from and write to.
         Output: the stored/canonical nocab_uuid for this entry IF this
             call caused a create() or an actual content-changing
@@ -174,7 +210,7 @@ class DominionTabsCardIngestionStage:
             (the latter via _build_card() -> _build_raw_content()).
         """
         card_tag = db_entry["card_tag"]
-        text_entry = text_by_card_tag.get(card_tag)
+        text_entry = text_by_card_tag[card_tag]
         existing = binder.get_by_alias(
             self.SOURCE_GAME, DataSource.DOMINIONTABS, card_tag
         )
@@ -188,7 +224,9 @@ class DominionTabsCardIngestionStage:
         else:
             # Existing card: build a throwaway candidate and merge it.
             candidate = self._build_card(db_entry, text_entry, card_tag)
-            merged = merge_strategies.keep_longer_content(existing, candidate)
+            merged = merge_strategies.keep_incoming_if_content_differs(
+                existing, candidate
+            )
             changed = merged != existing
             if changed:
                 binder.replace(existing.nocab_uuid, merged)
@@ -200,42 +238,42 @@ class DominionTabsCardIngestionStage:
 
         return stored_uuid if changed else None
 
-    def _build_raw_content(self, db_entry: dict, text_entry: dict | None) -> dict:
-        """Build the trimmed raw_content dict for one card.
+    def _build_raw_content(self, db_entry: dict, text_entry: dict) -> dict:
+        """Build the lean raw_content dict for one card.
 
         Private helper — single consumer is _build_card(). Keeps only
-        name, types, cost, description, potcost, debtcost — see this
-        module's docstring for why every other field on either raw
-        file is excluded.
+        name, types, cost, potcost, debtcost and description — see this
+        module's docstring for why every other field on either raw file
+        is excluded, and why cost is always present.
 
         Inputs:
             db_entry: one parsed JSON object from cards_db.json.
             text_entry: the matching cards_en_us.json value
-                (`{"description": ..., "name": ..., ...}`), or None if
-                no match was found (see _ingest_card()).
-        Output: a dict with keys "name", "types", "cost", "description",
-            and, only when present on db_entry, "potcost"/"debtcost".
-            "description" is "" when text_entry is None. cost/potcost/
-            debtcost are kept as dominiontabs' own raw strings,
-            unparsed. description's `<br>`/`<n>` tokens are left as-is.
+                (`{"description": ..., "name": ..., ...}`).
+        Output: a dict with keys "name", "types", "cost" (always, "" when
+            the card has none), then "potcost"/"debtcost" only when
+            db_entry has them, then "description" (cleaned by
+            _clean_description) only when there is English text for it.
         Side effects: none.
         Exceptions: raises if db_entry is missing "card_tag" or "types".
         """
         raw_content: dict = {
             "name": db_entry["card_tag"],
-            "types": db_entry["types"],
+            "types": list(db_entry["types"]),
             "cost": db_entry.get("cost", ""),
-            "description": text_entry["description"] if text_entry is not None else "",
         }
         for optional_field in _OPTIONAL_DB_FIELDS:
             if optional_field in db_entry:
                 raw_content[optional_field] = db_entry[optional_field]
+        description = _clean_description(text_entry["description"])
+        if description:
+            raw_content["description"] = description
         return raw_content
 
     def _build_card(
         self,
         db_entry: dict,
-        text_entry: dict | None,
+        text_entry: dict,
         card_tag: str,
     ) -> GenericCard:
         """Build a fresh GenericCard for one dominiontabs card.
@@ -264,3 +302,33 @@ class DominionTabsCardIngestionStage:
                 fetched_at=datetime.now(timezone.utc),
             ),
         )
+
+
+def _clean_description(text: str) -> str:
+    """Turn a dominiontabs description's layout markup into plain text.
+
+    Inputs: text (str): a cards_en_us.json "description", e.g.
+        "+2 Cards<br>+1 Action<line>When you discard this...".
+    Output: str: <br>, <n> and <line> as newlines; <left>, <center> and
+        <justify> start a new line; <u> becomes a space (Knights lists
+        "5 Coin<u>Dame Anna</u>") and </u>, <i>, <b> and closing tags are
+        removed; <VP>/<*VP*>, <*COIN*> and <*POTION*> become VP, Coin and
+        Potion; runs of spaces (and non-breaking spaces) collapse, spaces
+        around newlines go, three or more newlines become two, and the
+        ends are stripped.
+    Side effects: none.
+    Exceptions: none.
+
+    Example:
+        >>> _clean_description("+2 Cards<br>+1 Action<n>Gain <*COIN*>.")
+        '+2 Cards\n+1 Action\nGain Coin.'
+    """
+    text = _SYMBOL_TAG.sub(lambda match: _SYMBOL_WORDS[match.group(1)], text)
+    text = _LINE_BREAK_TAG.sub("\n", text)
+    text = _BLOCK_OPEN_TAG.sub("\n", text)
+    text = text.replace("<u>", " ")
+    text = _FORMATTING_TAG.sub("", text)
+    text = _SPACES.sub(" ", text)
+    text = _SPACES_AROUND_NEWLINE.sub("\n", text)
+    text = _BLANK_LINES.sub("\n\n", text)
+    return text.strip()

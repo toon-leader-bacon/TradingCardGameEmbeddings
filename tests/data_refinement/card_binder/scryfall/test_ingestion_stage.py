@@ -79,6 +79,182 @@ class TestIngestNewCards:
             ScryfallCardIngestionStage().ingest(raw_path, binder)
 
 
+class TestLeanContent:
+    def test_created_card_keeps_card_fields_and_drops_noise(
+        self, tmp_path: Path
+    ) -> None:
+        raw_path = tmp_path / "oracle-cards.jsonl"
+        row = {
+            "object": "card",
+            "id": "cfa04897-6438-45e5-a10b-2e8afaf2b9eb",
+            "oracle_id": "id-1",
+            "name": "Lightning Bolt",
+            "lang": "en",
+            "released_at": "2026-09-12",
+            "uri": "https://api.scryfall.com/cards/x",
+            "image_uris": {"small": "https://cards.scryfall.io/small/x.jpg"},
+            "mana_cost": "{R}",
+            "cmc": 1.0,
+            "type_line": "Instant",
+            "oracle_text": "Lightning Bolt deals 3 damage to any target.",
+            "colors": ["R"],
+            "keywords": [],
+            "prices": {"usd": "0.25", "eur": None},
+            "artist": "Christopher Moeller",
+            "flavor_text": "",
+            "set": "m10",
+            "set_name": "Magic 2010",
+            "rarity": "common",
+            "foil": True,
+            "reserved": False,
+            "digital": True,
+            "all_parts": [{"name": "Other Card", "component": "combo_piece"}],
+        }
+        _write_jsonl(raw_path, [row])
+        binder = CardBinder()
+
+        ScryfallCardIngestionStage().ingest(raw_path, binder)
+
+        card = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
+        assert card is not None
+        assert card.raw_content == {
+            "name": "Lightning Bolt",
+            "mana_cost": "{R}",
+            "cmc": 1,
+            "type_line": "Instant",
+            "colors": ["R"],
+            "rarity": "common",
+            "set": "m10",
+            "digital": True,
+            "oracle_text": "Lightning Bolt deals 3 damage to any target.",
+        }
+
+    def test_key_order_puts_identity_first_and_rules_text_last(
+        self, tmp_path: Path
+    ) -> None:
+        raw_path = tmp_path / "oracle-cards.jsonl"
+        row = {
+            "oracle_id": "id-1",
+            "oracle_text": "Text.",
+            "reserved": True,
+            "type_line": "Instant",
+            "name": "Bolt",
+        }
+        _write_jsonl(raw_path, [row])
+        binder = CardBinder()
+
+        ScryfallCardIngestionStage().ingest(raw_path, binder)
+
+        card = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
+        assert card is not None
+        assert list(card.raw_content) == [
+            "name",
+            "type_line",
+            "reserved",
+            "oracle_text",
+        ]
+
+    def test_legalities_list_only_non_default_statuses(self, tmp_path: Path) -> None:
+        raw_path = tmp_path / "oracle-cards.jsonl"
+        row = {
+            "oracle_id": "id-1",
+            "name": "Bolt",
+            "legalities": {
+                "standard": "not_legal",
+                "modern": "legal",
+                "legacy": "legal",
+                "vintage": "restricted",
+                "historic": "banned",
+            },
+        }
+        _write_jsonl(raw_path, [row])
+        binder = CardBinder()
+
+        ScryfallCardIngestionStage().ingest(raw_path, binder)
+
+        card = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
+        assert card is not None
+        assert card.raw_content["legalities"] == {
+            "legal": ["modern", "legacy"],
+            "restricted": ["vintage"],
+            "banned": ["historic"],
+        }
+
+    def test_legalities_omitted_when_nothing_is_legal(self, tmp_path: Path) -> None:
+        raw_path = tmp_path / "oracle-cards.jsonl"
+        row = {
+            "oracle_id": "id-1",
+            "name": "Some Token",
+            "legalities": {"standard": "not_legal", "modern": "not_legal"},
+        }
+        _write_jsonl(raw_path, [row])
+        binder = CardBinder()
+
+        ScryfallCardIngestionStage().ingest(raw_path, binder)
+
+        card = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
+        assert card is not None
+        assert "legalities" not in card.raw_content
+
+    def test_card_faces_are_cleaned_and_ordered_per_face(self, tmp_path: Path) -> None:
+        raw_path = tmp_path / "oracle-cards.jsonl"
+        row = {
+            "oracle_id": "id-1",
+            "name": "Witch Enchanter // Witch-Blessed Meadow",
+            "card_faces": [
+                {
+                    "object": "card_face",
+                    "oracle_text": "When this creature enters, destroy target artifact.",
+                    "name": "Witch Enchanter",
+                    "artist": "Someone",
+                    "illustration_id": "7106ab4f-bd3e-4d2a-ba9c-7f223b5a0b7f",
+                    "image_uris": {"small": "https://cards.scryfall.io/small/y.jpg"},
+                    "mana_cost": "{3}{W}",
+                    "power": "2",
+                    "flavor_text": "",
+                },
+                {
+                    "object": "card_face",
+                    "name": "Witch-Blessed Meadow",
+                    "type_line": "Land",
+                },
+            ],
+        }
+        _write_jsonl(raw_path, [row])
+        binder = CardBinder()
+
+        ScryfallCardIngestionStage().ingest(raw_path, binder)
+
+        card = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
+        assert card is not None
+        assert card.raw_content["card_faces"] == [
+            {
+                "name": "Witch Enchanter",
+                "mana_cost": "{3}{W}",
+                "power": "2",
+                "oracle_text": "When this creature enters, destroy target artifact.",
+            },
+            {"name": "Witch-Blessed Meadow", "type_line": "Land"},
+        ]
+
+    def test_ids_dropped_from_content_still_register_as_aliases(
+        self, tmp_path: Path
+    ) -> None:
+        # Aliases are read from the RAW row, not from the lean content.
+        raw_path = tmp_path / "oracle-cards.jsonl"
+        _write_jsonl(raw_path, [_ROW_WITH_ALL_ALIASES])
+        binder = CardBinder()
+
+        ScryfallCardIngestionStage().ingest(raw_path, binder)
+
+        card = binder.get_by_alias(
+            GameId.MTG, DataSource.SCRYFALL, _ROW_WITH_ALL_ALIASES["oracle_id"]
+        )
+        assert card is not None
+        assert "arena_id" not in card.raw_content
+        assert binder.get_by_alias(GameId.MTG, DataSource.ARENA, "76497") == card
+
+
 class TestReIngestDuplicates:
     def test_unchanged_row_is_a_noop_and_preserves_uuid(self, tmp_path: Path) -> None:
         raw_path = tmp_path / "oracle-cards.jsonl"
@@ -97,59 +273,99 @@ class TestReIngestDuplicates:
         assert reloaded.nocab_uuid == original.nocab_uuid
         assert second_changed == []
 
-    def test_richer_row_updates_content_in_place(self, tmp_path: Path) -> None:
-        binder = CardBinder()
-        stage = ScryfallCardIngestionStage()
-        sparse_path = tmp_path / "sparse.jsonl"
-        _write_jsonl(sparse_path, [{"oracle_id": "id-1", "name": "Bolt"}])
-        stage.ingest(sparse_path, binder)
-        original = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
-        assert original is not None
-
-        richer_path = tmp_path / "richer.jsonl"
-        richer_row = {
-            "oracle_id": "id-1",
-            "name": "Bolt",
-            "mana_cost": "{R}",
-            "type_line": "Instant",
-        }
-        _write_jsonl(richer_path, [richer_row])
-
-        changed = stage.ingest(richer_path, binder)
-
-        updated = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
-        assert updated is not None
-        assert updated.nocab_uuid == original.nocab_uuid
-        assert updated.raw_content == richer_row
-        assert changed == [original.nocab_uuid]
-
-    def test_less_rich_row_leaves_existing_content_untouched(
+    def test_changed_row_replaces_content_in_place_keeping_uuid(
         self, tmp_path: Path
     ) -> None:
         binder = CardBinder()
         stage = ScryfallCardIngestionStage()
-        richer_path = tmp_path / "richer.jsonl"
-        richer_row = {
-            "oracle_id": "id-1",
+        first_path = tmp_path / "first.jsonl"
+        _write_jsonl(first_path, [{"oracle_id": "id-1", "name": "Bolt"}])
+        stage.ingest(first_path, binder)
+        original = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
+        assert original is not None
+
+        second_path = tmp_path / "second.jsonl"
+        _write_jsonl(
+            second_path,
+            [
+                {
+                    "oracle_id": "id-1",
+                    "name": "Bolt",
+                    "mana_cost": "{R}",
+                    "type_line": "Instant",
+                }
+            ],
+        )
+
+        changed = stage.ingest(second_path, binder)
+
+        updated = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
+        assert updated is not None
+        assert updated.nocab_uuid == original.nocab_uuid
+        assert updated.raw_content == {
             "name": "Bolt",
             "mana_cost": "{R}",
             "type_line": "Instant",
         }
-        _write_jsonl(richer_path, [richer_row])
-        stage.ingest(richer_path, binder)
+        assert changed == [original.nocab_uuid]
+
+    def test_shorter_incoming_row_still_wins(self, tmp_path: Path) -> None:
+        # The dump is authoritative: errata that shortens rules text must
+        # not lose to a stale, longer stored row.
+        binder = CardBinder()
+        stage = ScryfallCardIngestionStage()
+        old_path = tmp_path / "old.jsonl"
+        _write_jsonl(
+            old_path,
+            [{"oracle_id": "id-1", "name": "Bolt", "oracle_text": "Long old text."}],
+        )
+        stage.ingest(old_path, binder)
         original = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
         assert original is not None
 
-        sparse_path = tmp_path / "sparse.jsonl"
-        _write_jsonl(sparse_path, [{"oracle_id": "id-1", "name": "Bolt"}])
+        new_path = tmp_path / "new.jsonl"
+        _write_jsonl(
+            new_path, [{"oracle_id": "id-1", "name": "Bolt", "oracle_text": "New."}]
+        )
 
-        changed = stage.ingest(sparse_path, binder)
+        changed = stage.ingest(new_path, binder)
 
-        unchanged = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
-        assert unchanged is not None
-        assert unchanged.nocab_uuid == original.nocab_uuid
-        assert unchanged.raw_content == richer_row
+        updated = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
+        assert updated is not None
+        assert updated.raw_content["oracle_text"] == "New."
+        assert updated.nocab_uuid == original.nocab_uuid
+        assert changed == [original.nocab_uuid]
+
+    def test_row_differing_only_in_noise_is_a_noop(self, tmp_path: Path) -> None:
+        # Prices, image URLs and ids change between dumps; the card does not.
+        binder = CardBinder()
+        stage = ScryfallCardIngestionStage()
+        first_path = tmp_path / "first.jsonl"
+        _write_jsonl(
+            first_path,
+            [{"oracle_id": "id-1", "name": "Bolt", "prices": {"usd": "0.25"}}],
+        )
+        stage.ingest(first_path, binder)
+        original = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
+        assert original is not None
+
+        second_path = tmp_path / "second.jsonl"
+        _write_jsonl(
+            second_path,
+            [
+                {
+                    "oracle_id": "id-1",
+                    "name": "Bolt",
+                    "prices": {"usd": "0.31"},
+                    "image_uris": {"small": "https://x.io/a.jpg"},
+                }
+            ],
+        )
+
+        changed = stage.ingest(second_path, binder)
+
         assert changed == []
+        assert binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1") == original
 
 
 class TestAliasRegistration:
@@ -175,11 +391,13 @@ class TestAliasRegistration:
     ) -> None:
         # Aliases must be re-registered even when content doesn't
         # change — a losing/no-op row's identifier must never become
-        # a dead end (plans/card_binder_v2.md's "Open risks").
+        # a dead end (plans/card_binder_v2.md's "Open risks"). arena_id is
+        # dropped from raw_content as noise, so the two rows have identical
+        # content and the second takes the no-op branch.
         binder = CardBinder()
         stage = ScryfallCardIngestionStage()
         first_path = tmp_path / "first.jsonl"
-        _write_jsonl(first_path, [{"oracle_id": "id-1", "name": "Bolt", "a": "x" * 50}])
+        _write_jsonl(first_path, [{"oracle_id": "id-1", "name": "Bolt"}])
         stage.ingest(first_path, binder)
 
         second_path = tmp_path / "second.jsonl"
@@ -187,9 +405,10 @@ class TestAliasRegistration:
             second_path,
             [{"oracle_id": "id-1", "name": "Bolt", "arena_id": 76497}],
         )
-        stage.ingest(second_path, binder)
+        changed = stage.ingest(second_path, binder)
 
         card = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1")
+        assert changed == []
         assert binder.get_by_alias(GameId.MTG, DataSource.ARENA, "76497") == card
 
     def test_missing_arena_id_is_tolerated(self, tmp_path: Path) -> None:

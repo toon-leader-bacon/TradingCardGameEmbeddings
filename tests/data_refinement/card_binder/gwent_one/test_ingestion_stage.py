@@ -141,7 +141,7 @@ class TestIngest:
         assert card.provenance.source_id == "202512"
         assert card.provenance.data_source == DataSource.GWENT_ONE
 
-    def test_raw_content_has_stripped_data_attrs_plus_name_category_ability(
+    def test_raw_content_has_data_attrs_plus_name_category_ability_but_no_ids(
         self, tmp_path: Path
     ) -> None:
         _write_page(tmp_path / "page_1.html", _MASK_OF_UROBOROS_HTML)
@@ -153,7 +153,7 @@ class TestIngest:
             GameId.GWENT, DataSource.GWENT_ONE, "202512"
         ).raw_content
 
-        assert raw_content["id"] == "202512"
+        assert "id" not in raw_content
         assert raw_content["power"] == "0"
         assert raw_content["faction"] == "skellige"
         assert raw_content["set"] == "merchants of ofir"
@@ -165,6 +165,50 @@ class TestIngest:
             "Melee row."
         )
         assert "data-id" not in raw_content
+
+    def test_image_keys_are_dropped_and_key_order_is_identity_first_text_last(
+        self, tmp_path: Path
+    ) -> None:
+        _write_page(tmp_path / "page_1.html", _MASK_OF_UROBOROS_HTML)
+        binder = CardBinder()
+
+        GwentOneCardIngestionStage().ingest(tmp_path, binder)
+
+        raw_content = binder.get_by_alias(
+            GameId.GWENT, DataSource.GWENT_ONE, "202512"
+        ).raw_content
+        assert "artid" not in raw_content
+        assert "res" not in raw_content
+        assert list(raw_content)[0] == "name"
+        assert list(raw_content)[-1] == "ability_text"
+
+    def test_keys_the_mask_metrics_read_are_always_present(
+        self, tmp_path: Path
+    ) -> None:
+        # gwent_one's mask metrics index these directly
+        _write_page(
+            tmp_path / "page_1.html",
+            _MASK_OF_UROBOROS_HTML,
+            _WEREWOLF_HTML,
+            _VANILLA_UNIT_HTML,
+        )
+        binder = CardBinder()
+
+        GwentOneCardIngestionStage().ingest(tmp_path, binder)
+
+        for card in binder.all_cards(GameId.GWENT):
+            for key in (
+                "name",
+                "type",
+                "color",
+                "faction",
+                "rarity",
+                "set",
+                "provision",
+                "power",
+                "armor",
+            ):
+                assert key in card.raw_content, (card.name, key)
 
     def test_flattens_multi_clause_ability_text_with_newlines(
         self, tmp_path: Path
@@ -193,23 +237,23 @@ class TestIngest:
         card = binder.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, "200600")
         assert card.raw_content["ability_text"] == "Resilience."
 
-    def test_empty_category_becomes_empty_string(self, tmp_path: Path) -> None:
+    def test_empty_category_is_omitted(self, tmp_path: Path) -> None:
         _write_page(tmp_path / "page_1.html", _WEREWOLF_HTML)
         binder = CardBinder()
 
         GwentOneCardIngestionStage().ingest(tmp_path, binder)
 
         card = binder.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, "201600")
-        assert card.raw_content["category"] == ""
+        assert "category" not in card.raw_content
 
-    def test_no_ability_div_becomes_empty_string(self, tmp_path: Path) -> None:
+    def test_no_ability_div_omits_ability_text(self, tmp_path: Path) -> None:
         _write_page(tmp_path / "page_1.html", _VANILLA_UNIT_HTML)
         binder = CardBinder()
 
         GwentOneCardIngestionStage().ingest(tmp_path, binder)
 
         card = binder.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, "200055")
-        assert card.raw_content["ability_text"] == ""
+        assert "ability_text" not in card.raw_content
 
     def test_each_card_gets_a_distinct_uuid(self, tmp_path: Path) -> None:
         _write_page(tmp_path / "page_1.html", _MASK_OF_UROBOROS_HTML, _WEREWOLF_HTML)

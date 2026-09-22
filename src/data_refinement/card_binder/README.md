@@ -146,6 +146,91 @@ deliberately accepted risk: a stage technically *can* call
 maintenance cost of another Protocol file was judged not worth
 guarding against a mistake a stage has no reason to make.
 
+## What goes in `raw_content`: content rules for ingestion stages
+
+The binder is meant to be a clean, high-signal, one-card-one-entry data
+source, a candidate for publishing on its own. So `raw_content` is a lean
+description of the card as a game object, and derived or aggregate facts
+about a card (say, "does it have a marvel printing?") belong in a dedicated
+metric, not in the binder. It is also what the text encoder reads
+(`encoder_model/` serializes it as compact JSON, verbatim). The ingestion stage is the only code that knows
+its source, so it decides what stays; the raw dump stays on disk in
+`data/raw/`, so trimming loses nothing the project cannot re-derive. The
+serializer applies no per-game logic.
+
+Why it matters: an untrimmed Scryfall row is ~2,350 tokens (median) and
+only ~5% of that describes the card as a game object; the rest is image
+and purchase URLs, IDs, prices and legality tables. Trimmed as below it is
+~140. The text encoder truncates, so noise placed ahead of the rules text
+pushes the rules text out entirely. Measurements and the full analysis:
+`src/training/Notes.md` (section 7).
+
+Rules of thumb when writing a stage:
+
+1. **Keep the game object, drop the rest.** Keep what a player would use
+   to describe the card (name, cost, type, rules text, stats). Drop what
+   describes a printing, a product, an image or a database row: URLs, IDs,
+   timestamps, prices, artists, image/border/finish metadata, collector
+   numbers, API envelope fields (`object`, `lang`).
+2. **Detect noise by value shape, not only key name.** A string that is a
+   URL, a UUID or an ISO date is almost always noise, whatever its key
+   (key-name rules miss odd ones like Gwent's `artid`). This one rule is
+   most of the saving.
+3. **Omit empty values** (`null`, `""`, `[]`, `{}`, `false`), but keep `0`
+   (a power of 0 matters). Exception: when `null` is the source's default
+   and an explicit `false` marks the exceptions (a tri-state field, e.g.
+   STS2 `can_be_generated_in_combat`), the `false` is information; keep it.
+   Also check that no key a consumer indexes directly can be empty, or
+   dropping empties turns into a `KeyError` downstream.
+4. **Never remove a key a metric or dojo reads or predicts.** Masked-field
+   metrics and dojos read `raw_content` keys directly (Gwent: `set`,
+   `rarity`, `faction`, `color`, `type`, `armor`, `provision`, `power`;
+   Dominion: `type`, `set`, `cost`). Search `metrics/` and `dojos/` for the
+   game before dropping a key. Conversely, do not keep a field that gives a
+   masked one away (a masked `set` next to a `set_name`).
+5. **Bound lists and drop references to other cards.** A Scryfall token
+   lists every card that creates it (one token was 12,681 tokens). Names of
+   other cards also leak held-out cards into this card's text.
+6. **Collapse tables of enums** (Scryfall `legalities`: 195 tokens as
+   `{format: status}`, ~40 as a list of the non-default statuses), or
+   question whether they belong on the card at all.
+7. **Remove duplicated information** within a card. Equal strings
+   (`drop_repeated_strings`, keeping the first) and the same thing in
+   another form: FaB `types`/`classes`/`talents`/`subtypes` are all inside
+   `typebox`; STS2 `description_raw` is the template of `description` and
+   `vars`/`powers_applied` restate its numbers; Pokemon `retreatCost` is
+   a list of "Colorless" whose length is `convertedRetreatCost`. Prefer the
+   canonical form over the per-print display variant (FaB `face_1_true_*`
+   over `face_1_rules_text`). Equal numbers or lists can be coincidence, so
+   check before dropping them.
+8. **Normalize small things:** `3.0` to `3`; strip presentation markup
+   where that is trivial (`map_strings`): color tags like `[gold]`, line
+   breaks like `{br}`. Keep markup that is a game symbol (`[energy:1]`).
+9. **Order keys:** identity and short structured fields first, long free
+   text last, so truncation only eats the tail. (An augmentation `Mod` may
+   shuffle keys later; that is fine.)
+10. **When a source has several rows per card, store the card-level answer,
+    not one row's.** If a field varies by printing but is a useful label
+    (FaB `rarity`), pick a deterministic card-level value (FaB: the least
+    restrictive rarity across the English prints) rather than whichever
+    row happens to be read last.
+11. **Decide which source rows are cards.** A dump can contain rows that
+    are not playable cards (Scryfall `art_series` art cards, placeholders).
+    Skip or flag them deliberately rather than by accident.
+12. **Measure before you finish.** With the project's tokenizer, report
+    token percentiles per card, the costliest keys, the keys removed, and
+    the number of cards that serialize identically (must be 0). Aim for a
+    p99 under ~384 tokens.
+
+The shared, source-independent parts of these rules live in
+`lean_content.py` (`strip_noise`, `drop_repeated_strings`, `map_strings`,
+`order_keys`); which keys to keep, their order, and which rows are cards
+stay in each stage. Bounding lists (rule 5) has no shared helper yet: add
+one when a stage needs it. Every stage now follows these rules;
+`scryfall/ingestion_stage.py` and `cardvault_fabtcg/ingestion_stage.py` are
+good worked examples. Measure a stage with `scripts/report_card_content.py
+--source <name>`.
+
 ## Files
 
 - `card_binder.py` — `CardBinder`, the facade. See "Full CRUD" above
@@ -164,8 +249,15 @@ guarding against a mistake a stage has no reason to make.
   unconditionally). Every function in this module has a hard
   contract: the returned card always carries `existing.nocab_uuid`,
   never `candidate`'s freshly-minted one — these functions decide
-  content only, never identity. All four `CardIngestionStage`
-  implementations below use `keep_longer_content`.
+  content only, never identity. `keep_incoming_if_content_differs` (the
+  incoming card wins only if its `raw_content` or `name` differ, so an
+  unchanged re-ingest is a no-op) is used by the Scryfall, FaB, Spire Codex,
+  gwent.one and Dominion stages, whose sources are authoritative for their
+  own ids. Only Pokemon still uses `keep_longer_content` (its reprints of
+  one (name, set) genuinely differ, and with noise removed the fuller card
+  is a meaningful winner).
+- `lean_content.py` — source-independent helpers that keep a card's
+  `raw_content` lean (see "What goes in `raw_content`" above).
 - `card_lookup.py` — `CardLookup`, described above.
 - `alias_ledger.py` — `AliasLedger`, described above. Has no opinion
   about which source wins a collision — that's entirely each
@@ -201,7 +293,10 @@ guarding against a mistake a stage has no reason to make.
   card identity), so no heuristic is needed. Also registers
   `arena_id`/`mtgo_id`/`mtgo_foil_id`/each `multiverse_ids` entry as
   secondary aliases, whichever are present on a given row (e.g. an
-  Arena-illegal card has no `arena_id`).
+  Arena-illegal card has no `arena_id`). Aliases are read from the raw
+  row, while `raw_content` is the lean version (~2,350 tokens down to
+  ~150 median). A re-ingest replaces a card's content when the lean
+  content differs, keeping its `nocab_uuid`, and is a no-op otherwise.
 - `pokemon_tcg/ingestion_stage.py` — `PokemonTcgCardIngestionStage`
   (`SOURCE_GAME = GameId.POKEMON`), reading a *directory* of
   pokemon-tcg-data's per-set `.json` files (each a JSON array, not

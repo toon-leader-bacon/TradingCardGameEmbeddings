@@ -29,8 +29,21 @@ Confirmed by sampling a live gwent.one AJAX response directly:
     Scryfall's oracle_text convention, not raw markup or a structured
     keyword breakdown).
 
-Collision policy is merge_strategies.keep_longer_content, same as
-ScryfallCardIngestionStage.
+Collision policy is merge_strategies.keep_incoming_if_content_differs,
+same as ScryfallCardIngestionStage: data-id is a perfect natural key, so a
+newer page dump is authoritative for its own ids.
+
+LEAN CONTENT: what _extract_raw_content() builds is the RAW extraction
+(every data-* attribute plus the text fields); the stored raw_content is
+its lean form (see _lean_card_content and "What goes in raw_content" in
+card_binder/README.md). Only id (still the identity/alias, read from the
+raw extraction), artid (an image id) and res (image resolution, "medium"
+on every card) are dropped, and category when empty. Every other key
+stays because the masked-field metrics and dojos read them directly
+(faction, color, rarity, set, type, armor, provision, power) and
+leader_masked_from_deck_metric reads name. Checked against the live data:
+none of those keys is ever empty (even a zero is the string "0", which is
+kept), so dropping empties cannot remove a key a consumer indexes.
 """
 
 from datetime import datetime, timezone
@@ -43,11 +56,35 @@ from tqdm import tqdm
 
 from src.data_refinement.card_binder import merge_strategies
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.lean_content import (
+    JsonObject,
+    order_keys,
+    strip_noise,
+)
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 
 _CARD_BLOCK_SELECTOR = "div.card-wrap.card-data"
+
+# artid is an image id that the id/_id name rule cannot see; res is the image
+# resolution. (id is dropped by strip_noise itself.)
+_NOISE_KEYS = frozenset({"artid", "res"})
+# Short identifying fields first, the ability text last.
+_LEADING_KEYS = (
+    "name",
+    "type",
+    "color",
+    "faction",
+    "faction-duo",
+    "rarity",
+    "set",
+    "provision",
+    "power",
+    "armor",
+    "category",
+)
+_TRAILING_KEYS = ("ability_text",)
 
 
 class GwentOneCardIngestionStage:
@@ -167,8 +204,9 @@ class GwentOneCardIngestionStage:
 
         If an existing card resolves: builds the same kind of
         GenericCard as a throwaway candidate, then calls
-        merge_strategies.keep_longer_content(existing, candidate).
-        Compares the result to existing BY VALUE (dataclass equality):
+        merge_strategies.keep_incoming_if_content_differs(existing,
+        candidate). Compares the result to existing BY VALUE (dataclass
+        equality):
         if different, calls binder.replace(existing.nocab_uuid,
         merged).
 
@@ -199,7 +237,9 @@ class GwentOneCardIngestionStage:
             changed = True
         else:
             candidate = self._build_card(raw_content)
-            merged = merge_strategies.keep_longer_content(existing, candidate)
+            merged = merge_strategies.keep_incoming_if_content_differs(
+                existing, candidate
+            )
             changed = merged != existing
             if changed:
                 binder.replace(existing.nocab_uuid, merged)
@@ -220,7 +260,8 @@ class GwentOneCardIngestionStage:
 
         Inputs:
             raw_content: the flat dict from _extract_raw_content().
-        Output: a new GenericCard with a freshly minted nocab_uuid.
+        Output: a new GenericCard with a freshly minted nocab_uuid and the
+            lean form of raw_content (see _lean_card_content).
         Side effects: none.
         Exceptions: none — raw_content is already validated by
             _extract_raw_content() to carry "id" and "name".
@@ -229,7 +270,7 @@ class GwentOneCardIngestionStage:
             nocab_uuid=uuid4(),
             source_game=self.SOURCE_GAME,
             name=raw_content["name"],
-            raw_content=raw_content,
+            raw_content=_lean_card_content(raw_content),
             provenance=Provenance(
                 data_source=DataSource.GWENT_ONE,
                 source_id=raw_content["id"],
@@ -318,3 +359,22 @@ class GwentOneCardIngestionStage:
 
         lines = [line.strip() for line in ability_div.get_text().split("\n")]
         return "\n".join(line for line in lines if line)
+
+
+def _lean_card_content(extracted: dict[str, str]) -> JsonObject:
+    """Reduce one block's extracted attributes to what describes the card.
+
+    Inputs: extracted (dict[str, str]): the flat dict from
+        _extract_raw_content().
+    Output: a new JsonObject without id, artid and res (and without
+        category when empty), identity keys first and ability_text last.
+    Side effects: none.
+    Exceptions: none.
+
+    Example:
+        >>> _lean_card_content({"id": "1", "artid": "5j", "res": "medium",
+        ...     "name": "Geralt", "category": "", "ability_text": "Deal 2."})
+        {'name': 'Geralt', 'ability_text': 'Deal 2.'}
+    """
+    content = strip_noise(dict(extracted), extra_noise_keys=_NOISE_KEYS)
+    return order_keys(content, _LEADING_KEYS, _TRAILING_KEYS)

@@ -38,8 +38,8 @@ Confirmed by sampling data/raw/pokemon_tcg/cards/*.json directly
   - Since (name, set code) has no CardBinder-native lookup, identity
     resolution is: binder.get_by_name(self.SOURCE_GAME, name) (a
     list), then filter that list by comparing each match's own set
-    code (re-derived from its stored raw_content["id"]) against this
-    row's set code.
+    code (its stored raw_content["set"], see LEAN CONTENT below) against
+    this row's set code.
   - No secondary identifier system exists in this data comparable to
     Scryfall's arena_id/mtgo_id/multiverse_ids — no extra aliases are
     ever registered for this source, only each row's own id.
@@ -48,8 +48,25 @@ Confirmed by sampling data/raw/pokemon_tcg/cards/*.json directly
     printings share the same dex number, and an alias key has no
     defined multi-owner behavior.
 
+LEAN CONTENT: raw_content is not the raw row (see _lean_card_content and
+"What goes in raw_content" in card_binder/README.md). Dropped: id, number,
+artist, flavorText, rarity, images (printing-level; rarity and art differ
+between reprints in the same set), nationalPokedexNumbers (a species id),
+legalities (rotates; regulationMark carries the same signal), retreatCost (always a list of
+"Colorless", so it only repeats convertedRetreatCost), and each attack's
+convertedEnergyCost (equals len(cost)). Kept: evolvesFrom AND evolvesTo,
+the evolution links. They name other cards, but they are card-level
+information that the card's own other fields do not give (whether a Basic
+or Stage 1 evolves further is not implied by its subtypes). Added: "set",
+the set code taken
+from id, because it is half of this stage's identity and is otherwise
+unrecoverable once id is gone. Aliases still come from the RAW row's id.
+
 Collision policy is merge_strategies.keep_longer_content, same as
-ScryfallCardIngestionStage.
+ScryfallCardIngestionStage used to use. Unlike Scryfall, reprints of one
+(name, set) here can genuinely differ (hp, attack text, abilities), and
+with the noise removed "the fuller card wins" compares real content, not
+URL lengths.
 """
 
 import json
@@ -62,9 +79,46 @@ from tqdm import tqdm
 
 from src.data_refinement.card_binder import merge_strategies
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.lean_content import (
+    JsonObject,
+    order_keys,
+    strip_noise,
+)
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
+
+# Dropped wherever they appear (see the module docstring for why each).
+_PRINTING_AND_REDUNDANT_KEYS = frozenset(
+    {
+        "number",
+        "artist",
+        "flavorText",
+        "rarity",
+        "images",
+        "nationalPokedexNumbers",
+        "legalities",
+        "retreatCost",
+        "convertedEnergyCost",
+    }
+)
+# Short identifying fields first, long text (abilities, attacks, rules) last.
+_LEADING_KEYS = (
+    "name",
+    "supertype",
+    "subtypes",
+    "types",
+    "hp",
+    "level",
+    "evolvesFrom",
+    "evolvesTo",
+    "set",
+    "regulationMark",
+    "weaknesses",
+    "resistances",
+    "convertedRetreatCost",
+)
+_TRAILING_KEYS = ("abilities", "attacks", "rules", "ancientTrait")
 
 
 class PokemonTcgCardIngestionStage:
@@ -143,8 +197,8 @@ class PokemonTcgCardIngestionStage:
         this source has no perfect natural key, so the identity check
         is a heuristic — binder.get_by_name(self.SOURCE_GAME,
         row["name"]) followed by filtering that list to the one (if
-        any) whose own set code (_set_code() of ITS stored
-        raw_content["id"]) equals this row's own set code. A match
+        any) whose own stored raw_content["set"] equals this row's own
+        set code (_set_code() of its id). A match
         means row is a duplicate of that card; no match means row is
         new — see this module's docstring for why (name, set code) is
         the right identity key for this data.
@@ -205,8 +259,8 @@ class PokemonTcgCardIngestionStage:
 
         Private helper — single consumer is _ingest_row(). Filters
         binder.get_by_name(self.SOURCE_GAME, name) down to the card
-        (if any) whose own raw_content["id"] resolves to the same set
-        code — see this module's docstring for why name alone isn't
+        (if any) whose own raw_content["set"] is the same set code — see
+        this module's docstring for why name alone isn't
         enough (cross-set same-name cards are distinct cards).
 
         Inputs:
@@ -223,7 +277,7 @@ class PokemonTcgCardIngestionStage:
         Exceptions: none.
         """
         for candidate in binder.get_by_name(self.SOURCE_GAME, name):
-            if self._set_code(candidate.raw_content["id"]) == set_code:
+            if candidate.raw_content["set"] == set_code:
                 return candidate
         return None
 
@@ -256,7 +310,8 @@ class PokemonTcgCardIngestionStage:
             row: one parsed JSON object from a pokemon-tcg-data
                 cards/*.json file's array.
             printing_id: row["id"], passed in rather than re-read.
-        Output: a new GenericCard with a freshly minted nocab_uuid.
+        Output: a new GenericCard with a freshly minted nocab_uuid and the
+            row's lean content (see _lean_card_content) as raw_content.
         Side effects: none.
         Exceptions: raises if row is missing "name".
         """
@@ -264,10 +319,31 @@ class PokemonTcgCardIngestionStage:
             nocab_uuid=uuid4(),
             source_game=self.SOURCE_GAME,
             name=row["name"],
-            raw_content=row,
+            raw_content=self._lean_card_content(row, printing_id),
             provenance=Provenance(
                 data_source=DataSource.POKEMON_TCG,
                 source_id=printing_id,
                 fetched_at=datetime.now(timezone.utc),
             ),
         )
+
+    def _lean_card_content(self, row: dict, printing_id: str) -> JsonObject:
+        """Reduce a pokemon-tcg-data row to what describes the card.
+
+        Inputs:
+            row: one parsed JSON object from a cards/*.json array.
+            printing_id: row["id"], for the set code.
+        Output: a new JsonObject: the row without the printing-level and
+            redundant keys, plus "set" (the set code), identity first and
+            long text last.
+        Side effects: none.
+        Exceptions: none.
+
+        Example:
+            >>> stage._lean_card_content({"id": "base4-1", "name": "Alakazam",
+            ...     "hp": "80", "rarity": "Rare"}, "base4-1")
+            {'name': 'Alakazam', 'hp': '80', 'set': 'base4'}
+        """
+        content = strip_noise(row, extra_noise_keys=_PRINTING_AND_REDUNDANT_KEYS)
+        content["set"] = self._set_code(printing_id)
+        return order_keys(content, _LEADING_KEYS, _TRAILING_KEYS)

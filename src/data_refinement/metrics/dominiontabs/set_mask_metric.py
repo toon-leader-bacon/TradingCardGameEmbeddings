@@ -24,7 +24,9 @@ each raw tag down to a canonical expansion name first (19 possible
 canonical values; see LABEL_VALUES' own comment for why only 17 of
 those 19 are real classification labels - "base" and "guilds" are
 canonicalization targets that can never survive as a card's SOLE
-canonical label). For 790 of 819 cards this collapses the whole
+canonical label). For 788 of the 817 cards in the binder (819 raw
+entries minus the two German big-box duplicates the ingestion stage
+skips) this collapses the whole
 cardset_tags list to exactly one canonical name - those are this
 metric's eligible cards. The other 29 (confirmed: Dominion's
 cross-expansion basics - Copper/Silver/Gold/Estate/Duchy/Province/
@@ -35,7 +37,7 @@ MORE than one expansion and are excluded: they don't have one true
 ground truth, not a real one.
 
 Sanity-checked against the live corpus (819 cards): the 17 real
-labels split 790 eligible cards fairly evenly (max "allies" 78 down to
+labels split 788 eligible cards fairly evenly (max "allies" 78 down to
 min "alchemy" 12, roughly a 6.5x spread) - by far the best-balanced of
 this container's three metrics.
 
@@ -60,6 +62,11 @@ from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 
 _EDITION_SUFFIX_PATTERN = re.compile(r"(1stEdition|2ndEdition)(Removed|Upgrade)?$")
+
+# A few cards_db.json entries are not in the binder on purpose (the ingestion
+# stage skips German big-box duplicates); more than this fraction means the
+# binder was built from a different raw directory.
+_MAX_MISSING_FROM_BINDER_FRACTION = 0.05
 
 
 @dataclass(frozen=True)
@@ -102,7 +109,7 @@ class _ExpansionMaskRow:
 
 class SetMaskMetric:
     """Card -> home expansion, masked. Eligibility is real filtering,
-    not every card: see this module's docstring for the 790/819 split.
+    not every card: see this module's docstring for the 788/817 split.
 
     Satisfies CorpusScanMetric (../generic/corpus_scan_metric.py)
     structurally.
@@ -237,13 +244,19 @@ class SetMaskMetric:
         entries = self._load_db_entries()
 
         result: list[_ExpansionMaskRow] = []
+        not_in_binder: list[str] = []
         # Walk every entry, keeping only the ones whose cardset_tags
         # canonicalize down to exactly one real expansion.
         for entry in tqdm(entries, desc=type(self).__name__, unit="card"):
             canonical_labels = self._canonical_expansion_labels(entry.cardset_tags)
             if len(canonical_labels) != 1:
                 continue
-            result.append(self._mask_row(entry, next(iter(canonical_labels))))
+            row = self._mask_row(entry, next(iter(canonical_labels)))
+            if row is None:
+                not_in_binder.append(entry.card_tag)
+            else:
+                result.append(row)
+        self._check_few_missing_from_binder(not_in_binder, len(entries))
 
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
         self._write_rows(result)
@@ -329,7 +342,31 @@ class SetMaskMetric:
                 "_CANONICAL_EXPANSION_BY_PREFIX needs a new entry for it"
             ) from None
 
-    def _mask_row(self, entry: _RawCardEntry, label: str) -> _ExpansionMaskRow:
+    def _check_few_missing_from_binder(
+        self, not_in_binder: list[str], entry_count: int
+    ) -> None:
+        """Raise if too many raw entries have no binder card.
+
+        A few are expected: the ingestion stage skips cards_db.json entries
+        it does not treat as cards (the German big-box duplicates). Many
+        would mean the binder was built from a different raw directory.
+
+        Inputs: not_in_binder (list[str]): card_tags with no binder card.
+            entry_count (int): number of raw entries scanned.
+        Output: none.
+        Side effects: none.
+        Exceptions: ValueError if more than _MAX_MISSING_FROM_BINDER_FRACTION
+            of the entries are missing.
+        """
+        if len(not_in_binder) > _MAX_MISSING_FROM_BINDER_FRACTION * entry_count:
+            raise ValueError(
+                f"{type(self).__name__}: {len(not_in_binder)} of {entry_count} "
+                f"cards_db.json entries have no registered DOMINIONTABS alias "
+                f"(e.g. {not_in_binder[:3]}) - was card_lookup built from this "
+                "same raw_data_dir?"
+            )
+
+    def _mask_row(self, entry: _RawCardEntry, label: str) -> _ExpansionMaskRow | None:
         """Build one output row for a single already-eligible entry.
 
         Private helper - single consumer is scan().
@@ -339,23 +376,20 @@ class SetMaskMetric:
                 is eligible.
             label: entry's single canonical expansion name, from
                 _canonical_expansion_labels().
-        Output: an _ExpansionMaskRow - nocab_uuid (resolved via
+        Output: None if entry.card_tag has no binder card (see
+            _check_few_missing_from_binder); otherwise an
+            _ExpansionMaskRow - nocab_uuid (resolved via
             self._card_lookup.get_by_alias(self.SOURCE_GAME,
             DataSource.DOMINIONTABS, entry.card_tag)),
             masked_field (["cardset_tags"]), and label.
         Side effects: none.
-        Exceptions: raises if entry.card_tag has no registered
-            DOMINIONTABS alias on self._card_lookup.
+        Exceptions: none.
         """
         card = self._card_lookup.get_by_alias(
             self.SOURCE_GAME, DataSource.DOMINIONTABS, entry.card_tag
         )
         if card is None:
-            raise ValueError(
-                f"{type(self).__name__}: {entry.card_tag!r} has no registered "
-                "DOMINIONTABS alias - was card_lookup built from this same "
-                "raw_data_dir?"
-            )
+            return None
         return _ExpansionMaskRow(
             nocab_uuid=str(card.nocab_uuid),
             masked_field=["cardset_tags"],
