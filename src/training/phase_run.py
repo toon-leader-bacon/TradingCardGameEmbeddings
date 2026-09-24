@@ -20,6 +20,8 @@ class PhaseRun:
     sampler: the phase's diet policy.
     streams: dojo name -> endless TRAIN batches.
     faults: failure counts and dojo quarantine.
+    scaler: fp16 loss scaler (a disabled pass-through at other precisions);
+        one per phase, like the optimizer it steps.
     """
 
     phase: Phase
@@ -28,3 +30,4 @@ class PhaseRun:
     sampler: DietSampler
     streams: dict[str, DojoBatchStream]
     faults: DojoFaultLedger
+    scaler: torch.amp.GradScaler

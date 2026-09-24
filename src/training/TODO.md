@@ -61,9 +61,15 @@ a median of ~200 tokens and FaB to ~570.
 - [x] **GPU verification script:** `scripts/verify_gpu.py` (6/6 checks
   pass: matmul agrees with CPU, fp16 and bf16 autocast, SDPA, throughput,
   training steps).
-- [ ] **Add a fp16 `GradScaler` to the trainer.** fp16 is the fast path
-  (see below) and the trainer has none (README "Not built"). A GradScaler
-  worked in the benchmarks (finite losses).
+- [x] **Add a fp16 `GradScaler` to the trainer** (2026-09-24).
+  `HardwareLimits(precision="fp16")` runs training and evaluation forward
+  passes under `torch.autocast` and steps through a per-phase `GradScaler`
+  (unscale before clipping). An overflow skips the step without counting
+  as a dojo fault until the scale reaches its floor of 1, where the step
+  raises `NonFiniteGradientError` like the fp32 non-finite-gradient path.
+  `"bf16"` is autocast only; `"fp32"` (default) is unchanged. Tested on CPU
+  autocast; not yet run on the RX 6800. Scaler state is not checkpointed
+  (only matters once resume exists).
 
 ### GPU measurements (RX 6800, 16 GiB)
 

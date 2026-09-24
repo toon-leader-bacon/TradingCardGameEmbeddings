@@ -8,6 +8,7 @@ affect results but are not yet written to the checkpoint manifest).
 
 import re
 from dataclasses import dataclass
+from typing import Literal, get_args
 
 from src.schema.holdout import HoldoutSpec
 
@@ -170,16 +171,28 @@ class TrainingPlan:
                 )
 
 
+Precision = Literal["fp32", "fp16", "bf16"]
+
+
 @dataclass(frozen=True)
 class HardwareLimits:
-    """Machine-dependent ceilings.
+    """Machine-dependent ceilings and numeric format.
 
     max_batch_cost: ceiling on the summed cost_of of one batch (becomes
         BatchBudget.max_cost).
+    precision: "fp32" runs everything in float32. "fp16" and "bf16" run
+        the forward pass (training and evaluation) under torch.autocast on
+        the model's device; weights and optimizer state stay float32.
+        "fp16" also scales the loss with a GradScaler so small gradients
+        do not underflow; "bf16" has float32's range and needs none. Pick
+        by hardware: the RX 6800 runs fp16 about 3x faster than bf16.
     """
 
     max_batch_cost: int
+    precision: Precision = "fp32"
 
     def __post_init__(self) -> None:
         if self.max_batch_cost < 1:
             raise ValueError("max_batch_cost must be >= 1")
+        if self.precision not in get_args(Precision):
+            raise ValueError(f"precision must be one of {get_args(Precision)}")

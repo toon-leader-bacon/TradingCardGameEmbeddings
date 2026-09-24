@@ -4,10 +4,11 @@ Knows only the Dojo Protocol, so generic and contrastive dojos are
 interchangeable. One optimizer step trains on one batch from one dojo.
 """
 
+import contextlib
 import gc
 import logging
 import random
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, ContextManager, Sequence
 
 import torch
 
@@ -31,12 +32,24 @@ from src.training.round_evaluation import evaluate_test_losses
 from src.training.recording.run_listener import RunListener
 from src.training.trainable_encoder import TrainableEncoder
 
-
 logger = logging.getLogger(__name__)
+
+# fp16 loss scale floor: overflow above it is the GradScaler probing its
+# scale (skip the step, back off); overflow at it means the gradients are
+# non-finite in true units, a real fault. Clamping also stops one bad dojo
+# from driving the shared scale toward zero.
+_MIN_LOSS_SCALE = 1.0
+
+_AUTOCAST_DTYPES = {"fp16": torch.float16, "bf16": torch.bfloat16}
 
 
 class NonFiniteLossError(ValueError):
     """A dojo produced a NaN or infinite loss; the step is skipped."""
+
+
+class NonFiniteGradientError(ValueError):
+    """fp16 gradients overflowed even at the minimum loss scale; the step is
+    skipped."""
 
 
 class Trainer:
@@ -70,6 +83,7 @@ class Trainer:
         # One budget for every Dojo.batches() call (not yet written to the manifest)
         self._budget = BatchBudget(limits.max_batch_cost, cost_of)
         self._rng = random.Random(plan.seed)
+        self._precision = limits.precision
         self._steps_taken = 0
         # The encoder parameters that are trainable as built (a pretrained
         # LM frozen by its own flag stays frozen); phases toggle only these
@@ -163,7 +177,24 @@ class Trainer:
                 for name in phase.dojo_names
             },
             faults=DojoFaultLedger(self._plan.faults, phase.dojo_names),
+            scaler=torch.amp.GradScaler(
+                self._device_type(), enabled=self._precision == "fp16"
+            ),
         )
+
+    def _device_type(self) -> str:
+        """The model's device type ("cuda" also on ROCm), read each call so
+        a model moved after construction is followed."""
+        for parameter in self._model.parameters():
+            return parameter.device.type
+        return "cpu"
+
+    def _autocast(self) -> ContextManager[Any]:
+        """torch.autocast at the configured precision; a no-op for fp32."""
+        dtype = _AUTOCAST_DTYPES.get(self._precision)
+        if dtype is None:
+            return contextlib.nullcontext()
+        return torch.autocast(device_type=self._device_type(), dtype=dtype)
 
     def _build_optimizer(self, phase: Phase) -> torch.optim.Optimizer:
         """AdamW with an encoder group at encoder_lr (only if trainable)
@@ -244,24 +275,60 @@ class Trainer:
         batch = phase_run.streams[dojo.name].next_batch()
 
         # Forward: encoder embeds batch.inputs, the dojo scores them
-        loss = self._loss_of(dojo, batch)
+        with self._autocast():
+            loss = self._loss_of(dojo, batch)
         self._require_finite(loss, dojo)
 
-        # Backward, then clip: a non-finite gradient raises here, skipping
-        # the step instead of poisoning the weights and Adam state
-        # (mixed-precision GradScaler is not in the plan)
-        phase_run.optimizer.zero_grad()
-        loss.backward()
+        # Backward (loss scaled under fp16, else unchanged), then unscale so
+        # clipping sees gradients in true units
+        optimizer, scaler = phase_run.optimizer, phase_run.scaler
+        optimizer.zero_grad()
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
         parameters = [
             parameter
-            for group in phase_run.optimizer.param_groups
+            for group in optimizer.param_groups
             for parameter in group["params"]
         ]
-        torch.nn.utils.clip_grad_norm_(
-            parameters, phase_run.phase.max_grad_norm, error_if_nonfinite=True
+        if not scaler.is_enabled():
+            # A non-finite gradient raises here, skipping the step instead
+            # of poisoning the weights and Adam state
+            torch.nn.utils.clip_grad_norm_(
+                parameters, phase_run.phase.max_grad_norm, error_if_nonfinite=True
+            )
+            optimizer.step()
+            self._steps_taken += 1
+            return
+        torch.nn.utils.clip_grad_norm_(parameters, phase_run.phase.max_grad_norm)
+        self._scaled_step(scaler, optimizer, dojo)
+
+    def _scaled_step(
+        self, scaler: torch.amp.GradScaler, optimizer: torch.optim.Optimizer, dojo: Dojo
+    ) -> None:
+        """Step through the scaler, which skips the step and backs off its
+        scale if any unscaled gradient is non-finite. Such a skip is normal
+        above _MIN_LOSS_SCALE; at it, the scale is held there and
+        NonFiniteGradientError raises so the fault ledger counts it."""
+        scale_before = scaler.get_scale()
+        scaler.step(optimizer)
+        scaler.update()
+        # The scale only shrinks when the step was skipped
+        if scaler.get_scale() >= scale_before:
+            self._steps_taken += 1
+            return
+        if scale_before > _MIN_LOSS_SCALE:
+            logger.debug(
+                "fp16 overflow on %r; skipped the step, loss scale %g -> %g",
+                dojo.name,
+                scale_before,
+                scaler.get_scale(),
+            )
+            return
+        scaler.update(new_scale=_MIN_LOSS_SCALE)
+        raise NonFiniteGradientError(
+            f"dojo {dojo.name!r} gradients are non-finite at loss scale "
+            f"{_MIN_LOSS_SCALE:g}"
         )
-        phase_run.optimizer.step()
-        self._steps_taken += 1
 
     def _loss_of(self, dojo: Dojo, batch: DojoBatch) -> torch.Tensor:
         """Encode batch.inputs and return dojo.compute_loss (a scalar mean)."""
@@ -283,6 +350,9 @@ class Trainer:
         error.__traceback__ = None  # release the failed step's tensors
         try:
             phase_run.optimizer.zero_grad(set_to_none=True)
+            # Forget a half-finished unscale_ so the next step's unscale_
+            # does not raise; the scale itself is kept
+            phase_run.scaler.update(new_scale=phase_run.scaler.get_scale())
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -292,12 +362,13 @@ class Trainer:
     def _evaluate_round(self, phase_run: PhaseRun, round_index: int) -> RoundReport:
         """evaluate_test_losses over ALL dojos, feed the tracker, assemble
         the RoundReport."""
-        losses = evaluate_test_losses(
-            self._model,
-            list(self._dojos.values()),
-            self._budget,
-            self._plan.eval_examples_per_dojo,
-        )
+        with self._autocast():
+            losses = evaluate_test_losses(
+                self._model,
+                list(self._dojos.values()),
+                self._budget,
+                self._plan.eval_examples_per_dojo,
+            )
         statuses = phase_run.tracker.record_round(losses)
         return RoundReport(
             phase=phase_run.phase.name,

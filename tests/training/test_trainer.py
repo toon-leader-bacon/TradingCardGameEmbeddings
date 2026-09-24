@@ -6,7 +6,7 @@ import torch
 
 from src.dojos.dojo import Dojo
 from src.schema.holdout import HoldoutSpec
-from src.training.plan import FaultPolicy
+from src.training.plan import FaultPolicy, HardwareLimits, Precision
 from src.training.recording.checkpointer import DirectoryCheckpointer
 from src.training.recording.reports import CheckpointRecord, RoundReport
 from src.training.trainer import Trainer
@@ -52,6 +52,7 @@ def _trainer(
     checkpointer: object | None = None,
     model: FakeModel | None = None,
     plan_overrides: dict[str, object] | None = None,
+    precision: Precision = "fp32",
     **phase_overrides: object,
 ) -> Trainer:
     names = phase_names or tuple(d.name for d in dojos)
@@ -60,7 +61,7 @@ def _trainer(
         model or FakeModel(),  # type: ignore[arg-type]
         dojos,  # type: ignore[arg-type]
         plan,
-        LIMITS,
+        HardwareLimits(LIMITS.max_batch_cost, precision),
         checkpointer or DirectoryCheckpointer(tmp_path),  # type: ignore[arg-type]
         listeners or [],  # type: ignore[arg-type]
     )
@@ -303,6 +304,124 @@ class TestFailureRecovery:
         ).run()
         assert result.final_report is not None
         assert result.final_report.round_index < 19
+
+
+def _gradient_norm(parameters: list[torch.nn.Parameter]) -> float:
+    grads = [p.grad for p in parameters if p.grad is not None]
+    return float(torch.linalg.vector_norm(torch.stack([g.norm() for g in grads])))
+
+
+class TestMixedPrecision:
+    """fp16/bf16 autocast on CPU, which exercises the same GradScaler path
+    as a GPU."""
+
+    @pytest.mark.parametrize("precision", ["fp16", "bf16"])
+    def test_trains_with_finite_weights_and_losses(
+        self, tmp_path: Path, precision: Precision
+    ) -> None:
+        model = FakeModel()
+        before = model.layer.weight.detach().clone()
+        result = _trainer(
+            tmp_path, [FakeDojo("a"), FakeDojo("b")], model=model, precision=precision
+        ).run()
+
+        assert result.stopped_early_reason is None
+        assert not torch.equal(before, model.layer.weight)
+        assert all(torch.isfinite(p).all() for p in model.parameters())
+        assert result.final_report is not None
+        assert result.final_report.step > 0
+        losses = result.final_report.per_dojo_test_loss.values()
+        assert all(torch.isfinite(torch.tensor(loss)) for loss in losses)
+
+    def test_clips_unscaled_gradients(self, tmp_path: Path) -> None:
+        # Clipping before unscaling would leave a norm 65536x too small
+        model = FakeModel()
+        dojo = FakeDojo("a")
+        _trainer(
+            tmp_path,
+            [dojo],
+            model=model,
+            precision="fp16",
+            max_grad_norm=1e-3,
+            steps_per_round=4,
+            max_rounds=1,
+        ).run()
+        parameters = [*model.parameters(), *dojo.trainable_parameters()]
+        assert _gradient_norm(parameters) == pytest.approx(1e-3, rel=1e-2)
+
+    def test_overflow_above_the_minimum_scale_skips_without_a_fault(
+        self, tmp_path: Path
+    ) -> None:
+        # Overflows fp16 until the loss scale backs off to ~4 (14 halvings);
+        # counted as faults, 2 in a row would quarantine the only dojo
+        model = FakeModel()
+        before = model.layer.weight.detach().clone()
+        result = _trainer(
+            tmp_path,
+            [FakeDojo("a", loss_gain=1e4)],
+            model=model,
+            precision="fp16",
+            steps_per_round=30,
+            max_rounds=1,
+            plan_overrides={"faults": FaultPolicy(2, 2)},
+        ).run()
+
+        assert result.stopped_early_reason is None
+        assert result.final_report is not None
+        assert "a" not in result.final_report.quarantined
+        assert 0 < result.final_report.step < 30
+        assert not torch.equal(before, model.layer.weight)
+
+    def test_nan_gradients_never_update_and_fault_at_the_minimum_scale(
+        self, tmp_path: Path
+    ) -> None:
+        # 16 skips take the scale from 65536 to 1; then each step is a fault
+        model = FakeModel()
+        dojo = FakeDojo("a", nan_grad=True)
+        before = [p.detach().clone() for p in model.parameters()]
+        result = _trainer(
+            tmp_path,
+            [dojo],
+            model=model,
+            precision="fp16",
+            steps_per_round=40,
+            max_rounds=1,
+            plan_overrides={"faults": FaultPolicy(2, 1000)},
+        ).run()
+
+        assert result.stopped_early_reason == "every dojo quarantined in 'joint'"
+        assert result.final_report is not None
+        assert result.final_report.step == 0
+        assert all(torch.equal(b, p) for b, p in zip(before, model.parameters()))
+        assert all(torch.isfinite(p).all() for p in dojo.trainable_parameters())
+
+    def test_a_step_failing_after_unscale_does_not_poison_later_steps(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Without a scaler reset, every later unscale_ raises and the only
+        # dojo is quarantined
+        real_clip = torch.nn.utils.clip_grad_norm_
+        calls = {"n": 0}
+
+        def clip_failing_once(*args: object, **kwargs: object) -> torch.Tensor:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("simulated failure after unscale_")
+            return real_clip(*args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(torch.nn.utils, "clip_grad_norm_", clip_failing_once)
+        result = _trainer(
+            tmp_path,
+            [FakeDojo("a")],
+            precision="fp16",
+            steps_per_round=8,
+            max_rounds=1,
+            plan_overrides={"faults": FaultPolicy(2, 1000)},
+        ).run()
+
+        assert result.stopped_early_reason is None
+        assert result.final_report is not None
+        assert result.final_report.step > 0
 
 
 def test_fake_dojo_satisfies_the_protocol() -> None:

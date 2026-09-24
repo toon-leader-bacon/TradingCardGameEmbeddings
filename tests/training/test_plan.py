@@ -47,6 +47,8 @@ def test_limits_and_fault_policy_reject_non_positive_values() -> None:
     with pytest.raises(ValueError):
         HardwareLimits(max_batch_cost=0)
     with pytest.raises(ValueError):
+        HardwareLimits(max_batch_cost=1, precision="fp8")  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
         FaultPolicy(max_consecutive_dojo_failures=0)
 
 

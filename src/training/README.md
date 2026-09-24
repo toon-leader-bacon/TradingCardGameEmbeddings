@@ -101,7 +101,11 @@ Points worth knowing:
   (exception, out-of-memory, non-finite loss or gradient), evaluation,
   checkpoint save or listener is logged and skipped. Gradients are clipped
   to `Phase.max_grad_norm`, and a non-finite gradient skips the step before
-  it can reach the weights. A dojo that fails
+  it can reach the weights. Under `HardwareLimits(precision="fp16")` the
+  loss is scaled by a per-phase `GradScaler` and gradients are unscaled
+  before clipping; an fp16 overflow only skips the step and halves the
+  scale, and counts as a failure only once the scale is at its floor of 1
+  (the gradients are then non-finite in true units). A dojo that fails
   `FaultPolicy.max_consecutive_dojo_failures` times in a row (or
   `max_total_dojo_failures` in total) is quarantined for the phase, and
   `max_consecutive_failures` in a row stops the run cleanly with the last
@@ -116,7 +120,7 @@ Points worth knowing:
 - Not built: gradient accumulation, GradCache, several tasks per step,
   per-dojo step size on the shared encoder, staged partial unfreezing,
   cached card encodings while the LM is frozen, token-aware `cost_of`,
-  mixed-precision `GradScaler`, Hugging Face export.
+  saving `GradScaler` state for resume, Hugging Face export.
 
 ## How to run
 

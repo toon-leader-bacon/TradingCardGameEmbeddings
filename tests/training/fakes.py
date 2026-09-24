@@ -48,7 +48,9 @@ class FakeDojo:
     """Regression-to-zero dojo with a linear head.
 
     fail: 'train' raises when TRAIN batches are requested, 'test' when
-    TEST ones are; nan_loss makes compute_loss return NaN.
+    TEST ones are; nan_loss makes compute_loss return NaN; loss_gain
+    multiplies the loss (large values overflow fp16 gradients until the
+    loss scale backs off).
     """
 
     def __init__(
@@ -62,6 +64,7 @@ class FakeDojo:
         count_fails: bool = False,
         nan_grad: bool = False,
         fail_at_batch: int | None = None,
+        loss_gain: float = 1.0,
     ) -> None:
         self.name = name
         self.holdout = HoldoutSpec.no_holdout()
@@ -74,6 +77,7 @@ class FakeDojo:
         self._count_fails = count_fails
         self._nan_grad = nan_grad
         self._fail_at_batch = fail_at_batch
+        self._loss_gain = loss_gain
 
     def batches(
         self, split: Split, budget: BatchBudget, max_examples: int | None = None
@@ -91,7 +95,7 @@ class FakeDojo:
         return self._train_count
 
     def compute_loss(self, embeddings: Any, batch: Any) -> torch.Tensor:
-        loss = self._head(embeddings).pow(2).mean()
+        loss = self._head(embeddings).pow(2).mean() * self._loss_gain
         if self._nan_grad:
             # finite forward value, NaN gradient (sqrt at 0)
             loss = loss + (embeddings.sum() * 0).sqrt()
