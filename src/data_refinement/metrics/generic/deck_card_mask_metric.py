@@ -48,6 +48,10 @@ import pyarrow.parquet as pq
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.metrics.version_metadata import (
+    MetricVersionMetadata,
+    schema_with_version_metadata,
+)
 from src.schema.card import GenericCard
 from src.schema.game_id import GameId
 
@@ -97,12 +101,19 @@ class DeckCardMaskMetric(ABC):
         self._card_lookup = card_lookup
         self._deck_box = deck_box
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
-        self._output_schema = pa.schema(
-            [
-                ("deck_uuid", pa.string()),
-                ("target_card_uuid", pa.string()),
-                ("label", pa.string()),
-            ]
+        self._output_schema = schema_with_version_metadata(
+            pa.schema(
+                [
+                    ("deck_uuid", pa.string()),
+                    ("target_card_uuid", pa.string()),
+                    ("label", pa.string()),
+                ]
+            ),
+            MetricVersionMetadata(
+                game=self.SOURCE_GAME,
+                card_binder_version=card_lookup.version_for(self.SOURCE_GAME),
+                requires_deck_box=True,
+            ),
         )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
         self._writer = pq.ParquetWriter(self._output_path, self._output_schema)

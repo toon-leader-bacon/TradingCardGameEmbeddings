@@ -22,6 +22,7 @@ directly, only CardBinder's own get_by_alias()/register_alias().
 """
 
 import copy
+import hashlib
 import json
 import re
 from dataclasses import replace
@@ -422,6 +423,50 @@ class CardBinder:
             for card in self._cards_by_uuid.values()
             if card.source_game == source_game
         ]
+
+    def version_for(self, source_game: GameId) -> str:
+        """A content hash over every currently-held source_game card.
+
+        Derived, not stored - a pure function of this binder's current
+        in-memory content, recomputed on every call (and so also fresh
+        on every load()). Deliberately excludes provenance (in
+        particular provenance.fetched_at, which changes on every
+        re-ingest even when content doesn't) - only (nocab_uuid, name,
+        raw_content) feed the hash, the same fields
+        merge_strategies.keep_incoming_if_content_differs already
+        treats as "content" for its own no-op-re-ingest check. Two
+        CardBinder instances holding the same cards always agree on
+        this value, regardless of load order or process.
+
+        Inputs:
+            source_game: which game's cards to hash.
+        Output: a sha256 hex digest (64 hex chars). A game with no
+            cards yet still produces a fixed digest (of an empty
+            sequence), not an error - a fresh, not-yet-ingested game is
+            a real, meaningful "version" of its own.
+        Side effects: none.
+        Exceptions: none.
+
+        Example:
+            >>> binder = CardBinder.load([Path("data/final/cards/gwent.jsonl")])
+            >>> binder.version_for(GameId.GWENT)
+            '3f2b1c...'
+        """
+        cards = sorted(self.all_cards(source_game), key=lambda card: card.nocab_uuid)
+        digest = hashlib.sha256()
+        for card in cards:
+            digest.update(
+                json.dumps(
+                    {
+                        "nocab_uuid": str(card.nocab_uuid),
+                        "name": card.name,
+                        "raw_content": card.raw_content,
+                    },
+                    sort_keys=True,
+                ).encode("utf-8")
+            )
+            digest.update(b"\n")
+        return digest.hexdigest()
 
     def ensure_unknown_card(self, source_game: GameId) -> GenericCard:
         """Look up (or lazily create) this game's sentinel "Unknown" card.

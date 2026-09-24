@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -96,6 +97,7 @@ class TestBatches:
             pair_constructor=pair_constructor,
             card_lookup=CardBinder(),
             holdout=HoldoutSpec.no_holdout(),
+            strict_version_check=False,
             decks_per_sample=2,
         )
 
@@ -113,6 +115,7 @@ class TestComputeLoss:
             pair_constructor=_ScriptedPairConstructor([]),
             card_lookup=CardBinder(),
             holdout=HoldoutSpec.no_holdout(),
+            strict_version_check=False,
         )
         batch = ContrastiveBatch(
             inputs=[_card(), _card()],
@@ -130,6 +133,7 @@ class TestComputeLoss:
             pair_constructor=_ScriptedPairConstructor([]),
             card_lookup=CardBinder(),
             holdout=HoldoutSpec.no_holdout(),
+            strict_version_check=False,
             contrastive_loss=recording_loss,
         )
         batch = ContrastiveBatch(
@@ -156,6 +160,7 @@ class TestBudget:
             pair_constructor=_ScriptedPairConstructor([]),
             card_lookup=CardBinder(),
             holdout=HoldoutSpec.no_holdout(),
+            strict_version_check=False,
         )
 
         with pytest.raises(ValueError):
@@ -173,6 +178,7 @@ class TestBudget:
             pair_constructor=_ScriptedPairConstructor([heavy]),
             card_lookup=CardBinder(),
             holdout=HoldoutSpec.no_holdout(),
+            strict_version_check=False,
             decks_per_sample=2,
         )
 
@@ -190,6 +196,7 @@ class TestBudget:
             pair_constructor=_ScriptedPairConstructor([good, good, good]),
             card_lookup=CardBinder(),
             holdout=HoldoutSpec.no_holdout(),
+            strict_version_check=False,
             decks_per_sample=2,
         )
 
@@ -203,7 +210,65 @@ class TestBudget:
             pair_constructor=_ScriptedPairConstructor([]),
             card_lookup=CardBinder(),
             holdout=HoldoutSpec.no_holdout(),
+            strict_version_check=False,
         )
 
         assert dojo.example_count(Split.TRAIN) == 6
         assert list(dojo.trainable_parameters()) == []
+
+
+class TestVersionCheck:
+    def test_raises_when_dealer_has_no_recorded_card_binder_version(self) -> None:
+        with pytest.raises(ValueError, match="CardBinder"):
+            ContrastiveDojo(
+                dealer=_dealer_with_decks(2),
+                pair_constructor=_ScriptedPairConstructor([]),
+                card_lookup=CardBinder(),
+                holdout=HoldoutSpec.no_holdout(),
+            )
+
+    def test_passes_when_dealers_recorded_version_matches(self, tmp_path: Path) -> None:
+        binder = CardBinder()
+        box = DeckBox()
+        box.create(_deck())
+        path = tmp_path / "mtg.jsonl"
+        box.save(path, GameId.MTG, binder.version_for(GameId.MTG))
+        dealer = DeckBoxDealer(DeckBox.load([path]), GameId.MTG, split_ratios=[1, 0, 0])
+
+        dojo = ContrastiveDojo(
+            dealer=dealer,
+            pair_constructor=_ScriptedPairConstructor([]),
+            card_lookup=binder,
+            holdout=HoldoutSpec.no_holdout(),
+        )
+
+        assert dojo.example_count(Split.TRAIN) == 1
+
+    def test_raises_when_dealers_recorded_version_is_stale(
+        self, tmp_path: Path
+    ) -> None:
+        binder = CardBinder()
+        box = DeckBox()
+        box.create(_deck())
+        path = tmp_path / "mtg.jsonl"
+        box.save(path, GameId.MTG, "stale-version")
+        dealer = DeckBoxDealer(DeckBox.load([path]), GameId.MTG, split_ratios=[1, 0, 0])
+
+        with pytest.raises(ValueError, match="CardBinder"):
+            ContrastiveDojo(
+                dealer=dealer,
+                pair_constructor=_ScriptedPairConstructor([]),
+                card_lookup=binder,
+                holdout=HoldoutSpec.no_holdout(),
+            )
+
+    def test_strict_version_check_false_skips_a_real_mismatch(self) -> None:
+        dojo: Dojo = ContrastiveDojo(
+            dealer=_dealer_with_decks(2),
+            pair_constructor=_ScriptedPairConstructor([]),
+            card_lookup=CardBinder(),
+            holdout=HoldoutSpec.no_holdout(),
+            strict_version_check=False,
+        )
+
+        assert dojo.example_count(Split.TRAIN) == 2

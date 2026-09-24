@@ -36,6 +36,9 @@ from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.seventeenlands.game_data.game_card_average_metric import (
     GameCardAverageMetric,
 )
+from src.data_refinement.metrics.version_metadata import (
+    write_dataframe_with_version_metadata,
+)
 from src.schema.game_id import GameId
 
 _DEFAULT_OUTPUT_PATH = Path(
@@ -118,7 +121,7 @@ class GameLengthAssociationMetric(GameCardAverageMetric):
             missing; writes self._output_path (a parquet file with
             columns nocab_uuid: str, game_length_association: float,
             sample_count: int - one row per card seen at least once).
-        Exceptions: whatever pandas.DataFrame.to_parquet raises.
+        Exceptions: whatever pyarrow.parquet.write_table raises.
 
         Example:
             >>> metric.finalize()
@@ -132,8 +135,9 @@ class GameLengthAssociationMetric(GameCardAverageMetric):
             self._association_row(card_uuid) for card_uuid in self._total_count
         ]
 
-        self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(result).to_parquet(self._output_path, index=False)
+        write_dataframe_with_version_metadata(
+            pd.DataFrame(result), self._output_path, self._version_metadata
+        )
         return self._output_path
 
     def _association_row(self, card_uuid: UUID) -> dict:

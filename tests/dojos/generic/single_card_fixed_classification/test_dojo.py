@@ -74,6 +74,7 @@ class TestSingleCardFixedClassificationDojoSplits:
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         batches = list(dojo.batches(Split.TRAIN, _BUDGET))
@@ -96,6 +97,7 @@ class TestSingleCardFixedClassificationDojoSplits:
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         train_rows = sum(
@@ -134,6 +136,7 @@ class TestSingleCardFixedClassificationDojoModPipeline:
                 [MaskTargetKeyMod(key="faction", train_only=False)]
             ),
             rng_seed=0,
+            strict_version_check=False,
         )
 
         train_batches = list(dojo.batches(Split.TRAIN, _BUDGET))
@@ -159,6 +162,7 @@ class TestSingleCardFixedClassificationDojoComputeLoss:
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
         embeddings = [torch.randn(4), torch.randn(4)]
         labels = ["monster", "northern_realms"]
@@ -179,6 +183,7 @@ class TestSingleCardFixedClassificationDojoComputeLoss:
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         try:
@@ -219,6 +224,7 @@ class TestSingleCardFixedClassificationDojoLossFactory:
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         assert isinstance(dojo.loss_calculator, FixedClassificationLoss)
@@ -238,6 +244,7 @@ class TestSingleCardFixedClassificationDojoLossFactory:
             card_embedding_size=4,
             loss_factory=_StubLoss,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         assert isinstance(dojo.loss_calculator, _StubLoss)

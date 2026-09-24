@@ -20,6 +20,19 @@ scope discussion). train_only=False is what makes that hold on every
 split; ModPipeline/Mod's own train_only default (True) is for the
 opposite case, augmentation a model shouldn't see at eval time.
 
+FactionMaskDojo ALSO masks "faction-duo" (present on 15 of 1260 cards):
+confirmed against the live corpus, its value always starts with the true
+faction ("syndicate_monster" for faction "syndicate"), so leaving it
+unmasked would let the model read the masked faction straight back off
+it. Setting it on every card, not only the 15 that have it, is harmless
+(MaskTargetKeyMod always sets its key; the other 1245 cards simply gain
+a "faction-duo": "[MASK]" they never had) and keeps this dojo's input
+shape uniform. Every other wrapper's masked field has no such correlated
+key in gwent.one's raw data (confirmed - see
+card_binder/gwent_one/ingestion_stage.py's own docstring for the one
+correlated key that WAS found, category vs. color, fixed there instead
+since it is pure duplication rather than genuinely-additional data).
+
 KNOWN LIMITATION, not fixed by this dojo: MaskTargetKeyMod.key masks
 one top-level raw_content key
 (card.raw_content[self.key] = "[MASK]") - it does not walk a multi-
@@ -66,7 +79,8 @@ from src.schema.holdout import HoldoutSpec
 class FactionMaskDojo(SingleCardFixedClassificationDojo):
     """Card, faction masked -> predicted faction (FactionMaskMetric).
     label_values=FactionMaskMetric.LABEL_VALUES unchanged - this metric
-    never falls back to OTHER_LABEL."""
+    never falls back to OTHER_LABEL. Also masks "faction-duo" - see this
+    module's docstring for why."""
 
     def __init__(
         self,
@@ -75,6 +89,7 @@ class FactionMaskDojo(SingleCardFixedClassificationDojo):
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         super().__init__(
             card_lookup=card_binder,
@@ -88,10 +103,12 @@ class FactionMaskDojo(SingleCardFixedClassificationDojo):
                 [
                     MaskTargetKeyMod(
                         key=FactionMaskMetric.MASKED_FIELD[-1], train_only=False
-                    )
+                    ),
+                    MaskTargetKeyMod(key="faction-duo", train_only=False),
                 ]
             ),
             rng_seed=rng_seed,
+            strict_version_check=strict_version_check,
         )
 
 
@@ -107,6 +124,7 @@ class ColorMaskDojo(SingleCardFixedClassificationDojo):
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         super().__init__(
             card_lookup=card_binder,
@@ -124,6 +142,7 @@ class ColorMaskDojo(SingleCardFixedClassificationDojo):
                 ]
             ),
             rng_seed=rng_seed,
+            strict_version_check=strict_version_check,
         )
 
 
@@ -139,6 +158,7 @@ class RarityMaskDojo(SingleCardFixedClassificationDojo):
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         super().__init__(
             card_lookup=card_binder,
@@ -156,6 +176,7 @@ class RarityMaskDojo(SingleCardFixedClassificationDojo):
                 ]
             ),
             rng_seed=rng_seed,
+            strict_version_check=strict_version_check,
         )
 
 
@@ -171,6 +192,7 @@ class SetMaskDojo(SingleCardFixedClassificationDojo):
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         super().__init__(
             card_lookup=card_binder,
@@ -184,6 +206,7 @@ class SetMaskDojo(SingleCardFixedClassificationDojo):
                 [MaskTargetKeyMod(key=SetMaskMetric.MASKED_FIELD[-1], train_only=False)]
             ),
             rng_seed=rng_seed,
+            strict_version_check=strict_version_check,
         )
 
 
@@ -199,6 +222,7 @@ class TypeMaskDojo(SingleCardFixedClassificationDojo):
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         super().__init__(
             card_lookup=card_binder,
@@ -216,6 +240,7 @@ class TypeMaskDojo(SingleCardFixedClassificationDojo):
                 ]
             ),
             rng_seed=rng_seed,
+            strict_version_check=strict_version_check,
         )
 
 
@@ -232,6 +257,7 @@ class ArmorMaskDojo(SingleCardFixedClassificationDojo):
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         super().__init__(
             card_lookup=card_binder,
@@ -249,6 +275,7 @@ class ArmorMaskDojo(SingleCardFixedClassificationDojo):
                 ]
             ),
             rng_seed=rng_seed,
+            strict_version_check=strict_version_check,
         )
 
 
@@ -265,6 +292,7 @@ class ProvisionMaskDojo(SingleCardFixedClassificationDojo):
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         super().__init__(
             card_lookup=card_binder,
@@ -282,6 +310,7 @@ class ProvisionMaskDojo(SingleCardFixedClassificationDojo):
                 ]
             ),
             rng_seed=rng_seed,
+            strict_version_check=strict_version_check,
         )
 
 
@@ -298,6 +327,7 @@ class PowerMaskDojo(SingleCardFixedClassificationDojo):
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         super().__init__(
             card_lookup=card_binder,
@@ -315,4 +345,5 @@ class PowerMaskDojo(SingleCardFixedClassificationDojo):
                 ]
             ),
             rng_seed=rng_seed,
+            strict_version_check=strict_version_check,
         )

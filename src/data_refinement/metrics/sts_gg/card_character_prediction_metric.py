@@ -30,6 +30,10 @@ import pandas as pd
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.metrics.version_metadata import (
+    MetricVersionMetadata,
+    write_dataframe_with_version_metadata,
+)
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 
@@ -78,6 +82,10 @@ class CardCharacterPredictionMetric:
         self._card_binder = card_binder
         self._deck_box = deck_box
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
+        self._version_metadata = MetricVersionMetadata(
+            game=GameId.SLAY_THE_SPIRE_2,
+            card_binder_version=card_binder.version_for(GameId.SLAY_THE_SPIRE_2),
+        )
         self._total_count: dict[UUID, int] = {}
         self._character_count: dict[tuple[UUID, str], int] = {}
 
@@ -133,7 +141,7 @@ class CardCharacterPredictionMetric:
             card's total tally, written once per card rather than once
             per (card, character) row as before - see
             plans/card_character_prediction_metric_output_shape.md).
-        Exceptions: whatever pandas.DataFrame.to_parquet raises.
+        Exceptions: whatever pyarrow.parquet.write_table raises.
 
         Example:
             >>> metric.finalize()
@@ -143,8 +151,9 @@ class CardCharacterPredictionMetric:
             self._card_row(card_uuid) for card_uuid in self._total_count
         ]
 
-        self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(result).to_parquet(self._output_path, index=False)
+        write_dataframe_with_version_metadata(
+            pd.DataFrame(result), self._output_path, self._version_metadata
+        )
         return self._output_path
 
     def _card_row(self, card_uuid: UUID) -> dict:

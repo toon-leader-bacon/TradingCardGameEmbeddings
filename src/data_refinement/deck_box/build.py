@@ -28,7 +28,10 @@ def build_or_update_deck_box(
         2. extraction_stage.extract(raw_path, box, card_lookup) —
            creates decks on box, as a side effect, under
            extraction_stage.SOURCE_GAME.
-        3. box.save(box_path, extraction_stage.SOURCE_GAME).
+        3. box.save(box_path, extraction_stage.SOURCE_GAME,
+           card_lookup.version_for(extraction_stage.SOURCE_GAME)) —
+           stamps the box with the CardBinder version its card
+           references were just resolved against.
         4. Return the list[UUID] extract() itself returned, unchanged.
 
     Inputs:
@@ -63,5 +66,9 @@ def build_or_update_deck_box(
     """
     box = DeckBox.load([box_path] if box_path.exists() else [])
     changed_uuids = extraction_stage.extract(raw_path, box, card_lookup)
-    box.save(box_path, extraction_stage.SOURCE_GAME)
+    box.save(
+        box_path,
+        extraction_stage.SOURCE_GAME,
+        card_lookup.version_for(extraction_stage.SOURCE_GAME),
+    )
     return changed_uuids

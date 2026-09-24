@@ -58,6 +58,10 @@ import pandas as pd
 from tqdm import tqdm
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
+from src.data_refinement.metrics.version_metadata import (
+    MetricVersionMetadata,
+    write_dataframe_with_version_metadata,
+)
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 
@@ -400,16 +404,25 @@ class SetMaskMetric:
         """Write rows to self._output_path as a parquet file.
 
         Private helper - single consumer is scan(). Mirrors
-        MaskedFieldMetric.scan()'s own pandas.DataFrame(...).to_parquet(...)
-        call, over _ExpansionMaskRow instead of _MaskedFieldRow.
+        MaskedFieldMetric.scan()'s own
+        version_metadata.write_dataframe_with_version_metadata() call,
+        over _ExpansionMaskRow instead of _MaskedFieldRow - the output
+        carries which self._card_lookup version (see
+        CardLookup.version_for()) it was built from, embedded as
+        parquet schema metadata, not a sidecar file.
 
         Inputs:
             rows: every eligible card's output row.
         Output: none.
         Side effects: writes self._output_path, overwriting any
             existing file there.
-        Exceptions: whatever pandas.DataFrame.to_parquet raises.
+        Exceptions: whatever pyarrow.parquet.write_table raises.
         """
-        pd.DataFrame([asdict(row) for row in rows]).to_parquet(
-            self._output_path, index=False
+        write_dataframe_with_version_metadata(
+            pd.DataFrame([asdict(row) for row in rows]),
+            self._output_path,
+            MetricVersionMetadata(
+                game=self.SOURCE_GAME,
+                card_binder_version=self._card_lookup.version_for(self.SOURCE_GAME),
+            ),
         )

@@ -24,7 +24,9 @@ from src.encoder_model.text_encoder import (
     StaticEmbeddingTextEncoder,
 )
 
-_DEFAULT_PRETRAINED_CHECKPOINT = "distilbert-base-uncased"
+# See reference_singlecard_models.py's own comment on this constant for
+# why ModernBERT-base.
+_DEFAULT_PRETRAINED_CHECKPOINT = "answerdotai/ModernBERT-base"
 
 
 class LinearProjectionMultiCardModel(MultiCardModel):

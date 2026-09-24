@@ -9,6 +9,11 @@ import torch
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.card_lookup import CardLookup
+from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.metrics.version_metadata import (
+    MetricVersionMetadata,
+    write_dataframe_with_version_metadata,
+)
 from src.dojos.batch import Batch
 from src.dojos.dojo import BatchBudget, Dojo
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
@@ -65,6 +70,7 @@ def _dojo(
         holdout=holdout,
         card_embedding_size=4,
         rng_seed=0,
+        strict_version_check=False,
     )
 
 
@@ -149,3 +155,164 @@ def test_compute_loss_rejects_a_foreign_batch(tmp_path: Path) -> None:
         dojo.compute_loss([torch.randn(4)], object())  # type: ignore[arg-type]
     with pytest.raises(ValueError):
         dojo.compute_loss([torch.randn(4)], Batch([card, card], [1.0, 2.0]))
+
+
+class TestVersionCheck:
+    def _source(
+        self,
+        tmp_path: Path,
+        card: GenericCard,
+        metadata: MetricVersionMetadata | None,
+    ) -> Path:
+        source = tmp_path / "source.parquet"
+        df = pd.DataFrame({"nocab_uuid": [str(card.nocab_uuid)], "label": [0.0]})
+        if metadata is None:
+            df.to_parquet(source, index=False)
+        else:
+            write_dataframe_with_version_metadata(df, source, metadata)
+        return source
+
+    def test_raises_when_source_has_no_version_metadata(self, tmp_path: Path) -> None:
+        binder = CardBinder()
+        card = _card("a")
+        binder.create(card)
+        source = self._source(tmp_path, card, metadata=None)
+
+        with pytest.raises(ValueError, match="no version metadata"):
+            SingleCardRegressionDojo(
+                path_to_training_data=source,
+                data_constructor=_CardPerRowConstructor(),
+                card_lookup=binder,
+                holdout=HoldoutSpec.no_holdout(),
+                card_embedding_size=4,
+            )
+
+    def test_passes_when_card_binder_version_matches(self, tmp_path: Path) -> None:
+        binder = CardBinder()
+        card = _card("a")
+        binder.create(card)
+        metadata = MetricVersionMetadata(
+            game=GameId.MTG, card_binder_version=binder.version_for(GameId.MTG)
+        )
+        source = self._source(tmp_path, card, metadata)
+
+        dojo = SingleCardRegressionDojo(
+            path_to_training_data=source,
+            data_constructor=_CardPerRowConstructor(),
+            card_lookup=binder,
+            holdout=HoldoutSpec.no_holdout(),
+            card_embedding_size=4,
+        )
+
+        assert dojo.name == "source"
+
+    def test_raises_when_card_binder_version_does_not_match(
+        self, tmp_path: Path
+    ) -> None:
+        binder = CardBinder()
+        card = _card("a")
+        binder.create(card)
+        metadata = MetricVersionMetadata(game=GameId.MTG, card_binder_version="stale")
+        source = self._source(tmp_path, card, metadata)
+
+        with pytest.raises(ValueError, match="CardBinder version"):
+            SingleCardRegressionDojo(
+                path_to_training_data=source,
+                data_constructor=_CardPerRowConstructor(),
+                card_lookup=binder,
+                holdout=HoldoutSpec.no_holdout(),
+                card_embedding_size=4,
+            )
+
+    def test_strict_version_check_false_skips_a_real_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        binder = CardBinder()
+        card = _card("a")
+        binder.create(card)
+        metadata = MetricVersionMetadata(game=GameId.MTG, card_binder_version="stale")
+        source = self._source(tmp_path, card, metadata)
+
+        dojo = SingleCardRegressionDojo(
+            path_to_training_data=source,
+            data_constructor=_CardPerRowConstructor(),
+            card_lookup=binder,
+            holdout=HoldoutSpec.no_holdout(),
+            card_embedding_size=4,
+            strict_version_check=False,
+        )
+
+        assert dojo.name == "source"
+
+    def test_raises_when_deck_box_required_but_not_given(self, tmp_path: Path) -> None:
+        binder = CardBinder()
+        card = _card("a")
+        binder.create(card)
+        metadata = MetricVersionMetadata(
+            game=GameId.MTG,
+            card_binder_version=binder.version_for(GameId.MTG),
+            requires_deck_box=True,
+        )
+        source = self._source(tmp_path, card, metadata)
+
+        with pytest.raises(ValueError, match="deck_box"):
+            SingleCardRegressionDojo(
+                path_to_training_data=source,
+                data_constructor=_CardPerRowConstructor(),
+                card_lookup=binder,
+                holdout=HoldoutSpec.no_holdout(),
+                card_embedding_size=4,
+            )
+
+    def test_raises_when_deck_box_binder_version_does_not_match(
+        self, tmp_path: Path
+    ) -> None:
+        # An unstamped DeckBox has card_binder_version_for() == None,
+        # which never matches a real version - a fresh, never-saved
+        # box is treated the same as a genuinely stale one.
+        binder = CardBinder()
+        card = _card("a")
+        binder.create(card)
+        deck_box = DeckBox()
+        metadata = MetricVersionMetadata(
+            game=GameId.MTG,
+            card_binder_version=binder.version_for(GameId.MTG),
+            requires_deck_box=True,
+        )
+        source = self._source(tmp_path, card, metadata)
+
+        with pytest.raises(ValueError, match="CardBinder version"):
+            SingleCardRegressionDojo(
+                path_to_training_data=source,
+                data_constructor=_CardPerRowConstructor(),
+                card_lookup=binder,
+                holdout=HoldoutSpec.no_holdout(),
+                card_embedding_size=4,
+                deck_box=deck_box,
+            )
+
+    def test_passes_when_deck_box_binder_version_matches(self, tmp_path: Path) -> None:
+        binder = CardBinder()
+        card = _card("a")
+        binder.create(card)
+        binder_version = binder.version_for(GameId.MTG)
+        # A DeckBox only carries card_binder_version_for() after a
+        # save()/load() round trip - see DeckBox.save()'s docstring.
+        deck_box_path = tmp_path / "deck_box.jsonl"
+        DeckBox().save(deck_box_path, GameId.MTG, binder_version)
+        deck_box = DeckBox.load([deck_box_path])
+        metadata = MetricVersionMetadata(
+            game=GameId.MTG, card_binder_version=binder_version, requires_deck_box=True
+        )
+        source = self._source(tmp_path, card, metadata)
+
+        dojo = SingleCardRegressionDojo(
+            path_to_training_data=source,
+            data_constructor=_CardPerRowConstructor(),
+            card_lookup=binder,
+            holdout=HoldoutSpec.no_holdout(),
+            card_embedding_size=4,
+            deck_box=deck_box,
+        )
+
+        assert dojo.name == "source"

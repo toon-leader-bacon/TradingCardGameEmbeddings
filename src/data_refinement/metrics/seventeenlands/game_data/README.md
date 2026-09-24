@@ -252,6 +252,8 @@ scan_game_csv(raw_csv_path, metrics)
 # each metric's DEFAULT_OUTPUT_PATH now exists
 
 deck_box.save(
-    Path("data/metrics/seventeenlands/game_data/deck_box.jsonl"), GameId.MTG
+    Path("data/metrics/seventeenlands/game_data/deck_box.jsonl"),
+    GameId.MTG,
+    binder.version_for(GameId.MTG),
 )
 ```

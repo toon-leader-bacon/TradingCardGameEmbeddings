@@ -27,6 +27,10 @@ import pandas as pd
 from tqdm import tqdm
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
+from src.data_refinement.metrics.version_metadata import (
+    MetricVersionMetadata,
+    write_dataframe_with_version_metadata,
+)
 from src.schema.card import GenericCard
 from src.schema.game_id import GameId
 
@@ -93,7 +97,12 @@ class MaskedFieldRegressionMetric(ABC):
             columns nocab_uuid: str, masked_field: list[str], label:
             float). One row per eligible card. Prints a tqdm progress
             bar to stderr.
-        Exceptions: whatever pandas.DataFrame.to_parquet raises.
+        Written with version_metadata.write_dataframe_with_version_metadata()
+        so the output carries which self._card_lookup version (see
+        CardLookup.version_for()) it was built from, embedded as
+        parquet schema metadata - not a sidecar file.
+
+        Exceptions: whatever pyarrow.parquet.write_table raises.
 
         Example:
             >>> metric = CostRegressionMetric(card_lookup)
@@ -102,15 +111,24 @@ class MaskedFieldRegressionMetric(ABC):
         """
         result: list[_MaskedFieldRegressionRow] = []
 
+        # A card with no raw_content at all (the CardBinder "Unknown"
+        # sentinel - card_binder.py's ensure_unknown_card()) is
+        # excluded here, structurally, rather than leaving every
+        # subclass's _is_eligible()/_value_for_card() to each guard
+        # against a raw_content lookup that would otherwise KeyError.
         cards = list(self._card_lookup.all_cards(self.SOURCE_GAME))
         for card in tqdm(cards, desc=type(self).__name__, unit="card"):
-            if not self._is_eligible(card):
+            if not card.raw_content or not self._is_eligible(card):
                 continue
             result.append(self._mask_row(card))
 
-        self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame([asdict(row) for row in result]).to_parquet(
-            self._output_path, index=False
+        write_dataframe_with_version_metadata(
+            pd.DataFrame([asdict(row) for row in result]),
+            self._output_path,
+            MetricVersionMetadata(
+                game=self.SOURCE_GAME,
+                card_binder_version=self._card_lookup.version_for(self.SOURCE_GAME),
+            ),
         )
         return self._output_path
 

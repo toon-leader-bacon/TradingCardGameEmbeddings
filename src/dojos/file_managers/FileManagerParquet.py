@@ -109,6 +109,20 @@ class FileManagerParquet:
 
         self._schema = pq.ParquetFile(self.path_to_training_data).schema_arrow
 
+    @property
+    def schema(self) -> pa.Schema:
+        """The source file's cached schema, metadata included.
+
+        Exposes what __init__ already computed (self._schema) so a
+        caller (e.g. GenericDojo's version-metadata check) can read it
+        without reaching into a private attribute or re-opening the
+        file. Every split file make_splits() writes carries this same
+        schema (metadata included), since _stream_source_into_splits
+        constructs each split's ParquetWriter with self._schema
+        directly.
+        """
+        return self._schema
+
     def make_splits(
         self,
         split_ratios: List[float] = [8, 1, 1],

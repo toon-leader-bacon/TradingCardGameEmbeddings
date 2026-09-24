@@ -38,6 +38,7 @@ class TestPickNumberDecayCurveDojo:
             card_embedding_size=4,
             path_to_training_data=source,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         assert isinstance(dojo, SingleCardFixedClassificationDojo)

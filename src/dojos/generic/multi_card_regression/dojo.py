@@ -7,6 +7,7 @@ decoder head and loss; everything else is the shared `Dojo` contract.
 from pathlib import Path
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
+from src.data_refinement.deck_box.deck_box import DeckBox
 from src.dojos.generic.data_constructor import DataConstructor
 from src.dojos.generic.generic_dojo import GenericDojo
 from src.dojos.generic.multi_card_regression.decoder_head import (
@@ -35,6 +36,8 @@ class MultiCardRegressionDojo(GenericDojo):
         mod_pipeline: ModPipeline | None = None,
         pooler: EmbeddingPooler | None = None,
         rng_seed: int | None = None,
+        deck_box: DeckBox | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         self.card_embedding_size = card_embedding_size
         super().__init__(
@@ -48,4 +51,6 @@ class MultiCardRegressionDojo(GenericDojo):
             loss_calculator=MseLoss(),
             mod_pipeline=mod_pipeline,
             rng_seed=rng_seed,
+            deck_box=deck_box,
+            strict_version_check=strict_version_check,
         )

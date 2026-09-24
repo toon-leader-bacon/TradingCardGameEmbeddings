@@ -32,6 +32,7 @@ class PackToPickChoiceSetDojo(MultiCardOptionSelectionDojo):
         path_to_training_data: Path | None = None,
         scoring_head: OptionScoringHead | None = None,
         rng_seed: int | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         super().__init__(
             card_lookup=card_binder,
@@ -42,4 +43,5 @@ class PackToPickChoiceSetDojo(MultiCardOptionSelectionDojo):
             card_embedding_size=card_embedding_size,
             scoring_head=scoring_head,
             rng_seed=rng_seed,
+            strict_version_check=strict_version_check,
         )

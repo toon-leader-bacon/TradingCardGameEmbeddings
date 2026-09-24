@@ -26,6 +26,11 @@ from src.data_refinement.metrics.isotropic.summary.row_utils import (
     card_uuid_for_name,
     eligible_player_entries,
 )
+from src.data_refinement.metrics.version_metadata import (
+    MetricVersionMetadata,
+    schema_with_version_metadata,
+)
+from src.schema.game_id import GameId
 
 _logger = logging.getLogger(__name__)
 
@@ -63,11 +68,17 @@ class CopiesBoughtDistributionMetric:
         """
         self._card_binder = card_binder
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
-        self._output_schema = pa.schema(
-            [
-                ("nocab_uuid", pa.string()),
-                ("copies", pa.int64()),
-            ]
+        self._output_schema = schema_with_version_metadata(
+            pa.schema(
+                [
+                    ("nocab_uuid", pa.string()),
+                    ("copies", pa.int64()),
+                ]
+            ),
+            MetricVersionMetadata(
+                game=GameId.DOMINION,
+                card_binder_version=card_binder.version_for(GameId.DOMINION),
+            ),
         )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
         self._writer = pq.ParquetWriter(self._output_path, self._output_schema)

@@ -21,7 +21,13 @@ from src.encoder_model.text_encoder import (
     StaticEmbeddingTextEncoder,
 )
 
-_DEFAULT_PRETRAINED_CHECKPOINT = "distilbert-base-uncased"
+# Cased and code-heavy-pretrained (card text is JSON), 8192-token native
+# context (this project truncates well below that - see text_encoder.py's
+# _DEFAULT_MAX_LENGTH) and Apache-2.0. No open checkpoint is JSON-tuned;
+# this is the closest available - see src/training/Notes.md section 4 for
+# the alternatives considered. Loads with attn_implementation="sdpa" by
+# default (confirmed, no override needed).
+_DEFAULT_PRETRAINED_CHECKPOINT = "answerdotai/ModernBERT-base"
 
 
 class LinearProjectionCardModel(SingleCardModel):

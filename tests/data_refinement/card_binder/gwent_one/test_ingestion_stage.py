@@ -28,6 +28,25 @@ _MASK_OF_UROBOROS_HTML = """
 </div>
 """
 
+# A leader card: category "Leader" is pure duplication of color "leader"
+# (confirmed against the live corpus - see the ingestion stage's docstring).
+_KING_BRAN_HTML = """
+<div class="card-wrap card-data" data-id="203100" data-power="0"
+     data-armor="0" data-provision="6" data-faction="skellige"
+     data-set="baseset" data-color="leader" data-type="unit"
+     data-rarity="legendary">
+    <div class="card-head">
+        <div class="card-name">
+            <a href="https://gwent.one/en/card/203100">King Bran</a>
+        </div>
+        <div class="card-category">Leader</div>
+    </div>
+    <div class="card-body">
+        <div class="card-body-ability">Charges: 2.<br /></div>
+    </div>
+</div>
+"""
+
 # Same data-id, richer ability text — a re-fetch with more content.
 _MASK_OF_UROBOROS_RICHER_HTML = """
 <div class="card-wrap card-data" data-id="202512" data-power="0"
@@ -245,6 +264,31 @@ class TestIngest:
 
         card = binder.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, "201600")
         assert "category" not in card.raw_content
+
+    def test_leader_category_is_omitted_as_a_duplicate_of_color(
+        self, tmp_path: Path
+    ) -> None:
+        # category "Leader" restates color "leader" exactly - not real
+        # category information for these cards, so it is dropped the same
+        # as an empty one (masked_field_dojos.py's ColorMaskDojo would
+        # otherwise be able to read the masked color straight back off it).
+        _write_page(tmp_path / "page_1.html", _KING_BRAN_HTML)
+        binder = CardBinder()
+
+        GwentOneCardIngestionStage().ingest(tmp_path, binder)
+
+        card = binder.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, "203100")
+        assert card.raw_content["color"] == "leader"
+        assert "category" not in card.raw_content
+
+    def test_non_leader_category_is_kept(self, tmp_path: Path) -> None:
+        _write_page(tmp_path / "page_1.html", _MASK_OF_UROBOROS_HTML)
+        binder = CardBinder()
+
+        GwentOneCardIngestionStage().ingest(tmp_path, binder)
+
+        card = binder.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, "202512")
+        assert card.raw_content["category"] == "Location"
 
     def test_no_ability_div_omits_ability_text(self, tmp_path: Path) -> None:
         _write_page(tmp_path / "page_1.html", _VANILLA_UNIT_HTML)

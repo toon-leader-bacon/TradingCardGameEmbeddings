@@ -378,6 +378,88 @@ class TestAllCards:
         assert list(binder.all_cards(GameId.MTG)) == [mtg_card]
 
 
+class TestVersionFor:
+    def test_empty_game_returns_a_fixed_digest(self) -> None:
+        binder = CardBinder()
+
+        assert binder.version_for(GameId.MTG) == binder.version_for(GameId.MTG)
+        assert isinstance(binder.version_for(GameId.MTG), str)
+
+    def test_stable_across_instances_with_the_same_content(self) -> None:
+        card = _card("Bolt", "src-1", {"a": 1})
+        first_binder = CardBinder()
+        first_binder.create(replace(card))
+        second_binder = CardBinder()
+        second_binder.create(replace(card))
+
+        assert first_binder.version_for(GameId.MTG) == second_binder.version_for(
+            GameId.MTG
+        )
+
+    def test_unaffected_by_creation_order(self) -> None:
+        card_a = _card("Bolt", "src-1", {"a": 1})
+        card_b = _card("Shock", "src-2", {"a": 2})
+        first_binder = CardBinder()
+        first_binder.create(replace(card_a))
+        first_binder.create(replace(card_b))
+        second_binder = CardBinder()
+        second_binder.create(replace(card_b))
+        second_binder.create(replace(card_a))
+
+        assert first_binder.version_for(GameId.MTG) == second_binder.version_for(
+            GameId.MTG
+        )
+
+    def test_changes_when_raw_content_changes(self) -> None:
+        card = _card("Bolt", "src-1", {"a": 1})
+        binder = CardBinder()
+        binder.create(card)
+        before = binder.version_for(GameId.MTG)
+
+        binder.update(card.nocab_uuid, raw_content_patch={"a": 2})
+
+        assert binder.version_for(GameId.MTG) != before
+
+    def test_unaffected_by_provenance_change(self) -> None:
+        # provenance.fetched_at changes on every re-ingest even when
+        # content doesn't - version_for() must ignore it, or a no-op
+        # re-ingest would look like a real change.
+        card = _card("Bolt", "src-1", {"a": 1})
+        binder = CardBinder()
+        binder.create(card)
+        before = binder.version_for(GameId.MTG)
+
+        binder.update(
+            card.nocab_uuid,
+            provenance=Provenance(
+                data_source=DataSource.SCRYFALL,
+                source_id="src-1",
+                fetched_at=datetime.now(timezone.utc),
+            ),
+        )
+
+        assert binder.version_for(GameId.MTG) == before
+
+    def test_unaffected_by_other_games(self) -> None:
+        binder = CardBinder()
+        before = binder.version_for(GameId.MTG)
+
+        binder.create(
+            _card("Charmander", "src-9", {"a": 1}, source_game=GameId.POKEMON)
+        )
+
+        assert binder.version_for(GameId.MTG) == before
+
+    def test_changes_when_a_card_is_added(self) -> None:
+        binder = CardBinder()
+        binder.create(_card("Bolt", "src-1", {"a": 1}))
+        before = binder.version_for(GameId.MTG)
+
+        binder.create(_card("Shock", "src-2", {"a": 2}))
+
+        assert binder.version_for(GameId.MTG) != before
+
+
 class TestLoad:
     def test_empty_list_returns_usable_empty_binder(self) -> None:
         binder = CardBinder.load([])

@@ -26,6 +26,10 @@ from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.seventeenlands.draft_data.pack_pool_columns import (
     DraftCardColumns,
 )
+from src.data_refinement.metrics.version_metadata import (
+    MetricVersionMetadata,
+    schema_with_version_metadata,
+)
 from src.schema.game_id import GameId
 
 _DEFAULT_OUTPUT_PATH = Path(
@@ -86,8 +90,15 @@ class PoolConditionedPickMetric:
             header, card_binder, source_game
         )
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
+        self._output_schema = schema_with_version_metadata(
+            _OUTPUT_SCHEMA,
+            MetricVersionMetadata(
+                game=source_game,
+                card_binder_version=card_binder.version_for(source_game),
+            ),
+        )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._writer = pq.ParquetWriter(self._output_path, _OUTPUT_SCHEMA)
+        self._writer = pq.ParquetWriter(self._output_path, self._output_schema)
         self._closed = False
 
     def accumulate(self, row: dict) -> None:
@@ -115,6 +126,21 @@ class PoolConditionedPickMetric:
         )
         pick_uuid = self._draft_columns.uuid_for_name(row["pick"])
 
+        # TODO: memory/perf - this calls write_table() once per input
+        # row, so a big CSV (e.g. MSH.PremierDraft.csv, ~40M rows)
+        # writes tens of millions of one-row parquet row groups.
+        # ParquetWriter accumulates per-row-group metadata in memory
+        # for the life of the writer, so RAM grows across the whole
+        # run and throughput collapses well before finishing (observed:
+        # 2026-09-23/24, killed after ~10% of a 4.3 GB CSV, 4.8->6.4+ GiB
+        # RSS and climbing, machine badly degraded - see
+        # src/training/TODO.md section C). Likely fix: buffer rows and
+        # call write_table() on a pyarrow.Table of a few thousand rows
+        # at a time (or pass row_group_size), not one row group per
+        # CSV row. Left unfixed for now - shelved in favor of the first
+        # training run; MSH PremierDraft draft metrics are corrupt on
+        # disk and excluded from the first-run dojo set until this is
+        # fixed and this file is regenerated.
         output_row = self._output_row(row, pool_uuids, pack_option_uuids, pick_uuid)
         self._writer.write_table(output_row)
 
@@ -176,5 +202,5 @@ class PoolConditionedPickMetric:
                 "pack_option_uuids": [[str(uuid) for uuid in pack_option_uuids]],
                 "pick_uuid": [str(pick_uuid) if pick_uuid is not None else None],
             },
-            schema=_OUTPUT_SCHEMA,
+            schema=self._output_schema,
         )

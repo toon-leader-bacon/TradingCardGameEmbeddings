@@ -78,6 +78,12 @@ class VisibleCardLookup:
         """See CardLookup.all_cards(); hidden cards are omitted."""
         return self._only_visible(self._inner.all_cards(source_game))
 
+    def version_for(self, source_game: GameId) -> str:
+        """See CardLookup.version_for() - forwarded unfiltered: this
+        describes the underlying store's content, not a per-split view
+        of it, so holdout visibility does not apply here."""
+        return self._inner.version_for(source_game)
+
     def _is_visible(self, card: GenericCard) -> bool:
         tier = self._spec.tier_of(card.nocab_uuid, card.source_game)
         return tier in self._visible

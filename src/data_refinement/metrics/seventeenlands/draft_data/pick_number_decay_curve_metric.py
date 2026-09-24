@@ -38,6 +38,7 @@ import pyarrow.parquet as pq
 from src.data_refinement.metrics.seventeenlands.draft_data.pack_card_tally_metric import (
     PackCardTallyMetric,
 )
+from src.data_refinement.metrics.version_metadata import schema_with_version_metadata
 
 
 class PickNumberDecayCurveMetric(PackCardTallyMetric):
@@ -105,6 +106,9 @@ class PickNumberDecayCurveMetric(PackCardTallyMetric):
 
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
         table = pa.Table.from_pylist(rows)
+        table = table.replace_schema_metadata(
+            schema_with_version_metadata(table.schema, self._version_metadata).metadata
+        )
         pq.write_table(table, self._output_path)
         return self._output_path
 

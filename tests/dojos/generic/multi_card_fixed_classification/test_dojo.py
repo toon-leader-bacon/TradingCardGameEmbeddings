@@ -79,6 +79,7 @@ class TestMultiCardFixedClassificationDojoSplits:
             label_values=_LABEL_VALUES,
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         batches = list(dojo.batches(Split.TRAIN, _BUDGET))
@@ -101,6 +102,7 @@ class TestMultiCardFixedClassificationDojoSplits:
             label_values=_LABEL_VALUES,
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         train_rows = sum(
@@ -132,6 +134,7 @@ class TestMultiCardFixedClassificationDojoPooler:
             card_embedding_size=4,
             pooler=stub_pooler,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         assert dojo.decoder_head.pooler is stub_pooler
@@ -150,6 +153,7 @@ class TestMultiCardFixedClassificationDojoComputeLoss:
             label_values=_LABEL_VALUES,
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
         # Two decks of different sizes - compute_loss must handle the
         # ragged BatchedMultiCardEmbedding shape correctly.
@@ -172,6 +176,7 @@ class TestMultiCardFixedClassificationDojoComputeLoss:
             label_values=_LABEL_VALUES,
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         try:
@@ -195,6 +200,7 @@ class TestMultiCardFixedClassificationDojoComputeLoss:
             label_values=_LABEL_VALUES,
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         try:

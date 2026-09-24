@@ -34,6 +34,10 @@ from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.seventeenlands.replay_data.replay_card_columns import (
     ReplayCardColumns,
 )
+from src.data_refinement.metrics.version_metadata import (
+    MetricVersionMetadata,
+    schema_with_version_metadata,
+)
 from src.schema.game_id import GameId
 
 _DEFAULT_OUTPUT_PATH = Path(
@@ -97,8 +101,15 @@ class AttackerBlockerCombatOutcomeMetric:
             header, card_binder, source_game
         )
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
+        self._output_schema = schema_with_version_metadata(
+            _OUTPUT_SCHEMA,
+            MetricVersionMetadata(
+                game=source_game,
+                card_binder_version=card_binder.version_for(source_game),
+            ),
+        )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._writer = pq.ParquetWriter(self._output_path, _OUTPUT_SCHEMA)
+        self._writer = pq.ParquetWriter(self._output_path, self._output_schema)
         self._closed = False
 
     def accumulate(self, row: dict) -> None:
@@ -269,5 +280,5 @@ class AttackerBlockerCombatOutcomeMetric:
                 "blocker_uuids": blocker_uuids,
                 "net_kill_delta": net_kill_deltas,
             },
-            schema=_OUTPUT_SCHEMA,
+            schema=self._output_schema,
         )

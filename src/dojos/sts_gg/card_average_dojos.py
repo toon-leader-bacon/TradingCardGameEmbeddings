@@ -40,6 +40,7 @@ class CardRelicCountDojo(SingleCardRegressionDojo):
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         super().__init__(
             card_lookup=card_binder,
@@ -51,6 +52,7 @@ class CardRelicCountDojo(SingleCardRegressionDojo):
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
+            strict_version_check=strict_version_check,
         )
 
 
@@ -64,6 +66,7 @@ class CardTotalDamageTakenDojo(SingleCardRegressionDojo):
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         super().__init__(
             card_lookup=card_binder,
@@ -75,6 +78,7 @@ class CardTotalDamageTakenDojo(SingleCardRegressionDojo):
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
+            strict_version_check=strict_version_check,
         )
 
 
@@ -88,6 +92,7 @@ class CardDeckSizeDojo(SingleCardRegressionDojo):
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         super().__init__(
             card_lookup=card_binder,
@@ -99,6 +104,7 @@ class CardDeckSizeDojo(SingleCardRegressionDojo):
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
+            strict_version_check=strict_version_check,
         )
 
 
@@ -112,6 +118,7 @@ class CardTotalCardsPickedDojo(SingleCardRegressionDojo):
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         super().__init__(
             card_lookup=card_binder,
@@ -123,6 +130,7 @@ class CardTotalCardsPickedDojo(SingleCardRegressionDojo):
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
+            strict_version_check=strict_version_check,
         )
 
 
@@ -136,6 +144,7 @@ class CardTotalTurnsDojo(SingleCardRegressionDojo):
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         super().__init__(
             card_lookup=card_binder,
@@ -147,6 +156,7 @@ class CardTotalTurnsDojo(SingleCardRegressionDojo):
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
+            strict_version_check=strict_version_check,
         )
 
 
@@ -160,6 +170,7 @@ class CardElitesKilledDojo(SingleCardRegressionDojo):
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         super().__init__(
             card_lookup=card_binder,
@@ -171,6 +182,7 @@ class CardElitesKilledDojo(SingleCardRegressionDojo):
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
+            strict_version_check=strict_version_check,
         )
 
 
@@ -184,6 +196,7 @@ class CardFloorsClearedDojo(SingleCardRegressionDojo):
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         super().__init__(
             card_lookup=card_binder,
@@ -195,6 +208,7 @@ class CardFloorsClearedDojo(SingleCardRegressionDojo):
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
+            strict_version_check=strict_version_check,
         )
 
 
@@ -208,6 +222,7 @@ class CardTotalCombatsDojo(SingleCardRegressionDojo):
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         super().__init__(
             card_lookup=card_binder,
@@ -219,6 +234,7 @@ class CardTotalCombatsDojo(SingleCardRegressionDojo):
             ),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
+            strict_version_check=strict_version_check,
         )
 
 
@@ -239,6 +255,7 @@ class CardWinRateDojo(SingleCardRegressionDojo):
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         super().__init__(
             card_lookup=card_binder,
@@ -248,4 +265,5 @@ class CardWinRateDojo(SingleCardRegressionDojo):
             data_constructor=CardAverageDataConstructor(CardWinRateMetric.LABEL_COLUMN),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
+            strict_version_check=strict_version_check,
         )

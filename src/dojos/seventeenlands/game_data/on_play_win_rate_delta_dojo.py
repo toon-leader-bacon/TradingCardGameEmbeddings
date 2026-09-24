@@ -41,6 +41,7 @@ class OnPlayWinRateDeltaDojo(SingleCardRegressionDojo):
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         super().__init__(
             card_lookup=card_binder,
@@ -50,4 +51,5 @@ class OnPlayWinRateDeltaDojo(SingleCardRegressionDojo):
             data_constructor=CardAverageDataConstructor("on_play_win_rate_delta"),
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
+            strict_version_check=strict_version_check,
         )

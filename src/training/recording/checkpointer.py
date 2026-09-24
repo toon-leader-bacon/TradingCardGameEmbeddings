@@ -13,7 +13,6 @@ from src.training.plan import TrainingPlan
 from src.training.recording.reports import CheckpointRecord, RoundReport
 from src.training.trainable_encoder import TrainableEncoder
 
-
 _STATE_FILE = "state.pt"
 _ENCODER_FILE = "encoder.pt"
 _MANIFEST_FILE = "manifest.json"

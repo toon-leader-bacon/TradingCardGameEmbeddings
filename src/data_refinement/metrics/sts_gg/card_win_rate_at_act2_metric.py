@@ -27,6 +27,10 @@ import pandas as pd
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.metrics.version_metadata import (
+    MetricVersionMetadata,
+    write_dataframe_with_version_metadata,
+)
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 
@@ -75,6 +79,10 @@ class CardWinRateAtAct2Metric:
         self._card_binder = card_binder
         self._deck_box = deck_box
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
+        self._version_metadata = MetricVersionMetadata(
+            game=GameId.SLAY_THE_SPIRE_2,
+            card_binder_version=card_binder.version_for(GameId.SLAY_THE_SPIRE_2),
+        )
         self._total_count: dict[UUID, int] = {}
         self._win_count: dict[UUID, int] = {}
 
@@ -125,7 +133,7 @@ class CardWinRateAtAct2Metric:
             if missing; writes self._output_path (a parquet file with
             columns nocab_uuid: str, win_rate: float, sample_count:
             int - one row per card seen at least once).
-        Exceptions: whatever pandas.DataFrame.to_parquet raises.
+        Exceptions: whatever pyarrow.parquet.write_table raises.
 
         Example:
             >>> metric.finalize()
@@ -137,8 +145,9 @@ class CardWinRateAtAct2Metric:
         for card_uuid in self._total_count:
             result.append(self._win_rate_row(card_uuid))
 
-        self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(result).to_parquet(self._output_path, index=False)
+        write_dataframe_with_version_metadata(
+            pd.DataFrame(result), self._output_path, self._version_metadata
+        )
         return self._output_path
 
     def _act_2_start_floor(self, hp_per_floor: list[dict]) -> int | None:

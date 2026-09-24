@@ -38,6 +38,10 @@ import pyarrow.parquet as pq
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.hash_utils import deck_uuid_from_cards
+from src.data_refinement.metrics.version_metadata import (
+    MetricVersionMetadata,
+    schema_with_version_metadata,
+)
 from src.schema.card import GenericDeck
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
@@ -89,12 +93,19 @@ class DeckLabelMetric(ABC):
         self._card_binder = card_binder
         self._deck_box = deck_box
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
-        self._output_schema = pa.schema(
-            [
-                ("run_id", pa.string()),
-                ("deck_uuid", pa.string()),
-                (self.LABEL_COLUMN, self.LABEL_TYPE),
-            ]
+        self._output_schema = schema_with_version_metadata(
+            pa.schema(
+                [
+                    ("run_id", pa.string()),
+                    ("deck_uuid", pa.string()),
+                    (self.LABEL_COLUMN, self.LABEL_TYPE),
+                ]
+            ),
+            MetricVersionMetadata(
+                game=GameId.SLAY_THE_SPIRE_2,
+                card_binder_version=card_binder.version_for(GameId.SLAY_THE_SPIRE_2),
+                requires_deck_box=True,
+            ),
         )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
         self._writer = pq.ParquetWriter(self._output_path, self._output_schema)

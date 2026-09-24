@@ -124,7 +124,11 @@ deck_box = DeckBox.load([Path("data/final/decks/gwent.jsonl")])  # warm start
 metrics = [LeaderMaskedFromDeckMetric(card_binder, deck_box)]
 
 scan_guides_jsonl(Path("data/raw/play_gwent/guides.jsonl"), metrics)
-deck_box.save(Path("data/final/decks/gwent.jsonl"), GameId.GWENT)
+deck_box.save(
+    Path("data/final/decks/gwent.jsonl"),
+    GameId.GWENT,
+    card_binder.version_for(GameId.GWENT),
+)
 ```
 
 ## Out of scope (deferred)

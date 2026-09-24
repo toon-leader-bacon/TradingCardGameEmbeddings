@@ -52,7 +52,11 @@ def scan_guides_jsonl(raw_path: Path, metrics: list[Metric[dict]]) -> None:
         >>> box = DeckBox.load([Path("data/final/decks/gwent.jsonl")])
         >>> metrics = [LeaderMaskedFromDeckMetric(card_lookup, box)]
         >>> scan_guides_jsonl(Path("data/raw/play_gwent/guides.jsonl"), metrics)
-        >>> box.save(Path("data/final/decks/gwent.jsonl"), GameId.GWENT)
+        >>> box.save(
+        ...     Path("data/final/decks/gwent.jsonl"),
+        ...     GameId.GWENT,
+        ...     card_binder.version_for(GameId.GWENT),
+        ... )
     """
     total_bytes = raw_path.stat().st_size
     with open(raw_path, "r", encoding="utf-8") as raw_file, tqdm(

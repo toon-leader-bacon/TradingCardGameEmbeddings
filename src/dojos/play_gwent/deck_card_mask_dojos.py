@@ -44,6 +44,7 @@ class LeaderMaskedFromDeckDojo(MultiCardFixedClassificationDojo):
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         rng_seed: int | None = None,
+        strict_version_check: bool = True,
     ) -> None:
         super().__init__(
             card_lookup=card_binder,
@@ -54,4 +55,5 @@ class LeaderMaskedFromDeckDojo(MultiCardFixedClassificationDojo):
             label_values=LeaderMaskedFromDeckMetric.LABEL_VALUES,
             card_embedding_size=card_embedding_size,
             rng_seed=rng_seed,
+            strict_version_check=strict_version_check,
         )

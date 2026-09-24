@@ -67,3 +67,7 @@ class CardLookup(Protocol):
     def all_cards(self, source_game: GameId) -> Iterable[GenericCard]:
         """See CardBinder.all_cards()."""
         ...
+
+    def version_for(self, source_game: GameId) -> str:
+        """See CardBinder.version_for()."""
+        ...

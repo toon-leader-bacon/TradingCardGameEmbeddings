@@ -26,7 +26,12 @@ import pyarrow.parquet as pq
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.isotropic.summary.row_utils import deck_for_player
+from src.data_refinement.metrics.version_metadata import (
+    MetricVersionMetadata,
+    schema_with_version_metadata,
+)
 from src.schema.card import GenericDeck
+from src.schema.game_id import GameId
 
 _MIN_MULTIPLAYER_COUNT = 3
 _MAX_MULTIPLAYER_COUNT = 4
@@ -70,11 +75,18 @@ class MultiplayerPlacementMetric:
         self._card_binder = card_binder
         self._deck_box = deck_box
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
-        self._output_schema = pa.schema(
-            [
-                ("deck_uuids", pa.list_(pa.string())),
-                ("ranks", pa.list_(pa.int64())),
-            ]
+        self._output_schema = schema_with_version_metadata(
+            pa.schema(
+                [
+                    ("deck_uuids", pa.list_(pa.string())),
+                    ("ranks", pa.list_(pa.int64())),
+                ]
+            ),
+            MetricVersionMetadata(
+                game=GameId.DOMINION,
+                card_binder_version=card_binder.version_for(GameId.DOMINION),
+                requires_deck_box=True,
+            ),
         )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
         self._writer = pq.ParquetWriter(self._output_path, self._output_schema)

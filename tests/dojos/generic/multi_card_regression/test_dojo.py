@@ -72,6 +72,7 @@ class TestMultiCardRegressionDojoSplits:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         batches = list(dojo.batches(Split.TRAIN, _BUDGET))
@@ -93,6 +94,7 @@ class TestMultiCardRegressionDojoSplits:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         train_rows = sum(
@@ -123,6 +125,7 @@ class TestMultiCardRegressionDojoPooler:
             card_embedding_size=4,
             pooler=stub_pooler,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         assert dojo.decoder_head.pooler is stub_pooler
@@ -140,6 +143,7 @@ class TestMultiCardRegressionDojoComputeLoss:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
         # Two decks of different sizes - compute_loss must handle the
         # ragged BatchedMultiCardEmbedding shape correctly.
@@ -161,6 +165,7 @@ class TestMultiCardRegressionDojoComputeLoss:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         try:

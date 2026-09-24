@@ -1,3 +1,4 @@
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
@@ -26,6 +27,32 @@ def _box_with_decks(count: int) -> tuple[DeckBox, list[UUID]]:
         box.create(deck)
         uuids.append(deck.nocab_uuid)
     return box, uuids
+
+
+class TestSourceGameAndCardBinderVersion:
+    def test_source_game_is_the_constructor_argument(self) -> None:
+        box, _ = _box_with_decks(1)
+
+        dealer = DeckBoxDealer(box, GameId.MTG)
+
+        assert dealer.source_game == GameId.MTG
+
+    def test_card_binder_version_is_none_for_an_unstamped_box(self) -> None:
+        box, _ = _box_with_decks(1)
+
+        dealer = DeckBoxDealer(box, GameId.MTG)
+
+        assert dealer.card_binder_version is None
+
+    def test_card_binder_version_reflects_the_box(self, tmp_path: Path) -> None:
+        box, _ = _box_with_decks(1)
+        path = tmp_path / "mtg.jsonl"
+        box.save(path, GameId.MTG, "binder-v1")
+        loaded = DeckBox.load([path])
+
+        dealer = DeckBoxDealer(loaded, GameId.MTG)
+
+        assert dealer.card_binder_version == "binder-v1"
 
 
 class TestInit:

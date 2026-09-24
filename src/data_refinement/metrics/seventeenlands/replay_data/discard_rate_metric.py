@@ -29,6 +29,10 @@ from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.seventeenlands.replay_data.replay_card_columns import (
     ReplayCardColumns,
 )
+from src.data_refinement.metrics.version_metadata import (
+    MetricVersionMetadata,
+    write_dataframe_with_version_metadata,
+)
 from src.schema.game_id import GameId
 
 _DEFAULT_OUTPUT_PATH = Path(
@@ -79,6 +83,9 @@ class DiscardRateMetric:
         self._replay_columns = ReplayCardColumns.from_header(
             header, card_binder, source_game
         )
+        self._version_metadata = MetricVersionMetadata(
+            game=source_game, card_binder_version=card_binder.version_for(source_game)
+        )
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
         self._total_count: dict[UUID, int] = {}
         self._hit_count: dict[UUID, int] = {}
@@ -127,7 +134,7 @@ class DiscardRateMetric:
             missing; writes self._output_path (a parquet file with
             columns nocab_uuid: str, discard_rate: float,
             sample_count: int).
-        Exceptions: whatever pandas.DataFrame.to_parquet raises.
+        Exceptions: whatever pyarrow.parquet.write_table raises.
 
         Example:
             >>> metric.finalize()
@@ -135,8 +142,9 @@ class DiscardRateMetric:
         """
         result = [self._rate_row(card_uuid) for card_uuid in self._total_count]
 
-        self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(result).to_parquet(self._output_path, index=False)
+        write_dataframe_with_version_metadata(
+            pd.DataFrame(result), self._output_path, self._version_metadata
+        )
         return self._output_path
 
     def _discarded_uuids_for_row(self, row: dict) -> set[UUID]:

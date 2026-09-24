@@ -29,6 +29,11 @@ from src.data_refinement.metrics.isotropic.summary.row_utils import (
     kingdom_card_names,
     winner_entry,
 )
+from src.data_refinement.metrics.version_metadata import (
+    MetricVersionMetadata,
+    write_dataframe_with_version_metadata,
+)
+from src.schema.game_id import GameId
 
 _logger = logging.getLogger(__name__)
 
@@ -126,7 +131,7 @@ class TurnCountAssociationMetric:
             columns nocab_uuid: str, turn_count_delta: float (signed -
             positive means this card's kingdoms run longer than
             average), sample_count: int).
-        Exceptions: whatever pandas.DataFrame.to_parquet raises, or
+        Exceptions: whatever pyarrow.parquet.write_table raises, or
             ZeroDivisionError if this instance's accumulate() was never
             called with any natural-kingdom, winner-resolvable game
             (self._corpus_game_count == 0) - a real "no baseline to
@@ -147,6 +152,12 @@ class TurnCountAssociationMetric:
             for card_uuid, count in self._game_count.items()
         ]
 
-        self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(result).to_parquet(self._output_path, index=False)
+        write_dataframe_with_version_metadata(
+            pd.DataFrame(result),
+            self._output_path,
+            MetricVersionMetadata(
+                game=GameId.DOMINION,
+                card_binder_version=self._card_binder.version_for(GameId.DOMINION),
+            ),
+        )
         return self._output_path

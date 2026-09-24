@@ -33,6 +33,10 @@ from src.data_refinement.metrics.hash_utils import deck_uuid_from_cards
 from src.data_refinement.metrics.seventeenlands.replay_data.replay_card_columns import (
     ReplayCardColumns,
 )
+from src.data_refinement.metrics.version_metadata import (
+    MetricVersionMetadata,
+    schema_with_version_metadata,
+)
 from src.schema.card import GenericDeck
 from src.schema.game_id import GameId
 
@@ -101,8 +105,16 @@ class CombatAggressionProfileMetric:
         self._source_game = source_game
         self._deck_box = deck_box
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
+        self._output_schema = schema_with_version_metadata(
+            _OUTPUT_SCHEMA,
+            MetricVersionMetadata(
+                game=source_game,
+                card_binder_version=card_binder.version_for(source_game),
+                requires_deck_box=True,
+            ),
+        )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._writer = pq.ParquetWriter(self._output_path, _OUTPUT_SCHEMA)
+        self._writer = pq.ParquetWriter(self._output_path, self._output_schema)
         self._closed = False
 
     def accumulate(self, row: dict) -> None:
@@ -243,5 +255,5 @@ class CombatAggressionProfileMetric:
                 "deck_uuid": [str(deck_uuid)],
                 "combat_aggression_profile": [profile],
             },
-            schema=_OUTPUT_SCHEMA,
+            schema=self._output_schema,
         )

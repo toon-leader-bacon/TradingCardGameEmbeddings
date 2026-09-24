@@ -67,9 +67,10 @@ merged or cross-referenced.
 
 - `deck_box.py` — `DeckBox`, the in-memory, multi-game deck store. Three
   regions: **CRUD by UUID** (`create`/`create_if_absent`/`update`/
-  `replace`/`delete`, `get_by_uuid`, `all_uuids`, `all_decks`),
-  **Persistence** (`load`/`save`, `default_output_path`), **Private
-  Helpers** (`_upsert_deck`). `create()` raises if `nocab_uuid` is
+  `replace`/`delete`, `get_by_uuid`, `all_uuids`, `all_decks`,
+  `version_for`, `card_binder_version_for`), **Persistence**
+  (`load`/`save`, `default_output_path`), **Private Helpers**
+  (`_upsert_deck`, `_read_header`). `create()` raises if `nocab_uuid` is
   already stored; `create_if_absent()` is its counterpart for a
   content-derived id scheme (e.g.
   `metrics/hash_utils.py`'s `deck_uuid_from_cards()`) where the same
@@ -84,9 +85,22 @@ merged or cross-referenced.
   location (e.g. `DeckBox.default_output_path(GameId.MTG) ==
   Path("data/final/decks/mtg.jsonl")`) — a recommended default, not an
   enforced requirement. Only `get_by_uuid`, `all_uuids`, and `all_decks`
-  exist as read methods today — no name-based or alias-based lookup, and
-  no `decks_containing(card_uuid)`; these are deliberately deferred until
-  a real consumer needs them.
+  exist as name/uuid-shaped read methods today — no name-based or
+  alias-based lookup, and no `decks_containing(card_uuid)`; these are
+  deliberately deferred until a real consumer needs them.
+  `version_for(source_game) -> str` is a derived content hash (same
+  reasoning as `CardBinder.version_for()` — see that container's
+  README) over this game's decks, keyed on `nocab_uuid`/`name`/a
+  *sorted* `card_nocab_uuids` (a multiset, so incidental list order
+  must not affect the hash). `card_binder_version_for(source_game) ->
+  str | None` is different in kind — not derived, since a deck carries
+  no `raw_content` to re-hash against: it's the upstream `CardBinder`
+  version `save()` was given, round-tripped through a reserved leading
+  JSON line (`{"__card_binder_version__": ..., "__game__": ...}`) in
+  the box's own JSONL file, read back by `load()`. `None` means that
+  game was never loaded from a file carrying that line (a fresh box,
+  or one saved before this existed) — callers checking staleness treat
+  that the same as a real mismatch, not a free pass.
 - `extraction.py` — `DeckExtractionStage`, the shared Strategy Protocol
   (structural, `typing.Protocol` — matching `CardIngestionStage`'s own
   convention) every raw deck source implements:
@@ -105,9 +119,15 @@ merged or cross-referenced.
   box_path, card_lookup) -> list[UUID]`, the thin driver:
   `DeckBox.load([box_path] if it exists else [])` →
   `extraction_stage.extract(raw_path, box, card_lookup)` →
-  `box.save(box_path, extraction_stage.SOURCE_GAME)` → return
+  `box.save(box_path, extraction_stage.SOURCE_GAME,
+  card_lookup.version_for(extraction_stage.SOURCE_GAME))` → return
   `extract()`'s own `list[UUID]` unchanged. No `source_game` parameter of
-  its own — it reads `extraction_stage.SOURCE_GAME`.
+  its own — it reads `extraction_stage.SOURCE_GAME`. The saved box is
+  stamped with the `CardBinder` version its card references were
+  resolved against (see `DeckBox.save()`'s own docstring) — every raw
+  row extraction already resolves through `card_lookup`, so the
+  version is simply
+  `card_lookup.version_for(extraction_stage.SOURCE_GAME)`.
 
 ## Sources
 
@@ -237,7 +257,7 @@ flowchart TD
     E --> F["box.create(GenericDeck(...))"]
     F --> G{"more rows?"}
     G -- yes --> D
-    G -- no --> H["box.save(box_path,\nextraction_stage.SOURCE_GAME)"]
+    G -- no --> H["box.save(box_path,\nextraction_stage.SOURCE_GAME,\ncard_lookup.version_for(...))"]
     H --> I["list[UUID]\n(every deck created this run)"]
 ```
 
@@ -260,7 +280,11 @@ box.create(
         card_nocab_uuids=[...],
     )
 )
-box.save(DeckBox.default_output_path(GameId.MTG), GameId.MTG)
+box.save(
+    DeckBox.default_output_path(GameId.MTG),
+    GameId.MTG,
+    card_binder.version_for(GameId.MTG),
+)
 
 # Reading a saved deck box back:
 loaded = DeckBox.load([Path("data/final/decks/mtg.jsonl")])

@@ -70,6 +70,16 @@ Reads don't presume any uniqueness:
 - `get_by_alias(source_game, data_source, source_id) -> GenericCard | None`
 - `all_uuids(source_game=None)` / `all_cards(source_game)` —
   enumeration, with an optional/required game filter respectively.
+- `version_for(source_game) -> str` — a content hash over every
+  currently-held `source_game` card (sorted by `nocab_uuid`, keyed on
+  `nocab_uuid`/`name`/`raw_content` only — `provenance` is excluded, so
+  a no-op re-ingest keeps the same version). Derived, not persisted:
+  recomputed on every call, so it can never itself go stale. Every
+  metric writer under `metrics/` embeds the version it scanned as
+  parquet schema metadata (see `metrics/version_metadata.py`), and
+  `GenericDojo`/`ContrastiveDojo` check it against the live binder at
+  construction, raising if a metric was built from a since-changed
+  binder (`strict_version_check=False` opts out).
 
 ## The "Unknown" sentinel card
 
@@ -187,7 +197,16 @@ Rules of thumb when writing a stage:
    `rarity`, `faction`, `color`, `type`, `armor`, `provision`, `power`;
    Dominion: `type`, `set`, `cost`). Search `metrics/` and `dojos/` for the
    game before dropping a key. Conversely, do not keep a field that gives a
-   masked one away (a masked `set` next to a `set_name`).
+   masked one away (a masked `set` next to a `set_name`) - real, found-by-
+   checking examples: Gwent's `category` was exactly `"Leader"` on every
+   card with `color == "leader"` and never otherwise, pure duplication, so
+   it is dropped for them (see `gwent_one/ingestion_stage.py`); Gwent's
+   `faction-duo`, when present, always contains the true `faction` as its
+   own prefix, but it is not pure duplication (it names a genuine second
+   faction), so `FactionMaskDojo` masks it alongside `faction` instead of
+   the stage dropping it (see `dojos/gwent_one/masked_field_dojos.py`).
+   Check every masking dojo against the real data, not just by reasoning
+   about the field names.
 5. **Bound lists and drop references to other cards.** A Scryfall token
    lists every card that creates it (one token was 12,681 tokens). Names of
    other cards also leak held-out cards into this card's text.

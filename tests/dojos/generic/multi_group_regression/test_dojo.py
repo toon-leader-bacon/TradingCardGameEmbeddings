@@ -73,6 +73,7 @@ class TestMultiGroupRegressionDojoSplits:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         batches = list(dojo.batches(Split.TRAIN, _BUDGET))
@@ -94,6 +95,7 @@ class TestMultiGroupRegressionDojoSplits:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         train_rows = sum(
@@ -124,6 +126,7 @@ class TestMultiGroupRegressionDojoPooler:
             card_embedding_size=4,
             pooler=stub_pooler,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         assert dojo.decoder_head.pooler is stub_pooler
@@ -141,6 +144,7 @@ class TestMultiGroupRegressionDojoComputeLoss:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
         # One example with an empty second group, one with a non-empty
         # one - compute_loss must handle both without raising.
@@ -165,6 +169,7 @@ class TestMultiGroupRegressionDojoComputeLoss:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         with pytest.raises(ValueError):

@@ -50,6 +50,7 @@ class ContrastiveDojo:
         decks_per_sample: int = 3,
         contrastive_loss: ContrastiveLoss | None = None,
         name: str = "contrastive",
+        strict_version_check: bool = True,
     ) -> None:
         """
         Inputs:
@@ -69,9 +70,19 @@ class ContrastiveDojo:
             contrastive_loss: the batch-level loss compute_loss
                 delegates to. Defaults to SingleCardInfoNCELoss().
             name: this dojo's name in a training plan.
+            strict_version_check: when True (default), dealer's
+                recorded CardBinder version (dealer.card_binder_version)
+                is checked against
+                card_lookup.version_for(dealer.source_game) before
+                anything else; a mismatch (or a None recorded version)
+                raises. False is the explicit escape hatch - it skips
+                the check and logs a warning instead.
         Output: none (constructor).
-        Side effects: none.
-        Exceptions: none.
+        Side effects: none of its own beyond the check below (one
+            logging.warning() when strict_version_check is False).
+        Exceptions: ValueError if strict_version_check is True and
+            dealer's recorded CardBinder version is missing or doesn't
+            match card_lookup's current one.
         """
         self.name = name
         self.holdout = holdout
@@ -79,6 +90,7 @@ class ContrastiveDojo:
         self._pair_constructor = pair_constructor
         self._decks_per_sample = decks_per_sample
         self._contrastive_loss = contrastive_loss or SingleCardInfoNCELoss()
+        self._check_deck_box_version(dealer, card_lookup, strict_version_check)
         self._lookups = {
             split: VisibleCardLookup(card_lookup, holdout, split) for split in Split
         }
@@ -184,4 +196,30 @@ class ContrastiveDojo:
         if cost > budget.max_cost:
             raise ValueError(
                 f"Contrastive batch costs {cost}, over budget {budget.max_cost}"
+            )
+
+    def _check_deck_box_version(
+        self, dealer: DeckBoxDealer, card_lookup: CardLookup, strict_version_check: bool
+    ) -> None:
+        """Raise if dealer's recorded CardBinder version doesn't match
+        card_lookup - see __init__'s own docstring for the exact
+        contract.
+
+        Private helper - single caller is __init__.
+        """
+        if not strict_version_check:
+            _logger.warning(
+                "%s: skipping deck box version check (strict_version_check=False)",
+                self.name,
+            )
+            return
+
+        recorded_version = dealer.card_binder_version
+        actual_version = card_lookup.version_for(dealer.source_game)
+        if recorded_version != actual_version:
+            raise ValueError(
+                f"{self.name}: dealer's deck box was minted from CardBinder "
+                f"version {recorded_version!r}, but the current one for "
+                f"{dealer.source_game} is {actual_version!r} - regenerate "
+                "the deck box"
             )

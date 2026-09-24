@@ -66,6 +66,7 @@ class TestSingleCardRegressionDojoSplits:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         batches = list(dojo.batches(Split.TRAIN, _BUDGET))
@@ -87,6 +88,7 @@ class TestSingleCardRegressionDojoSplits:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         train_rows = sum(
@@ -114,6 +116,7 @@ class TestSingleCardRegressionDojoComputeLoss:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
         embeddings = [torch.randn(4), torch.randn(4)]
         labels = [1.0, 2.0]
@@ -133,6 +136,7 @@ class TestSingleCardRegressionDojoComputeLoss:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         try:

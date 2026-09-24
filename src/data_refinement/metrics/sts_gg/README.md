@@ -241,5 +241,9 @@ metrics = [
 ]
 scan_runs_jsonl(Path("data/raw/sts_gg/runs.jsonl"), metrics)
 # each metric's DEFAULT_OUTPUT_PATH now exists
-deck_box.save(Path("data/metrics/sts_gg/deck_box.jsonl"), GameId.SLAY_THE_SPIRE_2)
+deck_box.save(
+    Path("data/metrics/sts_gg/deck_box.jsonl"),
+    GameId.SLAY_THE_SPIRE_2,
+    binder.version_for(GameId.SLAY_THE_SPIRE_2),
+)
 ```

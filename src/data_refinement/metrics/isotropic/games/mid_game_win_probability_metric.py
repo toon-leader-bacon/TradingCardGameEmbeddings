@@ -33,6 +33,10 @@ from src.data_refinement.metrics.isotropic.games.partial_deck import (
     partial_deck_card_uuids,
 )
 from src.data_refinement.metrics.isotropic.games.row_utils import card_uuid_for_name
+from src.data_refinement.metrics.version_metadata import (
+    MetricVersionMetadata,
+    schema_with_version_metadata,
+)
 from src.schema.card import GenericDeck
 from src.schema.game_id import GameId
 
@@ -77,12 +81,19 @@ class EventualWinProbabilityMetric:
         self._card_binder = card_binder
         self._deck_box = deck_box
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
-        self._output_schema = pa.schema(
-            [
-                ("partial_deck_uuid", pa.string()),
-                ("kingdom_uuid", pa.string()),
-                ("player_wins", pa.bool_()),
-            ]
+        self._output_schema = schema_with_version_metadata(
+            pa.schema(
+                [
+                    ("partial_deck_uuid", pa.string()),
+                    ("kingdom_uuid", pa.string()),
+                    ("player_wins", pa.bool_()),
+                ]
+            ),
+            MetricVersionMetadata(
+                game=GameId.DOMINION,
+                card_binder_version=card_binder.version_for(GameId.DOMINION),
+                requires_deck_box=True,
+            ),
         )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
         self._writer = pq.ParquetWriter(self._output_path, self._output_schema)

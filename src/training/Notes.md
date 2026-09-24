@@ -295,6 +295,79 @@ MTGO, 29,544 Gatherer, 11,862 Arena entries.
    printing per card, MTG `set`/`rarity` describe that printing. Do not build
    a set- or rarity-mask dojo on MTG expecting oracle-level meaning.
 
+## 9. Encoder wiring (section B: max_length, model_kwargs, length bucketing)
+
+`src/encoder_model/text_encoder.py`, `reference_singlecard_models.py`,
+`reference_multicard_models.py`.
+
+- `PretrainedTextEncoder`'s `max_length` default is now 384 (was 512),
+  matching section 7's p99s across every game after the lean-`raw_content`
+  work. It also takes `model_kwargs: dict | None`, forwarded to
+  `AutoModel.from_pretrained` (e.g. `attn_implementation`). Loading
+  ModernBERT-base with no `attn_implementation` specified already resolves
+  to `sdpa` (checked directly: `AutoModel.from_pretrained(...).config._attn_implementation
+  == "sdpa"`, no warnings), so `model_kwargs` is a general escape hatch, not
+  something the reference presets need to set by default.
+- Both reference-model files' `_DEFAULT_PRETRAINED_CHECKPOINT` switched from
+  `distilbert-base-uncased` to `answerdotai/ModernBERT-base`.
+- **Length bucketing**, inside `PretrainedTextEncoder.encode` only (no
+  trainer/dojo change): a call over `length_bucket_size` texts (default 16)
+  sorts by character length (a cheap proxy for token length - avoids
+  tokenizing twice), splits into that many sorted sub-batches, tokenizes and
+  forwards each separately (so each pads to its own, shorter max length),
+  then reassembles into one result in original order. Reassembly pads every
+  bucket's hidden_states/attention_mask up to the overall max sequence
+  length via `index_copy_`, which is differentiable, so a trainable
+  encoder's gradients still reach it. Sorting by CHARACTER length, not
+  actually re-measuring token counts, is a deliberate simplification -
+  works because tokens-per-character is fairly stable within one
+  tokenizer/language.
+  - Why 16 as a default: `HardwareLimits.max_batch_cost` is expected to
+    start around 32 (see section A), and the bucket size needs to be
+    smaller than a typical incoming batch or bucketing never triggers.
+    This has NOT been tuned against a real dojo batch yet - revisit once
+    real training numbers exist (section E of the TODO).
+  - The original mixed-game benchmark in section 2 ("28 vs 117 cards/s")
+    was an exaggerated worst case for THIS mechanism, since one dojo batch
+    is normally one game, not several mixed together; the real win here is
+    narrower (mainly separating a game's own long-tail outliers, e.g. MTG's
+    p90 202 vs max 622 tokens) but still real.
+  - `StaticEmbeddingTextEncoder` (the from-scratch baseline) was NOT given
+    bucketing: it has no attention, so padding costs a few extra embedding
+    lookups, not quadratic attention - nothing worth bucketing for.
+
+### Masking-dojo leak check (also section B)
+
+Checked every dojo that uses `MaskTargetKeyMod` against the real, lean
+`raw_content` - today that's only `gwent_one` (8 dojos) and `dominiontabs`
+(2 dojos); no other game has a masking dojo yet.
+
+- **Found and fixed:** gwent.one `category` was exactly `"Leader"` on
+  every `color == "leader"` card and never otherwise (confirmed against
+  all 1260 cards, both directions) - pure duplication for those 42 cards,
+  not real category information, so the ingestion stage now drops it for
+  them (same treatment as an empty category). Closes a leak in
+  `ColorMaskDojo`.
+- **Found and fixed:** gwent.one `faction-duo`, present on 15 of 1260
+  cards, always contains the true `faction` as its own prefix (e.g.
+  faction `"syndicate"`, faction-duo `"syndicate_monster"`). Unlike
+  `category`, this is NOT pure duplication - it names a real second
+  faction - so the fix is at the dojo, not the stage: `FactionMaskDojo`
+  now also masks `"faction-duo"` (unconditionally, via a second
+  `MaskTargetKeyMod`; harmless on the 1245 cards that never had the key,
+  which just gain a `"[MASK]"` they never had).
+- **Checked, no leak:** Dominion `CostRegressionDojo` masks `cost`;
+  `potcost`/`debtcost` remain unmasked but are different currencies, never
+  literally equal to the coin-cost value being predicted (they correlate
+  with it, which is legitimate signal, not a verbatim leak). Dominion
+  `TypeMaskDojo` masks the whole `types` list value at once
+  (`MaskTargetKeyMod` replaces the entire value with `"[MASK]"`), so list
+  length/order changes from the lean-content work don't matter.
+- This class of bug (a masked field's value restated in a sibling key)
+  is exactly what card_binder/README.md's rule 4 warns about in the
+  abstract; it needed checking against real data to actually find - the
+  fix is recorded there with these two as concrete examples.
+
 ## Sources
 
 - AMD ROCm Windows compatibility matrix:

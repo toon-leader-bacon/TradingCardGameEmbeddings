@@ -320,11 +320,7 @@ class SeventeenLandsGameDataDeckExtractionStage:
         draft_id = row.get("draft_id", "unknown")
         match_number = row.get("match_number", -1)
         game_number = row.get("game_number", -1)
-        deck_uuid = self._deck_uuid(
-            draft_id, 
-            match_number, 
-            game_number
-        )
+        deck_uuid = self._deck_uuid(draft_id, match_number, game_number)
         card_nocab_uuids = self._card_nocab_uuids_for_row(row, deck_columns)
         provenance = Provenance(
             data_source=DataSource.SEVENTEENLANDS_GAME_DATA,

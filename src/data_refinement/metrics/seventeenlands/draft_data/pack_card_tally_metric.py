@@ -55,6 +55,10 @@ from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.seventeenlands.draft_data.pack_pool_columns import (
     DraftCardColumns,
 )
+from src.data_refinement.metrics.version_metadata import (
+    MetricVersionMetadata,
+    write_dataframe_with_version_metadata,
+)
 from src.schema.game_id import GameId
 
 
@@ -99,6 +103,9 @@ class PackCardTallyMetric(ABC):
         """
         self._draft_columns = DraftCardColumns.from_header(
             header, card_binder, source_game
+        )
+        self._version_metadata = MetricVersionMetadata(
+            game=source_game, card_binder_version=card_binder.version_for(source_game)
         )
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
         self._times_in_pack: dict[tuple, int] = {}
@@ -159,8 +166,9 @@ class PackCardTallyMetric(ABC):
         """
         result: list[dict] = [self._take_rate_row(key) for key in self._times_in_pack]
 
-        self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(result).to_parquet(self._output_path, index=False)
+        write_dataframe_with_version_metadata(
+            pd.DataFrame(result), self._output_path, self._version_metadata
+        )
         return self._output_path
 
     def _is_eligible_row(self, row: dict) -> bool:

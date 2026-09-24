@@ -69,7 +69,11 @@ def scan_isotropic_summary_archives(
         ...     ],
         ...     metrics,
         ... )
-        >>> deck_box.save(Path("data/metrics/isotropic/deck_box.jsonl"), GameId.DOMINION)
+        >>> deck_box.save(
+        ...     Path("data/metrics/isotropic/deck_box.jsonl"),
+        ...     GameId.DOMINION,
+        ...     card_binder.version_for(GameId.DOMINION),
+        ... )
     """
     for archive_path in archive_paths:
         for row in _iter_summary_rows(archive_path):

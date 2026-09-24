@@ -74,6 +74,7 @@ class TestMultiCardBinaryClassificationDojoSplits:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         batches = list(dojo.batches(Split.TRAIN, _BUDGET))
@@ -95,6 +96,7 @@ class TestMultiCardBinaryClassificationDojoSplits:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         train_rows = sum(
@@ -125,6 +127,7 @@ class TestMultiCardBinaryClassificationDojoPooler:
             card_embedding_size=4,
             pooler=stub_pooler,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         assert dojo.decoder_head.pooler is stub_pooler
@@ -142,6 +145,7 @@ class TestMultiCardBinaryClassificationDojoComputeLoss:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
         # Two decks of different sizes - compute_loss must handle the
         # ragged BatchedMultiCardEmbedding shape correctly.
@@ -163,6 +167,7 @@ class TestMultiCardBinaryClassificationDojoComputeLoss:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         try:

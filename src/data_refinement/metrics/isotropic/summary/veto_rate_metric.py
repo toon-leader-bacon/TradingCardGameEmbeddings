@@ -28,6 +28,11 @@ from src.data_refinement.metrics.isotropic.summary.row_utils import (
     kingdom_card_names,
     card_uuid_for_name,
 )
+from src.data_refinement.metrics.version_metadata import (
+    MetricVersionMetadata,
+    write_dataframe_with_version_metadata,
+)
+from src.schema.game_id import GameId
 
 _logger = logging.getLogger(__name__)
 
@@ -116,7 +121,7 @@ class VetoRateMetric:
             if missing; writes self._output_path (a parquet file with
             columns nocab_uuid: str, veto_rate: float, sample_count:
             int - one row per card seen at least once).
-        Exceptions: whatever pandas.DataFrame.to_parquet raises.
+        Exceptions: whatever pyarrow.parquet.write_table raises.
 
         Example:
             >>> metric.finalize()
@@ -131,8 +136,14 @@ class VetoRateMetric:
             for card_uuid, total in self._total_count.items()
         ]
 
-        self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(result).to_parquet(self._output_path, index=False)
+        write_dataframe_with_version_metadata(
+            pd.DataFrame(result),
+            self._output_path,
+            MetricVersionMetadata(
+                game=GameId.DOMINION,
+                card_binder_version=self._card_binder.version_for(GameId.DOMINION),
+            ),
+        )
         return self._output_path
 
     def _card_uuid_or_log(self, card_name: str) -> UUID | None:

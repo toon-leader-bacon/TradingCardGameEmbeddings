@@ -69,6 +69,7 @@ class TestMaskedFieldDojoWrappers:
             card_embedding_size=4,
             path_to_training_data=source,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         assert isinstance(dojo, SingleCardFixedClassificationDojo)
@@ -89,10 +90,54 @@ class TestMaskedFieldDojoWrappers:
             card_embedding_size=4,
             path_to_training_data=source,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         mods = dojo.data_mod_pipeline.mods
-        assert len(mods) == 1
         assert isinstance(mods[0], MaskTargetKeyMod)
         assert mods[0].key == metric_cls.MASKED_FIELD[-1]
         assert mods[0].train_only is False
+
+    def test_every_wrapper_except_faction_masks_only_its_own_field(
+        self, tmp_path: Path
+    ) -> None:
+        source = tmp_path / "source.parquet"
+        _write_source(source)
+        card_binder = CardBinder()
+
+        for dojo_cls, _ in _CASES:
+            if dojo_cls is FactionMaskDojo:
+                continue
+            dojo = dojo_cls(
+                card_binder,
+                HoldoutSpec.no_holdout(),
+                card_embedding_size=4,
+                path_to_training_data=source,
+                rng_seed=0,
+                strict_version_check=False,
+            )
+            assert len(dojo.data_mod_pipeline.mods) == 1
+
+    def test_faction_dojo_also_masks_the_correlated_faction_duo_field(
+        self, tmp_path: Path
+    ) -> None:
+        # faction-duo always contains the true faction as its own prefix
+        # (confirmed against the live corpus); left unmasked, it would let
+        # the model read the masked faction straight back off it.
+        source = tmp_path / "source.parquet"
+        _write_source(source)
+        card_binder = CardBinder()
+
+        dojo = FactionMaskDojo(
+            card_binder,
+            HoldoutSpec.no_holdout(),
+            card_embedding_size=4,
+            path_to_training_data=source,
+            rng_seed=0,
+            strict_version_check=False,
+        )
+
+        mods = dojo.data_mod_pipeline.mods
+        assert len(mods) == 2
+        assert mods[1].key == "faction-duo"
+        assert mods[1].train_only is False

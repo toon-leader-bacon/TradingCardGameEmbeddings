@@ -72,6 +72,19 @@ class DeckBoxDealer:
             self._partition_uuids(all_uuids, split_ratios)
         )
 
+    @property
+    def source_game(self) -> GameId:
+        """The game this dealer was constructed for."""
+        return self._source_game
+
+    @property
+    def card_binder_version(self) -> str | None:
+        """self._deck_box.card_binder_version_for(self.source_game),
+        read live from the deck box (this dealer never caches it -
+        deck_box.card_binder_version_for() is already a cheap dict
+        lookup, not a rescan)."""
+        return self._deck_box.card_binder_version_for(self._source_game)
+
     def decks_for(
         self, split: Split, decks_per_sample: int, shuffle: bool = True
     ) -> Iterator[list[GenericDeck]]:

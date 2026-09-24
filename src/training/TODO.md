@@ -92,12 +92,14 @@ a median of ~200 tokens and FaB to ~570.
 
 ## B. Text encoder and serialization
 
-- [ ] **Choose the encoder.** Suggested: `answerdotai/ModernBERT-base`
-  (Apache-2.0, 149M params, 8192-token context, cased, code-heavy
-  pretraining). No open model is truly JSON-tuned; this is the closest.
-  Runner-up: `jinaai/jina-embeddings-v2-base-code` (needs
-  `trust_remote_code`). Skip `nomic-ai/modernbert-embed-base`
-  (retrieval-tuned, needs prefixes).
+- [x] **Choose the encoder: `answerdotai/ModernBERT-base`** (Apache-2.0,
+  149M params, 8192-token context, cased, code-heavy pretraining). No open
+  model is truly JSON-tuned; this is the closest. Runner-up:
+  `jinaai/jina-embeddings-v2-base-code` (needs `trust_remote_code`). Skip
+  `nomic-ai/modernbert-embed-base` (retrieval-tuned, needs prefixes). Now
+  the default checkpoint in `reference_singlecard_models.py` and
+  `reference_multicard_models.py` (was `distilbert-base-uncased`); confirmed
+  it loads with `attn_implementation="sdpa"` by default, no override needed.
 - [ ] **Lean `raw_content` in each ingestion stage** (decision 2026-09-21:
   simplification lives in `src/data_refinement/card_binder/*/ingestion_stage.py`,
   not the serializer). Rules: `card_binder/README.md`, "What goes in
@@ -111,11 +113,14 @@ a median of ~200 tokens and FaB to ~570.
     `nocab_uuid`s and 119,992 aliases preserved, second ingest changes 0,
     binder file 212.6 MB to 30.1 MB, MTG tokens 2,352 to a median of 183
     (153 with compact JSON), p99 351 (295);
-  - [ ] **re-ingest the binders.** Decision 2026-09-21: no legacy-data
-    migrations; `data/final/cards` was deleted and is simply rebuilt with
-    `PYTHONPATH=. python scripts/run_card_binder_ingestion.py` (all
-    sources, or `--source <name>`). New binders mint new `nocab_uuid`s, so
-    every metric parquet, split and deck box must be regenerated after;
+  - [x] **re-ingested the binders** (2026-09-21, `--all`). New
+    `nocab_uuid`s, so metric parquets/splits/deck boxes still need
+    regenerating (untouched so far, see section C);
+  - [x] **re-ingested `gwent_one` once more** (2026-09-23), after the
+    `category`/`faction-duo` leak fix. In place, all uuids preserved; 42
+    cards content-changed (exactly the 42 leader cards), confirming the
+    fix and nothing else moved. `decks/gwent.jsonl` and Gwent
+    metrics/splits stay valid;
   - [x] converted (details in `plans/card_content_conversion.md`):
     FaB (median tokens 657 to 70), Pokemon (349 to 142), STS2 (342 to 69),
     Gwent (131 to 89), Scryfall/MTG (2,352 to ~150). All under 384 tokens
@@ -129,20 +134,37 @@ a median of ~200 tokens and FaB to ~570.
 - [x] **Serialization report script:** `scripts/report_card_content.py
   --source <name>` (token percentiles, costliest keys, identical
   serializations); run when a game is onboarded (README rule 11).
-- [ ] **Set `max_length` (384 after the serialization fix; not 1024)** and let
-  `PretrainedTextEncoder` accept model kwargs. Verified: ModernBERT loads on
-  the GPU with `attn_implementation="sdpa"`. `reference_compile` no longer
-  exists in transformers 5.x (passing it raises `TypeError`), so it is not
-  needed. Once the serialization is trimmed, most cards fit in 512 tokens
-  (MTG median ~140 after the lean-`raw_content` work), and shorter caps are much
-  cheaper on this GPU.
-- [ ] **Batch by similar length.** `PretrainedTextEncoder.encode` pads to
-  the longest text in the batch; the trainer's batches mix games and card
-  sizes, which cost a ~4x slowdown in measurement. Options: sort or bucket
-  within a batch's cards, or a token-aware `cost_of` (README "Not built").
-- [ ] **Check masking dojos against the new serialization.** A masked field
-  such as `set` or `rarity` must not leak through another key (e.g.
-  `set_name`).
+- [x] **`max_length=384`** (`text_encoder.py`'s `_DEFAULT_MAX_LENGTH`), and
+  `PretrainedTextEncoder` now takes `model_kwargs: dict | None` forwarded to
+  `AutoModel.from_pretrained` (e.g. `attn_implementation`). `reference_compile`
+  no longer exists in transformers 5.x (passing it raises `TypeError`), so
+  it is not needed and not passed by default.
+- [x] **Batch by similar length**, inside `PretrainedTextEncoder.encode`
+  itself (no dojo/trainer changes needed): a call over more than
+  `length_bucket_size` texts (default 16) is sorted by character length and
+  tokenized/forwarded in sorted sub-batches, then reassembled into one
+  padded result in original order - tested, including that bucketed and
+  unbucketed calls produce identical output and that gradients still reach
+  the model. `length_bucket_size` is a real tuning knob (right value
+  depends on hardware and typical batch size); revisit once real training
+  numbers are in (see section E).
+- [x] **Checked masking dojos against the new serialization** - found and
+  fixed two real leaks in gwent.one (the only games with masking dojos
+  today: gwent_one, 8 dojos; dominiontabs, 2 dojos - checked both, only
+  gwent.one had a leak):
+  - `category` was exactly `"Leader"` on every `color == "leader"` card
+    and never otherwise (confirmed both directions against the live
+    corpus) - pure duplication, not real category info for those 42 cards,
+    so the gwent.one ingestion stage now drops it for them (same as an
+    empty category), closing the leak for `ColorMaskDojo`;
+  - `faction-duo`, when present (15 of 1260 cards), always contains the
+    true `faction` as its own prefix - not pure duplication (it names a
+    real second faction), so `FactionMaskDojo` now also masks it, rather
+    than the stage dropping it.
+  Dominion's `CostRegressionDojo` masks `cost`, but `potcost`/`debtcost`
+  (different currencies, never literally equal to the coin cost) don't
+  restate it - checked, no leak. `TypeMaskDojo` masks the whole `types`
+  list at once, so list length doesn't matter.
 - [x] **Measure frozen-LM throughput.** Done, see "GPU measurements" in
   section A: ~100 cards/s length-sorted. The trainer re-encodes every card
   every step; caching frozen-LM outputs is "not built" and is worth it only
@@ -154,6 +176,36 @@ a median of ~200 tokens and FaB to ~570.
 - [ ] **Build a real inventory.** `docs/metric_dojo_inventory.csv` is stale
   (references paths and dojo names that don't exist). Script it: metric
   parquet, dojo class, row count, whether cards resolve in the binder.
+- [x] **MSH PremierDraft draft-data metrics are corrupt - shelved, not
+  fixing now** (found while starting the inventory: scanned every
+  `data/metrics/**/*.parquet` for a valid PAR1 head/tail; only these two
+  failed). `pool_conditioned_pick.parquet` (1.8 GB) and
+  `pack_to_pick_choice_set.parquet` (949 MB) are both truncated (no footer).
+  Raw data is intact (`data/raw/17lands/draft_data/MSH.PremierDraft.csv`,
+  4.3 GB), so tried regenerating via `scripts/run_metrics.py --source
+  seventeenlands_draft_data --raw-path .../MSH.PremierDraft.csv`. **Do not
+  retry this as-is:** the process's memory grew unbounded (4.8 GB to 6.4+ GB
+  and still climbing) while barely progressing through the CSV, badly
+  degrading the whole machine (a trivial shell command took 2 minutes; the
+  process's own tqdm line logged 10 hours elapsed for 10% progress) - killed
+  it. This is almost certainly what corrupted the files the first time (an
+  OOM/kill mid-write, not a disk issue).
+
+  Root cause found: both metrics already stream (no cross-row
+  accumulation), but `accumulate()` calls `ParquetWriter.write_table()`
+  once per CSV row - for a ~40M-row file that's tens of millions of
+  one-row parquet row groups, and `ParquetWriter` keeps per-row-group
+  metadata in memory for its whole lifetime, so RAM grows and throughput
+  collapses across the run. Filed as inline `# TODO:` comments at the
+  `write_table()` call in both
+  `src/data_refinement/metrics/seventeenlands/draft_data/pool_conditioned_pick_metric.py`
+  and `.../pack_to_pick_choice_set_metric.py` (likely fix: batch a few
+  thousand rows into one `write_table()` call, or pass `row_group_size`,
+  instead of one row group per row). Explicitly shelved per user decision
+  (2026-09-23) in favor of reaching a first training run; MSH PremierDraft
+  draft metrics stay corrupt and excluded from the first-run dojo set until
+  someone does that rewrite and regenerates this file. Both files are
+  unchanged in effect from before the killed attempt (still unreadable).
 - [ ] **Report card-loading health per game.** Unresolved names, alias
   collisions, 17lands-name -> Scryfall-UUID resolution rate for MSH and
   KTK. Check STS2: 578 cards against 7.8k decks.
@@ -180,9 +232,21 @@ a median of ~200 tokens and FaB to ~570.
   section B, the rest is deferred): skip `art_series` and `front_card`
   objects (~6.5% of the MTG binder are not cards); decide about
   tokens/emblems/schemes/planar; refresh the stage's stale docstring.
-- [ ] **Confirm every `all_cards()` consumer excludes the `Unknown`
-  sentinel** (empty `raw_content`, present in the MTG, FaB, Gwent and STS2
-  binders): corpus-scan metrics, contrastive, masked-field dojos.
+- [x] **Confirm every `all_cards()` consumer excludes the `Unknown`
+  sentinel.** Checked: none of the on-disk binders currently have the
+  sentinel persisted (`ensure_unknown_card` + `binder.save()` only
+  happens inside `run_deck_box_ingestion.py`, not yet re-run since the
+  last card re-ingest). But it's a real, imminent bug: every one of
+  gwent_one's 8 masked-field metrics and dominiontabs's
+  `CostRegressionMetric` indexes `card.raw_content[...]` directly with
+  no empty check, so the *next* deck-box ingestion run (needed anyway,
+  see below) would seed the sentinel into `gwent.jsonl`, and the next
+  metrics re-scan would then crash with `KeyError`. Fixed at the base
+  class: `MaskedFieldMetric.scan()` and
+  `MaskedFieldRegressionMetric.scan()` now skip any card with empty
+  `raw_content` before calling `_is_eligible()`, so no per-subclass
+  fix is needed; tested (`test_masked_field_metric.py`, new
+  `test_masked_field_regression_metric.py`).
 - [ ] **Exercise every chosen dojo once before training.** Construct it,
   pull one TRAIN batch, run `compute_loss` on random embeddings, confirm
   head dims match `card_embedding_size`.
@@ -212,9 +276,30 @@ a median of ~200 tokens and FaB to ~570.
 
 ## E. Shakedown
 
-- [ ] **CPU tiny run.** `FromScratchCardModel` (or frozen DistilBERT), two
-  Gwent dojos, ~20 steps per round, a few rounds. Confirms the loop,
-  checkpoints and manifest against real dojos.
+- [x] **CPU tiny run** (2026-09-24): `scripts/smoke_test_training_loop.py`
+  (new - distinct from the existing, pipeline-only `scripts/smoke_test.py`,
+  which still needs the Section F fix/removal). A frozen
+  `LinearProjectionCardModel` (ModernBERT-base + linear head, embed_dim
+  32) against two real gwent_one dojos (`ColorMaskDojo`, `FactionMaskDojo`),
+  `HoldoutSpec.no_holdout()`, 5 steps/round, 3 rounds. First time this
+  project's `Trainer` has run against anything but fake dojos/a fake
+  encoder. Ran clean: no quarantines, `stopped_early_reason: None`, loss
+  fell every round (`color_mask` 0.99 -> 0.83, `faction_mask` 2.00 -> 1.94),
+  all 3 checkpoints (`state.pt`, `encoder.pt`, `manifest.json`) written
+  and readable.
+  - Along the way, hit and fixed the exact staleness section C already
+    flagged: gwent_one's 8 metric parquets
+    (`data/metrics/gwent_one/*.parquet`) were built against the
+    *pre-`--all`* card binder, so 0 of their `nocab_uuid`s resolved
+    against the current one (checked directly: 0/20 sampled
+    `color_mask.parquet` uuids found in the current `gwent.jsonl`) -
+    every dojo silently yielded zero TRAIN/TEST examples and got
+    quarantined, no exception raised. Fixed by regenerating:
+    `PYTHONPATH=. python scripts/run_metrics.py --source gwent_one`
+    (near-instant, in-memory scan over 1,260 cards - not the MSH-draft
+    kind of risk). The other 5 games' metrics/deck boxes are presumably
+    just as stale and will need the same regeneration before their dojos
+    can be smoke-tested too.
 - [ ] **GPU run.** Frozen ModernBERT, head-only phase; inspect loss curves
   and saturation behavior.
 - [ ] **Trainable-LM phase later**, once VRAM is measured. Consider

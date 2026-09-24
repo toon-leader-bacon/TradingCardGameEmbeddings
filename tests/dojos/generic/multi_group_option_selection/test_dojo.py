@@ -80,6 +80,7 @@ class TestMultiGroupOptionSelectionDojoSplits:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         batches = list(dojo.batches(Split.TRAIN, _BUDGET))
@@ -101,6 +102,7 @@ class TestMultiGroupOptionSelectionDojoSplits:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         train_rows = sum(
@@ -131,6 +133,7 @@ class TestMultiGroupOptionSelectionDojoScoringHeadAndPooler:
             card_embedding_size=4,
             scoring_head=stub_scoring_head,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         assert dojo.decoder_head.scoring_head is stub_scoring_head
@@ -149,6 +152,7 @@ class TestMultiGroupOptionSelectionDojoScoringHeadAndPooler:
             card_embedding_size=4,
             pooler=stub_pooler,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         assert dojo.decoder_head.pooler is stub_pooler
@@ -166,6 +170,7 @@ class TestMultiGroupOptionSelectionDojoComputeLoss:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
         # One example with an empty pool, one with a non-empty pool -
         # compute_loss must handle both without raising.
@@ -190,6 +195,7 @@ class TestMultiGroupOptionSelectionDojoComputeLoss:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         with pytest.raises(ValueError):

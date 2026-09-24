@@ -75,6 +75,7 @@ class TestMultiCardOptionSelectionDojoSplits:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         batches = list(dojo.batches(Split.TRAIN, _BUDGET))
@@ -96,6 +97,7 @@ class TestMultiCardOptionSelectionDojoSplits:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         train_rows = sum(
@@ -126,6 +128,7 @@ class TestMultiCardOptionSelectionDojoScoringHead:
             card_embedding_size=4,
             scoring_head=stub_scoring_head,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         assert dojo.decoder_head.scoring_head is stub_scoring_head
@@ -143,6 +146,7 @@ class TestMultiCardOptionSelectionDojoComputeLoss:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
         # Two examples with different pack sizes - compute_loss must
         # handle the ragged BatchedMultiCardEmbedding shape correctly.
@@ -164,6 +168,7 @@ class TestMultiCardOptionSelectionDojoComputeLoss:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             rng_seed=0,
+            strict_version_check=False,
         )
 
         with pytest.raises(ValueError):

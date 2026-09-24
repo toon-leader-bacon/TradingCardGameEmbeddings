@@ -16,6 +16,7 @@ for the exact same deck, always (see load()'s docstring).
 """
 
 import copy
+import hashlib
 import json
 from dataclasses import replace
 from datetime import datetime
@@ -54,6 +55,7 @@ class DeckBox:
         Exceptions: none.
         """
         self._decks_by_uuid: dict[UUID, GenericDeck] = {}
+        self._card_binder_version_by_game: dict[GameId, str] = {}
 
     # region CRUD by UUID
 
@@ -304,6 +306,76 @@ class DeckBox:
             if deck.source_game == source_game
         ]
 
+    def version_for(self, source_game: GameId) -> str:
+        """A content hash over every currently-held source_game deck.
+
+        Derived, not stored - mirrors CardBinder.version_for()'s
+        reasoning exactly (see that method's docstring). provenance is
+        excluded for the same reason.
+
+        Inputs:
+            source_game: which game's decks to hash.
+        Output: a sha256 hex digest (64 hex chars). A game with no
+            decks yet still produces a fixed digest, not an error.
+        Side effects: none.
+        Exceptions: none.
+
+        Example:
+            >>> box = DeckBox.load([Path("data/final/decks/gwent.jsonl")])
+            >>> box.version_for(GameId.GWENT)
+            '7a91e0...'
+        """
+        decks = sorted(self.all_decks(source_game), key=lambda deck: deck.nocab_uuid)
+        digest = hashlib.sha256()
+        for deck in decks:
+            digest.update(
+                json.dumps(
+                    {
+                        "nocab_uuid": str(deck.nocab_uuid),
+                        "name": deck.name,
+                        # card_nocab_uuids is a multiset (see
+                        # GenericDeck's own docstring: "unordered,
+                        # duplicates meaningful") - sorted here so this
+                        # hash reflects content only, not whatever
+                        # incidental order the list happens to be in.
+                        "card_nocab_uuids": sorted(
+                            str(nocab_uuid) for nocab_uuid in deck.card_nocab_uuids
+                        ),
+                    },
+                    sort_keys=True,
+                ).encode("utf-8")
+            )
+            digest.update(b"\n")
+        return digest.hexdigest()
+
+    def card_binder_version_for(self, source_game: GameId) -> str | None:
+        """The CardBinder version this box's source_game decks were
+        minted against, as recorded by save() and read back by load().
+
+        Unlike version_for() above, this is NOT derived from this
+        box's own content - a deck has no raw_content to re-hash
+        against, so which upstream CardBinder snapshot resolved its
+        card_nocab_uuids has to be recorded at extraction time and
+        round-tripped through save()/load() (see this module's
+        docstring's persisted-vs-derived distinction).
+
+        Inputs:
+            source_game: which game's recorded version to read.
+        Output: the version save() was given for source_game, or None
+            if source_game was never loaded from a file carrying that
+            header line (a fresh, never-saved box, or a file written
+            before this method existed) - treated the same way by any
+            caller checking staleness: "unknown" is not "fine."
+        Side effects: none.
+        Exceptions: none.
+
+        Example:
+            >>> box = DeckBox.load([Path("data/final/decks/gwent.jsonl")])
+            >>> box.card_binder_version_for(GameId.GWENT)
+            '3f2b1c...'
+        """
+        return self._card_binder_version_by_game.get(source_game)
+
     # endregion CRUD by UUID
 
     # region Persistence
@@ -316,7 +388,9 @@ class DeckBox:
         that row, is reinserted UNCHANGED — no remapping of any kind.
         If the same nocab_uuid legitimately appears in more than one
         loaded path, last-path-wins (a plain overwrite) — paths are
-        processed in the given order.
+        processed in the given order. The same last-path-wins rule
+        applies to a game's recorded card_binder_version_for() value
+        when more than one loaded path stamps the same game.
 
         load([]) — an empty list — is the sanctioned way to start a
         fresh, empty box.
@@ -340,30 +414,72 @@ class DeckBox:
         box = DeckBox()
         for path in paths:
             with open(path, "r", encoding="utf-8") as box_file:
-                for line in box_file:
-                    row = json.loads(line)
-                    provenance_row = row.get("provenance")
-                    deck = GenericDeck(
-                        nocab_uuid=UUID(row["nocab_uuid"]),
-                        source_game=GameId(row["source_game"]),
-                        name=row["name"],
-                        card_nocab_uuids=[
-                            UUID(uuid_str) for uuid_str in row["card_nocab_uuids"]
-                        ],
-                        provenance=(
-                            Provenance(
-                                data_source=DataSource(provenance_row["data_source"]),
-                                source_id=provenance_row["source_id"],
-                                fetched_at=datetime.fromisoformat(
-                                    provenance_row["fetched_at"]
-                                ),
-                            )
-                            if provenance_row is not None
-                            else None
-                        ),
-                    )
-                    box._upsert_deck(deck)
+                lines = box_file.readlines()
+
+            header, deck_lines = DeckBox._read_header(lines)
+            if header is not None:
+                game, card_binder_version = header
+                box._card_binder_version_by_game[game] = card_binder_version
+
+            for line in deck_lines:
+                row = json.loads(line)
+                provenance_row = row.get("provenance")
+                deck = GenericDeck(
+                    nocab_uuid=UUID(row["nocab_uuid"]),
+                    source_game=GameId(row["source_game"]),
+                    name=row["name"],
+                    card_nocab_uuids=[
+                        UUID(uuid_str) for uuid_str in row["card_nocab_uuids"]
+                    ],
+                    provenance=(
+                        Provenance(
+                            data_source=DataSource(provenance_row["data_source"]),
+                            source_id=provenance_row["source_id"],
+                            fetched_at=datetime.fromisoformat(
+                                provenance_row["fetched_at"]
+                            ),
+                        )
+                        if provenance_row is not None
+                        else None
+                    ),
+                )
+                box._upsert_deck(deck)
         return box
+
+    @staticmethod
+    def _read_header(
+        lines: list[str],
+    ) -> tuple[tuple[GameId, str] | None, list[str]]:
+        """Split a loaded file's lines into an optional header line
+        plus its remaining deck rows.
+
+        Private helper — single consumer is load(). A header line is
+        the reserved shape save() writes when given a
+        card_binder_version: a JSON object with a "__card_binder_version__"
+        key and no "nocab_uuid" key (every real deck row has
+        "nocab_uuid" and never "__card_binder_version__", so the two
+        shapes can never be confused). A file written before this
+        method existed has no such line — every line is a deck row.
+
+        Inputs:
+            lines: a loaded file's lines, in file order.
+        Output: ((game, card_binder_version), remaining lines) if
+            lines[0] is a header line; (None, lines) unchanged
+            otherwise.
+        Side effects: none.
+        Exceptions: none beyond what json.loads raises for a malformed
+            first line.
+        """
+        if not lines:
+            return None, lines
+        first_row = json.loads(lines[0])
+        if "__card_binder_version__" not in first_row:
+            return None, lines
+        header = (
+            GameId(first_row["__game__"]),
+            first_row["__card_binder_version__"],
+        )
+        return header, lines[1:]
 
     @staticmethod
     def default_output_path(source_game: GameId) -> Path:
@@ -386,26 +502,50 @@ class DeckBox:
             game=source_game.value
         )
 
-    def save(self, path: Path, source_game: GameId) -> None:
+    def save(self, path: Path, source_game: GameId, card_binder_version: str) -> None:
         """Write this box's decks for one game to path, as JSONL.
 
         Only decks with deck.source_game == source_game are written.
+        BREAKING CHANGE: card_binder_version is now a required
+        argument (see this module's docstring's persisted-vs-derived
+        distinction) - every caller extracting decks from raw data
+        already has the CardBinder it resolved card references
+        against in hand, so it can always compute
+        card_binder.version_for(source_game) to pass here.
 
         Inputs:
             path: destination file (e.g.
                 data/final/decks/<game>.jsonl). Overwritten if it
                 already exists.
             source_game: which game's subset of this box to write.
+            card_binder_version: the CardBinder version this box's
+                source_game decks were minted against (typically
+                card_binder.version_for(source_game)) - written as a
+                reserved leading line, read back by
+                card_binder_version_for().
         Output: none.
         Side effects: creates path's parent directory if missing;
             writes/overwrites path.
         Exceptions: raises on failure to write path.
 
         Example:
-            >>> box.save(Path("data/final/decks/mtg.jsonl"), GameId.MTG)
+            >>> box.save(
+            ...     Path("data/final/decks/mtg.jsonl"),
+            ...     GameId.MTG,
+            ...     card_binder.version_for(GameId.MTG),
+            ... )
         """
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as box_file:
+            box_file.write(
+                json.dumps(
+                    {
+                        "__card_binder_version__": card_binder_version,
+                        "__game__": source_game.value,
+                    }
+                )
+                + "\n"
+            )
             for deck in self._decks_by_uuid.values():
                 if deck.source_game != source_game:
                     continue

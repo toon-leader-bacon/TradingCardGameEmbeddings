@@ -35,6 +35,10 @@ from src.data_refinement.metrics.hash_utils import deck_uuid_from_cards
 from src.data_refinement.metrics.seventeenlands.game_data.game_card_columns import (
     GameCardColumns,
 )
+from src.data_refinement.metrics.version_metadata import (
+    MetricVersionMetadata,
+    write_dataframe_with_version_metadata,
+)
 from src.schema.card import GenericDeck
 from src.schema.game_id import GameId
 
@@ -89,6 +93,11 @@ class OnPlayWinRateSensitivityByDeckMetric:
         )
         self._source_game = source_game
         self._deck_box = deck_box
+        self._version_metadata = MetricVersionMetadata(
+            game=source_game,
+            card_binder_version=card_binder.version_for(source_game),
+            requires_deck_box=True,
+        )
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
         self._win_count: dict[tuple[UUID, bool], int] = {}
         self._total_count: dict[tuple[UUID, bool], int] = {}
@@ -143,7 +152,7 @@ class OnPlayWinRateSensitivityByDeckMetric:
             columns deck_uuid: str, on_play_win_rate_sensitivity: float
             | None, sample_count: int - one row per deck seen at least
             once on either side).
-        Exceptions: whatever pandas.DataFrame.to_parquet raises.
+        Exceptions: whatever pyarrow.parquet.write_table raises.
 
         Example:
             >>> metric.finalize()
@@ -153,8 +162,9 @@ class OnPlayWinRateSensitivityByDeckMetric:
             self._sensitivity_row(deck_uuid) for deck_uuid in self._distinct_decks()
         ]
 
-        self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(result).to_parquet(self._output_path, index=False)
+        write_dataframe_with_version_metadata(
+            pd.DataFrame(result), self._output_path, self._version_metadata
+        )
         return self._output_path
 
     def _deck_for_row(

@@ -27,14 +27,18 @@ def _card(raw_content: dict) -> GenericCard:
 
 
 class _FakeCardLookup:
-    """A minimal CardLookup - only all_cards() is exercised by
-    MaskedFieldMetric, so that's the only method this fake implements."""
+    """A minimal CardLookup - only all_cards()/version_for() are
+    exercised by MaskedFieldMetric, so those are the only methods this
+    fake implements."""
 
     def __init__(self, cards: list[GenericCard]) -> None:
         self._cards = cards
 
     def all_cards(self, source_game: GameId) -> list[GenericCard]:
         return [card for card in self._cards if card.source_game == source_game]
+
+    def version_for(self, source_game: GameId) -> str:
+        return "test-version"
 
 
 class _TopLevelFieldMetric(MaskedFieldMetric):
@@ -132,6 +136,21 @@ class TestScan:
 
         assert len(df) == 1
         assert df.iloc[0]["nocab_uuid"] == str(gwent_card.nocab_uuid)
+
+    def test_unknown_sentinel_excluded_without_raising(self, tmp_path: Path) -> None:
+        # The CardBinder "Unknown" sentinel (card_binder.py's
+        # ensure_unknown_card()) has empty raw_content; scan() must
+        # skip it before any subclass's _is_eligible()/_label_for_card()
+        # tries to walk MASKED_FIELD into it and raises KeyError.
+        cards = [_card({"faction": "skellige"}), _card({})]
+        metric = _TopLevelFieldMetric(
+            _FakeCardLookup(cards), output_path=tmp_path / "out.parquet"
+        )
+
+        df = pd.read_parquet(metric.scan())
+
+        assert len(df) == 1
+        assert df.iloc[0]["label"] == "skellige"
 
     def test_no_eligible_cards_writes_empty_file(self, tmp_path: Path) -> None:
         metric = _TopLevelFieldMetric(

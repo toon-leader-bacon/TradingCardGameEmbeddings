@@ -246,7 +246,11 @@ def run_sts_gg(raw_path: Path | None) -> None:
 
     print(f"=== sts_gg: {resolved_raw_path} ===")
     scan_runs_jsonl(resolved_raw_path, metrics)
-    deck_box.save(Path("data/metrics/sts_gg/deck_box.jsonl"), GameId.SLAY_THE_SPIRE_2)
+    deck_box.save(
+        Path("data/metrics/sts_gg/deck_box.jsonl"),
+        GameId.SLAY_THE_SPIRE_2,
+        binder.version_for(GameId.SLAY_THE_SPIRE_2),
+    )
     print(f"wrote {len(metrics)} metric outputs")
 
 
@@ -303,7 +307,7 @@ def run_play_gwent(raw_path: Path | None) -> None:
 
     print(f"=== play_gwent: {resolved_raw_path} ===")
     scan_guides_jsonl(resolved_raw_path, metrics)
-    deck_box.save(box_path, GameId.GWENT)
+    deck_box.save(box_path, GameId.GWENT, binder.version_for(GameId.GWENT))
     print(f"wrote {len(metrics)} metric outputs")
 
 
@@ -628,7 +632,7 @@ def _run_seventeenlands_family(
 
     if deck_box_output_path is not None:
         assert deck_box is not None
-        deck_box.save(deck_box_output_path, GameId.MTG)
+        deck_box.save(deck_box_output_path, GameId.MTG, binder.version_for(GameId.MTG))
 
 
 def run_seventeenlands_draft_data(raw_path: Path | None) -> None:

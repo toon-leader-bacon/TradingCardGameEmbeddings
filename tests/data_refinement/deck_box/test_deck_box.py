@@ -240,6 +240,119 @@ class TestAllDecks:
         assert list(box.all_decks(GameId.MTG)) == []
 
 
+class TestVersionFor:
+    def test_empty_game_returns_a_fixed_digest(self) -> None:
+        box = DeckBox()
+
+        assert box.version_for(GameId.MTG) == box.version_for(GameId.MTG)
+        assert isinstance(box.version_for(GameId.MTG), str)
+
+    def test_stable_across_instances_with_the_same_content(self) -> None:
+        deck = _deck("Mono Red", [uuid4(), uuid4()])
+        first_box = DeckBox()
+        first_box.create(replace(deck))
+        second_box = DeckBox()
+        second_box.create(replace(deck))
+
+        assert first_box.version_for(GameId.MTG) == second_box.version_for(GameId.MTG)
+
+    def test_unaffected_by_card_nocab_uuids_order(self) -> None:
+        # card_nocab_uuids is a multiset (unordered, duplicates
+        # meaningful) - the same deck (same nocab_uuid) with its cards
+        # listed in a different order must hash identically.
+        card_a, card_b = uuid4(), uuid4()
+        deck = _deck("Mono Red", [card_a, card_b])
+        reordered_deck = replace(deck, card_nocab_uuids=[card_b, card_a])
+        first_box = DeckBox()
+        first_box.create(deck)
+        second_box = DeckBox()
+        second_box.create(reordered_deck)
+
+        assert first_box.version_for(GameId.MTG) == second_box.version_for(GameId.MTG)
+
+    def test_changes_when_a_deck_is_added(self) -> None:
+        box = DeckBox()
+        box.create(_deck("Mono Red", [uuid4()]))
+        before = box.version_for(GameId.MTG)
+
+        box.create(_deck("Mono Blue", [uuid4()]))
+
+        assert box.version_for(GameId.MTG) != before
+
+    def test_unaffected_by_other_games(self) -> None:
+        box = DeckBox()
+        before = box.version_for(GameId.MTG)
+
+        box.create(_deck("Fire Deck", [uuid4()], source_game=GameId.POKEMON))
+
+        assert box.version_for(GameId.MTG) == before
+
+
+class TestCardBinderVersionFor:
+    def test_none_for_a_fresh_box(self) -> None:
+        box = DeckBox()
+
+        assert box.card_binder_version_for(GameId.MTG) is None
+
+    def test_round_trips_through_save_and_load(self, tmp_path: Path) -> None:
+        box = DeckBox()
+        box.create(_deck("Mono Red", [uuid4()]))
+        path = tmp_path / "mtg.jsonl"
+
+        box.save(path, GameId.MTG, "binder-v1")
+        loaded = DeckBox.load([path])
+
+        assert loaded.card_binder_version_for(GameId.MTG) == "binder-v1"
+
+    def test_none_for_a_game_the_loaded_file_never_stamped(
+        self, tmp_path: Path
+    ) -> None:
+        box = DeckBox()
+        box.create(_deck("Fire Deck", [uuid4()], source_game=GameId.POKEMON))
+        path = tmp_path / "pokemon.jsonl"
+
+        box.save(path, GameId.POKEMON, "binder-v1")
+        loaded = DeckBox.load([path])
+
+        assert loaded.card_binder_version_for(GameId.MTG) is None
+
+    def test_none_for_a_legacy_file_with_no_header_line(self, tmp_path: Path) -> None:
+        legacy_uuid = uuid4()
+        path = tmp_path / "mtg.jsonl"
+        with open(path, "w", encoding="utf-8") as legacy_file:
+            legacy_file.write(
+                json.dumps(
+                    {
+                        "nocab_uuid": str(legacy_uuid),
+                        "source_game": GameId.MTG.value,
+                        "name": "Mono Red",
+                        "card_nocab_uuids": [],
+                    }
+                )
+                + "\n"
+            )
+
+        loaded = DeckBox.load([path])
+
+        assert loaded.card_binder_version_for(GameId.MTG) is None
+        assert loaded.get_by_uuid(legacy_uuid) is not None
+
+    def test_last_path_wins_across_multiple_loaded_paths(self, tmp_path: Path) -> None:
+        first_box = DeckBox()
+        first_box.create(_deck("Mono Red", [uuid4()]))
+        first_path = tmp_path / "first.jsonl"
+        first_box.save(first_path, GameId.MTG, "binder-v1")
+
+        second_box = DeckBox()
+        second_box.create(_deck("Mono Blue", [uuid4()]))
+        second_path = tmp_path / "second.jsonl"
+        second_box.save(second_path, GameId.MTG, "binder-v2")
+
+        loaded = DeckBox.load([first_path, second_path])
+
+        assert loaded.card_binder_version_for(GameId.MTG) == "binder-v2"
+
+
 class TestLoad:
     def test_empty_list_returns_usable_empty_box(self) -> None:
         box = DeckBox.load([])
@@ -253,13 +366,13 @@ class TestLoad:
         first_box = DeckBox()
         first_box.create(deck)
         first_path = tmp_path / "first.jsonl"
-        first_box.save(first_path, GameId.MTG)
+        first_box.save(first_path, GameId.MTG, "binder-v1")
 
         updated_deck = replace(deck, card_nocab_uuids=[uuid4(), uuid4()])
         second_box = DeckBox()
         second_box.create(updated_deck)
         second_path = tmp_path / "second.jsonl"
-        second_box.save(second_path, GameId.MTG)
+        second_box.save(second_path, GameId.MTG, "binder-v2")
 
         merged = DeckBox.load([first_path, second_path])
 
@@ -277,7 +390,7 @@ class TestSaveLoadRoundTrip:
         box.create(deck)
         path = tmp_path / "mtg.jsonl"
 
-        box.save(path, GameId.MTG)
+        box.save(path, GameId.MTG, "binder-v1")
         loaded = DeckBox.load([path])
 
         reloaded_deck = loaded.get_by_uuid(deck.nocab_uuid)
@@ -295,7 +408,7 @@ class TestSaveLoadRoundTrip:
         box.create(deck)
         path = tmp_path / "mtg.jsonl"
 
-        box.save(path, GameId.MTG)
+        box.save(path, GameId.MTG, "binder-v1")
         loaded = DeckBox.load([path])
 
         reloaded_deck = loaded.get_by_uuid(deck.nocab_uuid)
@@ -310,7 +423,7 @@ class TestSaveLoadRoundTrip:
         box.create(_deck("Fire Deck", [uuid4()], source_game=GameId.POKEMON))
         path = tmp_path / "mtg.jsonl"
 
-        box.save(path, GameId.MTG)
+        box.save(path, GameId.MTG, "binder-v1")
 
         loaded = DeckBox.load([path])
         assert list(loaded.all_decks(GameId.MTG)) != []
@@ -323,7 +436,7 @@ class TestSaveLoadRoundTrip:
         box.create(deck)
         path = tmp_path / "mtg.jsonl"
 
-        box.save(path, GameId.MTG)
+        box.save(path, GameId.MTG, "binder-v1")
         loaded = DeckBox.load([path])
 
         reloaded_deck = loaded.get_by_uuid(deck.nocab_uuid)
@@ -359,7 +472,7 @@ class TestSaveLoadRoundTrip:
         box.create(_deck("Mono Red", [uuid4()]))
         nested_path = tmp_path / "does" / "not" / "exist" / "mtg.jsonl"
 
-        box.save(nested_path, GameId.MTG)
+        box.save(nested_path, GameId.MTG, "binder-v1")
 
         assert nested_path.exists()
 

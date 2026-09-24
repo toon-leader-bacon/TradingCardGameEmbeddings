@@ -44,6 +44,22 @@ stays because the masked-field metrics and dojos read them directly
 leader_masked_from_deck_metric reads name. Checked against the live data:
 none of those keys is ever empty (even a zero is the string "0", which is
 kept), so dropping empties cannot remove a key a consumer indexes.
+
+MASKED-FIELD LEAK, found and fixed while wiring the encoder up to this
+data (card_binder/README.md rule 4): category is "Leader" on EXACTLY the
+42 cards with color == "leader" (confirmed against the live corpus, both
+directions), never on any other card. It is not real category information
+for those cards - "Leader" restates the same fact color already carries,
+the way FaB's face_N_types restates face_N_typebox (rule 7) - so it is
+dropped for them the same as an empty category, leaving category
+meaningful (a creature/ability subtype) only where it actually is one.
+ColorMaskDojo would otherwise be able to read the masked color straight
+back off this field for those 42 cards. faction-duo, by contrast, is kept
+here: it genuinely adds a second faction beyond what faction alone says
+for its 15 cards, it does not just restate faction - but it does always
+CONTAIN the true faction as its own prefix, so FactionMaskDojo masks it
+alongside faction rather than this stage dropping it (see
+gwent_one/masked_field_dojos.py's FactionMaskDojo).
 """
 
 from datetime import datetime, timezone
@@ -70,6 +86,9 @@ _CARD_BLOCK_SELECTOR = "div.card-wrap.card-data"
 # artid is an image id that the id/_id name rule cannot see; res is the image
 # resolution. (id is dropped by strip_noise itself.)
 _NOISE_KEYS = frozenset({"artid", "res"})
+# category's value on every color=="leader" card: pure duplication, not
+# real category information there - see this module's docstring.
+_LEADER_CATEGORY = "Leader"
 # Short identifying fields first, the ability text last.
 _LEADING_KEYS = (
     "name",
@@ -366,8 +385,10 @@ def _lean_card_content(extracted: dict[str, str]) -> JsonObject:
 
     Inputs: extracted (dict[str, str]): the flat dict from
         _extract_raw_content().
-    Output: a new JsonObject without id, artid and res (and without
-        category when empty), identity keys first and ability_text last.
+    Output: a new JsonObject without id, artid and res, without category
+        when it is empty or duplicates color (see _LEADER_CATEGORY and
+        this module's docstring), identity keys first and ability_text
+        last.
     Side effects: none.
     Exceptions: none.
 
@@ -376,5 +397,8 @@ def _lean_card_content(extracted: dict[str, str]) -> JsonObject:
         ...     "name": "Geralt", "category": "", "ability_text": "Deal 2."})
         {'name': 'Geralt', 'ability_text': 'Deal 2.'}
     """
-    content = strip_noise(dict(extracted), extra_noise_keys=_NOISE_KEYS)
+    content: JsonObject = dict(extracted)
+    if content.get("category") == _LEADER_CATEGORY:
+        del content["category"]
+    content = strip_noise(content, extra_noise_keys=_NOISE_KEYS)
     return order_keys(content, _LEADING_KEYS, _TRAILING_KEYS)

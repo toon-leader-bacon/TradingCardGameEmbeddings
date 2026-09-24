@@ -29,6 +29,10 @@ from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.seventeenlands.draft_data.pack_pool_columns import (
     DraftCardColumns,
 )
+from src.data_refinement.metrics.version_metadata import (
+    MetricVersionMetadata,
+    schema_with_version_metadata,
+)
 from src.schema.game_id import GameId
 
 _DEFAULT_OUTPUT_PATH = Path(
@@ -88,8 +92,15 @@ class PackToPickChoiceSetMetric:
             header, card_binder, source_game
         )
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
+        self._output_schema = schema_with_version_metadata(
+            _OUTPUT_SCHEMA,
+            MetricVersionMetadata(
+                game=source_game,
+                card_binder_version=card_binder.version_for(source_game),
+            ),
+        )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._writer = pq.ParquetWriter(self._output_path, _OUTPUT_SCHEMA)
+        self._writer = pq.ParquetWriter(self._output_path, self._output_schema)
         self._closed = False
 
     def accumulate(self, row: dict) -> None:
@@ -114,6 +125,13 @@ class PackToPickChoiceSetMetric:
         )
         pick_uuid = self._draft_columns.uuid_for_name(row["pick"])
 
+        # TODO: memory/perf - same issue as
+        # pool_conditioned_pick_metric.py's accumulate() (see its TODO
+        # comment for the full writeup): one write_table() call per
+        # CSV row means one parquet row group per row, and
+        # ParquetWriter's per-row-group metadata grows across the
+        # whole run. Observed killing this on MSH.PremierDraft.csv
+        # (2026-09-23/24) - see src/training/TODO.md section C.
         output_row = self._output_row(row, pack_option_uuids, pick_uuid)
         self._writer.write_table(output_row)
 
@@ -170,5 +188,5 @@ class PackToPickChoiceSetMetric:
                 "pack_option_uuids": [[str(uuid) for uuid in pack_option_uuids]],
                 "pick_uuid": [str(pick_uuid) if pick_uuid is not None else None],
             },
-            schema=_OUTPUT_SCHEMA,
+            schema=self._output_schema,
         )
