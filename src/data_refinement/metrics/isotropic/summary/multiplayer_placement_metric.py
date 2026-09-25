@@ -21,11 +21,11 @@ from pathlib import Path
 from typing import ClassVar
 
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.isotropic.summary.row_utils import deck_for_player
+from src.data_refinement.metrics.parquet_builder import ParquetBuilder
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     schema_with_version_metadata,
@@ -66,11 +66,11 @@ class MultiplayerPlacementMetric:
         Output: none (constructor).
         Side effects: creates output_path's parent directories if
             missing; opens output_path for writing (truncating any
-            existing file) via a pyarrow.parquet.ParquetWriter held
-            open for the lifetime of this instance - callers MUST call
-            finalize() when done, or the file is left incomplete.
-        Exceptions: whatever pyarrow.parquet.ParquetWriter raises on
-            failure to open output_path for writing.
+            existing file) via a ParquetBuilder held open for the
+            lifetime of this instance - callers MUST call finalize()
+            when done, or the file is left incomplete.
+        Exceptions: whatever ParquetBuilder raises on failure to open
+            output_path for writing.
         """
         self._card_binder = card_binder
         self._deck_box = deck_box
@@ -89,8 +89,7 @@ class MultiplayerPlacementMetric:
             ),
         )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._writer = pq.ParquetWriter(self._output_path, self._output_schema)
-        self._closed = False
+        self._writer = ParquetBuilder(self._output_path, self._output_schema)
 
     def accumulate(self, row: dict) -> None:
         """Write one (deck_uuids, ranks) row for one 3-4p game where
@@ -99,13 +98,14 @@ class MultiplayerPlacementMetric:
         Inputs:
             row: one parsed Flavor A summary row, carrying "players".
         Output: none.
-        Side effects: writes exactly one row to the open ParquetWriter
-            when _MIN_MULTIPLAYER_COUNT <= len(row["players"]) <=
-            _MAX_MULTIPLAYER_COUNT AND every one of those players has a
-            real "end" block - writes nothing for a 1-2p game or a
-            multiplayer game with any resignation (module docstring's
-            WHOLE-GAME ELIGIBILITY note). Writes every player's deck
-            into self._deck_box via create_if_absent().
+        Side effects: buffers exactly one row into the open
+            ParquetBuilder when _MIN_MULTIPLAYER_COUNT <=
+            len(row["players"]) <= _MAX_MULTIPLAYER_COUNT AND every one
+            of those players has a real "end" block - writes nothing
+            for a 1-2p game or a multiplayer game with any resignation
+            (module docstring's WHOLE-GAME ELIGIBILITY note). Writes
+            every player's deck into self._deck_box via
+            create_if_absent().
         Exceptions: none expected beyond whatever row_utils' own
             functions raise for a malformed row.
 
@@ -129,34 +129,30 @@ class MultiplayerPlacementMetric:
 
         deck_uuid_strs, sorted_ranks = self._sorted_by_deck_uuid(decks, ranks)
 
-        output_row = pa.Table.from_pydict(
+        self._writer.write_row(
             {
-                "deck_uuids": [deck_uuid_strs],
-                "ranks": [sorted_ranks],
-            },
-            schema=self._output_schema,
+                "deck_uuids": deck_uuid_strs,
+                "ranks": sorted_ranks,
+            }
         )
-        self._writer.write_table(output_row)
 
     def finalize(self) -> Path:
-        """Close the underlying ParquetWriter.
+        """Flush any buffered rows and close the underlying writer.
 
         Does NOT save self._deck_box - that's the calling driver's own
         responsibility, since the box is shared across metrics.
 
         Inputs: none.
         Output: self._output_path.
-        Side effects: closes the ParquetWriter opened in __init__, if
-            not already closed.
-        Exceptions: whatever ParquetWriter.close() raises.
+        Side effects: closes the ParquetBuilder opened in __init__, if
+            not already closed (flushing any rows still buffered).
+        Exceptions: whatever ParquetBuilder.close() raises.
 
         Example:
             >>> metric.finalize()
             PosixPath('data/metrics/isotropic/multiplayer_placement.parquet')
         """
-        if not self._closed:
-            self._writer.close()
-            self._closed = True
+        self._writer.close()
         return self._output_path
 
     def _sorted_by_deck_uuid(

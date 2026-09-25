@@ -17,6 +17,7 @@ from src.data_refinement.metrics.seventeenlands.replay_data.combat_aggression_pr
     CombatAggressionProfileMetric,
 )
 from src.dojos.generic.data_constructors import DeckLabelDataConstructor
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
 from src.schema.holdout import HoldoutSpec
 
@@ -44,6 +45,7 @@ class CombatAggressionProfileDojo(MultiCardRegressionDojo):
                 deck_box, "combat_aggression_profile"
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )

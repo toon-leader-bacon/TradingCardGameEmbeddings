@@ -16,6 +16,7 @@ from src.data_refinement.metrics.seventeenlands.replay_data.turns_to_game_end_af
     TurnsToGameEndAfterCastMetric,
 )
 from src.dojos.generic.data_constructors import CardAverageDataConstructor
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
 from src.schema.holdout import HoldoutSpec
 
@@ -40,6 +41,7 @@ class TurnsToGameEndAfterCastDojo(SingleCardRegressionDojo):
             or TurnsToGameEndAfterCastMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=CardAverageDataConstructor("turns_to_game_end_after_cast"),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )

@@ -193,14 +193,14 @@ duplication it removes (see [`../../TODO.md`](../../TODO.md)).
 
 `CombatAggressionProfileMetric` is streaming - one row already carries
 a complete example (the deck plus a scalar this class computes via its
-own turn loop), so `accumulate()` writes it immediately via an open
-`pyarrow.parquet.ParquetWriter` and `finalize()` only closes that
-writer, mirroring
+own turn loop), so `accumulate()` buffers it into an open
+[`ParquetBuilder`](../../parquet_builder.py) and `finalize()` only
+closes that builder, mirroring
 [`../../sts_gg/deck_label_metric.py`](../../sts_gg/deck_label_metric.py)'s
 shape. `AttackerBlockerCombatOutcomeMetric` is streaming but fans a
 single input row out to zero or more output rows (one per qualifying
-half-turn) via a single `pa.Table.from_pydict()` call built from a
-wider dict, the same fan-out convention
+half-turn), calling `write_row()` once per fanned-out row, the same
+fan-out convention
 [`../game_data/tutor_target_pool_metric.py`](../game_data/tutor_target_pool_metric.py)'s
 `TutorTargetPoolMetric` established first, applied here over turns
 within a game rather than over pool members.

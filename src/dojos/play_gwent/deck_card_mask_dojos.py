@@ -24,6 +24,7 @@ from src.data_refinement.metrics.play_gwent.leader_masked_from_deck_metric impor
     LeaderMaskedFromDeckMetric,
 )
 from src.dojos.generic.data_constructors import DeckCardMaskDataConstructor
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.multi_card_fixed_classification.dojo import (
     MultiCardFixedClassificationDojo,
 )
@@ -54,6 +55,7 @@ class LeaderMaskedFromDeckDojo(MultiCardFixedClassificationDojo):
             data_constructor=DeckCardMaskDataConstructor(deck_box, "label"),
             label_values=LeaderMaskedFromDeckMetric.LABEL_VALUES,
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )

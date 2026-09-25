@@ -24,6 +24,7 @@ from src.data_refinement.metrics.seventeenlands.game_data.game_card_average_metr
     WinRateWhenInDeckMetric,
 )
 from src.dojos.generic.data_constructors import CardAverageDataConstructor
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
 from src.schema.holdout import HoldoutSpec
 
@@ -49,8 +50,9 @@ class WinRateWhenInDeckDojo(SingleCardRegressionDojo):
                 WinRateWhenInDeckMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -75,8 +77,9 @@ class OpeningHandWinRateDojo(SingleCardRegressionDojo):
                 OpeningHandWinRateMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -101,6 +104,7 @@ class DrawnWinRateDojo(SingleCardRegressionDojo):
                 DrawnWinRateMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )

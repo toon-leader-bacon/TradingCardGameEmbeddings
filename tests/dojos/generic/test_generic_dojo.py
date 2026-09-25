@@ -16,7 +16,14 @@ from src.data_refinement.metrics.version_metadata import (
 )
 from src.dojos.batch import Batch
 from src.dojos.dojo import BatchBudget, Dojo
+from src.dojos.file_managers.FileManagerParquet import FileManagerParquet
+from src.dojos.generic.dojo_config import DojoConfig
+from src.dojos.generic.generic_dojo import GenericDojo
+from src.dojos.generic.single_card_regression.decoder_head import (
+    SingleCardRegressionDecoderHead,
+)
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
+from src.dojos.loss.mse_loss import MseLoss
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
@@ -69,9 +76,128 @@ def _dojo(
         card_lookup=binder,
         holdout=holdout,
         card_embedding_size=4,
-        rng_seed=0,
-        strict_version_check=False,
+        config=DojoConfig(
+            rng_seed=0, strict_version_check=False, output_directory=tmp_path / "splits"
+        ),
     )
+
+
+def _generic_dojo(
+    tmp_path: Path,
+    cards: list[GenericCard],
+    rows: int = 20,
+    output_directory: Path | None = None,
+    output_file_prefix: str | None = None,
+    force_resplit: bool = False,
+) -> GenericDojo:
+    """A raw GenericDojo (not through a cell subclass), so tests can reach
+    output_directory/output_file_prefix/force_resplit - SingleCardRegressionDojo
+    doesn't forward these (out of scope for this change, see generic_dojo.py's
+    own deferred-TODO comment)."""
+    binder = CardBinder()
+    for card in cards:
+        binder.create(card)
+    source = tmp_path / "source.parquet"
+    pd.DataFrame(
+        {
+            "nocab_uuid": [str(cards[i % len(cards)].nocab_uuid) for i in range(rows)],
+            "label": [float(i) for i in range(rows)],
+        }
+    ).to_parquet(source, index=False)
+    return GenericDojo(
+        path_to_training_data=source,
+        data_constructor=_CardPerRowConstructor(),
+        card_lookup=binder,
+        holdout=HoldoutSpec.no_holdout(),
+        decoder_head=SingleCardRegressionDecoderHead(4),
+        loss_calculator=MseLoss(),
+        config=DojoConfig(
+            rng_seed=0,
+            strict_version_check=False,
+            output_directory=(
+                output_directory
+                if output_directory is not None
+                else tmp_path / "splits"
+            ),
+            output_file_prefix=output_file_prefix,
+            force_resplit=force_resplit,
+        ),
+    )
+
+
+class TestSplitReuse:
+    def test_default_output_directory_and_prefix_match_the_source_stem(
+        self, tmp_path: Path
+    ) -> None:
+        dojo = _generic_dojo(tmp_path, [_card("a")])
+
+        assert dojo.file_manager.output_directory == tmp_path / "splits"
+        assert dojo.file_manager.output_file_prefix == "source"
+
+    def test_custom_output_file_prefix_is_used(self, tmp_path: Path) -> None:
+        dojo = _generic_dojo(
+            tmp_path, [_card("a")], output_file_prefix="ktk_deck_win_prediction"
+        )
+
+        assert dojo.file_manager.output_file_prefix == "ktk_deck_win_prediction"
+        assert (tmp_path / "splits" / "ktk_deck_win_prediction_train.parquet").exists()
+
+    def test_missing_splits_are_built_on_construction(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = {"n": 0}
+        real_make_splits = FileManagerParquet.make_splits
+
+        def counting_make_splits(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            calls["n"] += 1
+            return real_make_splits(self, *args, **kwargs)
+
+        monkeypatch.setattr(FileManagerParquet, "make_splits", counting_make_splits)
+
+        _generic_dojo(tmp_path, [_card("a")])
+
+        assert calls["n"] == 1
+
+    def test_existing_splits_are_reused_without_resplitting(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        splits_dir = tmp_path / "splits"
+        _generic_dojo(tmp_path, [_card("a")], output_directory=splits_dir)
+
+        calls = {"n": 0}
+        real_make_splits = FileManagerParquet.make_splits
+
+        def counting_make_splits(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            calls["n"] += 1
+            return real_make_splits(self, *args, **kwargs)
+
+        monkeypatch.setattr(FileManagerParquet, "make_splits", counting_make_splits)
+
+        second = _generic_dojo(tmp_path, [_card("a")], output_directory=splits_dir)
+
+        assert calls["n"] == 0
+        assert second.example_count(Split.TRAIN) == 16
+
+    def test_force_resplit_rebuilds_even_when_splits_already_exist(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        splits_dir = tmp_path / "splits"
+        _generic_dojo(tmp_path, [_card("a")], output_directory=splits_dir)
+
+        calls = {"n": 0}
+        real_make_splits = FileManagerParquet.make_splits
+
+        def counting_make_splits(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            calls["n"] += 1
+            return real_make_splits(self, *args, **kwargs)
+
+        monkeypatch.setattr(FileManagerParquet, "make_splits", counting_make_splits)
+
+        _generic_dojo(
+            tmp_path, [_card("a")], output_directory=splits_dir, force_resplit=True
+        )
+
+        assert calls["n"] == 1
 
 
 def test_satisfies_the_dojo_protocol(tmp_path: Path) -> None:
@@ -202,6 +328,7 @@ class TestVersionCheck:
             card_lookup=binder,
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
+            config=DojoConfig(output_directory=tmp_path / "splits"),
         )
 
         assert dojo.name == "source"
@@ -239,7 +366,9 @@ class TestVersionCheck:
             card_lookup=binder,
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
-            strict_version_check=False,
+            config=DojoConfig(
+                strict_version_check=False, output_directory=tmp_path / "splits"
+            ),
         )
 
         assert dojo.name == "source"
@@ -313,6 +442,7 @@ class TestVersionCheck:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             deck_box=deck_box,
+            config=DojoConfig(output_directory=tmp_path / "splits"),
         )
 
         assert dojo.name == "source"

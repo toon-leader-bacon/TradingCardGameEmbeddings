@@ -7,10 +7,10 @@ net-kill-count delta.
 NEW SHAPE (second occurrence in this codebase, after
 game_data.TutorTargetPoolMetric) - FAN-OUT STREAMING: one row fans out
 to one output example PER QUALIFYING HALF-TURN, not per row. Written
-the same way TutorTargetPoolMetric writes its fan-out: one
-pa.Table.from_pydict() built from a row-count-many-wide dict, one
-write_table() call per accumulate() call - except this fans out over
-turns within a game, not over pool members.
+the same way TutorTargetPoolMetric writes its fan-out: a list of row
+dicts, one ParquetBuilder.write_row() call per fanned-out row per
+accumulate() call - except this fans out over turns within a game, not
+over pool members.
 
 No deck_box - this metric's identity is (draft_id, match_number,
 game_number, actor, turn), never a deck_uuid.
@@ -28,9 +28,9 @@ from pathlib import Path
 from typing import ClassVar, Iterable, Literal
 
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.metrics.parquet_builder import ParquetBuilder
 from src.data_refinement.metrics.seventeenlands.replay_data.replay_card_columns import (
     ReplayCardColumns,
 )
@@ -91,11 +91,11 @@ class AttackerBlockerCombatOutcomeMetric:
         Output: none (constructor).
         Side effects: creates output_path's parent directories if
             missing; opens output_path for writing (truncating any
-            existing file) via a pyarrow.parquet.ParquetWriter held
-            open for the lifetime of this instance - callers MUST call
-            finalize() when done, or the file is left incomplete.
-        Exceptions: whatever pyarrow.parquet.ParquetWriter raises on
-            failure to open output_path for writing.
+            existing file) via a ParquetBuilder held open for the
+            lifetime of this instance - callers MUST call finalize()
+            when done, or the file is left incomplete.
+        Exceptions: whatever ParquetBuilder raises on failure to open
+            output_path for writing.
         """
         self._replay_columns = ReplayCardColumns.from_header(
             header, card_binder, source_game
@@ -109,21 +109,22 @@ class AttackerBlockerCombatOutcomeMetric:
             ),
         )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._writer = pq.ParquetWriter(self._output_path, self._output_schema)
-        self._closed = False
+        self._writer = ParquetBuilder(self._output_path, self._output_schema)
 
     def accumulate(self, row: dict) -> None:
         """Convert one replay_data row into zero or more output rows
-        (one per half-turn with at least one attacker) and write them
-        immediately.
+        (one per half-turn with at least one attacker) and buffer them
+        for writing.
 
         Inputs:
             row: one replay_data CSV row, dict-like - see
                 ../scanner.py's module docstring.
         Output: none.
-        Side effects: writes one row per (actor, turn) half-turn on
-            this row whose creatures_attacked is non-empty, to the open
-            ParquetWriter - zero rows if the game had no attacks.
+        Side effects: buffers one row per (actor, turn) half-turn on
+            this row whose creatures_attacked is non-empty, into the
+            open ParquetBuilder (flushed to disk automatically once
+            its batch size is reached, or by finalize()) - zero rows
+            if the game had no attacks.
         Exceptions: implementation-defined (expected: none for a
             well-formed row - see ../scanner.py's isolation contract).
 
@@ -136,29 +137,27 @@ class AttackerBlockerCombatOutcomeMetric:
         if not half_turns:
             return
 
-        output_rows = self._output_rows(row, half_turns)
-        self._writer.write_table(output_rows)
+        for output_row in self._output_rows(row, half_turns):
+            self._writer.write_row(output_row)
 
     def finalize(self) -> Path:
-        """Close the underlying ParquetWriter.
+        """Flush any buffered rows and close the underlying writer.
 
         A true no-op relative to data - every row this instance will
-        ever write was already written by accumulate(). Idempotent: a
+        ever write was already buffered by accumulate(). Idempotent: a
         second call is a no-op.
 
         Inputs: none.
         Output: self._output_path.
-        Side effects: closes the ParquetWriter opened in __init__, if
-            not already closed.
-        Exceptions: whatever ParquetWriter.close() raises.
+        Side effects: closes the ParquetBuilder opened in __init__, if
+            not already closed (flushing any rows still buffered).
+        Exceptions: whatever ParquetBuilder.close() raises.
 
         Example:
             >>> metric.finalize()
             PosixPath('data/metrics/seventeenlands/replay_data/attacker_blocker_combat_outcome.parquet')
         """
-        if not self._closed:
-            self._writer.close()
-            self._closed = True
+        self._writer.close()
         return self._output_path
 
     def _qualifying_half_turns(
@@ -233,9 +232,9 @@ class AttackerBlockerCombatOutcomeMetric:
 
     def _output_rows(
         self, row: dict, half_turns: list[tuple[Literal["user", "oppo"], int]]
-    ) -> pa.Table:
-        """Build one multi-row pa.Table matching _OUTPUT_SCHEMA, one row
-        per qualifying half-turn.
+    ) -> list[dict]:
+        """Build one output row dict per qualifying half-turn, matching
+        _OUTPUT_SCHEMA's columns.
 
         Private helper - single consumer is accumulate().
 
@@ -243,19 +242,15 @@ class AttackerBlockerCombatOutcomeMetric:
             row: the same row accumulate() received.
             half_turns: this row's already-computed
                 _qualifying_half_turns(row).
-        Output: a pa.Table matching _OUTPUT_SCHEMA with len(half_turns)
-            rows: draft_id/match_number/game_number repeated per row,
-            actor/turn/attacker_uuids/blocker_uuids/net_kill_delta one
-            entry per half_turns member.
+        Output: a list of len(half_turns) dicts, each keyed by every
+            _OUTPUT_SCHEMA column name: draft_id/match_number/
+            game_number repeated per row, actor/turn/attacker_uuids/
+            blocker_uuids/net_kill_delta one entry per half_turns
+            member.
         Side effects: none.
         Exceptions: none expected.
         """
-        row_count = len(half_turns)
-        attacker_uuids = []
-        blocker_uuids = []
-        net_kill_deltas = []
-        actors = []
-        turns = []
+        output_rows = []
         for actor, turn in half_turns:
             attackers = self._replay_columns.arena_uuids(
                 row[ReplayCardColumns.turn_column(actor, turn, "creatures_attacked")]
@@ -263,22 +258,16 @@ class AttackerBlockerCombatOutcomeMetric:
             blockers = self._replay_columns.arena_uuids(
                 row[ReplayCardColumns.turn_column(actor, turn, "creatures_blocking")]
             )
-            attacker_uuids.append([str(uuid) for uuid in attackers])
-            blocker_uuids.append([str(uuid) for uuid in blockers])
-            net_kill_deltas.append(self._net_kill_delta(row, actor, turn))
-            actors.append(actor)
-            turns.append(turn)
-
-        return pa.Table.from_pydict(
-            {
-                "draft_id": [row["draft_id"]] * row_count,
-                "match_number": [row["match_number"]] * row_count,
-                "game_number": [row["game_number"]] * row_count,
-                "actor": actors,
-                "turn": turns,
-                "attacker_uuids": attacker_uuids,
-                "blocker_uuids": blocker_uuids,
-                "net_kill_delta": net_kill_deltas,
-            },
-            schema=self._output_schema,
-        )
+            output_rows.append(
+                {
+                    "draft_id": row["draft_id"],
+                    "match_number": row["match_number"],
+                    "game_number": row["game_number"],
+                    "actor": actor,
+                    "turn": turn,
+                    "attacker_uuids": [str(uuid) for uuid in attackers],
+                    "blocker_uuids": [str(uuid) for uuid in blockers],
+                    "net_kill_delta": self._net_kill_delta(row, actor, turn),
+                }
+            )
+        return output_rows

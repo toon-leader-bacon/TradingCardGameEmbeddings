@@ -52,11 +52,11 @@ from typing import Any, ClassVar, Iterable
 from uuid import UUID
 
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.hash_utils import deck_uuid_from_cards
+from src.data_refinement.metrics.parquet_builder import ParquetBuilder
 from src.data_refinement.metrics.seventeenlands.game_data.game_card_columns import (
     GameCardColumns,
 )
@@ -108,11 +108,11 @@ class GameDeckLabelMetric(ABC):
         Output: none (constructor).
         Side effects: creates output_path's parent directories if
             missing; opens output_path for writing (truncating any
-            existing file) via a pyarrow.parquet.ParquetWriter held
-            open for the lifetime of this instance - callers MUST call
-            finalize() when done, or the file is left incomplete.
-        Exceptions: whatever pyarrow.parquet.ParquetWriter raises on
-            failure to open output_path for writing.
+            existing file) via a ParquetBuilder held open for the
+            lifetime of this instance - callers MUST call finalize()
+            when done, or the file is left incomplete.
+        Exceptions: whatever ParquetBuilder raises on failure to open
+            output_path for writing.
         """
         self._game_columns = GameCardColumns.from_header(
             header, card_binder, source_game
@@ -137,12 +137,11 @@ class GameDeckLabelMetric(ABC):
             ),
         )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._writer = pq.ParquetWriter(self._output_path, self._output_schema)
-        self._closed = False
+        self._writer = ParquetBuilder(self._output_path, self._output_schema)
 
     def accumulate(self, row: dict) -> None:
-        """Convert one game_data row into a single output row and write
-        it immediately.
+        """Convert one game_data row into a single output row and
+        buffer it for writing.
 
         Inputs:
             row: one game_data CSV row, dict-like - carrying at least
@@ -150,11 +149,12 @@ class GameDeckLabelMetric(ABC):
                 deck_<name> columns, plus whatever field
                 _label_for_row() reads.
         Output: none.
-        Side effects: writes exactly one row to the open ParquetWriter.
-            Writes this row's deck into self._deck_box via
-            create_if_absent() (a no-op if an identical deck was
-            already written by this or another metric sharing the same
-            box).
+        Side effects: buffers exactly one row into the open
+            ParquetBuilder (flushed to disk automatically once its
+            batch size is reached, or by finalize()). Writes this
+            row's deck into self._deck_box via create_if_absent() (a
+            no-op if an identical deck was already written by this or
+            another metric sharing the same box).
         Exceptions: implementation-defined (expected: none for a
             well-formed row - see ../scanner.py's isolation contract).
 
@@ -174,13 +174,13 @@ class GameDeckLabelMetric(ABC):
         )
 
         output_row = self._output_row(row, deck_uuid, label)
-        self._writer.write_table(output_row)
+        self._writer.write_row(output_row)
 
     def finalize(self) -> Path:
-        """Close the underlying ParquetWriter.
+        """Flush any buffered rows and close the underlying writer.
 
         A true no-op relative to data - every row this instance will
-        ever write was already written by accumulate(). Idempotent: a
+        ever write was already buffered by accumulate(). Idempotent: a
         second call is a no-op. Does NOT save self._deck_box - that's
         the calling driver's own responsibility, since the box is
         shared across metrics and only the driver knows when every
@@ -188,17 +188,15 @@ class GameDeckLabelMetric(ABC):
 
         Inputs: none.
         Output: self._output_path.
-        Side effects: closes the ParquetWriter opened in __init__, if
-            not already closed.
-        Exceptions: whatever ParquetWriter.close() raises.
+        Side effects: closes the ParquetBuilder opened in __init__, if
+            not already closed (flushing any rows still buffered).
+        Exceptions: whatever ParquetBuilder.close() raises.
 
         Example:
             >>> metric.finalize()
             PosixPath('data/metrics/seventeenlands/game_data/some_label.parquet')
         """
-        if not self._closed:
-            self._writer.close()
-            self._closed = True
+        self._writer.close()
         return self._output_path
 
     @abstractmethod
@@ -252,8 +250,9 @@ class GameDeckLabelMetric(ABC):
             card_nocab_uuids=card_nocab_uuids,
         )
 
-    def _output_row(self, row: dict, deck_uuid: UUID, label: Any) -> pa.Table:
-        """Build one single-row pa.Table matching self._output_schema.
+    def _output_row(self, row: dict, deck_uuid: UUID, label: Any) -> dict:
+        """Build one output row dict matching self._output_schema's
+        columns.
 
         Private helper - single consumer is accumulate().
 
@@ -262,19 +261,16 @@ class GameDeckLabelMetric(ABC):
             deck_uuid: this row's already-hashed deck identity.
             label: this row's already-computed label
                 (_label_for_row(row)).
-        Output: a one-row pa.Table matching self._output_schema:
+        Output: a dict keyed by every self._output_schema column name:
             draft_id/match_number/game_number read straight off row,
             deck_uuid stringified, label under self.LABEL_COLUMN.
         Side effects: none.
         Exceptions: none expected.
         """
-        return pa.Table.from_pydict(
-            {
-                "draft_id": [row["draft_id"]],
-                "match_number": [row["match_number"]],
-                "game_number": [row["game_number"]],
-                "deck_uuid": [str(deck_uuid)],
-                self.LABEL_COLUMN: [label],
-            },
-            schema=self._output_schema,
-        )
+        return {
+            "draft_id": row["draft_id"],
+            "match_number": row["match_number"],
+            "game_number": row["game_number"],
+            "deck_uuid": str(deck_uuid),
+            self.LABEL_COLUMN: label,
+        }

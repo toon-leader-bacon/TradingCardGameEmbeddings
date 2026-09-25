@@ -33,6 +33,7 @@ from src.data_refinement.metrics.seventeenlands.draft_data.pick_number_decay_cur
     PickNumberDecayCurveMetric,
 )
 from src.dojos.generic.data_constructors import PickNumberDecayCurveDataConstructor
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.single_card_fixed_classification.dojo import (
     SingleCardFixedClassificationDojo,
 )
@@ -71,6 +72,7 @@ class PickNumberDecayCurveDojo(SingleCardFixedClassificationDojo):
             ],
             card_embedding_size=card_embedding_size,
             loss_factory=MaskedVectorRegressionLoss,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )

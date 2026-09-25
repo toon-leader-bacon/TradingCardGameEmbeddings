@@ -118,11 +118,14 @@ established for a similarly-shaped per-card frequency table.
 `PackToPickChoiceSetMetric`/`PoolConditionedPickMetric` are streaming
 instead — one row already carries a complete example (the full pack
 option set, and for the latter, the pool so far, plus which option was
-picked), so `accumulate()` writes it immediately via an open
-`pyarrow.parquet.ParquetWriter` and `finalize()` only closes that
-writer, mirroring
+picked), so `accumulate()` buffers it into an open
+[`ParquetBuilder`](../../parquet_builder.py) and `finalize()` only
+closes that builder, mirroring
 [`../../sts_gg/deck_label_metric.py`](../../sts_gg/deck_label_metric.py)'s
-shape.
+shape. `ParquetBuilder` batches rows into fixed-size parquet row
+groups rather than writing one row group per input row - the original
+motivation for these two metrics, whose raw CSVs can run into the tens
+of millions of rows (see its own module docstring).
 
 ## How to run
 

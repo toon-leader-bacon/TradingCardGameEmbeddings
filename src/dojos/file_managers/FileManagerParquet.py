@@ -162,6 +162,18 @@ class FileManagerParquet:
         )
         return [ParquetChunkReader(path, batch_size) for path in output_paths]
 
+    def splits_exist(self) -> bool:
+        """Whether this instance's train/test/validation split files are
+        already on disk under output_directory/output_file_prefix.
+
+        Output: True only if all three split files exist. False if any
+            are missing (including "make_splits has never run for this
+            output_directory/output_file_prefix").
+        Side effects: none (stats the files, does not read them).
+        Exceptions: none.
+        """
+        return all(self._split_path(index).exists() for index in _SPLIT_INDEX.values())
+
     def reader_for(self, split: Split, batch_size: int = 32) -> ParquetChunkReader:
         """Open a fresh chunked reader over one already-written split file.
 

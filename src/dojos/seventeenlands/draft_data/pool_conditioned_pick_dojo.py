@@ -14,6 +14,7 @@ from src.data_refinement.metrics.seventeenlands.draft_data.pool_conditioned_pick
     PoolConditionedPickMetric,
 )
 from src.dojos.generic.data_constructors import PoolConditionedPickDataConstructor
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.multi_group_option_selection.dojo import (
     MultiGroupOptionSelectionDojo,
 )
@@ -46,6 +47,7 @@ class PoolConditionedPickDojo(MultiGroupOptionSelectionDojo):
             card_embedding_size=card_embedding_size,
             scoring_head=scoring_head,
             pooler=pooler,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )

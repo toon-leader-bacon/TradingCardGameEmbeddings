@@ -316,6 +316,11 @@ good worked examples. Measure a stage with `scripts/report_card_content.py
   row, while `raw_content` is the lean version (~2,350 tokens down to
   ~150 median). A re-ingest replaces a card's content when the lean
   content differs, keeping its `nocab_uuid`, and is a no-op otherwise.
+  Rows whose `layout` is `token`/`double_faced_token`/`emblem`/`scheme`/
+  `planar`/`vanguard`/`art_series`/`front_card` are skipped entirely
+  (rule 11 above) - several share a name with a real card (e.g. a
+  "Tarmogoyf" token alongside the real creature), which would otherwise
+  make every name-based lookup for that real card ambiguous.
 - `pokemon_tcg/ingestion_stage.py` — `PokemonTcgCardIngestionStage`
   (`SOURCE_GAME = GameId.POKEMON`), reading a *directory* of
   pokemon-tcg-data's per-set `.json` files (each a JSON array, not

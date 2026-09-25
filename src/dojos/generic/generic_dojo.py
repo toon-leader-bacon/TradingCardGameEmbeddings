@@ -24,6 +24,7 @@ from src.dojos.budgeted_batching import group_by_budget
 from src.dojos.dojo import BatchBudget, DojoBatch
 from src.dojos.file_managers.FileManagerParquet import MAX_INT, FileManagerParquet
 from src.dojos.generic.data_constructor import DataConstructor
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.loss.nocab_loss import NocabLoss
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
@@ -52,26 +53,38 @@ class GenericDojo:
             loss inputs.
         loss_calculator: scores decoder_head's output against labels.
         mod_pipeline: augmentations; None means none.
-        rng_seed: seed for split shuffling; None means non-deterministic.
         deck_box: only required when path_to_training_data's metric was
             built from a DeckBox (its embedded metadata says
             requires_deck_box) - used to verify that box was minted
             from the same CardBinder version as the metric itself
             (DeckBox.card_binder_version_for()). None otherwise.
-        strict_version_check: when True (default), path_to_training_data's
-            embedded CardBinder version (see
-            src/data_refinement/metrics/version_metadata.py) is checked
-            against card_lookup (and, when requires_deck_box, deck_box's
-            own recorded CardBinder version) before splitting, and a
-            mismatch (or missing metadata) raises. False is the explicit
-            escape hatch for "proceed anyway" - it skips the check
-            entirely and logs a warning instead.
+        config: this dojo's identity/split-management/version-check
+            configuration (see DojoConfig, src/dojos/generic/dojo_config.py)
+            - defaults to DojoConfig() (every field at its default),
+            which preserves this project's original behavior exactly.
+            A None field resolves as follows (the only place this
+            resolution logic lives):
+              - self.name = config.name or path_to_training_data.stem.
+              - the split-file prefix passed to FileManagerParquet is
+                config.output_file_prefix or self.name (so setting
+                config.name alone already avoids a split-file collision,
+                without also needing output_file_prefix).
+              - self.rng is seeded from config.rng_seed exactly as a
+                bare rng_seed parameter used to be.
+              - make_splits() runs only when config.force_resplit is
+                True or the split files don't already exist
+                (FileManagerParquet.splits_exist()) - otherwise the
+                existing files are reused untouched.
+              - _check_metric_version's strictness is
+                config.strict_version_check.
     Output: n/a.
-    Side effects: creates/overwrites this dojo's split files under
-        data/splits (see FileManagerParquet.make_splits).
+    Side effects: creates this dojo's split files under
+        config.output_directory (see FileManagerParquet.make_splits)
+        unless they already exist and config.force_resplit is False, in
+        which case the existing files are left untouched and reused.
     Exceptions: whatever FileManagerParquet raises for a missing or
         malformed path_to_training_data. ValueError if
-        strict_version_check is True and path_to_training_data's
+        config.strict_version_check is True and path_to_training_data's
         version metadata is missing, doesn't match card_lookup, or
         needs a deck_box that wasn't given or whose own recorded
         CardBinder version doesn't match.
@@ -86,26 +99,28 @@ class GenericDojo:
         decoder_head: nn.Module,
         loss_calculator: NocabLoss[Any, Any],
         mod_pipeline: ModPipeline | None = None,
-        rng_seed: int | None = None,
         deck_box: DeckBox | None = None,
-        strict_version_check: bool = True,
+        config: DojoConfig = DojoConfig(),
     ) -> None:
-        self.name = path_to_training_data.stem
+        self.name = config.name or path_to_training_data.stem
         self.holdout = holdout
-        self.rng = random.Random(rng_seed) if rng_seed is not None else random.Random()
+        self.rng = (
+            random.Random(config.rng_seed)
+            if config.rng_seed is not None
+            else random.Random()
+        )
 
-        # TODO: an output_file_prefix that stays unique per metric sharing a
-        # cell (the stem is unique per metric file, but not per directory).
         self.file_manager = FileManagerParquet(
             path_to_training_data,
-            output_directory=Path("data/splits"),
-            output_file_prefix=path_to_training_data.stem,
+            output_directory=config.output_directory,
+            output_file_prefix=config.output_file_prefix or self.name,
             seed=self.rng.randint(0, MAX_INT),
         )
         self._check_metric_version(
-            path_to_training_data, card_lookup, deck_box, strict_version_check
+            path_to_training_data, card_lookup, deck_box, config.strict_version_check
         )
-        self.file_manager.make_splits(split_ratios=[8, 1, 1], shuffle=True)
+        if config.force_resplit or not self.file_manager.splits_exist():
+            self.file_manager.make_splits(split_ratios=[8, 1, 1], shuffle=True)
 
         self.data_constructor = data_constructor
         self.data_mod_pipeline = mod_pipeline or ModPipeline([])

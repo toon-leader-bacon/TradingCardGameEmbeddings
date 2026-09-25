@@ -68,6 +68,7 @@ from src.data_refinement.metrics.gwent_one.rarity_mask_metric import RarityMaskM
 from src.data_refinement.metrics.gwent_one.set_mask_metric import SetMaskMetric
 from src.data_refinement.metrics.gwent_one.type_mask_metric import TypeMaskMetric
 from src.dojos.generic.data_constructors import MaskedFieldDataConstructor
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.single_card_fixed_classification.dojo import (
     SingleCardFixedClassificationDojo,
 )
@@ -107,8 +108,9 @@ class FactionMaskDojo(SingleCardFixedClassificationDojo):
                     MaskTargetKeyMod(key="faction-duo", train_only=False),
                 ]
             ),
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -141,8 +143,9 @@ class ColorMaskDojo(SingleCardFixedClassificationDojo):
                     )
                 ]
             ),
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -175,8 +178,9 @@ class RarityMaskDojo(SingleCardFixedClassificationDojo):
                     )
                 ]
             ),
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -205,8 +209,9 @@ class SetMaskDojo(SingleCardFixedClassificationDojo):
             mod_pipeline=ModPipeline(
                 [MaskTargetKeyMod(key=SetMaskMetric.MASKED_FIELD[-1], train_only=False)]
             ),
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -239,8 +244,9 @@ class TypeMaskDojo(SingleCardFixedClassificationDojo):
                     )
                 ]
             ),
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -274,8 +280,9 @@ class ArmorMaskDojo(SingleCardFixedClassificationDojo):
                     )
                 ]
             ),
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -309,8 +316,9 @@ class ProvisionMaskDojo(SingleCardFixedClassificationDojo):
                     )
                 ]
             ),
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -344,6 +352,7 @@ class PowerMaskDojo(SingleCardFixedClassificationDojo):
                     )
                 ]
             ),
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )

@@ -44,10 +44,10 @@ from typing import ClassVar
 from uuid import UUID
 
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.metrics.parquet_builder import ParquetBuilder
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     schema_with_version_metadata,
@@ -92,11 +92,11 @@ class DeckCardMaskMetric(ABC):
         Output: none (constructor).
         Side effects: creates output_path's parent directories if
             missing; opens output_path for writing (truncating any
-            existing file) via a pyarrow.parquet.ParquetWriter held
-            open for the lifetime of this instance - callers MUST call
-            finalize() when done, or the file is left incomplete.
-        Exceptions: whatever pyarrow.parquet.ParquetWriter raises on
-            failure to open output_path for writing.
+            existing file) via a ParquetBuilder held open for the
+            lifetime of this instance - callers MUST call finalize()
+            when done, or the file is left incomplete.
+        Exceptions: whatever ParquetBuilder raises on failure to open
+            output_path for writing.
         """
         self._card_lookup = card_lookup
         self._deck_box = deck_box
@@ -116,11 +116,10 @@ class DeckCardMaskMetric(ABC):
             ),
         )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._writer = pq.ParquetWriter(self._output_path, self._output_schema)
-        self._closed = False
+        self._writer = ParquetBuilder(self._output_path, self._output_schema)
 
     def accumulate(self, row: dict) -> None:
-        """Ensure row's deck exists in self._deck_box, then write one
+        """Ensure row's deck exists in self._deck_box, then buffer one
         output row if row has a valid masking target.
 
         Inputs:
@@ -130,8 +129,10 @@ class DeckCardMaskMetric(ABC):
         Output: none.
         Side effects: whatever self._deck_uuid_for_row() does (at
             minimum, ensures row's deck is stored in self._deck_box).
-            Writes exactly one row to the open ParquetWriter when
-            self._target_card_uuid_for_row() finds a target; writes
+            Buffers exactly one row into the open ParquetBuilder
+            (flushed to disk automatically once its batch size is
+            reached, or by finalize()) when
+            self._target_card_uuid_for_row() finds a target; buffers
             nothing when it returns None.
         Exceptions: whatever _deck_uuid_for_row()/
             _target_card_uuid_for_row()/_label_for_card() raise.
@@ -164,18 +165,15 @@ class DeckCardMaskMetric(ABC):
             )
         label = self._label_for_card(card)
 
-        output_row = pa.Table.from_pydict(
-            {
-                "deck_uuid": [str(deck_uuid)],
-                "target_card_uuid": [str(target_uuid)],
-                "label": [label],
-            },
-            schema=self._output_schema,
-        )
-        self._writer.write_table(output_row)
+        output_row = {
+            "deck_uuid": str(deck_uuid),
+            "target_card_uuid": str(target_uuid),
+            "label": label,
+        }
+        self._writer.write_row(output_row)
 
     def finalize(self) -> Path:
-        """Close the underlying ParquetWriter.
+        """Flush any buffered rows and close the underlying writer.
 
         Idempotent: a second call is a no-op. Does NOT save
         self._deck_box - that's the calling driver's own
@@ -183,17 +181,15 @@ class DeckCardMaskMetric(ABC):
 
         Inputs: none.
         Output: self._output_path.
-        Side effects: closes the ParquetWriter opened in __init__, if
-            not already closed.
-        Exceptions: whatever ParquetWriter.close() raises.
+        Side effects: closes the ParquetBuilder opened in __init__, if
+            not already closed (flushing any rows still buffered).
+        Exceptions: whatever ParquetBuilder.close() raises.
 
         Example:
             >>> metric.finalize()
             PosixPath('data/metrics/play_gwent/leader_masked_from_deck.parquet')
         """
-        if not self._closed:
-            self._writer.close()
-            self._closed = True
+        self._writer.close()
         return self._output_path
 
     @abstractmethod

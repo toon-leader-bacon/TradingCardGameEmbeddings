@@ -144,6 +144,30 @@ _LEADING_KEYS = (
 _TRAILING_KEYS = ("oracle_text", "card_faces")
 _NOT_LEGAL = "not_legal"
 
+# Scryfall layouts that are not a playable card a deck can contain -
+# reminder/accessory objects that happen to share the oracle-cards dump
+# with real cards. Excluded outright (see ingest()) rather than ingested
+# and left for a downstream consumer to filter, because several of them
+# share a name with a real card (e.g. a "Tarmogoyf" token alongside the
+# real Tarmogoyf creature card) - leaving both in the binder makes any
+# name-based lookup for that real card ambiguous (2+ matches) and it
+# silently falls back to the Unknown sentinel, exactly as if the real
+# card didn't exist. Not excluded: every layout that IS a real playable
+# card, however unusually formatted (transform, saga, split, adventure,
+# modal_dfc, class, mutate, flip, leveler, meld, prepare, etc).
+_EXCLUDED_LAYOUTS = frozenset(
+    {
+        "token",
+        "double_faced_token",
+        "emblem",
+        "scheme",
+        "planar",
+        "vanguard",
+        "art_series",
+        "front_card",
+    }
+)
+
 
 class ScryfallCardIngestionStage:
     """Translates a Scryfall oracle-cards .jsonl dump directly into binder.
@@ -158,10 +182,10 @@ class ScryfallCardIngestionStage:
         """Parse a Scryfall oracle-cards .jsonl file, creating/updating
         cards directly on binder as a side effect.
 
-        One _ingest_row() call per line of raw_path — no additional
-        logic beyond calling that and collecting the non-None results.
-        No filtering by layout/type — every row becomes exactly one
-        create() or one considered-for-update() call.
+        One _ingest_row() call per line of raw_path whose "layout" is
+        not in _EXCLUDED_LAYOUTS (see that constant's own comment) - a
+        row with an excluded layout is skipped entirely: no create(),
+        no update, no alias registered.
 
         Inputs:
             raw_path: path to a Scryfall oracle-cards .jsonl file (one
@@ -207,6 +231,8 @@ class ScryfallCardIngestionStage:
             for line in raw_file:
                 progress.update(len(line.encode("utf-8")))
                 row = json.loads(line)
+                if row.get("layout") in _EXCLUDED_LAYOUTS:
+                    continue
                 result = self._ingest_row(row, binder)
                 if result is not None:
                     changed_uuids.append(result)

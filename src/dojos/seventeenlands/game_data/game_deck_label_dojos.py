@@ -41,6 +41,7 @@ from src.data_refinement.metrics.seventeenlands.game_data.game_deck_label_metric
     DeckWinPredictionMetric,
 )
 from src.dojos.generic.data_constructors import DeckLabelDataConstructor
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.multi_card_binary_classification.dojo import (
     MultiCardBinaryClassificationDojo,
 )
@@ -73,8 +74,9 @@ class DeckGameLengthPredictionDojo(MultiCardRegressionDojo):
                 deck_box, DeckGameLengthPredictionMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -100,8 +102,9 @@ class DeckWinPredictionDojo(MultiCardBinaryClassificationDojo):
                 deck_box, DeckWinPredictionMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -133,6 +136,7 @@ class DeckRankTierPredictionDojo(MultiCardFixedClassificationDojo):
             ),
             label_values=DeckRankTierPredictionMetric.LABEL_VALUES,
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )

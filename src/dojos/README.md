@@ -44,7 +44,23 @@ declares its own `train_only: bool` at construction (default `True`)
 - `[file_managers/FileManagerParquet.py](file_managers/FileManagerParquet.py)` -
 `FileManagerParquet`/`ParquetChunkReader`, splits a metric's output
 parquet file into train/test/validation files and streams each in
-chunks.
+chunks. `splits_exist()` lets a caller check whether that's already been
+done for a given output directory/prefix, so a repeat construction can
+skip re-splitting.
+- `[generic/dojo_config.py](generic/dojo_config.py)` - `DojoConfig`, a
+frozen parameter object bundling every `GenericDojo` constructor
+argument that's configuration rather than a real collaborator: `name`
+(this dojo's `Trainer`-facing identity - set explicitly whenever more
+than one dojo is built from metric files sharing a bare filename, e.g.
+the same metric under two different expansion/format directories),
+`output_directory`/`output_file_prefix`/`force_resplit`/`rng_seed`
+(split-file management), and `strict_version_check` (see
+`plans/dojo_config.md` and `plans/card_binder_versioning.md`). A dumb
+value object - no methods, no resolution logic; `GenericDojo.__init__`
+is the only place a `None` field resolves to its fallback. Every
+`GenericDojo`/task-shape constructor takes `config: DojoConfig =
+DojoConfig()`, so its default preserves this project's original
+per-parameter defaults exactly.
 - `[loss/](loss/)` - `NocabLoss` Protocol plus concrete losses  
 (`MseLoss`, `FixedClassificationLoss`, `SoftClassificationLoss`,  
 `MaskedVectorRegressionLoss`, `BceLoss`, `PickPredictionCrossEntropyLoss`).
@@ -105,7 +121,7 @@ metric family that shares its `(input shape, task shape)` cell.
 `SingleCardRegressionDojo` (`dojo.py`) is the generic cell for
 `(SingleCardInput, Regression)`: single card in, one float label out.
 Takes `path_to_training_data`, an injected `DataConstructor`,
-`card_embedding_size`, and optionally a `ModPipeline`/`rng_seed`.
+`card_embedding_size`, and optionally a `ModPipeline`/`DojoConfig`.
 Internally builds `MseLoss` and its own
 `SingleCardRegressionDecoderHead` (`decoder_head.py` - a small MLP down
 to one scalar) - callers never construct either directly.

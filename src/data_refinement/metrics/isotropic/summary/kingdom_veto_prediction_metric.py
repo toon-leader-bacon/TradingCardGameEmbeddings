@@ -24,7 +24,6 @@ from typing import ClassVar
 from uuid import UUID
 
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
@@ -34,6 +33,7 @@ from src.data_refinement.metrics.isotropic.summary.row_utils import (
     is_natural_kingdom,
     kingdom_card_names,
 )
+from src.data_refinement.metrics.parquet_builder import ParquetBuilder
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     schema_with_version_metadata,
@@ -72,11 +72,11 @@ class KingdomVetoPredictionMetric:
         Output: none (constructor).
         Side effects: creates output_path's parent directories if
             missing; opens output_path for writing (truncating any
-            existing file) via a pyarrow.parquet.ParquetWriter held
-            open for the lifetime of this instance - callers MUST call
-            finalize() when done, or the file is left incomplete.
-        Exceptions: whatever pyarrow.parquet.ParquetWriter raises on
-            failure to open output_path for writing.
+            existing file) via a ParquetBuilder held open for the
+            lifetime of this instance - callers MUST call finalize()
+            when done, or the file is left incomplete.
+        Exceptions: whatever ParquetBuilder raises on failure to open
+            output_path for writing.
         """
         self._card_binder = card_binder
         self._deck_box = deck_box
@@ -95,8 +95,7 @@ class KingdomVetoPredictionMetric:
             ),
         )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._writer = pq.ParquetWriter(self._output_path, self._output_schema)
-        self._closed = False
+        self._writer = ParquetBuilder(self._output_path, self._output_schema)
 
     def accumulate(self, row: dict) -> None:
         """Write one (candidate_pool_uuid, vetoed_card_uuids) row for
@@ -106,19 +105,19 @@ class KingdomVetoPredictionMetric:
             row: one parsed Flavor A summary row, carrying "board"
                 (with "supply") and, optionally, "vetoed".
         Output: none.
-        Side effects: writes exactly one row to the open ParquetWriter
-            when row has a non-empty "vetoed" list AND is a natural
-            kingdom (row_utils.is_natural_kingdom()) - writes nothing
-            for a row with no vetoes (a real "nothing to predict"
-            outcome, not an error) or a generator-constrained kingdom
-            (BRAINSTORM.md's known-biases note: a curated kingdom's
-            veto behavior isn't a fair sample). Writes the candidate
-            pool (board.supply union vetoed) into self._deck_box via
-            create_if_absent(), but only when a row also produces an
-            output row - an un-vetoed pool is never a useful training
-            input for this metric, so it's not worth minting. Emits one
-            logging.error() per vetoed/candidate-pool card name that
-            fails to resolve.
+        Side effects: buffers exactly one row into the open
+            ParquetBuilder when row has a non-empty "vetoed" list AND
+            is a natural kingdom (row_utils.is_natural_kingdom()) -
+            writes nothing for a row with no vetoes (a real "nothing to
+            predict" outcome, not an error) or a generator-constrained
+            kingdom (BRAINSTORM.md's known-biases note: a curated
+            kingdom's veto behavior isn't a fair sample). Writes the
+            candidate pool (board.supply union vetoed) into
+            self._deck_box via create_if_absent(), but only when a row
+            also produces an output row - an un-vetoed pool is never a
+            useful training input for this metric, so it's not worth
+            minting. Emits one logging.error() per vetoed/candidate-
+            pool card name that fails to resolve.
         Exceptions: none expected beyond whatever row_utils' own
             functions raise for a malformed row.
 
@@ -156,34 +155,30 @@ class KingdomVetoPredictionMetric:
         pool_deck = self._candidate_pool_deck(kingdom_names, vetoed_names)
         self._deck_box.create_if_absent(pool_deck)
 
-        output_row = pa.Table.from_pydict(
+        self._writer.write_row(
             {
-                "candidate_pool_uuid": [str(pool_deck.nocab_uuid)],
-                "vetoed_card_uuids": [[str(uuid) for uuid in vetoed_uuids]],
-            },
-            schema=self._output_schema,
+                "candidate_pool_uuid": str(pool_deck.nocab_uuid),
+                "vetoed_card_uuids": [str(uuid) for uuid in vetoed_uuids],
+            }
         )
-        self._writer.write_table(output_row)
 
     def finalize(self) -> Path:
-        """Close the underlying ParquetWriter.
+        """Flush any buffered rows and close the underlying writer.
 
         Does NOT save self._deck_box - that's the calling driver's own
         responsibility, since the box is shared across metrics.
 
         Inputs: none.
         Output: self._output_path.
-        Side effects: closes the ParquetWriter opened in __init__, if
-            not already closed.
-        Exceptions: whatever ParquetWriter.close() raises.
+        Side effects: closes the ParquetBuilder opened in __init__, if
+            not already closed (flushing any rows still buffered).
+        Exceptions: whatever ParquetBuilder.close() raises.
 
         Example:
             >>> metric.finalize()
             PosixPath('data/metrics/isotropic/kingdom_veto_prediction.parquet')
         """
-        if not self._closed:
-            self._writer.close()
-            self._closed = True
+        self._writer.close()
         return self._output_path
 
     def _candidate_pool_deck(

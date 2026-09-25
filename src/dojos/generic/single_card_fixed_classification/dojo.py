@@ -10,6 +10,7 @@ from typing import Any, Callable, Sequence
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.dojos.generic.data_constructor import DataConstructor
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.generic_dojo import GenericDojo
 from src.dojos.generic.single_card_fixed_classification.decoder_head import (
     FixedClassificationDecoderHead,
@@ -39,9 +40,8 @@ class SingleCardFixedClassificationDojo(GenericDojo):
         loss_factory: Callable[
             [Sequence[str]], NocabLoss[Any, Any]
         ] = FixedClassificationLoss,
-        rng_seed: int | None = None,
         deck_box: DeckBox | None = None,
-        strict_version_check: bool = True,
+        config: DojoConfig = DojoConfig(),
     ) -> None:
         label_values = list(label_values)
         self.card_embedding_size = card_embedding_size
@@ -56,7 +56,6 @@ class SingleCardFixedClassificationDojo(GenericDojo):
             ),
             loss_calculator=loss_factory(label_values),
             mod_pipeline=mod_pipeline,
-            rng_seed=rng_seed,
             deck_box=deck_box,
-            strict_version_check=strict_version_check,
+            config=config,
         )

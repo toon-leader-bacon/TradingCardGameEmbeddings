@@ -14,6 +14,7 @@ from src.data_refinement.metrics.seventeenlands.draft_data.pack_to_pick_choice_s
     PackToPickChoiceSetMetric,
 )
 from src.dojos.generic.data_constructors import PackToPickChoiceSetDataConstructor
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.multi_card_option_selection.dojo import (
     MultiCardOptionSelectionDojo,
 )
@@ -42,6 +43,7 @@ class PackToPickChoiceSetDojo(MultiCardOptionSelectionDojo):
             data_constructor=PackToPickChoiceSetDataConstructor(),
             card_embedding_size=card_embedding_size,
             scoring_head=scoring_head,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )

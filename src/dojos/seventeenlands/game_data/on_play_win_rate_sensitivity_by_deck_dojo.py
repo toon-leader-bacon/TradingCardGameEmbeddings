@@ -24,6 +24,7 @@ from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_rate_sensi
     OnPlayWinRateSensitivityByDeckMetric,
 )
 from src.dojos.generic.data_constructors import DeckLabelDataConstructor
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
 from src.schema.holdout import HoldoutSpec
 
@@ -51,6 +52,7 @@ class OnPlayWinRateSensitivityByDeckDojo(MultiCardRegressionDojo):
                 deck_box, "on_play_win_rate_sensitivity"
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )

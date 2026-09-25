@@ -173,11 +173,11 @@ many independent samples, not deduplicated to one per run.
 
 Every `DeckLabelMetric` subclass is streaming instead: a run's deck and
 its label are both already present on that one row, so `accumulate()`
-writes its one output row (`run_id`, `deck_uuid`, `LABEL_COLUMN`)
-immediately via an open `pyarrow.parquet.ParquetWriter` (after writing
-that run's final deck into its `DeckBox` — see "Deck references"
-above), and `finalize()` only closes that writer — no cross-run
-aggregation needed, unlike the two accumulation metrics above.
+buffers its one output row (`run_id`, `deck_uuid`, `LABEL_COLUMN`) into
+an open [`ParquetBuilder`](../parquet_builder.py) (after writing that
+run's final deck into its `DeckBox` — see "Deck references" above),
+and `finalize()` only closes that builder — no cross-run aggregation
+needed, unlike the two accumulation metrics above.
 
 Across every metric here, a card that fails to resolve against the
 `CardBinder` (e.g. spire_codex's card dump lagging a newer sts.gg

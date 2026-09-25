@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import ClassVar
 
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
@@ -25,6 +24,7 @@ from src.data_refinement.metrics.isotropic.summary.row_utils import (
     deck_for_player,
     eligible_player_entries,
 )
+from src.data_refinement.metrics.parquet_builder import ParquetBuilder
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     schema_with_version_metadata,
@@ -64,11 +64,11 @@ class FullDeckWinPredictionMetric:
         Output: none (constructor).
         Side effects: creates output_path's parent directories if
             missing; opens output_path for writing (truncating any
-            existing file) via a pyarrow.parquet.ParquetWriter held
-            open for the lifetime of this instance - callers MUST call
-            finalize() when done, or the file is left incomplete.
-        Exceptions: whatever pyarrow.parquet.ParquetWriter raises on
-            failure to open output_path for writing.
+            existing file) via a ParquetBuilder held open for the
+            lifetime of this instance - callers MUST call finalize()
+            when done, or the file is left incomplete.
+        Exceptions: whatever ParquetBuilder raises on failure to open
+            output_path for writing.
         """
         self._card_binder = card_binder
         self._deck_box = deck_box
@@ -87,18 +87,17 @@ class FullDeckWinPredictionMetric:
             ),
         )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._writer = pq.ParquetWriter(self._output_path, self._output_schema)
-        self._closed = False
+        self._writer = ParquetBuilder(self._output_path, self._output_schema)
 
     def accumulate(self, row: dict) -> None:
         """Convert every eligible player in one game into a single
-        (deck_uuid, won) output row each, writing immediately.
+        (deck_uuid, won) output row each, buffering it for writing.
 
         Inputs:
             row: one parsed Flavor A summary row, carrying "players"
                 (see row_utils.eligible_player_entries()).
         Output: none.
-        Side effects: writes one row to the open ParquetWriter per
+        Side effects: buffers one row into the open ParquetBuilder per
             eligible player. Writes each such player's final deck into
             self._deck_box via create_if_absent(). Emits one
             logging.error() per card name that fails to resolve.
@@ -113,34 +112,30 @@ class FullDeckWinPredictionMetric:
         for player in eligible_player_entries(row):
             deck = self._deck_for_player(player)
             self._deck_box.create_if_absent(deck)
-            output_row = pa.Table.from_pydict(
+            self._writer.write_row(
                 {
-                    "deck_uuid": [str(deck.nocab_uuid)],
-                    "won": [player["rank"] == 1],
-                },
-                schema=self._output_schema,
+                    "deck_uuid": str(deck.nocab_uuid),
+                    "won": player["rank"] == 1,
+                }
             )
-            self._writer.write_table(output_row)
 
     def finalize(self) -> Path:
-        """Close the underlying ParquetWriter.
+        """Flush any buffered rows and close the underlying writer.
 
         Does NOT save self._deck_box - that's the calling driver's own
         responsibility, since the box is shared across metrics.
 
         Inputs: none.
         Output: self._output_path.
-        Side effects: closes the ParquetWriter opened in __init__, if
-            not already closed.
-        Exceptions: whatever ParquetWriter.close() raises.
+        Side effects: closes the ParquetBuilder opened in __init__, if
+            not already closed (flushing any rows still buffered).
+        Exceptions: whatever ParquetBuilder.close() raises.
 
         Example:
             >>> metric.finalize()
             PosixPath('data/metrics/isotropic/full_deck_win_prediction.parquet')
         """
-        if not self._closed:
-            self._writer.close()
-            self._closed = True
+        self._writer.close()
         return self._output_path
 
     def _deck_for_player(self, player_entry: dict) -> GenericDeck:

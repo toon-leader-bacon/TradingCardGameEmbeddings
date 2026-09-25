@@ -233,11 +233,16 @@ a median of ~200 tokens and FaB to ~570.
   `pool_conditioned_pick`). With `rng_seed=None` a restart reshuffles the
   splits, so runs are not comparable. Pass seeds; skip rebuilding splits
   that already exist.
-- [ ] **Scryfall ingestion fixes** (details in `Notes.md` section 8; the
-  `keep_incoming` switch is needed by the lean-`raw_content` work in
-  section B, the rest is deferred): skip `art_series` and `front_card`
-  objects (~6.5% of the MTG binder are not cards); decide about
-  tokens/emblems/schemes/planar; refresh the stage's stale docstring.
+- [x] **Scryfall ingestion fixes** (details in `Notes.md` section 8; the
+  `keep_incoming` switch was needed by the lean-`raw_content` work in
+  section B). Skip `token`/`double_faced_token`/`emblem`/`scheme`/
+  `planar`/`vanguard`/`art_series`/`front_card` rows outright (~14% of
+  the raw dump) - found while debugging the 2026-09-24 deck box
+  regeneration: 95 real card names collide with a same-named row in one
+  of these layouts (e.g. a "Tarmogoyf" token alongside the real
+  creature), making `get_by_name` ambiguous and silently substituting
+  the Unknown sentinel for a real, common card. Fixed in
+  `scryfall/ingestion_stage.py`'s `ingest()`; docstring refreshed.
 - [x] **Confirm every `all_cards()` consumer excludes the `Unknown`
   sentinel.** Checked: none of the on-disk binders currently have the
   sentinel persisted (`ensure_unknown_card` + `binder.save()` only

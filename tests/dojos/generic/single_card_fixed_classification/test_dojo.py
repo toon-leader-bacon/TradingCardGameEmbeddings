@@ -10,6 +10,7 @@ from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.dojos.batch import Batch
 from src.dojos.dojo import BatchBudget
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.single_card_fixed_classification.dojo import (
     SingleCardFixedClassificationDojo,
 )
@@ -73,8 +74,11 @@ class TestSingleCardFixedClassificationDojoSplits:
             holdout=HoldoutSpec.no_holdout(),
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
 
         batches = list(dojo.batches(Split.TRAIN, _BUDGET))
@@ -96,8 +100,11 @@ class TestSingleCardFixedClassificationDojoSplits:
             holdout=HoldoutSpec.no_holdout(),
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
 
         train_rows = sum(
@@ -135,8 +142,11 @@ class TestSingleCardFixedClassificationDojoModPipeline:
             mod_pipeline=ModPipeline(
                 [MaskTargetKeyMod(key="faction", train_only=False)]
             ),
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
 
         train_batches = list(dojo.batches(Split.TRAIN, _BUDGET))
@@ -161,8 +171,11 @@ class TestSingleCardFixedClassificationDojoComputeLoss:
             holdout=HoldoutSpec.no_holdout(),
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
         embeddings = [torch.randn(4), torch.randn(4)]
         labels = ["monster", "northern_realms"]
@@ -182,8 +195,11 @@ class TestSingleCardFixedClassificationDojoComputeLoss:
             holdout=HoldoutSpec.no_holdout(),
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
 
         try:
@@ -223,8 +239,11 @@ class TestSingleCardFixedClassificationDojoLossFactory:
             holdout=HoldoutSpec.no_holdout(),
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
 
         assert isinstance(dojo.loss_calculator, FixedClassificationLoss)
@@ -243,8 +262,11 @@ class TestSingleCardFixedClassificationDojoLossFactory:
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
             loss_factory=_StubLoss,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
 
         assert isinstance(dojo.loss_calculator, _StubLoss)

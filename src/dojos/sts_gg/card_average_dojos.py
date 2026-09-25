@@ -26,6 +26,7 @@ from src.data_refinement.metrics.sts_gg.card_average_metrics import (
     CardWinRateMetric,
 )
 from src.dojos.generic.data_constructors import CardAverageDataConstructor
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
 from src.schema.holdout import HoldoutSpec
 
@@ -51,8 +52,9 @@ class CardRelicCountDojo(SingleCardRegressionDojo):
                 CardRelicCountMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -77,8 +79,9 @@ class CardTotalDamageTakenDojo(SingleCardRegressionDojo):
                 CardTotalDamageTakenMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -103,8 +106,9 @@ class CardDeckSizeDojo(SingleCardRegressionDojo):
                 CardDeckSizeMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -129,8 +133,9 @@ class CardTotalCardsPickedDojo(SingleCardRegressionDojo):
                 CardTotalCardsPickedMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -155,8 +160,9 @@ class CardTotalTurnsDojo(SingleCardRegressionDojo):
                 CardTotalTurnsMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -181,8 +187,9 @@ class CardElitesKilledDojo(SingleCardRegressionDojo):
                 CardElitesKilledMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -207,8 +214,9 @@ class CardFloorsClearedDojo(SingleCardRegressionDojo):
                 CardFloorsClearedMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -233,8 +241,9 @@ class CardTotalCombatsDojo(SingleCardRegressionDojo):
                 CardTotalCombatsMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -264,6 +273,7 @@ class CardWinRateDojo(SingleCardRegressionDojo):
             or CardWinRateMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=CardAverageDataConstructor(CardWinRateMetric.LABEL_COLUMN),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )

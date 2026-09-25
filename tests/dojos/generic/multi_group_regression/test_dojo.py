@@ -11,6 +11,7 @@ from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.dojos.batch import Batch
 from src.dojos.dojo import BatchBudget
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.multi_group_regression.dojo import MultiGroupRegressionDojo
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
@@ -72,8 +73,11 @@ class TestMultiGroupRegressionDojoSplits:
             card_lookup=CardBinder(),
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
 
         batches = list(dojo.batches(Split.TRAIN, _BUDGET))
@@ -94,8 +98,11 @@ class TestMultiGroupRegressionDojoSplits:
             card_lookup=CardBinder(),
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
 
         train_rows = sum(
@@ -125,8 +132,11 @@ class TestMultiGroupRegressionDojoPooler:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             pooler=stub_pooler,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
 
         assert dojo.decoder_head.pooler is stub_pooler
@@ -143,8 +153,11 @@ class TestMultiGroupRegressionDojoComputeLoss:
             card_lookup=CardBinder(),
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
         # One example with an empty second group, one with a non-empty
         # one - compute_loss must handle both without raising.
@@ -168,8 +181,11 @@ class TestMultiGroupRegressionDojoComputeLoss:
             card_lookup=CardBinder(),
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
 
         with pytest.raises(ValueError):

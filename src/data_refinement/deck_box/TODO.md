@@ -70,4 +70,26 @@ CSVs are picks, not decks, and are also out of scope here.
   - CARD.ABUNDANCE
   - CARD.SIDESTEP
   - CARD.PREPARE
-- Sts_GG deck builder created 0 decks? 
+- Sts_GG deck builder created 0 decks?
+
+- `SeventeenLandsGameDataDeckExtractionStage: unresolved card name 'Pick
+  Your Poison' — substituting the Unknown sentinel card` (seen during the
+  2026-09-24 regeneration) — but this one isn't a data gap like the
+  fabtcg/play_gwent ones above. Scryfall itself has two distinct real
+  cards sharing that exact name (`set: cmb2`, a
+  counters/snake-token/wrath-effect sorcery, vs. `set: mkm`, a
+  sacrifice-a-permanent-type sorcery — both `layout: normal`), so
+  `CardBinder.get_by_name()` correctly returns 2 matches and
+  `_card_uuid_for_name()` falls back to Unknown, same as it would for any
+  genuine ambiguous name. The Scryfall layout-collision fix (see
+  `card_binder/scryfall/ingestion_stage.py`'s `_EXCLUDED_LAYOUTS`, added
+  2026-09-24 for the unrelated Tarmogoyf-token bug) doesn't touch this —
+  both "Pick Your Poison" rows are legitimately `normal`-layout, real,
+  playable cards. Needs an actual decision, not a bug fix: either add
+  set/printing-aware disambiguation to `_card_uuid_for_name` (pick a
+  canonical printing when a name legitimately has multiple distinct real
+  cards), or accept the Unknown-sentinel fallback for true same-name
+  collisions as expected behavior and document it as such. This cuts
+  across `card_binder/scryfall` (whether/how to pick a canonical printing
+  at ingestion time) and this stage's name-resolution policy — not purely
+  a `deck_box` fix, so the eventual owner may live in either place. 

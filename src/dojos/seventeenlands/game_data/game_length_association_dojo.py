@@ -16,6 +16,7 @@ from src.data_refinement.metrics.seventeenlands.game_data.game_length_associatio
     GameLengthAssociationMetric,
 )
 from src.dojos.generic.data_constructors import CardAverageDataConstructor
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
 from src.schema.holdout import HoldoutSpec
 
@@ -42,6 +43,7 @@ class GameLengthAssociationDojo(SingleCardRegressionDojo):
                 GameLengthAssociationMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )

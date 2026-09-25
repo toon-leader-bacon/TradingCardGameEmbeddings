@@ -11,6 +11,7 @@ from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.dojos.batch import Batch
 from src.dojos.dojo import BatchBudget
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.multi_card_option_selection.dojo import (
     MultiCardOptionSelectionDojo,
 )
@@ -74,8 +75,11 @@ class TestMultiCardOptionSelectionDojoSplits:
             card_lookup=CardBinder(),
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
 
         batches = list(dojo.batches(Split.TRAIN, _BUDGET))
@@ -96,8 +100,11 @@ class TestMultiCardOptionSelectionDojoSplits:
             card_lookup=CardBinder(),
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
 
         train_rows = sum(
@@ -127,8 +134,11 @@ class TestMultiCardOptionSelectionDojoScoringHead:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             scoring_head=stub_scoring_head,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
 
         assert dojo.decoder_head.scoring_head is stub_scoring_head
@@ -145,8 +155,11 @@ class TestMultiCardOptionSelectionDojoComputeLoss:
             card_lookup=CardBinder(),
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
         # Two examples with different pack sizes - compute_loss must
         # handle the ragged BatchedMultiCardEmbedding shape correctly.
@@ -167,8 +180,11 @@ class TestMultiCardOptionSelectionDojoComputeLoss:
             card_lookup=CardBinder(),
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
 
         with pytest.raises(ValueError):

@@ -178,17 +178,17 @@ documented Template Method exception
 `GameDeckLabelMetric` and its three `game_deck_label_metrics.py`
 subclasses are streaming instead — one row already carries a complete
 example (the deck's cards plus a scalar label), so `accumulate()`
-writes it immediately via an open `pyarrow.parquet.ParquetWriter` and
-`finalize()` only closes that writer, mirroring
+buffers it into an open [`ParquetBuilder`](../../parquet_builder.py)
+and `finalize()` only closes that builder, mirroring
 [`../../sts_gg/deck_label_metric.py`](../../sts_gg/deck_label_metric.py)'s
 shape. `OnPlayWinRateDeltaMetric`/`TutorTargetRateMetric` are standalone
 accumulation metrics with their own two-dimensional or ratio-shaped
 tallies; `OnPlayWinRateSensitivityByDeckMetric` is `OnPlayWinRateDeltaMetric`'s
 accumulation-shaped deck-level mirror; `TutorTargetPoolMetric` is
 streaming but fans a single input row out to zero or more output rows
-(one per pool card) via a single `pa.Table.from_pydict()` call built
-from a wider dict, rather than the one-row-per-call shape every other
-streaming metric in this codebase uses.
+(one per pool card), calling `write_row()` once per fanned-out row
+rather than the one-row-per-call shape every other streaming metric in
+this codebase uses.
 
 ## How to run
 

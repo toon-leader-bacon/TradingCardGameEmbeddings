@@ -15,6 +15,7 @@ from src.data_refinement.metrics.seventeenlands.replay_data.attacker_blocker_com
 from src.dojos.generic.data_constructors import (
     AttackerBlockerCombatOutcomeDataConstructor,
 )
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.multi_group_regression.dojo import MultiGroupRegressionDojo
 from src.dojos.generic.pooling import EmbeddingPooler
 from src.schema.holdout import HoldoutSpec
@@ -42,6 +43,7 @@ class AttackerBlockerCombatOutcomeDojo(MultiGroupRegressionDojo):
             data_constructor=AttackerBlockerCombatOutcomeDataConstructor(),
             card_embedding_size=card_embedding_size,
             pooler=pooler,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )

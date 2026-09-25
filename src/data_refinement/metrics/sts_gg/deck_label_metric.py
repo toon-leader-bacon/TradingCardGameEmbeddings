@@ -33,11 +33,11 @@ from typing import Any, ClassVar
 from uuid import UUID
 
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.hash_utils import deck_uuid_from_cards
+from src.data_refinement.metrics.parquet_builder import ParquetBuilder
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     schema_with_version_metadata,
@@ -84,11 +84,11 @@ class DeckLabelMetric(ABC):
         Output: none (constructor).
         Side effects: creates output_path's parent directories if
             missing; opens output_path for writing (truncating any
-            existing file) via a pyarrow.parquet.ParquetWriter held
-            open for the lifetime of this instance - callers MUST call
-            finalize() when done, or the file is left incomplete.
-        Exceptions: whatever pyarrow.parquet.ParquetWriter raises on
-            failure to open output_path for writing.
+            existing file) via a ParquetBuilder held open for the
+            lifetime of this instance - callers MUST call finalize()
+            when done, or the file is left incomplete.
+        Exceptions: whatever ParquetBuilder raises on failure to open
+            output_path for writing.
         """
         self._card_binder = card_binder
         self._deck_box = deck_box
@@ -108,12 +108,11 @@ class DeckLabelMetric(ABC):
             ),
         )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._writer = pq.ParquetWriter(self._output_path, self._output_schema)
-        self._closed = False
+        self._writer = ParquetBuilder(self._output_path, self._output_schema)
 
     def accumulate(self, row: dict) -> None:
         """Convert one parsed sts_gg run into a single output row and
-        write it immediately.
+        buffer it for writing.
 
         Inputs:
             row: one parsed JSON object from sts_gg's runs.jsonl,
@@ -121,12 +120,14 @@ class DeckLabelMetric(ABC):
                 str, ...} card entries - the run's final deck), plus
                 whatever field _label_for_run() reads.
         Output: none.
-        Side effects: writes exactly one row to the open
-            ParquetWriter. Writes this run's final deck into
-            self._deck_box via create_if_absent() (a no-op if an
-            identical deck was already written by this or another
-            metric sharing the same box). Emits one logging.error()
-            per deck entry that fails to resolve against card_binder.
+        Side effects: buffers exactly one row into the open
+            ParquetBuilder (flushed to disk automatically once its
+            batch size is reached, or by finalize()). Writes this
+            run's final deck into self._deck_box via
+            create_if_absent() (a no-op if an identical deck was
+            already written by this or another metric sharing the
+            same box). Emits one logging.error() per deck entry that
+            fails to resolve against card_binder.
         Exceptions: raises if row is missing "id" or "deck", or
             whatever _label_for_run() raises for missing fields of its
             own.
@@ -163,21 +164,18 @@ class DeckLabelMetric(ABC):
             )
         )
 
-        output_row = pa.Table.from_pydict(
-            {
-                "run_id": [run_id],
-                "deck_uuid": [str(deck_uuid)],
-                self.LABEL_COLUMN: [label],
-            },
-            schema=self._output_schema,
-        )
-        self._writer.write_table(output_row)
+        output_row = {
+            "run_id": run_id,
+            "deck_uuid": str(deck_uuid),
+            self.LABEL_COLUMN: label,
+        }
+        self._writer.write_row(output_row)
 
     def finalize(self) -> Path:
-        """Close the underlying ParquetWriter.
+        """Flush any buffered rows and close the underlying writer.
 
         A true no-op relative to data - every row this instance will
-        ever write was already written by accumulate(). Idempotent: a
+        ever write was already buffered by accumulate(). Idempotent: a
         second call is a no-op, so scan_runs_jsonl's unconditional
         finalize() call is always safe. Does NOT save self._deck_box -
         that's the calling driver's own responsibility, since the box
@@ -186,17 +184,15 @@ class DeckLabelMetric(ABC):
 
         Inputs: none.
         Output: output_path.
-        Side effects: closes the ParquetWriter opened in __init__, if
-            not already closed.
-        Exceptions: whatever ParquetWriter.close() raises.
+        Side effects: closes the ParquetBuilder opened in __init__, if
+            not already closed (flushing any rows still buffered).
+        Exceptions: whatever ParquetBuilder.close() raises.
 
         Example:
             >>> metric.finalize()
             PosixPath('data/metrics/sts_gg/some_label.parquet')
         """
-        if not self._closed:
-            self._writer.close()
-            self._closed = True
+        self._writer.close()
         return self._output_path
 
     @abstractmethod

@@ -9,6 +9,7 @@ from pathlib import Path
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.dojos.generic.data_constructor import DataConstructor
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.generic_dojo import GenericDojo
 from src.dojos.generic.single_card_regression.decoder_head import (
     SingleCardRegressionDecoderHead,
@@ -33,9 +34,8 @@ class SingleCardRegressionDojo(GenericDojo):
         holdout: HoldoutSpec,
         card_embedding_size: int,
         mod_pipeline: ModPipeline | None = None,
-        rng_seed: int | None = None,
         deck_box: DeckBox | None = None,
-        strict_version_check: bool = True,
+        config: DojoConfig = DojoConfig(),
     ) -> None:
         self.card_embedding_size = card_embedding_size
         super().__init__(
@@ -46,7 +46,6 @@ class SingleCardRegressionDojo(GenericDojo):
             decoder_head=SingleCardRegressionDecoderHead(card_embedding_size),
             loss_calculator=MseLoss(),
             mod_pipeline=mod_pipeline,
-            rng_seed=rng_seed,
             deck_box=deck_box,
-            strict_version_check=strict_version_check,
+            config=config,
         )

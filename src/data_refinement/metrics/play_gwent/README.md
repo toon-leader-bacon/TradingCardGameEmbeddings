@@ -96,15 +96,23 @@ this same raw source).
 
 ## `leader_deck_counts.py` / `leader_labels.py`
 
-`leader_deck_counts.count_decks_per_leader(raw_path=None) -> dict[str, int]`
-is metric-design tooling (not a metric itself): streams `guides.jsonl`
-and counts guide decks per leader name, using each guide's own
-`leader.name` field directly — no `CardBinder`/`card_lookup` join
-needed. Used to generate `leader_labels.LEADER_NAMES`, a frozen tuple
-of the 42 distinct leader names observed across all 60,138 guides as
-of 2026-09-09 (well-balanced: 491–2555 decks per leader, no long tail)
-— see that file's own FRESHNESS caveat for what to do if a future
-expansion adds leaders.
+`leader_deck_counts.count_decks_per_leader(card_lookup, raw_path=None)
+-> dict[str, int]` is metric-design tooling (not a metric itself):
+streams `guides.jsonl` and counts guide decks per leader, keyed by the
+gwent.one `CardBinder`'s canonical name for each guide's `leaderId` —
+the same name `LeaderMaskedFromDeckMetric._label_for_card` itself
+checks `LEADER_NAMES` against, via the same
+`card_lookup.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE,
+str(leader_id))` lookup. Deliberately *not* the guide's own embedded
+`leader.name` text — playgwent.com's raw guide text and gwent.one's
+card names have disagreed on at least two leaders' spelling
+(`"Reckless Fury"` vs. `"Reckless Flurry"`), so counting by guide text
+previously produced a `LEADER_NAMES` vocabulary that silently
+mismatched what the metric validates against. Used to generate
+`leader_labels.LEADER_NAMES`, a frozen tuple of the 42 distinct leaders
+observed across 60,197 guides as of 2026-09-25 (well-balanced: 492–2559
+decks per leader, no long tail) — see that file's own FRESHNESS caveat
+for what to do if a future expansion adds leaders.
 
 ## How to run
 

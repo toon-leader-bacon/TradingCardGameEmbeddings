@@ -35,7 +35,6 @@ from pathlib import Path
 from typing import ClassVar
 
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
@@ -44,6 +43,7 @@ from src.data_refinement.metrics.isotropic.games.game_log_parser import GameLog
 from src.data_refinement.metrics.isotropic.games.partial_deck import (
     partial_deck_card_uuids,
 )
+from src.data_refinement.metrics.parquet_builder import ParquetBuilder
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     schema_with_version_metadata,
@@ -83,11 +83,11 @@ class MidGameDeckPairWinnerMetric:
         Output: none (constructor).
         Side effects: creates output_path's parent directories if
             missing; opens output_path for writing (truncating any
-            existing file) via a pyarrow.parquet.ParquetWriter held
-            open for the lifetime of this instance - callers MUST call
-            finalize() when done, or the file is left incomplete.
-        Exceptions: whatever pyarrow.parquet.ParquetWriter raises on
-            failure to open output_path for writing.
+            existing file) via a ParquetBuilder held open for the
+            lifetime of this instance - callers MUST call finalize()
+            when done, or the file is left incomplete.
+        Exceptions: whatever ParquetBuilder raises on failure to open
+            output_path for writing.
         """
         self._card_binder = card_binder
         self._deck_box = deck_box
@@ -107,8 +107,7 @@ class MidGameDeckPairWinnerMetric:
             ),
         )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._writer = pq.ParquetWriter(self._output_path, self._output_schema)
-        self._closed = False
+        self._writer = ParquetBuilder(self._output_path, self._output_schema)
 
     def accumulate(self, game_log: GameLog) -> None:
         """Write one row per turn checkpoint reached by both players,
@@ -121,7 +120,7 @@ class MidGameDeckPairWinnerMetric:
             len(game_log.header.players) != 2 (module docstring). For
             every checkpoint T both players reached, writes both
             partial decks into self._deck_box via create_if_absent(),
-            then writes one output row, canonically ordered by
+            then buffers one output row, canonically ordered by
             deck_uuid (module docstring's CANONICAL ORDERING note).
         Exceptions: none expected beyond a malformed game_log.
 
@@ -153,35 +152,30 @@ class MidGameDeckPairWinnerMetric:
             deck_lo, deck_hi, lo_wins = self._canonical_pair(
                 deck_a, deck_b, player_a.nick, player_b.nick, winner_nick
             )
-            output_row = pa.Table.from_pydict(
-                {
-                    "deck_uuid_lo": [str(deck_lo.nocab_uuid)],
-                    "deck_uuid_hi": [str(deck_hi.nocab_uuid)],
-                    "lo_wins": [lo_wins],
-                },
-                schema=self._output_schema,
-            )
-            self._writer.write_table(output_row)
+            output_row = {
+                "deck_uuid_lo": str(deck_lo.nocab_uuid),
+                "deck_uuid_hi": str(deck_hi.nocab_uuid),
+                "lo_wins": lo_wins,
+            }
+            self._writer.write_row(output_row)
 
     def finalize(self) -> Path:
-        """Close the underlying ParquetWriter.
+        """Flush any buffered rows and close the underlying writer.
 
         Does NOT save self._deck_box - that's the calling driver's own
         responsibility, since the box is shared across metrics.
 
         Inputs: none.
         Output: self._output_path.
-        Side effects: closes the ParquetWriter opened in __init__, if
-            not already closed.
-        Exceptions: whatever ParquetWriter.close() raises.
+        Side effects: closes the ParquetBuilder opened in __init__, if
+            not already closed (flushing any rows still buffered).
+        Exceptions: whatever ParquetBuilder.close() raises.
 
         Example:
             >>> metric.finalize()
             PosixPath('data/metrics/isotropic/mid_game_deck_pair_winner.parquet')
         """
-        if not self._closed:
-            self._writer.close()
-            self._closed = True
+        self._writer.close()
         return self._output_path
 
     def _checkpoint_decks(

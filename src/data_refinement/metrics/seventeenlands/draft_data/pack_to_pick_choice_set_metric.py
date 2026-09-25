@@ -23,9 +23,9 @@ from typing import Iterable
 from uuid import UUID
 
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.metrics.parquet_builder import ParquetBuilder
 from src.data_refinement.metrics.seventeenlands.draft_data.pack_pool_columns import (
     DraftCardColumns,
 )
@@ -82,11 +82,11 @@ class PackToPickChoiceSetMetric:
         Output: none (constructor).
         Side effects: creates output_path's parent directories if
             missing; opens output_path for writing (truncating any
-            existing file) via a pyarrow.parquet.ParquetWriter held
-            open for the lifetime of this instance - callers MUST call
+            existing file) via a ParquetBuilder held open for
+            the lifetime of this instance - callers MUST call
             finalize() when done, or the file is left incomplete.
-        Exceptions: whatever pyarrow.parquet.ParquetWriter raises on
-            failure to open output_path for writing.
+        Exceptions: whatever ParquetBuilder raises on failure
+            to open output_path for writing.
         """
         self._draft_columns = DraftCardColumns.from_header(
             header, card_binder, source_game
@@ -100,18 +100,19 @@ class PackToPickChoiceSetMetric:
             ),
         )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._writer = pq.ParquetWriter(self._output_path, self._output_schema)
-        self._closed = False
+        self._writer = ParquetBuilder(self._output_path, self._output_schema)
 
     def accumulate(self, row: dict) -> None:
         """Convert one draft_data row into a single output row and
-        write it immediately.
+        buffer it for writing.
 
         Inputs:
             row: one draft_data CSV row, dict-like - see
                 ../scanner.py's module docstring.
         Output: none.
-        Side effects: writes exactly one row to the open ParquetWriter.
+        Side effects: buffers exactly one row into the open
+            ParquetBuilder (flushed to disk automatically once
+            its batch size is reached, or by finalize()).
         Exceptions: implementation-defined (expected: none for a
             well-formed row - see ../scanner.py's isolation contract).
 
@@ -125,42 +126,34 @@ class PackToPickChoiceSetMetric:
         )
         pick_uuid = self._draft_columns.uuid_for_name(row["pick"])
 
-        # TODO: memory/perf - same issue as
-        # pool_conditioned_pick_metric.py's accumulate() (see its TODO
-        # comment for the full writeup): one write_table() call per
-        # CSV row means one parquet row group per row, and
-        # ParquetWriter's per-row-group metadata grows across the
-        # whole run. Observed killing this on MSH.PremierDraft.csv
-        # (2026-09-23/24) - see src/training/TODO.md section C.
         output_row = self._output_row(row, pack_option_uuids, pick_uuid)
-        self._writer.write_table(output_row)
+        self._writer.write_row(output_row)
 
     def finalize(self) -> Path:
-        """Close the underlying ParquetWriter.
+        """Flush any buffered rows and close the underlying writer.
 
         A true no-op relative to data - every row this instance will
-        ever write was already written by accumulate(). Idempotent: a
+        ever write was already buffered by accumulate(). Idempotent: a
         second call is a no-op.
 
         Inputs: none.
         Output: self._output_path.
-        Side effects: closes the ParquetWriter opened in __init__, if
-            not already closed.
-        Exceptions: whatever ParquetWriter.close() raises.
+        Side effects: closes the ParquetBuilder opened in
+            __init__, if not already closed (flushing any rows still
+            buffered).
+        Exceptions: whatever ParquetBuilder.close() raises.
 
         Example:
             >>> metric.finalize()
             PosixPath('data/metrics/seventeenlands/draft_data/pack_to_pick_choice_set.parquet')
         """
-        if not self._closed:
-            self._writer.close()
-            self._closed = True
+        self._writer.close()
         return self._output_path
 
     def _output_row(
         self, row: dict, pack_option_uuids: list[UUID], pick_uuid: UUID | None
-    ) -> pa.Table:
-        """Build one single-row pa.Table matching _OUTPUT_SCHEMA.
+    ) -> dict:
+        """Build one output row dict matching _OUTPUT_SCHEMA's columns.
 
         Private helper - single consumer is accumulate().
 
@@ -173,20 +166,17 @@ class PackToPickChoiceSetMetric:
                 sts_gg/deck_label_metrics.py's KilledByMetric for the
                 same nullable-column convention; this metric does not
                 drop or skip a row over an unmatched pick).
-        Output: a one-row pa.Table matching _OUTPUT_SCHEMA:
+        Output: a dict keyed by every _OUTPUT_SCHEMA column name:
             draft_id/pack_number/pick_number read straight off row,
             pack_option_uuids/pick_uuid stringified from the matched
             uuids given.
         Side effects: none.
         Exceptions: none expected.
         """
-        return pa.Table.from_pydict(
-            {
-                "draft_id": [row["draft_id"]],
-                "pack_number": [row["pack_number"]],
-                "pick_number": [row["pick_number"]],
-                "pack_option_uuids": [[str(uuid) for uuid in pack_option_uuids]],
-                "pick_uuid": [str(pick_uuid) if pick_uuid is not None else None],
-            },
-            schema=self._output_schema,
-        )
+        return {
+            "draft_id": row["draft_id"],
+            "pack_number": row["pack_number"],
+            "pick_number": row["pick_number"],
+            "pack_option_uuids": [str(uuid) for uuid in pack_option_uuids],
+            "pick_uuid": str(pick_uuid) if pick_uuid is not None else None,
+        }

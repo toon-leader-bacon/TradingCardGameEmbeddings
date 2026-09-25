@@ -182,6 +182,33 @@ class TestMakeSplits:
             pq.ParquetFile(split_file).schema_arrow
 
 
+class TestSplitsExist:
+    def test_false_before_make_splits(self, tmp_path: Path) -> None:
+        source = tmp_path / "source.parquet"
+        _write_source(source, num_rows=10)
+        fm = FileManagerParquet(source, tmp_path / "out", seed=0)
+
+        assert fm.splits_exist() is False
+
+    def test_true_after_make_splits(self, tmp_path: Path) -> None:
+        source = tmp_path / "source.parquet"
+        _write_source(source, num_rows=10)
+        fm = FileManagerParquet(source, tmp_path / "out", seed=0)
+        fm.make_splits(split_ratios=[8, 1, 1], batch_size=8)
+
+        assert fm.splits_exist() is True
+
+    def test_false_if_only_some_split_files_present(self, tmp_path: Path) -> None:
+        source = tmp_path / "source.parquet"
+        _write_source(source, num_rows=10)
+        out_dir = tmp_path / "out"
+        fm = FileManagerParquet(source, out_dir, seed=0)
+        fm.make_splits(split_ratios=[8, 1, 1], batch_size=8)
+        (out_dir / f"{fm.output_file_prefix}_validation.parquet").unlink()
+
+        assert fm.splits_exist() is False
+
+
 class TestShuffleSplitIndex:
     def test_reshuffles_and_preserves_row_count(self, tmp_path: Path) -> None:
         source = tmp_path / "source.parquet"

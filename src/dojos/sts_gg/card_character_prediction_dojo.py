@@ -32,6 +32,7 @@ from src.data_refinement.metrics.sts_gg.deck_label_metrics import (
     CharacterPredictionMetric,
 )
 from src.dojos.generic.data_constructors import CardCharacterPredictionDataConstructor
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.single_card_fixed_classification.dojo import (
     SingleCardFixedClassificationDojo,
 )
@@ -63,6 +64,7 @@ class CardCharacterPredictionDojo(SingleCardFixedClassificationDojo):
             label_values=CharacterPredictionMetric.LABEL_VALUES,
             card_embedding_size=card_embedding_size,
             loss_factory=SoftClassificationLoss,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )

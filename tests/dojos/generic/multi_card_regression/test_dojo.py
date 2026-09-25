@@ -10,6 +10,7 @@ from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.dojos.batch import Batch
 from src.dojos.dojo import BatchBudget
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
@@ -71,8 +72,11 @@ class TestMultiCardRegressionDojoSplits:
             card_lookup=CardBinder(),
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
 
         batches = list(dojo.batches(Split.TRAIN, _BUDGET))
@@ -93,8 +97,11 @@ class TestMultiCardRegressionDojoSplits:
             card_lookup=CardBinder(),
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
 
         train_rows = sum(
@@ -124,8 +131,11 @@ class TestMultiCardRegressionDojoPooler:
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
             pooler=stub_pooler,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
 
         assert dojo.decoder_head.pooler is stub_pooler
@@ -142,8 +152,11 @@ class TestMultiCardRegressionDojoComputeLoss:
             card_lookup=CardBinder(),
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
         # Two decks of different sizes - compute_loss must handle the
         # ragged BatchedMultiCardEmbedding shape correctly.
@@ -164,8 +177,11 @@ class TestMultiCardRegressionDojoComputeLoss:
             card_lookup=CardBinder(),
             holdout=HoldoutSpec.no_holdout(),
             card_embedding_size=4,
-            rng_seed=0,
-            strict_version_check=False,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
         )
 
         try:

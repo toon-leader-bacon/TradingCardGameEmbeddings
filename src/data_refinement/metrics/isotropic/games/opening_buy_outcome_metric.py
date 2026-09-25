@@ -27,7 +27,6 @@ from typing import ClassVar
 from uuid import UUID
 
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
@@ -37,6 +36,7 @@ from src.data_refinement.metrics.isotropic.games.header_parser import (
     GameHeaderPlayer,
 )
 from src.data_refinement.metrics.isotropic.games.row_utils import card_uuid_for_name
+from src.data_refinement.metrics.parquet_builder import ParquetBuilder
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     schema_with_version_metadata,
@@ -76,11 +76,11 @@ class OpeningBuyOutcomeMetric:
         Output: none (constructor).
         Side effects: creates output_path's parent directories if
             missing; opens output_path for writing (truncating any
-            existing file) via a pyarrow.parquet.ParquetWriter held
-            open for the lifetime of this instance - callers MUST call
-            finalize() when done, or the file is left incomplete.
-        Exceptions: whatever pyarrow.parquet.ParquetWriter raises on
-            failure to open output_path for writing.
+            existing file) via a ParquetBuilder held open for the
+            lifetime of this instance - callers MUST call finalize()
+            when done, or the file is left incomplete.
+        Exceptions: whatever ParquetBuilder raises on failure to open
+            output_path for writing.
         """
         self._card_binder = card_binder
         self._deck_box = deck_box
@@ -100,8 +100,7 @@ class OpeningBuyOutcomeMetric:
             ),
         )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._writer = pq.ParquetWriter(self._output_path, self._output_schema)
-        self._closed = False
+        self._writer = ParquetBuilder(self._output_path, self._output_schema)
 
     def accumulate(self, header: GameHeader) -> None:
         """Write one (opening_group_uuid, kingdom_uuid, won) row per
@@ -111,7 +110,7 @@ class OpeningBuyOutcomeMetric:
         Inputs:
             header: one parsed GameHeader (header_parser.py).
         Output: none.
-        Side effects: writes one row to the open ParquetWriter per
+        Side effects: buffers one row into the open ParquetBuilder per
             player with a resolvable opening, when header is a natural
             kingdom - writes nothing for a generator-constrained
             kingdom. Writes each player's opening group and the
@@ -142,35 +141,30 @@ class OpeningBuyOutcomeMetric:
                 kingdom_written = True
             self._deck_box.create_if_absent(opening_deck)
 
-            output_row = pa.Table.from_pydict(
-                {
-                    "opening_group_uuid": [str(opening_deck.nocab_uuid)],
-                    "kingdom_uuid": [str(kingdom_deck.nocab_uuid)],
-                    "won": [player.nick == header.winner_nick],
-                },
-                schema=self._output_schema,
-            )
-            self._writer.write_table(output_row)
+            output_row = {
+                "opening_group_uuid": str(opening_deck.nocab_uuid),
+                "kingdom_uuid": str(kingdom_deck.nocab_uuid),
+                "won": player.nick == header.winner_nick,
+            }
+            self._writer.write_row(output_row)
 
     def finalize(self) -> Path:
-        """Close the underlying ParquetWriter.
+        """Flush any buffered rows and close the underlying writer.
 
         Does NOT save self._deck_box - that's the calling driver's own
         responsibility, since the box is shared across metrics.
 
         Inputs: none.
         Output: self._output_path.
-        Side effects: closes the ParquetWriter opened in __init__, if
-            not already closed.
-        Exceptions: whatever ParquetWriter.close() raises.
+        Side effects: closes the ParquetBuilder opened in __init__, if
+            not already closed (flushing any rows still buffered).
+        Exceptions: whatever ParquetBuilder.close() raises.
 
         Example:
             >>> metric.finalize()
             PosixPath('data/metrics/isotropic/opening_buy_outcome.parquet')
         """
-        if not self._closed:
-            self._writer.close()
-            self._closed = True
+        self._writer.close()
         return self._output_path
 
     def _opening_group_deck(self, player: GameHeaderPlayer) -> GenericDeck | None:

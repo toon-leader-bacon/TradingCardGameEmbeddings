@@ -22,7 +22,6 @@ from typing import ClassVar
 from uuid import UUID
 
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
@@ -31,6 +30,7 @@ from src.data_refinement.metrics.isotropic.summary.row_utils import (
     card_uuid_for_name,
     eligible_player_entries,
 )
+from src.data_refinement.metrics.parquet_builder import ParquetBuilder
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     schema_with_version_metadata,
@@ -76,11 +76,11 @@ class DeckCardSetCopyCountMetric:
         Output: none (constructor).
         Side effects: creates output_path's parent directories if
             missing; opens output_path for writing (truncating any
-            existing file) via a pyarrow.parquet.ParquetWriter held
-            open for the lifetime of this instance - callers MUST call
-            finalize() when done, or the file is left incomplete.
-        Exceptions: whatever pyarrow.parquet.ParquetWriter raises on
-            failure to open output_path for writing.
+            existing file) via a ParquetBuilder held open for the
+            lifetime of this instance - callers MUST call finalize()
+            when done, or the file is left incomplete.
+        Exceptions: whatever ParquetBuilder raises on failure to open
+            output_path for writing.
         """
         self._card_binder = card_binder
         self._deck_box = deck_box
@@ -100,8 +100,7 @@ class DeckCardSetCopyCountMetric:
             ),
         )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._writer = pq.ParquetWriter(self._output_path, self._output_schema)
-        self._closed = False
+        self._writer = ParquetBuilder(self._output_path, self._output_schema)
 
     def accumulate(self, row: dict) -> None:
         """Write one (deck_set_uuid, card_uuid, count) row per distinct
@@ -111,7 +110,7 @@ class DeckCardSetCopyCountMetric:
             row: one parsed Flavor A summary row, carrying "players"
                 (see row_utils.eligible_player_entries()).
         Output: none.
-        Side effects: writes one row to the open ParquetWriter per
+        Side effects: buffers one row into the open ParquetBuilder per
             (eligible player, distinct card in that player's end.deck)
             pair. Writes each player's distinct-card set into
             self._deck_box via create_if_absent(). Emits one
@@ -138,35 +137,31 @@ class DeckCardSetCopyCountMetric:
                         card_name,
                     )
                     continue
-                output_row = pa.Table.from_pydict(
+                self._writer.write_row(
                     {
-                        "deck_set_uuid": [str(deck.nocab_uuid)],
-                        "card_uuid": [str(card_uuid)],
-                        "count": [count],
-                    },
-                    schema=self._output_schema,
+                        "deck_set_uuid": str(deck.nocab_uuid),
+                        "card_uuid": str(card_uuid),
+                        "count": count,
+                    }
                 )
-                self._writer.write_table(output_row)
 
     def finalize(self) -> Path:
-        """Close the underlying ParquetWriter.
+        """Flush any buffered rows and close the underlying writer.
 
         Does NOT save self._deck_box - that's the calling driver's own
         responsibility, since the box is shared across metrics.
 
         Inputs: none.
         Output: self._output_path.
-        Side effects: closes the ParquetWriter opened in __init__, if
-            not already closed.
-        Exceptions: whatever ParquetWriter.close() raises.
+        Side effects: closes the ParquetBuilder opened in __init__, if
+            not already closed (flushing any rows still buffered).
+        Exceptions: whatever ParquetBuilder.close() raises.
 
         Example:
             >>> metric.finalize()
             PosixPath('data/metrics/isotropic/deck_card_set_copy_count.parquet')
         """
-        if not self._closed:
-            self._writer.close()
-            self._closed = True
+        self._writer.close()
         return self._output_path
 
     def _distinct_card_set_deck(self, end_deck: dict[str, int]) -> GenericDeck:

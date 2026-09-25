@@ -62,6 +62,75 @@ class TestIngestNewCards:
         assert bolt.nocab_uuid != shock.nocab_uuid
         assert set(changed) == {bolt.nocab_uuid, shock.nocab_uuid}
 
+    def test_excluded_layouts_are_skipped_entirely(self, tmp_path: Path) -> None:
+        raw_path = tmp_path / "oracle-cards.jsonl"
+        _write_jsonl(
+            raw_path,
+            [
+                {"oracle_id": "id-1", "name": "Tarmogoyf", "layout": "token"},
+                {"oracle_id": "id-2", "name": "Tarmogoyf", "layout": "normal"},
+            ],
+        )
+        binder = CardBinder()
+
+        changed = ScryfallCardIngestionStage().ingest(raw_path, binder)
+
+        assert binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1") is None
+        real_card = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-2")
+        assert real_card is not None
+        assert changed == [real_card.nocab_uuid]
+        assert len(binder.get_by_name(GameId.MTG, "Tarmogoyf")) == 1
+
+    @pytest.mark.parametrize(
+        "layout",
+        [
+            "token",
+            "double_faced_token",
+            "emblem",
+            "scheme",
+            "planar",
+            "vanguard",
+            "art_series",
+            "front_card",
+        ],
+    )
+    def test_every_excluded_layout_is_skipped(
+        self, tmp_path: Path, layout: str
+    ) -> None:
+        raw_path = tmp_path / "oracle-cards.jsonl"
+        _write_jsonl(raw_path, [{"oracle_id": "id-1", "name": "X", "layout": layout}])
+        binder = CardBinder()
+
+        changed = ScryfallCardIngestionStage().ingest(raw_path, binder)
+
+        assert changed == []
+        assert binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1") is None
+
+    @pytest.mark.parametrize(
+        "layout",
+        ["normal", "transform", "saga", "split", "adventure", "modal_dfc", "meld"],
+    )
+    def test_real_card_layouts_are_not_skipped(
+        self, tmp_path: Path, layout: str
+    ) -> None:
+        raw_path = tmp_path / "oracle-cards.jsonl"
+        _write_jsonl(raw_path, [{"oracle_id": "id-1", "name": "X", "layout": layout}])
+        binder = CardBinder()
+
+        changed = ScryfallCardIngestionStage().ingest(raw_path, binder)
+
+        assert len(changed) == 1
+        assert binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "id-1") is not None
+
+    def test_row_with_no_layout_field_is_not_skipped(self, tmp_path: Path) -> None:
+        raw_path = tmp_path / "oracle-cards.jsonl"
+        _write_jsonl(raw_path, [{"oracle_id": "id-1", "name": "X"}])
+        binder = CardBinder()
+
+        changed = ScryfallCardIngestionStage().ingest(raw_path, binder)
+
+        assert len(changed) == 1
+
     def test_raises_if_row_missing_oracle_id(self, tmp_path: Path) -> None:
         raw_path = tmp_path / "oracle-cards.jsonl"
         _write_jsonl(raw_path, [{"name": "Bolt"}])

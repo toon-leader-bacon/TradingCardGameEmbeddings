@@ -10,6 +10,7 @@ from typing import Sequence
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.dojos.generic.data_constructor import DataConstructor
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.generic_dojo import GenericDojo
 from src.dojos.generic.multi_card_fixed_classification.decoder_head import (
     MultiCardFixedClassificationDecoderHead,
@@ -37,9 +38,8 @@ class MultiCardFixedClassificationDojo(GenericDojo):
         card_embedding_size: int,
         mod_pipeline: ModPipeline | None = None,
         pooler: EmbeddingPooler | None = None,
-        rng_seed: int | None = None,
         deck_box: DeckBox | None = None,
-        strict_version_check: bool = True,
+        config: DojoConfig = DojoConfig(),
     ) -> None:
         label_values = list(label_values)
         self.card_embedding_size = card_embedding_size
@@ -54,7 +54,6 @@ class MultiCardFixedClassificationDojo(GenericDojo):
             ),
             loss_calculator=FixedClassificationLoss(label_values),
             mod_pipeline=mod_pipeline,
-            rng_seed=rng_seed,
             deck_box=deck_box,
-            strict_version_check=strict_version_check,
+            config=config,
         )

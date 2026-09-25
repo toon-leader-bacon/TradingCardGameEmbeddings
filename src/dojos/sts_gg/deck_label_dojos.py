@@ -57,6 +57,7 @@ from src.data_refinement.metrics.sts_gg.deck_label_metrics import (
     WinMetric,
 )
 from src.dojos.generic.data_constructors import DeckLabelDataConstructor
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.multi_card_binary_classification.dojo import (
     MultiCardBinaryClassificationDojo,
 )
@@ -89,8 +90,9 @@ class DeckRelicCountDojo(MultiCardRegressionDojo):
                 deck_box, RelicCountMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -116,8 +118,9 @@ class DeckTotalDamageTakenDojo(MultiCardRegressionDojo):
                 deck_box, TotalDamageTakenMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -143,8 +146,9 @@ class DeckTotalCardsPickedDojo(MultiCardRegressionDojo):
                 deck_box, TotalCardsPickedMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -170,8 +174,9 @@ class DeckTotalCardsSkippedDojo(MultiCardRegressionDojo):
                 deck_box, TotalCardsSkippedMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -197,8 +202,9 @@ class DeckTotalTurnsDojo(MultiCardRegressionDojo):
                 deck_box, TotalTurnsMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -224,8 +230,9 @@ class DeckElitesKilledDojo(MultiCardRegressionDojo):
                 deck_box, ElitesKilledMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -251,8 +258,9 @@ class DeckFloorsClearedDojo(MultiCardRegressionDojo):
                 deck_box, FloorsClearedMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -278,8 +286,9 @@ class DeckTotalCombatsDojo(MultiCardRegressionDojo):
                 deck_box, TotalCombatsMetric.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -303,8 +312,9 @@ class WinDojo(MultiCardBinaryClassificationDojo):
             or WinMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=DeckLabelDataConstructor(deck_box, WinMetric.LABEL_COLUMN),
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -336,6 +346,7 @@ class CharacterDojo(MultiCardFixedClassificationDojo):
             ),
             label_values=CharacterPredictionMetric.LABEL_VALUES,
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )

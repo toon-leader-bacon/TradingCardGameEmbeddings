@@ -8,13 +8,13 @@ codebase (draft_data/pack_to_pick_choice_set_metric.py,
 draft_data/pool_conditioned_pick_metric.py,
 game_deck_label_metric.py's GameDeckLabelMetric family) writes exactly
 one output row per accumulate() call. This metric writes one row per
-POOL CARD, so one accumulate() call may write zero or more rows
-(pa.Table.from_pydict() naturally accepts a multi-row dict, so this
-needs no new writer mechanics beyond building a wider dict before one
-write_table() call). See plans/game_data_metrics.md's Component
-overview #10 and open question #2 for this shape's own rationale and
-the alternative (a single parallel-list row per game) flagged there for
-human review.
+POOL CARD, so one accumulate() call may write zero or more rows -
+built as a list of row dicts, then one ParquetBuilder.write_row() call
+per row (ParquetBuilder buffers and batches internally, so fanning out
+into several write_row() calls costs nothing extra here). See
+plans/game_data_metrics.md's Component overview #10 and open question
+#2 for this shape's own rationale and the alternative (a single
+parallel-list row per game) flagged there for human review.
 
 NOT A DECK: this metric's identity unit is the per-game
 (draft_id, match_number, game_number) triple plus a pool_card_uuid -
@@ -32,9 +32,9 @@ from typing import ClassVar, Iterable
 from uuid import UUID
 
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.metrics.parquet_builder import ParquetBuilder
 from src.data_refinement.metrics.seventeenlands.game_data.game_card_columns import (
     GameCardColumns,
 )
@@ -91,11 +91,11 @@ class TutorTargetPoolMetric:
         Output: none (constructor).
         Side effects: creates output_path's parent directories if
             missing; opens output_path for writing (truncating any
-            existing file) via a pyarrow.parquet.ParquetWriter held
-            open for the lifetime of this instance - callers MUST call
-            finalize() when done, or the file is left incomplete.
-        Exceptions: whatever pyarrow.parquet.ParquetWriter raises on
-            failure to open output_path for writing.
+            existing file) via a ParquetBuilder held open for the
+            lifetime of this instance - callers MUST call finalize()
+            when done, or the file is left incomplete.
+        Exceptions: whatever ParquetBuilder raises on failure to open
+            output_path for writing.
         """
         self._game_columns = GameCardColumns.from_header(
             header, card_binder, source_game
@@ -109,20 +109,21 @@ class TutorTargetPoolMetric:
             ),
         )
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._writer = pq.ParquetWriter(self._output_path, self._output_schema)
-        self._closed = False
+        self._writer = ParquetBuilder(self._output_path, self._output_schema)
 
     def accumulate(self, row: dict) -> None:
         """Convert one game_data row into zero or more output rows (one
-        per pool card) and write them immediately.
+        per pool card) and buffer them for writing.
 
         Inputs:
             row: one game_data CSV row, dict-like - see
                 ../scanner.py's module docstring.
         Output: none.
-        Side effects: writes one row per distinct pool card (deck_<name>
-            union sideboard_<name> present on this row) to the open
-            ParquetWriter - zero rows if the pool is empty.
+        Side effects: buffers one row per distinct pool card (deck_<name>
+            union sideboard_<name> present on this row) into the open
+            ParquetBuilder (flushed to disk automatically once its
+            batch size is reached, or by finalize()) - zero rows if the
+            pool is empty.
         Exceptions: implementation-defined (expected: none for a
             well-formed row - see ../scanner.py's isolation contract).
 
@@ -139,29 +140,27 @@ class TutorTargetPoolMetric:
             self._game_columns.present_uuids(row, self._game_columns.tutored_columns)
         )
 
-        output_rows = self._output_rows(row, pool_uuids, tutored_uuids)
-        self._writer.write_table(output_rows)
+        for output_row in self._output_rows(row, pool_uuids, tutored_uuids):
+            self._writer.write_row(output_row)
 
     def finalize(self) -> Path:
-        """Close the underlying ParquetWriter.
+        """Flush any buffered rows and close the underlying writer.
 
         A true no-op relative to data - every row this instance will
-        ever write was already written by accumulate(). Idempotent: a
+        ever write was already buffered by accumulate(). Idempotent: a
         second call is a no-op.
 
         Inputs: none.
         Output: self._output_path.
-        Side effects: closes the ParquetWriter opened in __init__, if
-            not already closed.
-        Exceptions: whatever ParquetWriter.close() raises.
+        Side effects: closes the ParquetBuilder opened in __init__, if
+            not already closed (flushing any rows still buffered).
+        Exceptions: whatever ParquetBuilder.close() raises.
 
         Example:
             >>> metric.finalize()
             PosixPath('data/metrics/seventeenlands/game_data/tutor_target_pool.parquet')
         """
-        if not self._closed:
-            self._writer.close()
-            self._closed = True
+        self._writer.close()
         return self._output_path
 
     def _pool_uuids(self, row: dict) -> list[UUID]:
@@ -190,9 +189,9 @@ class TutorTargetPoolMetric:
 
     def _output_rows(
         self, row: dict, pool_uuids: list[UUID], tutored_uuids: set[UUID]
-    ) -> pa.Table:
-        """Build one multi-row pa.Table matching _OUTPUT_SCHEMA, one row
-        per pool card.
+    ) -> list[dict]:
+        """Build one output row dict per pool card, matching
+        _OUTPUT_SCHEMA's columns.
 
         Private helper - single consumer is accumulate().
 
@@ -202,21 +201,21 @@ class TutorTargetPoolMetric:
                 (_pool_uuids(row)).
             tutored_uuids: this row's already-matched tutored_<name>
                 present cards, as a set for membership checks.
-        Output: a pa.Table matching _OUTPUT_SCHEMA with len(pool_uuids)
-            rows: draft_id/match_number/game_number repeated per row,
-            pool_card_uuid one entry per pool_uuids member,
-            tutored = pool_card_uuid in tutored_uuids.
+        Output: a list of len(pool_uuids) dicts, each keyed by every
+            _OUTPUT_SCHEMA column name: draft_id/match_number/
+            game_number repeated per row, pool_card_uuid one entry per
+            pool_uuids member, tutored = pool_card_uuid in
+            tutored_uuids.
         Side effects: none.
         Exceptions: none expected.
         """
-        row_count = len(pool_uuids)
-        return pa.Table.from_pydict(
+        return [
             {
-                "draft_id": [row["draft_id"]] * row_count,
-                "match_number": [row["match_number"]] * row_count,
-                "game_number": [row["game_number"]] * row_count,
-                "pool_card_uuid": [str(card_uuid) for card_uuid in pool_uuids],
-                "tutored": [card_uuid in tutored_uuids for card_uuid in pool_uuids],
-            },
-            schema=self._output_schema,
-        )
+                "draft_id": row["draft_id"],
+                "match_number": row["match_number"],
+                "game_number": row["game_number"],
+                "pool_card_uuid": str(card_uuid),
+                "tutored": card_uuid in tutored_uuids,
+            }
+            for card_uuid in pool_uuids
+        ]

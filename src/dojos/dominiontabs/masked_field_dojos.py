@@ -17,6 +17,7 @@ from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.dominiontabs.set_mask_metric import SetMaskMetric
 from src.data_refinement.metrics.dominiontabs.type_mask_metric import TypeMaskMetric
 from src.dojos.generic.data_constructors import MaskedFieldDataConstructor
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.single_card_fixed_classification.dojo import (
     SingleCardFixedClassificationDojo,
 )
@@ -54,8 +55,9 @@ class TypeMaskDojo(SingleCardFixedClassificationDojo):
                     )
                 ]
             ),
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
 
 
@@ -91,6 +93,7 @@ class SetMaskDojo(SingleCardFixedClassificationDojo):
             data_constructor=MaskedFieldDataConstructor("label"),
             label_values=SetMaskMetric.LABEL_VALUES,
             card_embedding_size=card_embedding_size,
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )

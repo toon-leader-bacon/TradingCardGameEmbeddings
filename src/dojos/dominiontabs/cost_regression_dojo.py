@@ -19,6 +19,7 @@ from src.data_refinement.metrics.dominiontabs.cost_regression_metric import (
     CostRegressionMetric,
 )
 from src.dojos.generic.data_constructors import MaskedFieldRegressionDataConstructor
+from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
 from src.dojos.mods.common_mods import MaskTargetKeyMod
 from src.dojos.mods.mod_pipeline import ModPipeline
@@ -51,6 +52,7 @@ class CostRegressionDojo(SingleCardRegressionDojo):
                     )
                 ]
             ),
-            rng_seed=rng_seed,
-            strict_version_check=strict_version_check,
+            config=DojoConfig(
+                rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
         )
