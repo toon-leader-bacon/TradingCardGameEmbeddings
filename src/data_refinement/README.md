@@ -1,29 +1,44 @@
 # data_refinement
 
-Converts raw data written by `data_retrieval` (and `image_processing`,
-for image-only sources) into the standardized `GenericCard`/
-`GenericDeck` schema (`src/schema/`), and computes derived per-card
-metrics from 17lands' raw data. Outputs land under `data/final/`.
-
-Internally, this is expected to be a pipeline of small, individually
-typed stages — each stage has an explicit input schema and output
-schema, so a stage can be tested and reasoned about in isolation. The
-order stages get chained in is a per-experiment/per-source concern,
-not something fixed by this container's structure.
+Turns raw data written by `data_retrieval` (`data/raw/`) into this
+project's own schema (`src/schema/`) and training labels. Everything it
+writes lands under `data/final/` (cards, decks) or `data/metrics/`
+(labels).
 
 ## Containers
 
-- **`card_binder/`** the standardized, multi-game card
-  store every other stage (and `training`, downstream) reads from and
-  writes into. We only need one data source per game to ingest into dedicated
-  cards.
-  See [`card_binder/README.md`](card_binder/README.md).
-- **`deck_box/`** the standardized, multi-game deck
-  store: `DeckBox` (mirroring `card_binder`'s CRUD-by-uuid shape) plus the
-  `DeckExtractionStage` Strategy Protocol every raw deck source will
-  implement. Not ever data source provides deck data to be consumed here.
-  See [`deck_box/README.md`](deck_box/README.md).
-- **metrics/** Each data source should have dedicated, game-specific or data-source
-  specific metrics associated with it. The logic for transforming raw data into
-  these more rich game-specific metrics are to be stored here. One directory
-  per data source.
+- **[`card_binder/`](card_binder/README.md)** - `CardBinder`, the
+  multi-game card store that gives every card its stable `nocab_uuid`,
+  plus one `CardIngestionStage` per card source. Every other flow
+  depends on it. Output: `data/final/cards/<game>.jsonl`.
+- **[`deck_box/`](deck_box/README.md)** - `DeckBox`, the multi-game deck
+  store (SQLite, CRUD by `nocab_uuid`), plus one `DeckExtractionStage`
+  per deck source. Output: `data/final/decks/<game>.db`.
+- **[`metrics/`](metrics/README.md)** - one directory per raw source,
+  each turning that source into (training input, label) parquet files
+  a dojo reads. Output: `data/metrics/<source>/`.
+
+## How it works
+
+```mermaid
+flowchart LR
+    Raw[data/raw/] --> Ingest[CardIngestionStage] --> Binder[(CardBinder)]
+    Raw --> Extract[DeckExtractionStage] --> Box[(DeckBox)]
+    Binder --> Extract
+    Raw --> Metric[metric scanner] --> Parquet[data/metrics/*.parquet]
+    Binder --> Metric
+    Box --> Metric
+```
+
+Card ingestion runs first: deck extraction and metrics both look cards
+up in the binder, so a game's binder must exist before either runs.
+
+## How to run
+
+```
+PYTHONPATH=. python3 scripts/run_card_binder_ingestion.py --source scryfall
+PYTHONPATH=. python3 scripts/run_deck_box_ingestion.py --source play_gwent
+PYTHONPATH=. python3 scripts/run_metrics.py --source gwent_one
+```
+
+Each script takes `--list`, `--source <name>` or `--all`.

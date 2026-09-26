@@ -8,12 +8,9 @@ spire-codex, ...) into `GenericCard` records, keyed by `nocab_uuid`.
 not here — this container consumes that shared vocabulary, it doesn't
 own it.
 
-Unlike the `seventeenlands/` metric pipelines (three separate,
-source-specific engines by design — see `seventeenlands/
-game_data_metrics/README.md` for why), `card_binder` genuinely is one
-shared, cross-source capability: every source's `CardIngestionStage`
-writes into the same one `CardBinder`, and every downstream consumer
-reads through the same one facade.
+`card_binder` is one shared, cross-source capability: every source's
+`CardIngestionStage` writes into the same `CardBinder`, and every
+downstream consumer reads through the same facade.
 
 ## Identity is nocab_uuid only — nothing else
 
@@ -59,14 +56,14 @@ Reads don't presume any uniqueness:
 - `get_by_name(source_game, name) -> list[GenericCard]` — a name can
   resolve to more than one card (e.g. Slay the Spire 2's Strike).
 - `get_by_name_single(source_game, name, strict=True) -> GenericCard | None`
-  — convenience for callers (MTG's 17lands pipelines, `Dojo`) that
+  — convenience for callers that
   know their game's names are actually unique: `strict=True` raises on
   ambiguity, `strict=False` returns one of the matches, unspecified
   which.
 - `get_by_name_regex(source_game, pattern) -> list[GenericCard]` —
-  generic, source-agnostic search; 17lands-specific fallback logic
-  that calls this lives in each `seventeenlands/` pipeline's own
-  resolution code, not here.
+  generic, source-agnostic search. `card_lookup.uuid_for_name_or_front_face()`
+  builds on it for sources that spell a split/MDFC card by its front
+  face only.
 - `get_by_alias(source_game, data_source, source_id) -> GenericCard | None`
 - `all_uuids(source_game=None)` / `all_cards(source_game)` —
   enumeration, with an optional/required game filter respectively.
@@ -111,9 +108,9 @@ card up:
    If two rows turn out to be the same card and one's content wins,
    the *other's* own `source_id` still needs to remain resolvable to
    the surviving card — otherwise a caller who only knows that
-   identifier could never find it again. Since collision handling now
-   lives in each `CardIngestionStage`, not `CardBinder`, this
-   guarantee is each stage's own responsibility: every stage in this
+   identifier could never find it again. Collision handling lives in
+   each `CardIngestionStage`, not `CardBinder`, so this guarantee is
+   each stage's own responsibility: every stage in this
    container calls `register_alias()` for a row's own primary
    identifier on *every* branch of its collision handling, not only
    the branches that change stored content — there's no structural
@@ -145,8 +142,8 @@ Any consumer that should only ever read — never `create()`/`update()`/
 `all_uuids`, `all_cards`) named as its own `typing.Protocol` — not a
 new capability, just that subset with the write methods excluded. A
 real `CardBinder` satisfies it structurally, so no wrapper object ever
-gets constructed. `training/`'s `Dojo.prepare_splits(corpus: CardLookup, ...)`
-is the first consumer.
+gets constructed. Every dojo reads cards through a `CardLookup`
+(narrowed further per split by `visible_card_lookup.py`).
 
 A `CardIngestionStage`, by contrast, needs both read *and* write
 access, and is typed to accept a full `CardBinder` directly — no
@@ -245,7 +242,7 @@ The shared, source-independent parts of these rules live in
 `lean_content.py` (`strip_noise`, `drop_repeated_strings`, `map_strings`,
 `order_keys`); which keys to keep, their order, and which rows are cards
 stay in each stage. Bounding lists (rule 5) has no shared helper yet: add
-one when a stage needs it. Every stage now follows these rules;
+one when a stage needs it. Every stage follows these rules;
 `scryfall/ingestion_stage.py` and `cardvault_fabtcg/ingestion_stage.py` are
 good worked examples. Measure a stage with `scripts/report_card_content.py
 --source <name>`.
@@ -260,150 +257,41 @@ good worked examples. Measure a stage with `scripts/report_card_content.py
   `CardBinder.default_output_path(GameId.MTG) ==
   Path("data/final/cards/mtg.jsonl")`) — a recommended default, not an
   enforced requirement.
-- `merge_strategies.py` — reusable collision-resolution policies, each
-  `(existing: GenericCard, candidate: GenericCard) -> GenericCard`:
-  `keep_longer_content` (whichever card's `raw_content` serializes to
-  more JSON bytes wins; ties favor `existing`), `keep_existing` (prior
-  entry wins unconditionally), `keep_incoming` (new entry wins
-  unconditionally). Every function in this module has a hard
-  contract: the returned card always carries `existing.nocab_uuid`,
-  never `candidate`'s freshly-minted one — these functions decide
-  content only, never identity. `keep_incoming_if_content_differs` (the
-  incoming card wins only if its `raw_content` or `name` differ, so an
-  unchanged re-ingest is a no-op) is used by the Scryfall, FaB, Spire Codex,
-  gwent.one and Dominion stages, whose sources are authoritative for their
-  own ids. Only Pokemon still uses `keep_longer_content` (its reprints of
-  one (name, set) genuinely differ, and with noise removed the fuller card
-  is a meaningful winner).
+- `merge_strategies.py` — reusable collision policies, each
+  `(existing, candidate) -> GenericCard`: `keep_existing`,
+  `keep_incoming`, `keep_longer_content` (more serialized `raw_content`
+  bytes wins) and `keep_incoming_if_content_differs` (an unchanged
+  re-ingest is a no-op). The returned card always carries
+  `existing.nocab_uuid`: these decide content, never identity.
 - `lean_content.py` — source-independent helpers that keep a card's
   `raw_content` lean (see "What goes in `raw_content`" above).
-- `card_lookup.py` — `CardLookup`, described above.
-- `alias_ledger.py` — `AliasLedger`, described above. Has no opinion
-  about which source wins a collision — that's entirely each
-  `CardIngestionStage`'s job now; `AliasLedger` only ever stores/
-  resolves identifier mappings it's told to.
-- `ingestion.py` — `CardIngestionStage`, the shared Strategy Protocol
-  (structural, `typing.Protocol` — matching the convention `Metric`
-  elsewhere in this project's architecture already established) every
-  raw-source ingestion stage implements:
-  `ingest(self, raw_path: Path, binder: CardBinder) -> list[UUID]`,
-  plus a `SOURCE_GAME: ClassVar[GameId]` class constant. A stage
-  always ingests exactly one game, so `SOURCE_GAME` is a class
-  constant rather than an `ingest()` parameter — this makes a
-  nonsensical call (e.g. passing a Gwent binder to the Scryfall stage)
-  impossible by construction rather than something to check for. A
-  stage performs its own identity/collision handling directly against
-  `binder` as a side effect (see each stage's own entry below) and
-  returns the `nocab_uuid` of every card it created or content-changed
-  this run — a card looked up and left untouched is not included.
-- `build.py` — `build_or_update_card_binder(raw_path, ingestion_stage, binder_path) -> list[UUID]`,
-  the thin driver: `CardBinder.load([binder_path] if it exists else [])`
-  → `ingestion_stage.ingest(raw_path, binder)` →
-  `binder.save(binder_path, ingestion_stage.SOURCE_GAME)` → return
-  `ingest()`'s own `list[UUID]` unchanged. No `source_game` parameter
-  of its own — it reads `ingestion_stage.SOURCE_GAME`. A plain
-  function, not an orchestrator class — matches the "thin runnable
-  snippet" pattern `src/data_retrieval/README.md`'s own examples use.
-- `scryfall/ingestion_stage.py` — `ScryfallCardIngestionStage`
-  (`SOURCE_GAME = GameId.MTG`), reading a single Scryfall oracle-cards
-  `.jsonl` file. Identity is `get_by_alias(GameId.MTG,
-  DataSource.SCRYFALL, oracle_id)` — Scryfall's `oracle_id` is a
-  perfect natural key (already deduplicates printings to one row per
-  card identity), so no heuristic is needed. Also registers
-  `arena_id`/`mtgo_id`/`mtgo_foil_id`/each `multiverse_ids` entry as
-  secondary aliases, whichever are present on a given row (e.g. an
-  Arena-illegal card has no `arena_id`). Aliases are read from the raw
-  row, while `raw_content` is the lean version (~2,350 tokens down to
-  ~150 median). A re-ingest replaces a card's content when the lean
-  content differs, keeping its `nocab_uuid`, and is a no-op otherwise.
-  Rows whose `layout` is `token`/`double_faced_token`/`emblem`/`scheme`/
-  `planar`/`vanguard`/`art_series`/`front_card` are skipped entirely
-  (rule 11 above) - several share a name with a real card (e.g. a
-  "Tarmogoyf" token alongside the real creature), which would otherwise
-  make every name-based lookup for that real card ambiguous.
-- `pokemon_tcg/ingestion_stage.py` — `PokemonTcgCardIngestionStage`
-  (`SOURCE_GAME = GameId.POKEMON`), reading a *directory* of
-  pokemon-tcg-data's per-set `.json` files (each a JSON array, not
-  JSONL). The one stage without a perfect natural key: every row's own
-  `id` (e.g. `"swsh8-1"`) is printing-specific, so keying off it
-  directly would never collapse anything. Identity is a heuristic:
-  `(name, set code)`, where set code is `id.rsplit("-", 1)[0]` (e.g.
-  `"swsh8-1"` → `"swsh8"`) — NOT a `"set"` field, which was confirmed
-  by sampling the full live corpus (20,444 rows) to be `None` on every
-  row. Resolved via `binder.get_by_name(GameId.POKEMON, name)`,
-  filtered to whichever match's own `id`-derived set code equals the
-  incoming row's. Confirmed against real data that this correctly
-  collapses alternate-art/rarity reprints within one set (e.g. "Mew V"
-  appears 3× in one set file with identical rules text) while keeping
-  cross-set same-named cards distinct. No secondary identifier system
-  exists in this data; `nationalPokedexNumbers` is deliberately
-  excluded from aliases since it identifies a species, not a printing.
-- `gwent_one/ingestion_stage.py` — `GwentOneCardIngestionStage`
-  (`SOURCE_GAME = GameId.GWENT`), reading a *directory* of
-  `page_*.html` files (via `bs4`/BeautifulSoup, `html.parser` backend
-  — see `src/data_retrieval/gwent_one/downloader.py`). Identity is
-  `get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, data_id)` — each
-  `card-wrap card-data` div's `data-id` attribute is gwent.one's own
-  per-card identity, a perfect natural key. `raw_content` is a flat
-  dict built from the div's other `data-*` attributes plus
-  `name`/`category`/`ability_text` (keyword `<span>`s unwrapped,
-  `<br>` turned into `\n`, matching Scryfall's `oracle_text`
-  convention). No secondary identifier system exists in this data.
-- `spire_codex/ingestion_stage.py` — `SpireCodexCardIngestionStage`
-  (`SOURCE_GAME = GameId.SLAY_THE_SPIRE_2`), reading a *single*
-  `cards.json` file (a JSON array — spire-codex ships its entire card
-  list as one file, not per-set/per-page files). Identity is
-  `get_by_alias(GameId.SLAY_THE_SPIRE_2, DataSource.SPIRE_CODEX, id)`
-  — each row's `id` (e.g. `"STRIKE_IRONCLAD"` vs `"STRIKE_SILENT"`) is
-  already per-character-unique, a perfect natural key. `name` is the
-  raw, unmangled `row["name"]` value — even though two names
-  ("Strike"/"Defend") repeat once per character (5 rows each, genuinely
-  distinct cards, not reprints), no disambiguation is needed: since
-  identity is keyed on `id` rather than name, all 5 correctly get
-  their own `nocab_uuid`, and `get_by_name("Strike")` on the built
-  binder correctly returns all 5.
-- `cardvault_fabtcg/ingestion_stage.py` — `CardVaultFabtcgCardIngestionStage`
-  (`SOURCE_GAME = GameId.FLESH_AND_BLOOD`), reading a *single*
-  `public_card_data.csv` file (one row per print — card x set/reprint
-  x print_language x finish). Identity is `get_by_alias(
-  GameId.FLESH_AND_BLOOD, DataSource.CARDVAULT_FABTCG, card_id)` —
-  `card_id` (e.g. `"10000-year-reunion-1"`) is stable across every
-  reprint, every one of the 9 `print_language` values, and every
-  finish/rarity of the same card, a perfect natural key structurally
-  identical to Scryfall's `oracle_id`. Each row's own `print_id` (e.g.
-  `"MST131"`, `"MST131-RF"`) is registered as a secondary alias,
-  analogous to Scryfall's `arena_id`/`multiverse_ids`. `name` is
-  `face_1_true_name`, joined as `"{face_1} // {face_2}"` when
-  `face_2_true_name` is populated (489/46,660 rows — genuine two-faced
-  cards, e.g. `"A Drop in the Ocean // Inner Chi"`, same shape as an
-  MTG DFC). The one deliberate departure from every other stage's
-  single-pass shape: ingestion is two-pass — pass 1 builds/merges
-  content from `print_language == "en"` rows only (so a non-English
-  row can never win `merge_strategies.keep_longer_content` purely on
-  serialized-byte-length and make the canonical name/rules text
-  non-English), pass 2 processes every other row and only registers
-  its `print_id` as a secondary alias against whichever card pass 1
-  already created — safe by construction since every `card_id` in the
-  corpus has at least one `en` row.
-- `dominiontabs/ingestion_stage.py` — `DominionTabsCardIngestionStage`
-  (`SOURCE_GAME = GameId.DOMINION`), reading a *directory* containing
-  two raw files: `cards_db.json` (819 entries, a JSON array of
-  language-neutral fields) and `cards_en_us.json` (884 entries, a JSON
-  dict of English text keyed by card name) — see
-  `src/data_retrieval/dominiontabs/downloader.py` for why this source
-  splits a card's data across two files. Identity is `get_by_alias(
-  GameId.DOMINION, DataSource.DOMINIONTABS, card_tag)` — `card_tag` is
-  a perfect natural key, unique across all 819 `cards_db.json` entries.
-  No secondary identifier system exists in this data. Iteration is
-  driven by `cards_db.json`, not `cards_en_us.json` — the latter's 117
-  keys with no `card_tag` match are group/category header text and
-  split-card alternate spellings, not cards, and are never visited.
-  Per explicit instruction, `raw_content` is deliberately trimmed to
-  six fields only (`name`, `types`, `cost`, `description`, `potcost`,
-  `debtcost`); `cost`/`potcost`/`debtcost` are kept as dominiontabs'
-  own raw strings (e.g. `"6*"` for a variable-cost card), not parsed
-  into `int`, and `description`'s `<br>`/`<n>` tokens are left
-  untouched — no text cleanup at this stage.
+- `card_lookup.py` — `CardLookup`, described above, plus
+  `uuid_for_name_or_front_face()`.
+- `visible_card_lookup.py` — `VisibleCardLookup`, a `CardLookup` that
+  hides cards a `HoldoutSpec` keeps out of a given split.
+- `alias_ledger.py` — `AliasLedger`, described above.
+- `ingestion.py` — `CardIngestionStage`, the Strategy Protocol every
+  source stage implements: `ingest(self, raw_path, binder) -> list[UUID]`
+  plus a `SOURCE_GAME: ClassVar[GameId]`. A stage ingests exactly one
+  game, so passing it another game's binder is impossible by
+  construction. It does its own identity/collision handling against
+  `binder` and returns the `nocab_uuid` of every card it created or
+  content-changed.
+- `build.py` — `build_or_update_card_binder(raw_path, ingestion_stage, binder_path)`,
+  the thin driver: load the binder (or start empty), `ingest()`, save.
+
+One subdirectory per card source, each holding one `ingestion_stage.py`
+(its module docstring documents that source's identity key, aliases and
+collision policy):
+
+| Directory | Stage | Game | Identity key |
+|---|---|---|---|
+| `scryfall/` | `ScryfallCardIngestionStage` | MTG | Scryfall `oracle_id` (+ Arena/MTGO/multiverse aliases) |
+| `pokemon_tcg/` | `PokemonTcgCardIngestionStage` | Pokemon | heuristic: (name, set code) |
+| `gwent_one/` | `GwentOneCardIngestionStage` | Gwent | gwent.one `data-id` |
+| `spire_codex/` | `SpireCodexCardIngestionStage` | Slay the Spire 2 | spire-codex card `id` |
+| `cardvault_fabtcg/` | `CardVaultFabtcgCardIngestionStage` | Flesh and Blood | cardvault `card_id` (+ `print_id` aliases) |
+| `dominiontabs/` | `DominionTabsCardIngestionStage` | Dominion | dominiontabs `card_tag` |
 
 ## How it works
 
@@ -414,7 +302,7 @@ flowchart TD
     C --> D["ingestion_stage.ingest(raw_path, binder)"]
     D --> E{"per row:\nget_by_alias() (or a\nsource-specific heuristic)\nfinds an existing card?"}
     E -- no --> F["binder.create(card)"]
-    E -- yes --> G["merge_strategies.keep_longer_content(\nexisting, candidate)"]
+    E -- yes --> G["the stage's merge_strategies\npolicy(existing, candidate)"]
     G --> H{"result differs\nfrom existing?"}
     H -- yes --> I["binder.replace(existing.nocab_uuid, merged)"]
     H -- no --> J["no-op — uuid NOT included\nin ingest()'s return value"]
@@ -429,94 +317,32 @@ flowchart TD
 
 ## How to run
 
+```
+PYTHONPATH=. python3 scripts/run_card_binder_ingestion.py --list
+PYTHONPATH=. python3 scripts/run_card_binder_ingestion.py --source scryfall
+```
+
+The script knows each source's default raw path (a single file for
+Scryfall, spire-codex and cardvault; a directory for pokemon_tcg,
+gwent.one and dominiontabs). From Python:
+
 ```python
 from pathlib import Path
 from src.data_refinement.card_binder.build import build_or_update_card_binder
+from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.scryfall.ingestion_stage import (
     ScryfallCardIngestionStage,
 )
-
-changed_uuids = build_or_update_card_binder(
-    Path("data/raw/scryfall/oracle-cards-20260820090157.jsonl"),
-    ScryfallCardIngestionStage(),
-    Path("data/final/cards/mtg.jsonl"),
-)
-```
-
-```python
-# Reading the built binder back — the interface every downstream
-# consumer (data_refinement's own metric pipelines, and eventually
-# training) actually uses:
-from pathlib import Path
-from src.data_refinement.card_binder.card_binder import CardBinder
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 
-binder = CardBinder.load([Path("data/final/cards/mtg.jsonl")])
+changed_uuids = build_or_update_card_binder(
+    Path("data/raw/scryfall/oracle-cards-20260912210156.jsonl"),
+    ScryfallCardIngestionStage(),
+    CardBinder.default_output_path(GameId.MTG),  # data/final/cards/mtg.jsonl
+)
+
+binder = CardBinder.load([CardBinder.default_output_path(GameId.MTG)])
 binder.get_by_name_single(GameId.MTG, "Lightning Bolt")
 binder.get_by_alias(GameId.MTG, DataSource.ARENA, "76497")
 ```
-
-```python
-# pokemon_tcg / gwent.one: raw_path is a directory, not a single file.
-from pathlib import Path
-from src.data_refinement.card_binder.build import build_or_update_card_binder
-from src.data_refinement.card_binder.pokemon_tcg.ingestion_stage import (
-    PokemonTcgCardIngestionStage,
-)
-
-changed_uuids = build_or_update_card_binder(
-    Path("data/raw/pokemon_tcg/cards"),
-    PokemonTcgCardIngestionStage(),
-    Path("data/final/cards/pokemon.jsonl"),
-)
-```
-
-```python
-# spire-codex: raw_path is a single cards.json file.
-from pathlib import Path
-from src.data_refinement.card_binder.build import build_or_update_card_binder
-from src.data_refinement.card_binder.spire_codex.ingestion_stage import (
-    SpireCodexCardIngestionStage,
-)
-
-changed_uuids = build_or_update_card_binder(
-    Path("data/raw/spire_codex/cards.json"),
-    SpireCodexCardIngestionStage(),
-    Path("data/final/cards/slay_the_spire_2.jsonl"),
-)
-```
-
-```python
-# cardvault.fabtcg.com: raw_path is a single public_card_data.csv file.
-from pathlib import Path
-from src.data_refinement.card_binder.build import build_or_update_card_binder
-from src.data_refinement.card_binder.cardvault_fabtcg.ingestion_stage import (
-    CardVaultFabtcgCardIngestionStage,
-)
-
-changed_uuids = build_or_update_card_binder(
-    Path("data/raw/cardvault_fabtcg/public_card_data.csv"),
-    CardVaultFabtcgCardIngestionStage(),
-    Path("data/final/cards/flesh_and_blood.jsonl"),
-)
-```
-
-```python
-# dominiontabs: raw_path is a directory containing both cards_db.json
-# and cards_en_us.json.
-from pathlib import Path
-from src.data_refinement.card_binder.build import build_or_update_card_binder
-from src.data_refinement.card_binder.dominiontabs.ingestion_stage import (
-    DominionTabsCardIngestionStage,
-)
-
-changed_uuids = build_or_update_card_binder(
-    Path("data/raw/dominiontabs"),
-    DominionTabsCardIngestionStage(),
-    Path("data/final/cards/dominion.jsonl"),
-)
-```
-
-This file grows as more `CardIngestionStage` implementations (one per
-raw source) get added under their own subdirectory here.
