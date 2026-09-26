@@ -73,6 +73,10 @@ def test_default_output_path() -> None:
     )
 
 
+@pytest.mark.skipif(
+    not Path("data/final/cards/dominion.jsonl").exists(),
+    reason="needs the real, already-ingested Dominion CardBinder",
+)
 def test_label_values_excludes_basics_and_includes_real_kingdom_cards() -> None:
     # LABEL_VALUES is populated once, at class-definition time, from
     # the real (already-ingested) data/final/cards/dominion.jsonl - not
