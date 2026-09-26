@@ -1,6 +1,6 @@
 """Template Method base for streaming metrics whose training input is
 one sts_gg run's final deck (referenced by deck_uuid, never embedded -
-see ../hash_utils.py and card_upgrade_rate_metric.py's module docstring
+see ../deck_ids.py and card_upgrade_rate_metric.py's module docstring
 "Deck references" discussion, also folded into ../README.md) paired
 with a single scalar label that's already present on that same run's
 raw row - no cross-run aggregation, no per-run lookup beyond the row
@@ -36,7 +36,7 @@ import pyarrow as pa
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.data_refinement.metrics.hash_utils import deck_uuid_from_cards
+from src.data_refinement.metrics.deck_ids import deck_uuid_from_cards
 from src.data_refinement.metrics.parquet_builder import ParquetBuilder
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,

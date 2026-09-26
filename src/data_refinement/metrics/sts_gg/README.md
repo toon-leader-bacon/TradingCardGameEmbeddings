@@ -77,7 +77,7 @@ metric's own output, a multi-card metric takes a
 in its constructor — a **private instance, never the published deck
 box** `deck_box/sts_gg/` builds — and writes the deck into it via
 `DeckBox.create_if_absent()`, keyed by
-[`../hash_utils.py`](../hash_utils.py)'s `deck_uuid_from_cards()` (a
+[`../deck_ids.py`](../deck_ids.py)'s `deck_uuid_from_cards()` (a
 content-addressed hash of the resolved card multiset). The metric's
 own output row then carries that `deck_uuid` instead of the card list.
 Every metric in one scan pass that's handed the *same* `DeckBox`

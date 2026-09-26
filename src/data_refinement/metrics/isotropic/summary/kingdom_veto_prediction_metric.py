@@ -7,7 +7,7 @@ deck (it's never bought, played, or scored) - stored via deck_box per
 the metric_writing skill's "this deck box... may write ANY multi-card
 collection... hands, draft packs, partial decks etc" allowance, using
 GenericDeck purely as a generic "named card group" container. Content-
-addressed the same way a real deck is (hash_utils.deck_uuid_from_cards)
+addressed the same way a real deck is (deck_ids.deck_uuid_from_cards)
 so two games with the same candidate pool collapse together.
 
 VARIABLE-SET LABEL: LABEL_VALUES is not fixed here (unlike e.g.
@@ -27,7 +27,7 @@ import pyarrow as pa
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.data_refinement.metrics.hash_utils import deck_uuid_from_cards
+from src.data_refinement.metrics.deck_ids import deck_uuid_from_cards
 from src.data_refinement.metrics.isotropic.summary.row_utils import (
     card_uuid_for_name,
     is_natural_kingdom,

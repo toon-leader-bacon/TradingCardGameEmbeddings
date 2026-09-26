@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from src.data_refinement.metrics.hash_utils import deck_uuid_from_cards
+from src.data_refinement.metrics.deck_ids import deck_uuid_from_cards
 
 
 class TestDeckUuidFromCards:

@@ -41,7 +41,7 @@ import logging
 from uuid import UUID
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.data_refinement.metrics.hash_utils import deck_uuid_from_cards
+from src.data_refinement.metrics.deck_ids import deck_uuid_from_cards
 from src.data_refinement.metrics.isotropic.card_names import (
     card_uuid_for_name as card_uuid_for_name,
 )
@@ -194,7 +194,7 @@ def deck_for_player(card_lookup: CardLookup, player_entry: dict) -> GenericDeck:
         card_lookup: same registry as card_uuid_for_name().
         player_entry: one players[] entry with a real "end" block.
     Output: a GenericDeck with source_game=GameId.DOMINION, content-
-        addressed via hash_utils.deck_uuid_from_cards() (so two
+        addressed via deck_ids.deck_uuid_from_cards() (so two
         players' identical final decks - even across different games -
         collapse to the same deck_uuid). provenance is left at its
         default (None) - a private, metrics-only DeckBox entry, not a

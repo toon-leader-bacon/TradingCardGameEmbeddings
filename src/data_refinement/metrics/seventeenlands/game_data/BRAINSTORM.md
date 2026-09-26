@@ -59,7 +59,7 @@ picking what to build next, not a spec.
   card running-average accumulation) and `DeckLabelMetric` (per-run
   streaming: a full "final deck" plus a scalar already on that same
   row, deduped through a private `DeckBox` via
-  `hash_utils.deck_uuid_from_cards()`) are close analogues in shape —
+  `deck_ids.deck_uuid_from_cards()`) are close analogues in shape —
   game_data's `deck_<name>` is exactly sts_gg's "final deck" concept,
   one row per game rather than one row per run.
 

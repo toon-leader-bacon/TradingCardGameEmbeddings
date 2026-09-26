@@ -38,7 +38,7 @@ import pyarrow as pa
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.data_refinement.metrics.hash_utils import deck_uuid_from_cards
+from src.data_refinement.metrics.deck_ids import deck_uuid_from_cards
 from src.data_refinement.metrics.isotropic.games.game_log_parser import GameLog
 from src.data_refinement.metrics.isotropic.games.partial_deck import (
     partial_deck_card_uuids,

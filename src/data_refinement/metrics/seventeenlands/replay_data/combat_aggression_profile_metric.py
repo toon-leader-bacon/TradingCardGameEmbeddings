@@ -28,7 +28,7 @@ import pyarrow as pa
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.data_refinement.metrics.hash_utils import deck_uuid_from_cards
+from src.data_refinement.metrics.deck_ids import deck_uuid_from_cards
 from src.data_refinement.metrics.parquet_builder import ParquetBuilder
 from src.data_refinement.metrics.seventeenlands.replay_data.replay_card_columns import (
     ReplayCardColumns,

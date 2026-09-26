@@ -13,7 +13,7 @@ That's why this hashing lives in one shared file rather than each
 metric rolling its own.
 
 A data source whose deck identity needs source-specific logic gets its
-own metrics/<source>/hash_utils.py instead of adding cases here — this
+own metrics/<source>/deck_ids.py instead of adding cases here — this
 file only ever holds hashing that's meaningful across every source.
 """
 

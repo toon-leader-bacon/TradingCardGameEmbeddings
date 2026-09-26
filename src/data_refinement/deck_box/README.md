@@ -56,7 +56,7 @@ the published `data/final/decks/` location or to a
 `DeckExtractionStage`. `metrics/sts_gg/` uses a second, entirely
 separate `DeckBox` instance this way: private to that container, saved
 under `data/metrics/sts_gg/` instead, and keyed by a content-derived
-id (`create_if_absent()` + `metrics/hash_utils.py`'s
+id (`create_if_absent()` + `metrics/deck_ids.py`'s
 `deck_uuid_from_cards()`) rather than this container's
 `uuid5(namespace, run_id)` scheme — see
 [`../metrics/sts_gg/README.md`](../metrics/sts_gg/README.md)'s "Deck
@@ -79,7 +79,7 @@ merged or cross-referenced.
   setup, per-row reads/writes, and the metadata-invalidation mechanism
   described below). `create()` raises if `nocab_uuid` is already
   stored; `create_if_absent()` is its counterpart for a content-derived
-  id scheme (e.g. `metrics/hash_utils.py`'s `deck_uuid_from_cards()`)
+  id scheme (e.g. `metrics/deck_ids.py`'s `deck_uuid_from_cards()`)
   where the same id legitimately recurring across calls is expected,
   not an error — a recurrence is a no-op that returns whatever is
   already stored, without comparing it against the argument; `update()`

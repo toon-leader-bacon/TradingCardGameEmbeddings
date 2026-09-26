@@ -25,7 +25,7 @@ import pyarrow as pa
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.data_refinement.metrics.hash_utils import deck_uuid_from_cards
+from src.data_refinement.metrics.deck_ids import deck_uuid_from_cards
 from src.data_refinement.metrics.isotropic.summary.row_utils import (
     card_uuid_for_name,
     eligible_player_entries,
@@ -71,7 +71,7 @@ class DeckCardSetCopyCountMetric:
                 even when they happen to share a deck_box instance
                 across a scan pass (a set and a multiset over the same
                 cards hash to different deck_uuids by construction, so
-                they can never collide - see hash_utils.py).
+                they can never collide - see deck_ids.py).
             output_path: overrides DEFAULT_OUTPUT_PATH when given.
         Output: none (constructor).
         Side effects: creates output_path's parent directories if

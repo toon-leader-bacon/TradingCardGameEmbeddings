@@ -51,7 +51,7 @@ larger amount of configuration surface - judged not worth it.
 ## Files
 
 - `metric.py` - `Metric[RawRowT]`, the accumulator-family Protocol.
-- `hash_utils.py` - content-addressed deck-id hashing shared across
+- `deck_ids.py` - content-addressed deck-id hashing shared across
   `Metric[RawRowT]`-family containers (see its own module docstring);
   not used by the `CorpusScanMetric` family, which has no deck concept.
 - `generic/` - source-agnostic metric bases, described above.

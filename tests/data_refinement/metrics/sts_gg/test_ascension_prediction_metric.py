@@ -11,7 +11,7 @@ from src.data_refinement.card_binder.spire_codex.ingestion_stage import (
     SpireCodexCardIngestionStage,
 )
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.data_refinement.metrics.hash_utils import deck_uuid_from_cards
+from src.data_refinement.metrics.deck_ids import deck_uuid_from_cards
 from src.data_refinement.metrics.sts_gg.ascension_prediction_metric import (
     AscensionPredictionMetric,
 )
