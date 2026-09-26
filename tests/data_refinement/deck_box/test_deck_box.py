@@ -587,7 +587,9 @@ class TestMutatingMethodsAreAtomic:
         box = DeckBox.load([path])
         deck = _deck("Mono Red", [uuid4(), uuid4()])
 
-        box._insert_deck_row(deck)  # what create() does before its cards write + commit
+        box._tables.insert_deck_row(
+            deck
+        )  # what create() does before its cards write + commit
         box._connection.close()  # never committed
 
         reopened = DeckBox.load([path])
@@ -606,8 +608,7 @@ class TestMutatingMethodsAreAtomic:
         # (e.g. every DeckExtractionStage). Without `with
         # self._connection:`'s rollback, the doomed call's deck row
         # would already be durably committed the moment
-        # _insert_deck_cards_rows raises (the old code committed after
-        # each private helper individually), so it would survive even
+        # insert_deck_cards raises, so it would survive even
         # though the whole create() call never returned successfully -
         # and would still be there after a later, unrelated call.
         path = tmp_path / "mtg.db"
@@ -617,7 +618,7 @@ class TestMutatingMethodsAreAtomic:
         def _raise(*args: object, **kwargs: object) -> None:
             raise RuntimeError("simulated mid-create failure")
 
-        monkeypatch.setattr(box, "_insert_deck_cards_rows", _raise)
+        monkeypatch.setattr(box._tables, "insert_deck_cards", _raise)
         with pytest.raises(RuntimeError, match="simulated mid-create failure"):
             box.create(doomed_deck)
 
