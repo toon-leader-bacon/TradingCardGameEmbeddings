@@ -248,7 +248,7 @@ def run_sts_gg(raw_path: Path | None) -> None:
     print(f"=== sts_gg: {resolved_raw_path} ===")
     scan_runs_jsonl(resolved_raw_path, metrics)
     deck_box.save(
-        Path("data/metrics/sts_gg/deck_box.jsonl"),
+        Path("data/metrics/sts_gg/deck_box.db"),
         GameId.SLAY_THE_SPIRE_2,
         binder.version_for(GameId.SLAY_THE_SPIRE_2),
     )
@@ -463,7 +463,7 @@ def run_seventeenlands_game_data(raw_path: Path | None) -> None:
         _GAME_DATA_METRICS,
         scan_game_csv,
         deck_box_output_path=Path(
-            "data/metrics/seventeenlands/game_data/deck_box.jsonl"
+            "data/metrics/seventeenlands/game_data/deck_box.db"
         ),
         raw_path=raw_path,
     )
@@ -476,7 +476,7 @@ def run_seventeenlands_replay_data(raw_path: Path | None) -> None:
         _REPLAY_DATA_METRICS,
         scan_replay_csv,
         deck_box_output_path=Path(
-            "data/metrics/seventeenlands/replay_data/deck_box.jsonl"
+            "data/metrics/seventeenlands/replay_data/deck_box.db"
         ),
         raw_path=raw_path,
     )

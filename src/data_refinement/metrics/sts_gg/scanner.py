@@ -59,7 +59,7 @@ def scan_runs_jsonl(raw_path: Path, metrics: list[Metric[dict]]) -> None:
         ... ]
         >>> scan_runs_jsonl(Path("data/raw/sts_gg/runs.jsonl"), metrics)
         >>> deck_box.save(
-        ...     Path("data/metrics/sts_gg/deck_box.jsonl"),
+        ...     Path("data/metrics/sts_gg/deck_box.db"),
         ...     GameId.SLAY_THE_SPIRE_2,
         ...     card_binder.version_for(GameId.SLAY_THE_SPIRE_2),
         ... )  # this function never does this - the driver's own job

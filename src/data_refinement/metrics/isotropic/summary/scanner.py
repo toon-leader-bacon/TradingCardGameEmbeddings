@@ -70,7 +70,7 @@ def scan_isotropic_summary_archives(
         ...     metrics,
         ... )
         >>> deck_box.save(
-        ...     Path("data/metrics/isotropic/deck_box.jsonl"),
+        ...     Path("data/metrics/isotropic/deck_box.db"),
         ...     GameId.DOMINION,
         ...     card_binder.version_for(GameId.DOMINION),
         ... )
