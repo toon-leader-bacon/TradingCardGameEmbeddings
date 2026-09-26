@@ -90,7 +90,7 @@ implementation yet). Implemented today:
   [`isotropic/summary/README.md`](isotropic/summary/README.md).
 - **`isotropic/games/`** - eleven metrics over isotropic's other raw
   flavor - turn-by-turn game-log HTML files, parsed via BeautifulSoup and
-  sharing `isotropic/card_resolution.py`'s card-name resolution with
+  sharing `isotropic/card_names.py`'s card-name resolution with
   `isotropic/summary/`. Six `Metric[GameHeader]` header metrics (opening
   buys, pile exhaustion/game-ending type) plus five `Metric[GameLog]`
   mid-game metrics (next buy, next trashed card, next-turn action count,

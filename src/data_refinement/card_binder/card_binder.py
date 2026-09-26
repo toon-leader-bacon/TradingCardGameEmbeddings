@@ -370,7 +370,7 @@ class CardBinder:
             >>> binder = CardBinder.load([Path("data/final/cards/mtg.jsonl")])
             >>> binder.get_by_alias(GameId.MTG, DataSource.ARENA, "76497")
         """
-        nocab_uuid = self._alias_ledger.resolve(source_game, data_source, source_id)
+        nocab_uuid = self._alias_ledger.uuid_for(source_game, data_source, source_id)
         if nocab_uuid is None:
             return None
         return self.get_by_uuid(nocab_uuid)

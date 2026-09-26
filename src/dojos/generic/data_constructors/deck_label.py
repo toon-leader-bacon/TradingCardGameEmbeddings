@@ -9,7 +9,7 @@ import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.dojos.generic.data_constructors._uuid_resolution import _cast_to_float
+from src.dojos.generic.data_constructors._row_values import _cast_to_float
 from src.schema.type_hints import Label, MultiCardInput, TrainingDatum
 
 

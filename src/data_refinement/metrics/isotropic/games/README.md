@@ -12,7 +12,7 @@ top of it and also reads the turn-by-turn `<hr/><b>Game log</b>` section
 metrics. Full row-shape documentation, confirmed field semantics, and
 every known bias lives in [`../BRAINSTORM.md`](../BRAINSTORM.md) - read
 that first. Card names resolve via
-[`../card_resolution.py`](../card_resolution.py) against the
+[`../card_names.py`](../card_names.py) against the
 already-ingested `dominiontabs` `CardBinder` (`GameId.DOMINION`),
 shared with [`../summary/`](../summary/README.md).
 

@@ -1,9 +1,7 @@
-"""Shared uuid/card resolution helpers used by more than one
-DataConstructor in this package - kept here rather than duplicated per
-class, or folded into any single DataConstructor's own module, since
-several of these are used by DataConstructors that feed different
-generic dojo shape packages (e.g. _card_for_uuid backs constructors for
-both single_card_regression and single_card_fixed_classification).
+"""Helpers that turn one raw metric-row value into a typed label or
+card(s), shared by more than one DataConstructor in this package (e.g.
+_card_for_uuid backs constructors for both single_card_regression and
+single_card_fixed_classification).
 """
 
 import math

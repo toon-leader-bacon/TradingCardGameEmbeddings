@@ -6,7 +6,7 @@ from typing import List
 import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.dojos.generic.data_constructors._uuid_resolution import (
+from src.dojos.generic.data_constructors._row_values import (
     _card_for_uuid,
     _label_as_float,
 )

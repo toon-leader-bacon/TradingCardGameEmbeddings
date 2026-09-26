@@ -186,7 +186,7 @@ class KingdomEndingPilePredictionMetric:
             kingdom_names: this game's dealt kingdom_card_names.
         Output: a GenericDeck over the resolved kingdom names -
             unresolved names are skipped, not raised on (mirroring
-            card_resolution.card_uuid_for_name()'s per-name contract),
+            card_names.card_uuid_for_name()'s per-name contract),
             so this method's own docstring does NOT promise
             len(card_nocab_uuids) == len(kingdom_names).
             source_game=GameId.DOMINION, provenance left at its

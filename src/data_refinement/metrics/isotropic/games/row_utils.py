@@ -1,7 +1,7 @@
 """Shared, stateless helpers for reading one already-parsed GameHeader
 (header_parser.py) - the games/ analogue of ../summary/row_utils.py.
 
-card_uuid_for_name() is re-exported from ../card_resolution.py, not
+card_uuid_for_name() is re-exported from ../card_names.py, not
 defined here - see that module's own docstring for why: it became a
 byte-identical second consumer of what was originally
 ../summary/row_utils.py's own private function, which is what pushed
@@ -15,7 +15,7 @@ justify keeping copies separate; this one never did).
 from uuid import UUID
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.data_refinement.metrics.isotropic.card_resolution import (
+from src.data_refinement.metrics.isotropic.card_names import (
     card_uuid_for_name as card_uuid_for_name,
 )
 from src.data_refinement.metrics.isotropic.games.header_parser import (

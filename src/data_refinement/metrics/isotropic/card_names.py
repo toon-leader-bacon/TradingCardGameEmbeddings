@@ -1,20 +1,10 @@
-"""Shared, stateless card-name resolution for both isotropic
-subpackages (summary/ Flavor A, games/ Flavor B).
+"""Card-name -> nocab_uuid lookup shared by both isotropic subpackages
+(summary/ Flavor A, games/ Flavor B).
 
-Promoted to this shared location once games/row_utils.py became a
-second real, byte-identical consumer of what was originally
-summary/row_utils.py's own private card_uuid_for_name() - what elevates
-this past this project's usual per-container duplication convention
-(see e.g. ../sts_gg/deck_label_metric.py's module docstring for that
-convention's normal case: near-identical logic across metric FILES
-within one container, deliberately kept separate because each file has
-its own raw-row shape to resolve card ids against). Here there was no
-per-subpackage row-shape difference at all - both callers pass the
-exact same (CardLookup, str) -> UUID | None shape, resolving by NAME
-against GameId.DOMINION regardless of which isotropic flavor the name
-came from - so centralizing removes real duplication without coupling
-either subpackage's own logic (Flavor A's kingdom-constraint filtering,
-Flavor B's header parsing) to the other.
+Both flavors spell cards by name and look them up the same way, against
+GameId.DOMINION, so this lives at their shared parent rather than in
+either one. Each subpackage's own logic (Flavor A's kingdom-constraint
+filtering, Flavor B's header parsing) stays in that subpackage.
 """
 
 from uuid import UUID

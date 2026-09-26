@@ -37,16 +37,16 @@ class AliasLedger:
         """
         self._uuid_by_alias: dict[tuple[GameId, DataSource, str], UUID] = {}
 
-    def resolve(
+    def uuid_for(
         self, source_game: GameId, data_source: DataSource, source_id: str
     ) -> UUID | None:
-        """Look up the nocab_uuid a given external identifier resolves to.
+        """The nocab_uuid registered for one external identifier.
 
         Inputs:
             source_game: which game's namespace to look in.
             data_source: which external system minted source_id.
             source_id: that system's own id.
-        Output: the resolved nocab_uuid, or None if this
+        Output: the registered nocab_uuid, or None if this
             (source_game, data_source, source_id) triple isn't
             registered.
         Side effects: none.
@@ -54,7 +54,7 @@ class AliasLedger:
 
         Example:
             >>> ledger = AliasLedger()
-            >>> ledger.resolve(GameId.MTG, DataSource.ARENA, "76497")
+            >>> ledger.uuid_for(GameId.MTG, DataSource.ARENA, "76497")
         """
         return self._uuid_by_alias.get((source_game, data_source, source_id))
 
@@ -65,7 +65,7 @@ class AliasLedger:
         source_id: str,
         nocab_uuid: UUID,
     ) -> None:
-        """Record that one external identifier resolves to nocab_uuid.
+        """Record that one external identifier maps to nocab_uuid.
 
         Overwrites any prior mapping for this exact
         (source_game, data_source, source_id) triple — last write wins.
@@ -75,7 +75,7 @@ class AliasLedger:
                 belongs to.
             data_source: which external system minted source_id.
             source_id: that system's own id.
-            nocab_uuid: the nocab_uuid this identifier should resolve
+            nocab_uuid: the nocab_uuid this identifier should map
                 to.
         Output: none.
         Side effects: mutates this ledger's in-memory index.

@@ -12,12 +12,12 @@ class TestResolve:
         nocab_uuid = uuid4()
         ledger.register(GameId.MTG, DataSource.ARENA, "76497", nocab_uuid)
 
-        assert ledger.resolve(GameId.MTG, DataSource.ARENA, "76497") == nocab_uuid
+        assert ledger.uuid_for(GameId.MTG, DataSource.ARENA, "76497") == nocab_uuid
 
     def test_not_found(self) -> None:
         ledger = AliasLedger()
 
-        assert ledger.resolve(GameId.MTG, DataSource.ARENA, "nonexistent") is None
+        assert ledger.uuid_for(GameId.MTG, DataSource.ARENA, "nonexistent") is None
 
     def test_same_source_id_different_data_source_does_not_collide(self) -> None:
         ledger = AliasLedger()
@@ -26,8 +26,8 @@ class TestResolve:
         ledger.register(GameId.MTG, DataSource.ARENA, "12345", arena_uuid)
         ledger.register(GameId.MTG, DataSource.MTGO, "12345", mtgo_uuid)
 
-        assert ledger.resolve(GameId.MTG, DataSource.ARENA, "12345") == arena_uuid
-        assert ledger.resolve(GameId.MTG, DataSource.MTGO, "12345") == mtgo_uuid
+        assert ledger.uuid_for(GameId.MTG, DataSource.ARENA, "12345") == arena_uuid
+        assert ledger.uuid_for(GameId.MTG, DataSource.MTGO, "12345") == mtgo_uuid
 
     def test_same_source_id_different_game_does_not_collide(self) -> None:
         ledger = AliasLedger()
@@ -36,9 +36,9 @@ class TestResolve:
         ledger.register(GameId.MTG, DataSource.SCRYFALL, "shared-id", mtg_uuid)
         ledger.register(GameId.POKEMON, DataSource.SCRYFALL, "shared-id", pokemon_uuid)
 
-        assert ledger.resolve(GameId.MTG, DataSource.SCRYFALL, "shared-id") == mtg_uuid
+        assert ledger.uuid_for(GameId.MTG, DataSource.SCRYFALL, "shared-id") == mtg_uuid
         assert (
-            ledger.resolve(GameId.POKEMON, DataSource.SCRYFALL, "shared-id")
+            ledger.uuid_for(GameId.POKEMON, DataSource.SCRYFALL, "shared-id")
             == pokemon_uuid
         )
 
@@ -52,7 +52,7 @@ class TestRegister:
 
         ledger.register(GameId.MTG, DataSource.ARENA, "76497", second_uuid)
 
-        assert ledger.resolve(GameId.MTG, DataSource.ARENA, "76497") == second_uuid
+        assert ledger.uuid_for(GameId.MTG, DataSource.ARENA, "76497") == second_uuid
 
 
 class TestSaveAndLoad:
@@ -65,7 +65,7 @@ class TestSaveAndLoad:
         ledger.save(path, GameId.MTG)
         loaded = AliasLedger.load(path, GameId.MTG)
 
-        assert loaded.resolve(GameId.MTG, DataSource.ARENA, "76497") == nocab_uuid
+        assert loaded.uuid_for(GameId.MTG, DataSource.ARENA, "76497") == nocab_uuid
 
     def test_save_writes_only_requested_games_subset(self, tmp_path: Path) -> None:
         ledger = AliasLedger()
@@ -76,8 +76,8 @@ class TestSaveAndLoad:
         ledger.save(path, GameId.MTG)
         loaded = AliasLedger.load(path, GameId.MTG)
 
-        assert loaded.resolve(GameId.MTG, DataSource.ARENA, "76497") is not None
-        assert loaded.resolve(GameId.POKEMON, DataSource.SCRYFALL, "poke-1") is None
+        assert loaded.uuid_for(GameId.MTG, DataSource.ARENA, "76497") is not None
+        assert loaded.uuid_for(GameId.POKEMON, DataSource.SCRYFALL, "poke-1") is None
 
     def test_save_creates_parent_directory_if_missing(self, tmp_path: Path) -> None:
         ledger = AliasLedger()
@@ -96,4 +96,4 @@ class TestSaveAndLoad:
 
         loaded = AliasLedger.load(path, GameId.MTG)
 
-        assert loaded.resolve(GameId.MTG, DataSource.ARENA, "76497") is None
+        assert loaded.uuid_for(GameId.MTG, DataSource.ARENA, "76497") is None

@@ -493,7 +493,7 @@ def _parse_card_quantity_list(list_text: str) -> tuple[CardQuantity, ...]:
     card, the one-item case of this same grammar). Centralized here
     rather than re-derived per matcher, since every matcher shares the
     identical "and"/Oxford-comma phrase-list shape - the same near-identical-logic
-    situation card_resolution.card_uuid_for_name() and this module's own
+    situation card_names.card_uuid_for_name() and this module's own
     sibling partial_deck.distinct_card_uuids() were already promoted
     out of per-consumer copies for.
 

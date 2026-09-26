@@ -6,7 +6,7 @@ from typing import List
 import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.dojos.generic.data_constructors._uuid_resolution import _card_for_uuid
+from src.dojos.generic.data_constructors._row_values import _card_for_uuid
 from src.schema.type_hints import TrainingDatum
 
 

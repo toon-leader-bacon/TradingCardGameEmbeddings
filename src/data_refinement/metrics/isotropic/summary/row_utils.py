@@ -12,7 +12,7 @@ filtering, winner/eligibility lookups) are non-trivial enough that
 duplicating them per metric would be a real PRINCIPLES.md violation,
 not a stylistic preference.
 
-card_uuid_for_name() itself is re-exported from ../card_resolution.py,
+card_uuid_for_name() itself is re-exported from ../card_names.py,
 not defined here - see that module's own docstring for why (it became
 a byte-identical second consumer once games/row_utils.py needed the
 exact same lookup, which is what pushed it past the "duplicate per
@@ -42,7 +42,7 @@ from uuid import UUID
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.metrics.hash_utils import deck_uuid_from_cards
-from src.data_refinement.metrics.isotropic.card_resolution import (
+from src.data_refinement.metrics.isotropic.card_names import (
     card_uuid_for_name as card_uuid_for_name,
 )
 from src.schema.card import GenericDeck

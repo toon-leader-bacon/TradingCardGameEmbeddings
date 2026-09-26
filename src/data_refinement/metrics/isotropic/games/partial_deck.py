@@ -215,7 +215,7 @@ def distinct_card_uuids(
     mid_game_next_trashed_card_metric.py's own
     next_trashed_card_uuids label both reduce to exactly this
     transform, with zero per-metric row-shape variation - the same
-    situation card_resolution.py's own module docstring documents for
+    situation card_names.py's own module docstring documents for
     why card_uuid_for_name() was promoted out of a single per-subpackage
     row_utils.py once a second, byte-identical consumer appeared. This
     lives in partial_deck.py (not row_utils.py) since both of its
