@@ -6,12 +6,6 @@ per training example in, one ground-truth float per example - but the
 scalar here is a pre-sigmoid LOGIT, and the loss is
 nn.BCEWithLogitsLoss (not nn.MSELoss), expecting `labels` in [0.0, 1.0]
 rather than an arbitrary regression target.
-
-Written as a NEW file alongside the existing
-src/dojos/loss/win_loss_bce_loss.py (WinLossBceLoss) rather than fixing
-that file in place - human decision this session: WinLossBceLoss's own
-shape (a multi-group comparison) and its unresolved +1.0/-1.0 encoding
-TODO are left as-is, untouched, still unused by any dojo.
 """
 
 from typing import List

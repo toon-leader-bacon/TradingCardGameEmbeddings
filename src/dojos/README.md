@@ -1,332 +1,109 @@
 # dojos
 
 Pluggable auxiliary training tasks for the card embedding model. Every
-dojo presents one interface to the training loop, the `Dojo` Protocol in
-`[dojo.py](dojo.py)`: `batches(split, budget, max_examples)` yields
-`DojoBatch`es (each has `inputs` for the encoder and `__len__`, the
-example count) whose card cost fits a `BatchBudget` the trainer sets from
-its hardware limit; `compute_loss(embeddings, batch)` returns a scalar
-per-example mean loss; `example_count(split)`, `trainable_parameters()`
-(the dojo's own decoder head, never the encoder) and `reset_head()`
-round it out. A dojo never owns its batch size - the budget is the
-trainer's. Most dojos read their labels from a parquet file produced by
-one of `../data_refinement/metrics/`'s metric classes; an "exotic" dojo
-whose task shape doesn't fit that (e.g. `[contrastive/](contrastive/)`,
-below) is sourced directly from `../data_refinement/`'s stores.
+dojo presents one interface to the trainer, the `Dojo` Protocol
+(`dojo.py`): `batches(split, budget, max_examples)` yields `DojoBatch`es
+(`inputs` for the encoder, `__len__` = example count) whose card cost
+fits the trainer's `BatchBudget`; `compute_loss(embeddings, batch)`
+returns a scalar per-example mean loss; `example_count(split)`,
+`trainable_parameters()` (the dojo's own decoder head, never the
+encoder) and `reset_head()` round it out. A dojo never owns its batch
+size - the budget is the trainer's.
+
+Most dojos read (input, label) rows from a parquet file one of
+`../data_refinement/metrics/`'s metrics wrote. The contrastive dojo
+reads decks straight from a `DeckBox` instead.
 
 Card holdout: each dojo is built with a `CardLookup` and a `HoldoutSpec`
 (`src/schema/holdout.py`) and reads cards through one `VisibleCardLookup`
-per split, so a TRAIN-split example can never contain a TEST or
-VALIDATION-tier card (TEST sees TRAIN+TEST; VALIDATION sees all). Row
-splits (8/1/1 by row, or by deck for contrastive) are unchanged and layer
-under it.
+per split, so a TRAIN example never contains a TEST- or VALIDATION-tier
+card (TEST sees TRAIN+TEST; VALIDATION sees all). Row splits (8/1/1 by
+row, or by deck for contrastive) layer under it.
 
-A small set of reusable generic dojo classes, one per `(input shape, task shape)` cell, plus
-thin per-metric subclasses that configure and inject a
-metric-family-specific `DataConstructor` into whichever generic cell
-that family's task shape needs.
+## Files
 
-## Shared plumbing (used by both generations)
+- `dojo.py` - the `Dojo`, `DojoBatch` and `BatchBudget` contract.
+- `batch.py` - `Batch`, the (inputs, labels) container generic dojos
+  yield.
+- `budgeted_batching.py` - `group_by_budget`, packs examples into
+  batches within a `BatchBudget`.
 
-- `[dojo.py](dojo.py)` - the `Dojo`, `DojoBatch` and `BatchBudget` contract.
-- `[batch.py](batch.py)` - `Batch`, the (inputs, labels) container every
-generic dojo yields.
-- `[budgeted_batching.py](budgeted_batching.py)` - `group_by_budget`, packs
-examples into batches within a `BatchBudget`.
-- `[mods/](mods/)` - `Mod`/`ModPipeline`, composable training-data
-transformations (e.g. masking) applied before batching. Each `Mod`
-declares its own `train_only: bool` at construction (default `True`)
-  - a plain augmentation mod (shuffling a deck, reordering json keys)
-  only runs during training; a mod that's a structural requirement of
-  the task itself (e.g. `MaskTargetKeyMod`, which must keep a field
-  masked at test/validation time too, or the model could just read the
-  answer off the input) is constructed with `train_only=False`.
-- `[file_managers/file_manager_parquet.py](file_managers/file_manager_parquet.py)` -
-`FileManagerParquet`/`ParquetChunkReader`, splits a metric's output
-parquet file into train/test/validation files and streams each in
-chunks. `splits_exist()` lets a caller check whether that's already been
-done for a given output directory/prefix, so a repeat construction can
-skip re-splitting.
-- `[file_managers/deck_box_dealer.py](file_managers/deck_box_dealer.py)` -
-`DeckBoxDealer`, a `FileManagerParquet`-equivalent for `DeckBox` (same
-split-management role, SQLite-native rather than parquet-native, since
-`DeckBox` itself is SQLite-backed - see `../data_refinement/deck_box/README.md`):
-persists one game's train/test/validation split assignment in its own
-SQLite file at `index_path` (separate from `DeckBox`'s own file),
-computed once via an exact-ratio ranking
-(`DeckBox.uuids_ranked_randomly()`) unless an assignment already
-exists there (`force_resplit=True` recomputes, the same escape hatch
-as `DojoConfig`'s). `decks_for()`/`training_decks()`/`test_decks()`/
-`validation_decks()` yield fixed-size groups of raw, unmodified
-`GenericDeck` objects per split (a "deck sample" - deliberately not
-"batch," reserved for `ContrastiveBatch` below). `shuffle=True` (used
-for `TRAIN`) reshuffles read order fresh on every call via SQL rather
-than holding a split's full uuid list in memory to reshuffle in
-Python - the one-time split *assignment* is seeded and reproducible
-given the same seed and box content, but this per-epoch reshuffle
-deliberately is not (a discussed, accepted trade-off - chasing full
-reproducibility here would mean going back to holding a full uuid
-list in memory). Mechanical, non-swappable.
-- `[generic/dojo_config.py](generic/dojo_config.py)` - `DojoConfig`, a
-frozen parameter object bundling every `GenericDojo` constructor
-argument that's configuration rather than a real collaborator: `name`
-(this dojo's `Trainer`-facing identity - set explicitly whenever more
-than one dojo is built from metric files sharing a bare filename, e.g.
-the same metric under two different expansion/format directories),
-`output_directory`/`output_file_prefix`/`force_resplit`/`rng_seed`
-(split-file management), and `strict_version_check` (see
-`plans/dojo_config.md` and `plans/card_binder_versioning.md`). A dumb
-value object - no methods, no resolution logic; `GenericDojo.__init__`
-is the only place a `None` field resolves to its fallback. Every
-`GenericDojo`/task-shape constructor takes `config: DojoConfig =
-DojoConfig()`, so its default preserves this project's original
-per-parameter defaults exactly.
-- `[loss/](loss/)` - `NocabLoss` Protocol plus concrete losses  
-(`MseLoss`, `FixedClassificationLoss`, `SoftClassificationLoss`,  
-`MaskedVectorRegressionLoss`, `BceLoss`, `PickPredictionCrossEntropyLoss`).
-A generic dojo builds whichever loss its task shape needs internally;
-callers never construct one directly.
+## Subdirectories
 
-## `generic/` - the generic dojo "cell"
+- **[`generic/`](generic/README.md)** - the reusable dojo cells, one per
+  `(input shape, task shape)`, plus the `DataConstructor`s that feed
+  them and the bases per-metric wrappers build on.
+- **`loss/`** - the `NocabLoss` Protocol and the row-wise losses the
+  cells use (`MseLoss`, `BceLoss`, `FixedClassificationLoss`,
+  `SoftClassificationLoss`, `MaskedVectorRegressionLoss`,
+  `PickPredictionCrossEntropyLoss`). A cell builds its own loss; callers
+  never construct one.
+- **`mods/`** - `Mod`/`ModPipeline`, input transformations applied
+  before batching (`MaskTargetKeyMod`, `ShuffleDeckMod`, `NoOpMod`). A
+  mod declares `train_only`: augmentations run on TRAIN only, while a
+  mod the task depends on (masking the field a dojo predicts) is built
+  with `train_only=False` so it applies on every split.
+- **`file_managers/`** - split management. `FileManagerParquet` splits a
+  metric's parquet into train/test/validation files and streams them in
+  chunks (`splits_exist()` lets a repeat construction reuse them).
+  `DeckBoxDealer` does the same for a `DeckBox`: a seeded, exact-ratio
+  split assignment kept in its own small SQLite index, and fixed-size
+  deck samples per split read straight from SQLite.
+- **`contrastive/`** - `ContrastiveDojo`, below.
+- **Per-source wrappers** - `gwent_one/`, `dominiontabs/`, `play_gwent/`,
+  `sts_gg/`, `seventeenlands/{draft_data,game_data,replay_data}/`: one
+  thin generic-cell subclass per metric (see `generic/README.md`'s
+  "Per-metric wrappers"). Every implemented metric has one.
 
-`[generic/data_constructor.py](generic/data_constructor.py)` defines  
-the `DataConstructor` Protocol every metric-family-specific constructor  
-satisfies: `build(chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]`, converting  
-one chunk of a metric's raw output rows into (input, label) pairs. A  
-generic dojo takes a `DataConstructor` as an injected collaborator  
-rather than owning one, so the same generic dojo class serves every  
-metric family that shares its `(input shape, task shape)` cell.
+## `contrastive/` - InfoNCE over deck co-occurrence
 
-- `CardAverageDataConstructor` - for `CardAverageMetric`'s family.
-  - Single card training datum input, regression (float) output.
-  - `uuid_column` (default `"nocab_uuid"`) is configurable the same way
-    `label_column` is, for a metric whose id column is named
-    differently because a row isn't "the" card in the usual
-    single-card-per-row sense - e.g. `TutorTargetPoolMetric`'s
-    `"pool_card_uuid"` (`TutorTargetPoolDojo`).
-- `MaskedFieldDataConstructor` - for `MaskedFieldMetric`'s family
-  - Single card training datum, where the specified card data json field is masked out before returning. Classification output (guess what the field was masked out, like rarity, card type, power, cost, etc).
-- `DeckLabelDataConstructor` - for `DeckLabelMetric`'s family
-  - A multi-card input (a deck of some type) with a classification output
-- `DeckCardMaskDataConstructor` - for `DeckCardMaskMetric`'s family
-  - A multi-card input where one card is targeted for exclusion. The training task is to guess what the missing card is.
-- `PickNumberDecayCurveDataConstructor` - for `PickNumberDecayCurveMetric`
-  - Single card input, a sparse `{bucket_index: take_rate}` output - one entry per pick-number bucket with enough samples to trust (a configurable `min_sample_count` threshold), rather than every bucket. Paired with `single_card_fixed_classification`'s cell (see below) via a non-default `loss_factory`.
-- `PackToPickChoiceSetDataConstructor` / `PoolConditionedPickDataConstructor` -
-  for `PackToPickChoiceSetMetric` / `PoolConditionedPickMetric`
-  - A ragged pack of option cards input (plus a second, optional pool
-    card group for the latter), the picked option's POSITION within
-    that row's own option list as output - a label shape no other
-    `DataConstructor` needed before. Skips the whole row if ANY option
-    fails to resolve (unlike `DeckLabelDataConstructor`'s "drop
-    individual unresolved cards, keep the row" convention - here the
-    label is a position that would otherwise go stale). Feed
-    `multi_card_option_selection`/`multi_group_option_selection` (see
-    below).
-- `AttackerBlockerCombatOutcomeDataConstructor` - for
-  `AttackerBlockerCombatOutcomeMetric`
-  - Two card groups (attackers, blockers) input, a signed net-kill-count
-    delta (float) output - a genuine regression over two groups, not a
-    position/selection label, so unlike the pair above it just reuses
-    `_cards_for_uuids()` for both groups directly. Skips a row only if
-    the attacker group is empty after resolution (mirrors
-    `DeckLabelDataConstructor`'s "empty result -> skip the row"
-    convention); an empty blocker group (an unblocked attack) is a
-    valid, expected result, never a skip condition. Feeds
-    `multi_group_regression` (see below).
-- Other custom data constructors, etc.
+Trains embeddings directly on "these cards appear in the same deck",
+sourced from a `DeckBox` through a `DeckBoxDealer`: no metric, no parquet
+file, no learned decoder head. It doesn't fit the generic cells because
+InfoNCE needs every item's embedding in a batch jointly, not a
+row-independent `(output, label) -> loss`.
 
-### `generic/single_card_regression/` - single card in, scalar out
+- `pair_constructor.py` - `ContrastivePairConstructor` Strategy: one deck
+  sample -> one `ContrastiveBatch`, deciding what counts as a positive
+  pair. This is the research surface. `SingleCardPairConstructor`
+  samples single cards (every same-deck card is a positive);
+  `MultiCardPairConstructor` samples fixed-size groups of cards.
+- `contrastive_batch.py` - `ContrastiveBatch`: a flat pool of `inputs`
+  (every item is both anchor and candidate), per-item card
+  `identities` (so exact duplicate cards are excluded from an anchor's
+  negatives), and `positive_cliques` (index sets that are mutually
+  positive, one per source deck).
+- `contrastive_loss.py` - `ContrastiveLoss` Strategy (batch-level, unlike
+  `NocabLoss`). `SingleCardInfoNCELoss`: InfoNCE over one cosine
+  similarity matrix of the whole pool. `MultiCardInfoNCELoss`: the same,
+  but a card's own item is excluded from both its positives and
+  negatives. Each validates its expected item shape and raises on a
+  mismatch.
+- `dojo.py` - `ContrastiveDojo`: wires dealer + pair constructor + card
+  lookup into `Dojo`. An example is one source deck, so the budget
+  becomes a deck count per batch; a batch with no positive clique of
+  size >= 2 is skipped and logged. It has no trainable parameters.
+  Defaults to `SingleCardInfoNCELoss`; the pair constructor and loss
+  must agree on item shape.
 
-`SingleCardRegressionDojo` (`dojo.py`) is the generic cell for
-`(SingleCardInput, Regression)`: single card in, one float label out.
-Takes `path_to_training_data`, an injected `DataConstructor`,
-`card_embedding_size`, and optionally a `ModPipeline`/`DojoConfig`.
-Internally builds `MseLoss` and its own
-`SingleCardRegressionDecoderHead` (`decoder_head.py` - a small MLP down
-to one scalar) - callers never construct either directly.
+Not built yet: multi-positive SupCon, a pooling `ContrastiveLoss`
+Decorator, and mixed contrastive + label-based training in one step.
 
-### `generic/single_card_fixed_classification/` - single card in, closed-vocabulary class out
+## How to run
 
-`SingleCardFixedClassificationDojo` (`dojo.py`) is the generic cell for  
-`(SingleCardInput, Fixed classification)`: single card in, one class  
-label out of a closed, per-metric vocabulary. Same constructor/method  
-shape as `SingleCardRegressionDojo`, plus `label_values: Sequence[str]`
+```python
+from src.data_refinement.card_binder.card_binder import CardBinder
+from src.dojos.dojo import BatchBudget
+from src.dojos.sts_gg.card_average_dojos import CardWinRateDojo
+from src.schema.game_id import GameId
+from src.schema.holdout import HoldoutSpec
+from src.schema.splits import Split
 
-For single card masking tasks, this is what is typically used where the masking is implemented by a masking Mod which is applied to the training, test and validation data (typically trying to predict the masked out item)
+binder = CardBinder.load([CardBinder.default_output_path(GameId.SLAY_THE_SPIRE_2)])
+dojo = CardWinRateDojo(binder, HoldoutSpec.no_holdout(), card_embedding_size=32)
+for batch in dojo.batches(Split.TRAIN, BatchBudget(32, lambda card: 1)):
+    loss = dojo.compute_loss(model(batch.inputs), batch)
+```
 
-`loss_factory` (default `FixedClassificationLoss`) lets a caller swap in
-a differently-scored loss over this same decoder head and split/batching
-plumbing, for a label shape that isn't one hard class per example:
-`SoftClassificationLoss` (a probability distribution over `label_values`
-that sums to 1 - `CardCharacterPredictionDojo`) and
-`MaskedVectorRegressionLoss` (independent per-position probabilities
-that don't sum to 1, some positions masked out per example -
-`PickNumberDecayCurveDojo`) are the two consumers today.
-
-### `generic/pooling.py` - shared multi-card pooling strategy
-
-Every multi-card generic cell faces the same problem before it can run
-its MLP: a deck is a *variable-length* list of card embeddings, not
-one fixed-size vector like a single card.  `MeanEmbeddingPooler` is the only concrete pooler implemented so far.
-
-### `generic/option_scoring.py` - shared per-option scoring strategy
-
-Shared by `multi_card_option_selection`/`multi_group_option_selection`
-(below) for their "score each option in a ragged pack" task. Strategy
-(PATTERNS.md) - `OptionScoringHead` scores one example's ragged option
-embeddings, optionally conditioned on a single pooled context vector,
-producing one logit per option. Deliberately swappable rather than
-fixed: a low-capacity scorer forces more of the "why is this card good
-here" reasoning into the shared card embeddings themselves; a
-high-capacity one (e.g. full self-attention across the pack) can solve
-the task by absorbing that reasoning into its own weights instead,
-leaving embeddings comparatively under-constrained - swapping capacity
-for research should mean swapping this one collaborator, not
-rewriting either cell. `BilinearOptionScoringHead` is the only
-concrete implementation today - a compatibility score between each
-option and its optional context, low-capacity enough to still require
-real embedding structure to solve the task.
-
-### `generic/multi_card_regression/` - whole deck in, scalar out
-
-`MultiCardRegressionDojo` (`dojo.py`) is the generic cell for
-`(MultiCardInput, Regression)`: whole deck in, one float label out.
-
-### `generic/multi_card_binary_classification/` - whole deck in, single logit out
-
-`MultiCardBinaryClassificationDojo` (`dojo.py`) is the generic cell for
-`(MultiCardInput, Binary classification)`: whole deck in, one raw logit out. Similar to MultiCardRegressionDojo, but uses the bce_loss only expecting decoder head to output in the range [0.0, 1.0].
-
-### `generic/multi_card_fixed_classification/` - whole deck in, closed-vocabulary class out
-
-`MultiCardFixedClassificationDojo` (`dojo.py`) is the generic cell for  
-`(MultiCardInput, Fixed classification)`: whole deck in, one class  
-label out of a closed, per-metric vocabulary.
-
-### `generic/multi_card_option_selection/` - ragged pack of options in, which one was picked out
-
-`MultiCardOptionSelectionDojo` (`dojo.py`) is the generic cell for a
-ragged pack of option cards in (`MultiCardInput`), one logit per
-option out - unlike every other multi-card cell above, this never
-pools the input down to a single vector; the whole point is a
-per-option score, not one score for the whole set. Delegates scoring
-to an injected `OptionScoringHead` (`option_scoring.py`, above; `None`
-defaults to `BilinearOptionScoringHead`). Loss is always
-`PickPredictionCrossEntropyLoss` (`src/dojos/loss/`) - parameterless,
-so unlike `single_card_fixed_classification` there's nothing
-per-metric to build it from. Today's only consumer:
-`PackToPickChoiceSetDojo`.
-
-### `generic/multi_group_option_selection/` - ragged pack of options + a conditioning group in, which option was picked out
-
-`MultiGroupOptionSelectionDojo` (`dojo.py`) is the sibling cell for
-`MultiGroupInput = [pack_option_cards, pool_cards]` - the same
-per-option selection task, plus a second card group pooled (via an
-injected `EmbeddingPooler`, `pooling.py`) into a single context vector
-that conditions each option's score. **Group order is load-bearing**:
-`src/schema/type_hints.py`'s `input_shape_of()` classifies shape by
-peeking group 0 only and raises on an empty list there - pack options
-(never empty) must stay index 0, the conditioning group (legitimately
-empty, e.g. a drafter's pool on the first pick of a draft) must stay
-index 1. Same loss as `multi_card_option_selection`. Today's only
-consumer: `PoolConditionedPickDojo`.
-
-### `generic/multi_group_regression/` - two card groups in, scalar regression out
-
-`MultiGroupRegressionDojo` (`dojo.py`) is the sibling cell to
-`multi_group_option_selection` for a genuine two-group *regression*
-task - both groups contribute symmetrically to one aggregate label,
-so there's no "which one" being scored. `MultiGroupRegressionDecoderHead`
-pools each group to a vector via a single shared `EmbeddingPooler`
-(one instance for both groups, not one per group), concatenates the
-pair (`[group_0_vector, group_1_vector]`, fixed order - no separator/
-segment token needed, since a plain `Linear` layer already has
-separate learned weights per input dimension, unlike a self-attention
-sequence that would need one), and runs a small MLP down to one
-scalar. When group 1 is empty, a learned `nn.Parameter` placeholder
-stands in for its pooled vector rather than calling the pooler on an
-empty list (undefined - see `EmbeddingPooler`) or assuming a plain
-zero vector is semantically neutral. Same group-0-must-be-non-empty
-ordering rule as `multi_group_option_selection` (`input_shape_of()`
-peeks group 0 only). Loss is always `MseLoss`. Today's only consumer:
-`AttackerBlockerCombatOutcomeDojo`.
-
-## `contrastive/` - exotic dojo for CLIP/InfoNCE-style contrastive training
-
-Trains the card embedding model directly on co-occurrence-in-a-deck,
-sourced straight from `../data_refinement/deck_box/`'s `DeckBox` and
-`../data_refinement/card_binder/`'s `CardLookup` - no metric, no
-parquet file, no learned decoder head. Doesn't fit the generic dojo
-cell pattern above: contrastive loss (InfoNCE) needs every item's
-embedding in a batch jointly (to build the similarity comparison
-across in-batch positives and negatives), not the row-independent
-`decoder_output, labels -> loss` shape every generic cell assumes.
-
-- `DeckBoxDealer` (`[file_managers/deck_box_dealer.py](file_managers/deck_box_dealer.py)`,
-  documented under "Shared plumbing" above) is this cell's source of
-  raw deck samples - it isn't contrastive-specific itself, just this
-  cell's main current consumer.
-- `[pair_constructor.py](contrastive/pair_constructor.py)` - `ContrastivePairConstructor`
-  Strategy: turns one deck sample into one `ContrastiveBatch`, deciding
-  what counts as a positive pair and how items are sampled. This is the
-  actual research surface - a different positive-pair definition (same-
-  color, same-archetype, etc.) or item shape (single-card vs. multi-
-  card group) is a new class here, not a change to `ContrastiveDojo`.
-  `SingleCardPairConstructor` is the only concrete implementation so
-  far: single-card items, `items_per_deck` sampled per deck (skipping
-  and logging a deck with fewer known cards than that), every same-deck
-  item marked mutually positive.
-- `[contrastive_batch.py](contrastive/contrastive_batch.py)` - `ContrastiveBatch`,
-  the `(inputs, identities, positive_cliques)` container a
-  `ContrastivePairConstructor` builds: `inputs` is one flat pool (every
-  item acts as both anchor and candidate for every other item in the
-  same batch), `identities` is a tuple of card uuid(s) per item -
-  positionally parallel to that item's own card order, not deduplicated
-  or reordered - so exact-duplicate cards can be excluded from the
-  negative pool at loss time without being precomputed or stored, and
-  `positive_cliques` is index groups - each entry a set of item indices
-  that are all mutually positive (one entry per surviving source deck
-  for `SingleCardPairConstructor`). Enforces one shared `InputShape`
-  across `inputs` the same way `Batch` does today.
-- `[contrastive_loss.py](contrastive/contrastive_loss.py)` - `ContrastiveLoss`
-  Strategy, sibling to but distinct from `NocabLoss` (batch-level, not
-  row-independent). Takes `item_embeddings: BatchedModelOutput` -
-  a concrete implementation validates its own expected per-item shape
-  (via `src/schema/type_hints.py`'s `output_shape_of()`) immediately and
-  raises `ValueError` on a mismatch, rather than a caller pooling to one
-  fixed shape first. `SingleCardInfoNCELoss` is the only concrete
-  implementation so far: single-positive InfoNCE via a numerically
-  stable `log_softmax` over cosine similarity, computed once across the
-  whole flat item pool (so every pairwise deck comparison falls out of
-  one similarity matrix, never special-cased per deck pair), excluding
-  exact-identity duplicates from a given anchor's negative pool.
-- `[dojo.py](contrastive/dojo.py)` - `ContrastiveDojo`, wiring a
-  `DeckBoxDealer` + `ContrastivePairConstructor` + `CardLookup` into
-  `Dojo.batches()` yielding `ContrastiveBatch` (skipping and logging a degenerate batch
-  - no positive clique of size >= 2 - rather than letting it fail deep
-  inside the loss), plus `compute_loss(item_embeddings, batch)`, which
-  reads identities and positive cliques off the batch since this task
-  shape has no per-example label at all.
-  Owns its `ContrastiveLoss` internally (an injected collaborator with a
-  sensible default), same convention as every generic dojo cell. A
-  future item-embedding-pooling need is a `ContrastiveLoss` Decorator
-  (PATTERNS.md) wrapping another `ContrastiveLoss`, not a separate
-  strategy `ContrastiveDojo` owns - there is no `ItemEmbeddingStrategy`
-  here.
-
-It implements `Dojo` too: an example is one source deck, the budget becomes a deck count per batch (`ContrastivePairConstructor.cards_per_deck`), and it has no trainable parameters. `ContrastiveBatch.__len__` is its surviving deck count.
-Single-card items only; a multi-card item shape, alternate
-`ContrastivePairConstructor`/`ContrastiveLoss` implementations
-(multi-positive SupCon, a pooling `ContrastiveLoss` Decorator), and a
-mixed contrastive + label-based training loop are all future work, not
-yet built.
-
-## Thin per-metric wrapper convention
-
-A per-source package (`gwent_one/`, `play_gwent/`, `sts_gg/`, etc.) holds thin generic-dojo subclasses, one per concrete metric.
-This is the prefer style for developing new dojos per metric, but exotic metrics may need a fully custom dojo that dose not fit neatly into an generic dojo cell/ style/ family.
-
-`src/dojos/seventeenlands/{draft_data,game_data,replay_data}/` follows
-this convention for all 26 of 17lands' metrics - every metric in that
-source has a thin wrapper dojo today, one file per metric module.
+`scripts/smoke_test_training_loop.py` drives real dojos through the
+`Trainer` end to end.

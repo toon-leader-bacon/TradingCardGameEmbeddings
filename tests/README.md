@@ -1,10 +1,13 @@
 # tests
 
-Test suite for the project. No fixed layout yet — expected to roughly
-mirror the `src/` container split (one test area per container) as
-each container gets real implementation to test against, rather than
-being decided up front before there's anything to test.
+pytest suite, mirroring `src/`'s layout (one directory per container)
+plus `scripts/` for tests of the scripts themselves. `conftest.py`
+patches `time.sleep` to a no-op for every test so retry/backoff paths
+run instantly.
 
-This file grows as the first container (likely `encoder_model` or
-`data_refinement`, whichever gets a real implementation first) gets
-its first tests written.
+Tests never need `data/`: they build small binders, deck boxes and
+parquet files in `tmp_path`. The one test that checks live project data
+skips when that data is absent.
+
+Run everything (format, lint, type-check, tests) with
+`./scripts/check.sh`, or just the tests with `python3 -m pytest tests -q`.
