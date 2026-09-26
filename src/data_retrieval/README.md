@@ -1,43 +1,74 @@
 # data_retrieval
 
 Collects raw card/deck data from external sources and writes it to
-disk untouched — no parsing, normalization, or schema conversion
-happens here, that's `data_refinement`'s job. Nothing this container
-produces is committed to git; it only ever writes into `data/raw`.
-Each source gets its own subdirectory so a broken or rate-limited
-source doesn't block the others.
+`data/raw/<source>/` untouched. No parsing, normalization or schema
+conversion happens here; that is `data_refinement`'s job. Nothing this
+container produces is committed to git. Each source gets its own
+subdirectory, so a broken or rate-limited source doesn't block the
+others.
 
-Internally, each source subdirectory is expected to be a fairly
-independent scraper/downloader with its own retry and auth concerns
-specific to that source — none of that is shared logic, so it stays
-local to the source rather than pushed up into this file. Three things
-live at this shared level instead: `rate_limiter.py` (deliberately
-placed here from the start, ahead of a second consumer — see its own
-module docstring), `download_utils.py` (extracted after the same
-stream-to-disk block showed up independently in three downloaders —
-the "rule of three" case, not a preemptive one), and `downloader.py`
-(the `Downloader` abstract base class every source's downloader class
-subclasses — see plans/downloader_base_class.md for the design
-discussion). What else is shared across sources, once something
-actually needs it, belongs at this level too rather than duplicated
-per source.
+## Files
 
-Every downloader class below except `seventeenlands/` subclasses
-`Downloader` (`downloader.py`) and follows its `phase_1()`/`phase_2()`
-convention — `SeventeenLandsDownloader`'s primary method takes a
-required `refs` list plus filters, which doesn't fit the no-arg
-`phase_1()` contract, so it deliberately keeps its own shape rather
-than being forced into this one. Every other source's convention: `phase_1()` always
-does a source's first fetch (a single static file, a fully
-self-contained paginated walk, or — for an id-list-then-detail source
-— just the id-list collection step); `phase_2()` does further fetching
-that depends on `phase_1()`'s own output, and defaults to a no-op
-(returning `phase_1()`'s own result unchanged) for a source with
-nothing further to fetch — see `Downloader`'s own docstring for the
-full contract. Every downloader's constructor accepts, at minimum, an
-optional `rate_limiter` (defaulting to `RateLimiter(requests_per_minute=60)`)
-and an optional `raw_data_dir` (defaulting to that class's own
-`DEFAULT_RAW_DATA_DIR`), and may declare further source-specific
-constructor arguments beyond those two.
+Shared by every source:
 
-Each writes into `data/raw/<source>/`.
+- `downloader.py`: `Downloader`, the abstract base class every source's
+  downloader subclasses (except 17lands, below).
+- `download_utils.py`: stream-to-disk GETs with retries
+  (`download_to_file`, `download_to_string`, `call_with_retries`) and
+  manifest-tracked appends for resumable crawls (`read_manifest`,
+  `append_with_manifest`).
+- `rate_limiter.py`: `RateLimiter`, request pacing.
+
+One subdirectory per source:
+
+| Directory | Game | What it downloads |
+|---|---|---|
+| `cardvault_fabtcg/` | Flesh and Blood | cardvault.fabtcg.com's full card CSV |
+| `dominiontabs/` | Dominion | dominiontabs' card database (fields + English text) |
+| `fabtcg_decklists/` | Flesh and Blood | fabtcg.com decklist pages |
+| `gwent_one/` | Gwent | gwent.one card search results (HTML fragments) |
+| `hearthstonejson/` | Hearthstone | one `cards.json` per Hearthstone build |
+| `isotropic/` | Dominion | Wayback-archived isotropic.org game logs |
+| `pitchstack/` | Flesh and Blood | pitchstack.gg deck ids and card lists (`pitchstack.md`: unimplemented endpoints) |
+| `play_gwent/` | Gwent | playgwent.com deck guides |
+| `pokemon_tcg/` | Pokemon | the pokemon-tcg-data repo's card and deck JSON |
+| `scryfall/` | MTG | a Scryfall oracle-cards bulk file |
+| `seventeenlands/` | MTG | 17lands per-set/per-format draft, game and replay CSVs (own [README](seventeenlands/README.md)) |
+| `spire_codex/` | Slay the Spire 2 | spire-codex `cards.json` and its paginated run export |
+| `sts2runs/` | Slay the Spire 2 | a monthly sts2runs.com run snapshot |
+| `sts_gg/` | Slay the Spire 2 | sts.gg run ids and run detail JSON |
+| `dominion/` | Dominion | not a downloader: research leads (`todo.md`) and a prototype replay scraper |
+
+## How it works
+
+A `Downloader` fetches in two phases. `phase_1()` does a source's first
+fetch: a single static file, a self-contained paginated walk, or, for an
+id-list-then-detail source, just the id list. `phase_2()` does fetching
+that depends on `phase_1()`'s output and defaults to returning
+`phase_1()`'s result for a source with nothing further to fetch (see
+`Downloader`'s docstring for the full contract). Every constructor
+accepts an optional `rate_limiter` (default
+`RateLimiter(requests_per_minute=60)`) and an optional `raw_data_dir`
+(default: the class's `DEFAULT_RAW_DATA_DIR`), plus any source-specific
+arguments.
+
+`SeventeenLandsDownloader` does not subclass `Downloader`: its main
+method takes a required `refs` list plus filters, which doesn't fit the
+no-argument `phase_1()` contract.
+
+## How to run
+
+```
+PYTHONPATH=. python3 scripts/run_data_retrieval.py --list
+PYTHONPATH=. python3 scripts/run_data_retrieval.py --source scryfall
+```
+
+Or from Python:
+
+```python
+from src.data_retrieval.scryfall.downloader import ScryfallOracleDownloader
+
+downloader = ScryfallOracleDownloader(oracle_cards_url)
+downloader.phase_1()
+raw_path = downloader.phase_2()  # data/raw/scryfall/...
+```

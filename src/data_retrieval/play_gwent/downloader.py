@@ -29,7 +29,6 @@ migrated under.
 
 import html
 import json
-import time
 from pathlib import Path
 from typing import ClassVar
 
@@ -37,13 +36,16 @@ import requests
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 
-from src.data_retrieval.download_utils import append_with_manifest, read_manifest
+from src.data_retrieval.download_utils import (
+    append_with_manifest,
+    call_with_retries,
+    read_manifest,
+)
 from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.rate_limiter import RateLimiter
 
 _REQUEST_TIMEOUT_SECONDS = 60
 _MAX_FETCH_ATTEMPTS = 3  # 1 initial try + up to 2 retries
-_RETRY_BACKOFF_SECONDS = 2.0
 # phase_1() doesn't know the true guide count up front (that's the
 # whole reason it pages until a short page signals the end) — this is
 # a rough, hand-set estimate used only to size the tqdm progress bar's
@@ -282,46 +284,30 @@ class PlayGwentDownloader(Downloader):
         return guides_path
 
     def _get_with_retries(self, url: str) -> requests.Response:
-        """GET url, retrying on failure up to _MAX_FETCH_ATTEMPTS times
-        total, with a fixed _RETRY_BACKOFF_SECONDS pause between
-        attempts.
+        """GET url, paced by this downloader's rate limiter, retrying via
+        download_utils.call_with_retries up to _MAX_FETCH_ATTEMPTS times.
 
-        Private helper — shared by phase_1() (per-page requests) and
-        phase_2() (per-guide requests), the two places this class
-        makes an outgoing request; centralizing retry behavior here
-        means both get it identically rather than two copies of the
-        same loop drifting apart (PRINCIPLES.md section 2). This
-        method itself has no opinion on what a caller does once
-        retries are exhausted — it always raises — phase_1() lets that
-        propagate as a hard failure, phase_2() catches it per-guide
-        for its best-effort skip (see that method's docstring for why
-        the two differ).
+        Private helper shared by phase_1() (per-page requests) and
+        phase_2() (per-guide requests). It always raises once retries
+        are exhausted; phase_1() lets that propagate as a hard failure,
+        phase_2() catches it per guide for its best-effort skip.
 
         Inputs:
             url: full URL to GET.
         Output: the successful requests.Response (2xx status).
-        Side effects: one paced network request per attempt (up to
-            _MAX_FETCH_ATTEMPTS); sleeps _RETRY_BACKOFF_SECONDS between
-            attempts (not after the last one).
+        Side effects: one paced network request per attempt; sleeps
+            between attempts (see call_with_retries).
         Exceptions: raises the last attempt's requests.RequestException
-            (e.g. connection error, timeout, non-2xx response) once
-            _MAX_FETCH_ATTEMPTS attempts have all failed.
+            once every attempt has failed.
         """
-        last_error: requests.RequestException | None = None
 
-        for attempt in range(_MAX_FETCH_ATTEMPTS):
+        def _attempt() -> requests.Response:
             self.rate_limiter.wait()
-            try:
-                response = requests.get(url, timeout=_REQUEST_TIMEOUT_SECONDS)
-                response.raise_for_status()
-                return response
-            except requests.RequestException as error:
-                last_error = error
-                if attempt < _MAX_FETCH_ATTEMPTS - 1:
-                    time.sleep(_RETRY_BACKOFF_SECONDS)
+            response = requests.get(url, timeout=_REQUEST_TIMEOUT_SECONDS)
+            response.raise_for_status()
+            return response
 
-        assert last_error is not None  # loop always runs >= 1 iteration
-        raise last_error
+        return call_with_retries(_attempt, max_attempts=_MAX_FETCH_ATTEMPTS)
 
     def _extract_guide_payload(self, html_text: str) -> dict:
         """Extract the "guide" payload embedded in a guide detail page.

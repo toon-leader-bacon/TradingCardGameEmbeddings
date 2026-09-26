@@ -5,10 +5,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from src.data_retrieval.play_gwent.downloader import (
-    _RETRY_BACKOFF_SECONDS,
-    PlayGwentDownloader,
-)
+from src.data_retrieval.download_utils import _RETRY_BACKOFF_SECONDS
+from src.data_retrieval.play_gwent.downloader import PlayGwentDownloader
 from src.data_retrieval.rate_limiter import RateLimiter
 from tests.data_retrieval.play_gwent.guide_detail_page_fixture import (
     DOUBLE_QUOTED_GUIDE_PAGE_HTML,
@@ -174,9 +172,7 @@ class TestPhase1:
         response.raise_for_status.side_effect = requests.HTTPError("500 Server Error")
 
         with patch("requests.get", return_value=response) as mock_get:
-            with patch(
-                "src.data_retrieval.play_gwent.downloader.time.sleep"
-            ) as mock_sleep:
+            with patch("src.data_retrieval.download_utils.time.sleep") as mock_sleep:
                 with pytest.raises(requests.HTTPError):
                     downloader.phase_1()
 
@@ -344,7 +340,7 @@ class TestPhase2:
                 succeeding_response,
             ],
         ) as mock_get:
-            with patch("src.data_retrieval.play_gwent.downloader.time.sleep"):
+            with patch("src.data_retrieval.download_utils.time.sleep"):
                 with patch(
                     "src.data_retrieval.play_gwent.downloader.tqdm.write"
                 ) as mock_write:
@@ -369,9 +365,7 @@ class TestGetWithRetries:
         response = _mock_text_response("ok")
 
         with patch("requests.get", return_value=response) as mock_get:
-            with patch(
-                "src.data_retrieval.play_gwent.downloader.time.sleep"
-            ) as mock_sleep:
+            with patch("src.data_retrieval.download_utils.time.sleep") as mock_sleep:
                 result = downloader._get_with_retries("https://example.test/x")
 
         assert result is response
@@ -389,9 +383,7 @@ class TestGetWithRetries:
         with patch(
             "requests.get", side_effect=[failing_response, succeeding_response]
         ) as mock_get:
-            with patch(
-                "src.data_retrieval.play_gwent.downloader.time.sleep"
-            ) as mock_sleep:
+            with patch("src.data_retrieval.download_utils.time.sleep") as mock_sleep:
                 result = downloader._get_with_retries("https://example.test/x")
 
         assert result is succeeding_response
@@ -406,9 +398,7 @@ class TestGetWithRetries:
         response.raise_for_status.side_effect = requests.HTTPError("500")
 
         with patch("requests.get", return_value=response) as mock_get:
-            with patch(
-                "src.data_retrieval.play_gwent.downloader.time.sleep"
-            ) as mock_sleep:
+            with patch("src.data_retrieval.download_utils.time.sleep") as mock_sleep:
                 with pytest.raises(requests.HTTPError):
                     downloader._get_with_retries("https://example.test/x")
 

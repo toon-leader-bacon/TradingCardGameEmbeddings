@@ -1,8 +1,7 @@
 # pitchstack
 
-`src/data_retrieval/pitchstack/` (deck version id collection + per-
-version card list collection) is implemented — see
-`src/data_retrieval/README.md`'s `pitchstack/` entry for current state.
+`PitchstackDeckDownloader` (`downloader.py`) collects deck version ids
+(`phase_1()`) and each version's card list (`phase_2()`).
 
 ## Not yet implemented
 
