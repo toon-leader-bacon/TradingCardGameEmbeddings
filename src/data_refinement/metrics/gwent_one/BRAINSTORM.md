@@ -3,9 +3,10 @@
 A todo/idea list of candidate metrics for Gwent's card pool, produced
 by scanning the live `data/raw/gwent_one/page_1.html` fragment (1,260
 cards, one AJAX response — see
-`src/data_retrieval/gwent_one/downloader.py`). None of this is
-designed or built yet — this is raw material for picking what to
-build next, not a spec.
+`src/data_retrieval/gwent_one/downloader.py`). Raw material for
+picking what to build next, not a spec. Built so far: the eight
+field-masking metrics (faction, color, rarity, set, type, armor,
+provision, power; see `README.md`).
 
 Each metric below states:
 

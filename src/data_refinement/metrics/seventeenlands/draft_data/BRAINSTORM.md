@@ -6,9 +6,8 @@ by running the `metric_writing` skill fresh against the raw CSV
 the first ~3000 lines — no Python interpreter is available in this
 environment, only PowerShell/Bash) rather than the small pre-extracted
 samples the original top-level `../BRAINSTORM.md` was written from.
-Nothing here is built yet — this supersedes that file's "## Draft
-data" section with corrected/sharpened ideas; the old section should
-be treated as retired once this file exists.
+This supersedes that file's "## Draft data" section. Built so far:
+six of these ideas (see `README.md`'s Files for which).
 
 ## What this session verified directly (corrections to the old draft)
 

@@ -1,10 +1,9 @@
-## In progress
+## Built
 
-- **Leader Prediction from Deck** (item 13 below) is being built now as
-  `LeaderMaskedFromDeckMetric` — see `plans/deck_card_masking.md` and
-  the new `DeckCardMaskMetric` base
-  (`../generic/deck_card_mask_metric.py`). Masks exactly one card (the leader)
-  per deck. **Deferred:** masking more than one target card per deck
+- **Leader Prediction from Deck** (item 13 below) is
+  `LeaderMaskedFromDeckMetric`, on the `DeckCardMaskMetric` base
+  (`../generic/deck_card_mask_metric.py`). It masks exactly one card (the
+  leader) per deck. **Deferred:** masking more than one target card per deck
   (e.g. "mask every artifact," "mask every stratagem" — see items 12
   and 20 below) needs its own output shape (a structured JSON masking
   rule, not a list-of-lists-of-strings) and its own design pass before

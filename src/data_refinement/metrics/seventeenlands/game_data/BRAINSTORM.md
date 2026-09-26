@@ -6,8 +6,8 @@ directly (`game_data/MSH.PremierDraft.csv`, first ~3000 rows via
 pandas), re-derived the top-level `BRAINSTORM.md`'s old "Game data"
 section with fresh eyes, and gave the two previously-undeveloped ideas
 (main/splash color prediction, tutor-target prediction) real design
-attention. Nothing here is built yet — this is raw material for
-picking what to build next, not a spec.
+attention. Raw material for picking what to build next, not a spec;
+`README.md` lists which ideas are built.
 
 ## Confirmed by this pass (supersedes/extends the shared BRAINSTORM.md)
 
