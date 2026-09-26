@@ -93,3 +93,17 @@ CSVs are picks, not decks, and are also out of scope here.
   across `card_binder/scryfall` (whether/how to pick a canonical printing
   at ingestion time) and this stage's name-resolution policy — not purely
   a `deck_box` fix, so the eventual owner may live in either place. 
+
+## Future enhancement (carried over from plans/deckbox_sqlite.md, now implemented)
+
+- A read-only, `CardLookup`-shaped counterpart to `DeckBox`, for
+  `DeckBoxDealer`'s (and any future consumer's) least-privilege access —
+  it takes a full `DeckBox` today though it only ever reads through it
+  (`uuids_ranked_randomly()`/`get_by_uuid()`). Worth doing precisely
+  because `DeckBox`'s SQLite rewrite made single-path `load()`
+  durable-by-default: a caller accidentally calling a mutating method
+  through a `DeckBox` reference that was only ever meant to be read from
+  now writes straight to the canonical on-disk file, with no `save()`
+  step that would have caught the mistake under the old in-memory
+  design. Not a regression from that rewrite, but its priority went up
+  because of it.

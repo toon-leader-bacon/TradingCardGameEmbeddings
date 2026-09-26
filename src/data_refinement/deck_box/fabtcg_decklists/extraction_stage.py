@@ -180,7 +180,7 @@ class FabtcgDecklistsExtractionStage:
             >>> binder = CardBinder.load(
             ...     [Path("data/final/cards/flesh_and_blood.jsonl")]
             ... )
-            >>> box = DeckBox.load([Path("data/final/decks/flesh_and_blood.jsonl")])
+            >>> box = DeckBox.load([Path("data/final/decks/flesh_and_blood.db")])
             >>> stage = FabtcgDecklistsExtractionStage()
             >>> changed_uuids = stage.extract(None, box, binder)
         """

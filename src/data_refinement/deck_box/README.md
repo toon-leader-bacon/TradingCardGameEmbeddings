@@ -65,42 +65,98 @@ merged or cross-referenced.
 
 ## Files
 
-- `deck_box.py` — `DeckBox`, the in-memory, multi-game deck store. Three
-  regions: **CRUD by UUID** (`create`/`create_if_absent`/`update`/
-  `replace`/`delete`, `get_by_uuid`, `all_uuids`, `all_decks`,
-  `version_for`, `card_binder_version_for`), **Persistence**
-  (`load`/`save`, `default_output_path`), **Private Helpers**
-  (`_upsert_deck`, `_read_header`). `create()` raises if `nocab_uuid` is
-  already stored; `create_if_absent()` is its counterpart for a
-  content-derived id scheme (e.g.
-  `metrics/hash_utils.py`'s `deck_uuid_from_cards()`) where the same
-  id legitimately recurring across calls is expected, not an error —
-  a recurrence is a no-op that returns whatever is already stored,
-  without comparing it against the argument; `update()` overwrites
-  whichever of `card_nocab_uuids`/`name` are given
+- `deck_box.py` — `DeckBox`, the SQLite-backed, multi-game deck store —
+  one SQLite file per game (e.g. `data/final/decks/mtg.db`), three
+  tables: `decks` (one row per deck, `nocab_uuid` primary key),
+  `deck_cards` (the `card_nocab_uuids` multiset, normalized to
+  `(deck_uuid, card_uuid, count)` — one row per distinct card, not one
+  per copy), and `metadata` (one row per game, holding
+  `card_binder_version`). Three regions: **CRUD by UUID**
+  (`create`/`create_if_absent`/`update`/`replace`/`delete`,
+  `get_by_uuid`, `all_uuids`, `all_decks`, `version_for`,
+  `card_binder_version_for`, `uuids_ranked_randomly`), **Persistence**
+  (`load`/`save`, `default_output_path`), **Private Helpers** (schema
+  setup, per-row reads/writes, and the metadata-invalidation mechanism
+  described below). `create()` raises if `nocab_uuid` is already
+  stored; `create_if_absent()` is its counterpart for a content-derived
+  id scheme (e.g. `metrics/hash_utils.py`'s `deck_uuid_from_cards()`)
+  where the same id legitimately recurring across calls is expected,
+  not an error — a recurrence is a no-op that returns whatever is
+  already stored, without comparing it against the argument; `update()`
+  overwrites whichever of `card_nocab_uuids`/`name` are given
   (`None` leaves that field untouched) rather than `CardBinder.update()`'s
   dict-merge, since `GenericDeck` has no dict-shaped field to merge into;
-  `replace()` fully swaps a deck's content. `DEFAULT_OUTPUT_DIR`/
-  `DEFAULT_OUTPUT_NAME` name this project's conventional per-game save
-  location (e.g. `DeckBox.default_output_path(GameId.MTG) ==
-  Path("data/final/decks/mtg.jsonl")`) — a recommended default, not an
+  `replace()` fully swaps a deck's content. Every mutating method
+  commits once, as the last thing it does — its own row write(s) and
+  any metadata invalidation land together, or a crash before that
+  commit leaves the store exactly as if the call had never happened.
+  `DEFAULT_OUTPUT_DIR`/`DEFAULT_OUTPUT_NAME` name this project's
+  conventional per-game save location (e.g.
+  `DeckBox.default_output_path(GameId.MTG) ==
+  Path("data/final/decks/mtg.db")`) — a recommended default, not an
   enforced requirement. Only `get_by_uuid`, `all_uuids`, and `all_decks`
   exist as name/uuid-shaped read methods today — no name-based or
   alias-based lookup, and no `decks_containing(card_uuid)`; these are
-  deliberately deferred until a real consumer needs them.
-  `version_for(source_game) -> str` is a derived content hash (same
-  reasoning as `CardBinder.version_for()` — see that container's
+  deliberately deferred until a real consumer needs them. `all_uuids()`/
+  `all_decks()` are lazy generators, not materialized lists — a read
+  against a box far larger than memory works the same way a small one
+  does. `version_for(source_game) -> str` is a derived content hash
+  (same reasoning as `CardBinder.version_for()` — see that container's
   README) over this game's decks, keyed on `nocab_uuid`/`name`/a
   *sorted* `card_nocab_uuids` (a multiset, so incidental list order
-  must not affect the hash). `card_binder_version_for(source_game) ->
-  str | None` is different in kind — not derived, since a deck carries
-  no `raw_content` to re-hash against: it's the upstream `CardBinder`
-  version `save()` was given, round-tripped through a reserved leading
-  JSON line (`{"__card_binder_version__": ..., "__game__": ...}`) in
-  the box's own JSONL file, read back by `load()`. `None` means that
-  game was never loaded from a file carrying that line (a fresh box,
-  or one saved before this existed) — callers checking staleness treat
-  that the same as a real mismatch, not a free pass.
+  must not affect the hash), streamed in `nocab_uuid` order rather than
+  sorting an in-memory list. `card_binder_version_for(source_game) ->
+  str | None` reads a real `metadata` row rather than a JSONL
+  header-line convention — `None` means either "never stamped" or
+  "a prior run's mutating call cleared this game's stamp and no
+  `save()` has re-established it since" (see crash-safety below);
+  callers checking staleness treat both the same, not a free pass.
+
+  `load(paths)` has three distinct behaviors. `load([])` (or the bare
+  `DeckBox()` constructor) opens a fresh `:memory:` box with no path
+  association — the sanctioned way to start empty. `load([one_path])`
+  **always** connects directly to that path, whether or not it exists
+  yet, so every mutating call after that persists immediately as its
+  own atomic commit rather than accumulating in memory — this is what
+  lets this container's largest source
+  (`seventeenlands_game_data`, ~15-20M decks) survive a crash
+  mid-ingestion with only genuinely-unprocessed work lost, not
+  everything. `load([2+ paths])` always merges into a *fresh*
+  `:memory:` connection, last-path-wins on a repeated `nocab_uuid` (and
+  on a game's `card_binder_version`), and never mutates any given path
+  — a genuine read, unlike the single-path case. `save(path,
+  source_game, card_binder_version)` narrows to two cases: already
+  connected to `path` → upsert the `metadata` row only, since every
+  deck is already durable; not yet connected (still `:memory:`, or
+  connected elsewhere) → copy this box's full current state to `path`
+  (via `sqlite3.Connection.backup()`), then the same upsert.
+
+  **Crash-safety of the version stamp:** the first mutating call
+  touching a given game in a freshly-`load()`-ed session clears that
+  game's `metadata` row before its own commit, so a crash partway
+  through a re-run against an existing box leaves
+  `card_binder_version_for()` returning `None` (already treated as
+  untrustworthy by every caller, e.g.
+  `src/dojos/contrastive/dojo.py`'s `ContrastiveDojo._check_deck_box_version()`)
+  rather than a stale value that no longer describes every row.
+  `save()` re-establishes the row only once a run completes without
+  error. This depends on every `DeckExtractionStage` being idempotent
+  under retry (deterministic identity +
+  `get_by_uuid()`-then-`create()`-or-`update()` — see `extraction.py`'s
+  own docstring); a hypothetical future stage that instead minted a
+  fresh, non-deterministic uuid per row would silently duplicate
+  content on a crash-then-retry.
+
+  `uuids_ranked_randomly(source_game, seed) -> Iterator[tuple[UUID,
+  int, int]]` ranks every one of a game's decks by a one-time
+  randomized order, entirely inside this connection — the primitive
+  `DeckBoxDealer` (`src/dojos/file_managers/DeckBoxDealer.py`) builds
+  an exact-ratio train/test/validation split on top of, without either
+  side needing to materialize a full uuid list in Python or leak
+  schema details across the boundary. SQLite's own `RANDOM()` isn't
+  seedable, so the ordering is a deterministic hash of `(seed,
+  nocab_uuid)` instead — reproducible given the same seed and box
+  content, unlike a bare `ORDER BY RANDOM()` would be.
 - `extraction.py` — `DeckExtractionStage`, the shared Strategy Protocol
   (structural, `typing.Protocol` — matching `CardIngestionStage`'s own
   convention) every raw deck source implements:
@@ -117,17 +173,20 @@ merged or cross-referenced.
   same raw data idempotent rather than duplicating decks.
 - `build.py` — `build_or_update_deck_box(raw_path, extraction_stage,
   box_path, card_lookup) -> list[UUID]`, the thin driver:
-  `DeckBox.load([box_path] if it exists else [])` →
+  `DeckBox.load([box_path])` →
   `extraction_stage.extract(raw_path, box, card_lookup)` →
   `box.save(box_path, extraction_stage.SOURCE_GAME,
   card_lookup.version_for(extraction_stage.SOURCE_GAME))` → return
-  `extract()`'s own `list[UUID]` unchanged. No `source_game` parameter of
-  its own — it reads `extraction_stage.SOURCE_GAME`. The saved box is
-  stamped with the `CardBinder` version its card references were
-  resolved against (see `DeckBox.save()`'s own docstring) — every raw
-  row extraction already resolves through `card_lookup`, so the
-  version is simply
-  `card_lookup.version_for(extraction_stage.SOURCE_GAME)`.
+  `extract()`'s own `list[UUID]` unchanged. `load()` connects directly
+  to `box_path` whether or not it already exists (see `deck_box.py`'s
+  entry above), so every deck `extract()` creates/updates is already
+  durable well before `save()` runs — `save()`'s only remaining job
+  here is the version stamp. No `source_game` parameter of its own —
+  it reads `extraction_stage.SOURCE_GAME`. The saved box is stamped
+  with the `CardBinder` version its card references were resolved
+  against (see `DeckBox.save()`'s own docstring) — every raw row
+  extraction already resolves through `card_lookup`, so the version is
+  simply `card_lookup.version_for(extraction_stage.SOURCE_GAME)`.
 
 ## Sources
 
@@ -251,7 +310,7 @@ merged or cross-referenced.
 ```mermaid
 flowchart TD
     A["raw_path\n(a future deck source's raw dump)"] --> B["build_or_update_deck_box()"]
-    B --> C["DeckBox.load([box_path])\nif it exists, else load([])"]
+    B --> C["DeckBox.load([box_path])\n(always connects directly, creating\nbox_path if it doesn't exist yet)"]
     C --> D["extraction_stage.extract(raw_path, box, card_lookup)"]
     D --> E["per raw row:\ncard_lookup.get_by_name/get_by_alias()\nresolves each card reference"]
     E --> F["box.create(GenericDeck(...))"]
@@ -287,7 +346,7 @@ box.save(
 )
 
 # Reading a saved deck box back:
-loaded = DeckBox.load([Path("data/final/decks/mtg.jsonl")])
+loaded = DeckBox.load([Path("data/final/decks/mtg.db")])
 list(loaded.all_decks(GameId.MTG))
 ```
 

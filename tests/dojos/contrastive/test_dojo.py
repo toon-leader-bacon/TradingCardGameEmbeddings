@@ -1,4 +1,5 @@
 import logging
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -9,9 +10,9 @@ import torch
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.dojos.contrastive.contrastive_batch import ContrastiveBatch
-from src.dojos.contrastive.deck_box_dealer import DeckBoxDealer
 from src.dojos.contrastive.dojo import ContrastiveDojo
 from src.dojos.dojo import BatchBudget, Dojo
+from src.dojos.file_managers.DeckBoxDealer import DeckBoxDealer
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
 from src.schema.card import GenericCard, GenericDeck, Provenance
@@ -69,7 +70,12 @@ def _dealer_with_decks(count: int) -> DeckBoxDealer:
     box = DeckBox()
     for _ in range(count):
         box.create(_deck())
-    return DeckBoxDealer(box, GameId.MTG, split_ratios=[1, 0, 0], seed=1)
+    # A throwaway index file - these tests don't care about a dealer's
+    # persisted index location, only its dealt-decks behavior, so a
+    # fresh tempdir per call avoids threading a tmp_path fixture
+    # through every one of this module's test methods.
+    index_path = Path(tempfile.mkdtemp()) / "dealer.db"
+    return DeckBoxDealer(box, GameId.MTG, index_path, split_ratios=[1, 0, 0], seed=1)
 
 
 _BUDGET = BatchBudget(max_cost=10, cost_of=lambda card: 1)
@@ -231,9 +237,14 @@ class TestVersionCheck:
         binder = CardBinder()
         box = DeckBox()
         box.create(_deck())
-        path = tmp_path / "mtg.jsonl"
+        path = tmp_path / "mtg.db"
         box.save(path, GameId.MTG, binder.version_for(GameId.MTG))
-        dealer = DeckBoxDealer(DeckBox.load([path]), GameId.MTG, split_ratios=[1, 0, 0])
+        dealer = DeckBoxDealer(
+            DeckBox.load([path]),
+            GameId.MTG,
+            tmp_path / "dealer.db",
+            split_ratios=[1, 0, 0],
+        )
 
         dojo = ContrastiveDojo(
             dealer=dealer,
@@ -250,9 +261,14 @@ class TestVersionCheck:
         binder = CardBinder()
         box = DeckBox()
         box.create(_deck())
-        path = tmp_path / "mtg.jsonl"
+        path = tmp_path / "mtg.db"
         box.save(path, GameId.MTG, "stale-version")
-        dealer = DeckBoxDealer(DeckBox.load([path]), GameId.MTG, split_ratios=[1, 0, 0])
+        dealer = DeckBoxDealer(
+            DeckBox.load([path]),
+            GameId.MTG,
+            tmp_path / "dealer.db",
+            split_ratios=[1, 0, 0],
+        )
 
         with pytest.raises(ValueError, match="CardBinder"):
             ContrastiveDojo(

@@ -47,6 +47,26 @@ parquet file into train/test/validation files and streams each in
 chunks. `splits_exist()` lets a caller check whether that's already been
 done for a given output directory/prefix, so a repeat construction can
 skip re-splitting.
+- `[file_managers/DeckBoxDealer.py](file_managers/DeckBoxDealer.py)` -
+`DeckBoxDealer`, a `FileManagerParquet`-equivalent for `DeckBox` (same
+split-management role, SQLite-native rather than parquet-native, since
+`DeckBox` itself is SQLite-backed - see `../data_refinement/deck_box/README.md`):
+persists one game's train/test/validation split assignment in its own
+SQLite file at `index_path` (separate from `DeckBox`'s own file),
+computed once via an exact-ratio ranking
+(`DeckBox.uuids_ranked_randomly()`) unless an assignment already
+exists there (`force_resplit=True` recomputes, the same escape hatch
+as `DojoConfig`'s). `decks_for()`/`training_decks()`/`test_decks()`/
+`validation_decks()` yield fixed-size groups of raw, unmodified
+`GenericDeck` objects per split (a "deck sample" - deliberately not
+"batch," reserved for `ContrastiveBatch` below). `shuffle=True` (used
+for `TRAIN`) reshuffles read order fresh on every call via SQL rather
+than holding a split's full uuid list in memory to reshuffle in
+Python - the one-time split *assignment* is seeded and reproducible
+given the same seed and box content, but this per-epoch reshuffle
+deliberately is not (a discussed, accepted trade-off - chasing full
+reproducibility here would mean going back to holding a full uuid
+list in memory). Mechanical, non-swappable.
 - `[generic/dojo_config.py](generic/dojo_config.py)` - `DojoConfig`, a
 frozen parameter object bundling every `GenericDojo` constructor
 argument that's configuration rather than a real collaborator: `name`
@@ -243,13 +263,10 @@ embedding in a batch jointly (to build the similarity comparison
 across in-batch positives and negatives), not the row-independent
 `decoder_output, labels -> loss` shape every generic cell assumes.
 
-- `[deck_box_dealer.py](contrastive/deck_box_dealer.py)` - `DeckBoxDealer`,
-  a `FileManagerParquet`-equivalent for `DeckBox`: partitions one
-  game's decks into a seeded train/test/validation split at
-  construction, and `training_decks()`/`test_decks()`/`validation_decks()`
-  yield fixed-size groups of raw, unmodified `GenericDeck` objects per
-  split (a "deck sample" - deliberately not "batch," which is reserved
-  for `ContrastiveBatch` below). Mechanical, non-swappable.
+- `DeckBoxDealer` (`[file_managers/DeckBoxDealer.py](file_managers/DeckBoxDealer.py)`,
+  documented under "Shared plumbing" above) is this cell's source of
+  raw deck samples - it isn't contrastive-specific itself, just this
+  cell's main current consumer.
 - `[pair_constructor.py](contrastive/pair_constructor.py)` - `ContrastivePairConstructor`
   Strategy: turns one deck sample into one `ContrastiveBatch`, deciding
   what counts as a positive pair and how items are sampled. This is the

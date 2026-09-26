@@ -158,7 +158,7 @@ class PlayGwentDeckExtractionStage:
 
         Example:
             >>> binder = CardBinder.load([Path("data/final/cards/gwent.jsonl")])
-            >>> box = DeckBox.load([Path("data/final/decks/gwent.jsonl")])
+            >>> box = DeckBox.load([Path("data/final/decks/gwent.db")])
             >>> stage = PlayGwentDeckExtractionStage()
             >>> changed_uuids = stage.extract(None, box, binder)
         """

@@ -1,4 +1,3 @@
-import json
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -297,7 +296,7 @@ class TestCardBinderVersionFor:
     def test_round_trips_through_save_and_load(self, tmp_path: Path) -> None:
         box = DeckBox()
         box.create(_deck("Mono Red", [uuid4()]))
-        path = tmp_path / "mtg.jsonl"
+        path = tmp_path / "mtg.db"
 
         box.save(path, GameId.MTG, "binder-v1")
         loaded = DeckBox.load([path])
@@ -309,48 +308,57 @@ class TestCardBinderVersionFor:
     ) -> None:
         box = DeckBox()
         box.create(_deck("Fire Deck", [uuid4()], source_game=GameId.POKEMON))
-        path = tmp_path / "pokemon.jsonl"
+        path = tmp_path / "pokemon.db"
 
         box.save(path, GameId.POKEMON, "binder-v1")
         loaded = DeckBox.load([path])
 
         assert loaded.card_binder_version_for(GameId.MTG) is None
 
-    def test_none_for_a_legacy_file_with_no_header_line(self, tmp_path: Path) -> None:
-        legacy_uuid = uuid4()
-        path = tmp_path / "mtg.jsonl"
-        with open(path, "w", encoding="utf-8") as legacy_file:
-            legacy_file.write(
-                json.dumps(
-                    {
-                        "nocab_uuid": str(legacy_uuid),
-                        "source_game": GameId.MTG.value,
-                        "name": "Mono Red",
-                        "card_nocab_uuids": [],
-                    }
-                )
-                + "\n"
-            )
-
-        loaded = DeckBox.load([path])
-
-        assert loaded.card_binder_version_for(GameId.MTG) is None
-        assert loaded.get_by_uuid(legacy_uuid) is not None
-
     def test_last_path_wins_across_multiple_loaded_paths(self, tmp_path: Path) -> None:
         first_box = DeckBox()
         first_box.create(_deck("Mono Red", [uuid4()]))
-        first_path = tmp_path / "first.jsonl"
+        first_path = tmp_path / "first.db"
         first_box.save(first_path, GameId.MTG, "binder-v1")
 
         second_box = DeckBox()
         second_box.create(_deck("Mono Blue", [uuid4()]))
-        second_path = tmp_path / "second.jsonl"
+        second_path = tmp_path / "second.db"
         second_box.save(second_path, GameId.MTG, "binder-v2")
 
         loaded = DeckBox.load([first_path, second_path])
 
         assert loaded.card_binder_version_for(GameId.MTG) == "binder-v2"
+
+    def test_none_after_a_mutating_call_invalidates_it(self, tmp_path: Path) -> None:
+        # See DeckBox's own docstring's crash-safety section: the first
+        # mutating call in a freshly-load()-ed session clears the
+        # version stamp, so a crash before the next save() leaves it
+        # correctly untrustworthy rather than falsely still matching.
+        box = DeckBox()
+        deck = _deck("Mono Red", [uuid4()])
+        box.create(deck)
+        path = tmp_path / "mtg.db"
+        box.save(path, GameId.MTG, "binder-v1")
+
+        reloaded = DeckBox.load([path])
+        assert reloaded.card_binder_version_for(GameId.MTG) == "binder-v1"
+        reloaded.update(deck.nocab_uuid, name="Renamed")
+
+        assert reloaded.card_binder_version_for(GameId.MTG) is None
+
+    def test_a_pure_read_session_never_invalidates_it(self, tmp_path: Path) -> None:
+        box = DeckBox()
+        deck = _deck("Mono Red", [uuid4()])
+        box.create(deck)
+        path = tmp_path / "mtg.db"
+        box.save(path, GameId.MTG, "binder-v1")
+
+        reloaded = DeckBox.load([path])
+        reloaded.get_by_uuid(deck.nocab_uuid)
+        list(reloaded.all_decks(GameId.MTG))
+
+        assert reloaded.card_binder_version_for(GameId.MTG) == "binder-v1"
 
 
 class TestLoad:
@@ -359,19 +367,36 @@ class TestLoad:
 
         assert list(box.all_decks(GameId.MTG)) == []
 
+    def test_single_path_connects_directly_even_when_missing(
+        self, tmp_path: Path
+    ) -> None:
+        # The important correction from this rewrite's second design
+        # pass: a brand-new path (never saved before) must still get a
+        # DIRECT connection, not a throwaway :memory: box - otherwise a
+        # first-ever ingestion's progress would be lost on a crash,
+        # never reaching save(). See DeckBox's own docstring.
+        path = tmp_path / "does" / "not" / "exist" / "mtg.db"
+
+        box = DeckBox.load([path])
+        box.create(_deck("Mono Red", [uuid4()]))
+
+        assert path.exists()
+        reopened = DeckBox.load([path])
+        assert len(list(reopened.all_decks(GameId.MTG))) == 1
+
     def test_last_path_wins_on_uuid_collision_across_paths(
         self, tmp_path: Path
     ) -> None:
         deck = _deck("Mono Red", [uuid4()])
         first_box = DeckBox()
         first_box.create(deck)
-        first_path = tmp_path / "first.jsonl"
+        first_path = tmp_path / "first.db"
         first_box.save(first_path, GameId.MTG, "binder-v1")
 
         updated_deck = replace(deck, card_nocab_uuids=[uuid4(), uuid4()])
         second_box = DeckBox()
         second_box.create(updated_deck)
-        second_path = tmp_path / "second.jsonl"
+        second_path = tmp_path / "second.db"
         second_box.save(second_path, GameId.MTG, "binder-v2")
 
         merged = DeckBox.load([first_path, second_path])
@@ -379,6 +404,30 @@ class TestLoad:
         assert merged.get_by_uuid(deck.nocab_uuid).card_nocab_uuids == (
             updated_deck.card_nocab_uuids
         )
+
+    def test_multi_path_load_never_mutates_any_given_path(self, tmp_path: Path) -> None:
+        first_box = DeckBox()
+        first_box.create(_deck("Mono Red", [uuid4()]))
+        first_path = tmp_path / "first.db"
+        first_box.save(first_path, GameId.MTG, "binder-v1")
+        first_mtime = first_path.stat().st_mtime
+        first_size = first_path.stat().st_size
+
+        second_box = DeckBox()
+        second_box.create(_deck("Mono Blue", [uuid4()]))
+        second_path = tmp_path / "second.db"
+        second_box.save(second_path, GameId.MTG, "binder-v2")
+
+        merged = DeckBox.load([first_path, second_path])
+        merged.create(_deck("Newly created only in the merged box", [uuid4()]))
+
+        assert first_path.stat().st_mtime == first_mtime
+        assert first_path.stat().st_size == first_size
+        # Neither original file gained the deck created only on the
+        # merged (fresh :memory:) box - confirms the merge is a real
+        # copy, not a live connection to either input.
+        assert len(list(DeckBox.load([first_path]).all_decks(GameId.MTG))) == 1
+        assert len(list(DeckBox.load([second_path]).all_decks(GameId.MTG))) == 1
 
 
 class TestSaveLoadRoundTrip:
@@ -388,7 +437,7 @@ class TestSaveLoadRoundTrip:
         box = DeckBox()
         deck = _deck("Mono Red", [uuid4()])
         box.create(deck)
-        path = tmp_path / "mtg.jsonl"
+        path = tmp_path / "mtg.db"
 
         box.save(path, GameId.MTG, "binder-v1")
         loaded = DeckBox.load([path])
@@ -406,7 +455,7 @@ class TestSaveLoadRoundTrip:
         box = DeckBox()
         deck = _deck("Mono Red", [repeated, repeated, repeated, uuid4()])
         box.create(deck)
-        path = tmp_path / "mtg.jsonl"
+        path = tmp_path / "mtg.db"
 
         box.save(path, GameId.MTG, "binder-v1")
         loaded = DeckBox.load([path])
@@ -417,24 +466,31 @@ class TestSaveLoadRoundTrip:
         )
         assert reloaded_deck.card_nocab_uuids.count(repeated) == 3
 
-    def test_writes_only_requested_games_subset(self, tmp_path: Path) -> None:
+    def test_backup_copies_every_game_regardless_of_source_game_argument(
+        self, tmp_path: Path
+    ) -> None:
+        # Unlike the old JSONL implementation, save() no longer filters
+        # by source_game when it has to copy a still-":memory:" box's
+        # full state to path (the not-yet-connected branch) - see
+        # save()'s own docstring. source_game is purely the metadata
+        # stamp's key here, not a row filter.
         box = DeckBox()
         box.create(_deck("Mono Red", [uuid4()], source_game=GameId.MTG))
         box.create(_deck("Fire Deck", [uuid4()], source_game=GameId.POKEMON))
-        path = tmp_path / "mtg.jsonl"
+        path = tmp_path / "mtg.db"
 
         box.save(path, GameId.MTG, "binder-v1")
 
         loaded = DeckBox.load([path])
         assert list(loaded.all_decks(GameId.MTG)) != []
-        assert list(loaded.all_decks(GameId.POKEMON)) == []
+        assert list(loaded.all_decks(GameId.POKEMON)) != []
 
     def test_preserves_provenance_when_present(self, tmp_path: Path) -> None:
         box = DeckBox()
         provenance = _provenance("run-1")
         deck = _deck("Mono Red", [uuid4()], provenance=provenance)
         box.create(deck)
-        path = tmp_path / "mtg.jsonl"
+        path = tmp_path / "mtg.db"
 
         box.save(path, GameId.MTG, "binder-v1")
         loaded = DeckBox.load([path])
@@ -442,45 +498,192 @@ class TestSaveLoadRoundTrip:
         reloaded_deck = loaded.get_by_uuid(deck.nocab_uuid)
         assert reloaded_deck.provenance == provenance
 
-    def test_provenance_defaults_to_none_when_absent_from_row(
-        self, tmp_path: Path
-    ) -> None:
-        # A deck row saved by a version of this class before the
-        # "provenance" key existed at all — load() must not raise or
-        # guess, just treat it as unset.
-        legacy_uuid = uuid4()
-        path = tmp_path / "mtg.jsonl"
-        with open(path, "w", encoding="utf-8") as legacy_file:
-            legacy_file.write(
-                json.dumps(
-                    {
-                        "nocab_uuid": str(legacy_uuid),
-                        "source_game": GameId.MTG.value,
-                        "name": "Mono Red",
-                        "card_nocab_uuids": [],
-                    }
-                )
-                + "\n"
-            )
+    def test_provenance_defaults_to_none_when_absent(self, tmp_path: Path) -> None:
+        box = DeckBox()
+        deck = _deck("Mono Red", [uuid4()], provenance=None)
+        box.create(deck)
+        path = tmp_path / "mtg.db"
 
+        box.save(path, GameId.MTG, "binder-v1")
         loaded = DeckBox.load([path])
 
-        assert loaded.get_by_uuid(legacy_uuid).provenance is None
+        assert loaded.get_by_uuid(deck.nocab_uuid).provenance is None
 
     def test_creates_parent_directory_if_missing(self, tmp_path: Path) -> None:
         box = DeckBox()
         box.create(_deck("Mono Red", [uuid4()]))
-        nested_path = tmp_path / "does" / "not" / "exist" / "mtg.jsonl"
+        nested_path = tmp_path / "does" / "not" / "exist" / "mtg.db"
 
         box.save(nested_path, GameId.MTG, "binder-v1")
 
         assert nested_path.exists()
 
 
+class TestUuidsRankedRandomly:
+    def test_ranks_are_a_dense_one_to_total_permutation(self) -> None:
+        box = DeckBox()
+        uuids = [uuid4() for _ in range(20)]
+        for nocab_uuid in uuids:
+            box.create(
+                GenericDeck(
+                    nocab_uuid=nocab_uuid,
+                    source_game=GameId.MTG,
+                    name="d",
+                    card_nocab_uuids=[],
+                )
+            )
+
+        ranked = list(box.uuids_ranked_randomly(GameId.MTG, seed=1))
+
+        assert {nocab_uuid for nocab_uuid, _, _ in ranked} == set(uuids)
+        assert sorted(rank for _, rank, _ in ranked) == list(range(1, 21))
+        assert all(total == 20 for _, _, total in ranked)
+
+    def test_reproducible_given_the_same_seed(self) -> None:
+        box = DeckBox()
+        for _ in range(15):
+            box.create(_deck("d", [uuid4()]))
+
+        first = sorted(
+            box.uuids_ranked_randomly(GameId.MTG, seed=42), key=lambda t: t[1]
+        )
+        second = sorted(
+            box.uuids_ranked_randomly(GameId.MTG, seed=42), key=lambda t: t[1]
+        )
+
+        assert first == second
+
+    def test_different_seeds_almost_certainly_differ(self) -> None:
+        box = DeckBox()
+        for _ in range(15):
+            box.create(_deck("d", [uuid4()]))
+
+        first = sorted(
+            box.uuids_ranked_randomly(GameId.MTG, seed=1), key=lambda t: t[1]
+        )
+        second = sorted(
+            box.uuids_ranked_randomly(GameId.MTG, seed=2), key=lambda t: t[1]
+        )
+
+        assert first != second
+
+    def test_empty_game_yields_nothing(self) -> None:
+        box = DeckBox()
+
+        assert list(box.uuids_ranked_randomly(GameId.MTG, seed=1)) == []
+
+
+class TestMutatingMethodsAreAtomic:
+    def test_a_crash_between_the_deck_row_and_its_card_rows_commits_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        # create() writes its deck row and its deck_cards rows, then
+        # commits ONCE at the end - not once per write - specifically
+        # so a crash between them can never leave a deck row with no
+        # cards. Simulate that crash directly: perform the row write
+        # create() does internally, without its own method's final
+        # commit, then "crash" (close without committing).
+        path = tmp_path / "mtg.db"
+        box = DeckBox.load([path])
+        deck = _deck("Mono Red", [uuid4(), uuid4()])
+
+        box._insert_deck_row(deck)  # what create() does before its cards write + commit
+        box._connection.close()  # never committed
+
+        reopened = DeckBox.load([path])
+        assert (
+            reopened.get_by_uuid(deck.nocab_uuid) is None
+        ), "an uncommitted partial write must not be visible after reconnecting"
+
+    def test_a_caught_exception_mid_create_never_leaks_into_a_later_call(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The failure mode the process-crash test above does NOT cover:
+        # a Python exception (not a process crash) raised mid-create(),
+        # caught by a caller who keeps reusing the SAME DeckBox instance
+        # for a later, unrelated create() - real callers loop
+        # create()/create_if_absent() per row against one shared box
+        # (e.g. every DeckExtractionStage). Without `with
+        # self._connection:`'s rollback, the doomed call's deck row
+        # would already be durably committed the moment
+        # _insert_deck_cards_rows raises (the old code committed after
+        # each private helper individually), so it would survive even
+        # though the whole create() call never returned successfully -
+        # and would still be there after a later, unrelated call.
+        path = tmp_path / "mtg.db"
+        box = DeckBox.load([path])
+        doomed_deck = _deck("Doomed", [uuid4()])
+
+        def _raise(*args: object, **kwargs: object) -> None:
+            raise RuntimeError("simulated mid-create failure")
+
+        monkeypatch.setattr(box, "_insert_deck_cards_rows", _raise)
+        with pytest.raises(RuntimeError, match="simulated mid-create failure"):
+            box.create(doomed_deck)
+
+        # Immediately after the caught exception - before any further
+        # calls - nothing from the doomed call should be visible.
+        assert box.get_by_uuid(doomed_deck.nocab_uuid) is None
+
+        # Reuse the SAME instance for an unrelated, successful create()
+        # - the doomed row must not have been silently folded into it.
+        monkeypatch.undo()
+        survivor_deck = _deck("Survivor", [uuid4()])
+        box.create(survivor_deck)
+
+        assert box.get_by_uuid(doomed_deck.nocab_uuid) is None, (
+            "the doomed call's partial write must not surface even after "
+            "this same instance went on to commit a later call successfully"
+        )
+        assert box.get_by_uuid(survivor_deck.nocab_uuid) is not None
+
+
+class TestCrashDuringExtractionThenRetry:
+    def test_retry_after_a_partial_run_converges_without_duplicating(
+        self, tmp_path: Path
+    ) -> None:
+        # Simulates the idempotent get_by_uuid()-then-create()-or-update()
+        # pattern every DeckExtractionStage follows (see extraction.py's
+        # own docstring) - a "crash" here is just abandoning a box after
+        # some rows without ever calling save().
+        path = tmp_path / "mtg.db"
+        all_uuids = [uuid4() for _ in range(5)]
+
+        def _extract_idempotently(box: DeckBox, uuids: list[UUID]) -> None:
+            for nocab_uuid in uuids:
+                if box.get_by_uuid(nocab_uuid) is None:
+                    box.create(
+                        GenericDeck(
+                            nocab_uuid=nocab_uuid,
+                            source_game=GameId.MTG,
+                            name="d",
+                            card_nocab_uuids=[],
+                        )
+                    )
+
+        # First (partial) run: only processes the first 3 of 5 rows,
+        # then "crashes" - never reaches save().
+        first_run = DeckBox.load([path])
+        _extract_idempotently(first_run, all_uuids[:3])
+
+        assert path.exists()  # already durable, per the direct-connect design
+        assert DeckBox.load([path]).card_binder_version_for(GameId.MTG) is None
+
+        # Retry: a fresh process re-runs extraction from the start over
+        # the SAME full raw source (all 5 uuids), then saves.
+        retry_run = DeckBox.load([path])
+        _extract_idempotently(retry_run, all_uuids)
+        retry_run.save(path, GameId.MTG, "binder-v2")
+
+        final = DeckBox.load([path])
+        assert set(final.all_uuids(GameId.MTG)) == set(all_uuids)
+        assert final.card_binder_version_for(GameId.MTG) == "binder-v2"
+
+
 class TestDefaultOutputPath:
     def test_matches_default_output_dir_and_name(self) -> None:
         assert DeckBox.default_output_path(GameId.MTG) == DeckBox.DEFAULT_OUTPUT_DIR / (
-            "mtg.jsonl"
+            "mtg.db"
         )
 
     def test_varies_by_game(self) -> None:

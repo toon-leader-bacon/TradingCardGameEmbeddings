@@ -206,7 +206,7 @@ class SeventeenLandsGameDataDeckExtractionStage:
 
         Example:
             >>> binder = CardBinder.load([Path("data/final/cards/mtg.jsonl")])
-            >>> box = DeckBox.load([Path("data/final/decks/mtg.jsonl")])
+            >>> box = DeckBox.load([Path("data/final/decks/mtg.db")])
             >>> stage = SeventeenLandsGameDataDeckExtractionStage()
             >>> changed_uuids = stage.extract(None, box, binder)
         """

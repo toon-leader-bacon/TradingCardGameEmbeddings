@@ -17,6 +17,23 @@ idempotent rather than duplicating a deck on every re-run — see
 src/data_refinement/deck_box/sts_gg/extraction_stage.py for the
 concrete example. replace() is not used by any stage today.
 
+THIS IDEMPOTENT-RETRY PATTERN IS NOW LOAD-BEARING, not just a nice-to-
+have, since DeckBox's SQLite rewrite (see deck_box.py's own docstring):
+build_or_update_deck_box() connects a single-path DeckBox directly to
+its destination file, so every create()/update() call this method
+makes persists to disk immediately, as it happens - a crash partway
+through a run leaves whatever was already processed durably on disk,
+and a retry re-runs extract() from the start over the same raw_path.
+That retry only converges to correct final content, rather than
+duplicating every already-processed row, because every current stage's
+identity is deterministic and every stage checks get_by_uuid() before
+deciding create() vs. update(). A hypothetical future stage that calls
+create() with a fresh, non-deterministic uuid per row (e.g. uuid4())
+would silently duplicate content on any crash-then-retry cycle under
+this model - harmless under DeckBox's old load-everything/save-once
+design, which never left partial writes on disk for a retry to
+encounter, but a real correctness bug under this one.
+
 A stage's own extract() is also free to widen raw_path's declared type
 to Path | None, defaulting to its own DEFAULT_RAW_PATH-style class
 constant when omitted — see the sts_gg stage's use of this convention.

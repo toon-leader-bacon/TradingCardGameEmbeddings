@@ -165,7 +165,7 @@ class Sts2RunsDeckExtractionStage:
             ...     [Path("data/final/cards/slay_the_spire_2.jsonl")]
             ... )
             >>> box = DeckBox.load(
-            ...     [Path("data/final/decks/slay_the_spire_2.jsonl")]
+            ...     [Path("data/final/decks/slay_the_spire_2.db")]
             ... )
             >>> stage = Sts2RunsDeckExtractionStage()
             >>> changed_uuids = stage.extract(None, box, binder)

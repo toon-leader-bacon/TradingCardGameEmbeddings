@@ -126,7 +126,7 @@ class StsGgDeckExtractionStage:
             >>> binder = CardBinder.load(
             ...     [Path("data/final/cards/slay_the_spire_2.jsonl")]
             ... )
-            >>> box = DeckBox.load([Path("data/final/decks/slay_the_spire_2.jsonl")])
+            >>> box = DeckBox.load([Path("data/final/decks/slay_the_spire_2.db")])
             >>> stage = StsGgDeckExtractionStage()
             >>> changed_uuids = stage.extract(None, box, binder)
         """

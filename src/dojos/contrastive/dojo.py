@@ -22,9 +22,9 @@ from src.dojos.contrastive.contrastive_loss import (
     ContrastiveLoss,
     SingleCardInfoNCELoss,
 )
-from src.dojos.contrastive.deck_box_dealer import DeckBoxDealer
 from src.dojos.contrastive.pair_constructor import ContrastivePairConstructor
 from src.dojos.dojo import BatchBudget, DojoBatch
+from src.dojos.file_managers.DeckBoxDealer import DeckBoxDealer
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
 from src.schema.type_hints import BatchedModelOutput, iter_cards
