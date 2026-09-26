@@ -22,7 +22,7 @@ from src.data_refinement.metrics.version_metadata import metadata_from_schema
 from src.dojos.batch import Batch
 from src.dojos.budgeted_batching import group_by_budget
 from src.dojos.dojo import BatchBudget, DojoBatch
-from src.dojos.file_managers.FileManagerParquet import MAX_INT, FileManagerParquet
+from src.dojos.file_managers.file_manager_parquet import MAX_INT, FileManagerParquet
 from src.dojos.generic.data_constructor import DataConstructor
 from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.loss.nocab_loss import NocabLoss
@@ -60,17 +60,16 @@ class GenericDojo:
             (DeckBox.card_binder_version_for()). None otherwise.
         config: this dojo's identity/split-management/version-check
             configuration (see DojoConfig, src/dojos/generic/dojo_config.py)
-            - defaults to DojoConfig() (every field at its default),
-            which preserves this project's original behavior exactly.
-            A None field resolves as follows (the only place this
-            resolution logic lives):
+            - defaults to DojoConfig() (every field at its default).
+            A None field falls back as follows (the only place this
+            fallback logic lives):
               - self.name = config.name or path_to_training_data.stem.
               - the split-file prefix passed to FileManagerParquet is
                 config.output_file_prefix or self.name (so setting
                 config.name alone already avoids a split-file collision,
                 without also needing output_file_prefix).
-              - self.rng is seeded from config.rng_seed exactly as a
-                bare rng_seed parameter used to be.
+              - self.rng is seeded from config.rng_seed (None means
+                unseeded).
               - make_splits() runs only when config.force_resplit is
                 True or the split files don't already exist
                 (FileManagerParquet.splits_exist()) - otherwise the

@@ -12,7 +12,7 @@ from src.data_refinement.deck_box.deck_box import DeckBox
 from src.dojos.contrastive.contrastive_batch import ContrastiveBatch
 from src.dojos.contrastive.dojo import ContrastiveDojo
 from src.dojos.dojo import BatchBudget, Dojo
-from src.dojos.file_managers.DeckBoxDealer import DeckBoxDealer
+from src.dojos.file_managers.deck_box_dealer import DeckBoxDealer
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
 from src.schema.card import GenericCard, GenericDeck, Provenance

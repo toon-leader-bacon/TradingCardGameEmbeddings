@@ -16,7 +16,7 @@ from src.data_refinement.metrics.version_metadata import (
 )
 from src.dojos.batch import Batch
 from src.dojos.dojo import BatchBudget, Dojo
-from src.dojos.file_managers.FileManagerParquet import FileManagerParquet
+from src.dojos.file_managers.file_manager_parquet import FileManagerParquet
 from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.generic_dojo import GenericDojo
 from src.dojos.generic.single_card_regression.decoder_head import (

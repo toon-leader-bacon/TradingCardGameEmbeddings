@@ -7,22 +7,32 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from src.dojos.file_managers.utils.split_postfix import get_split_file_postfix
 from src.schema.splits import Split
 from src.schema.ttv_splits import TTVSplits
 
 MAX_INT = 2**31 - 1
 
-# Split file order written by make_splits (see get_split_file_postfix).
+# Split file order written by make_splits (see _split_file_postfix).
 _SPLIT_INDEX = {Split.TRAIN: 0, Split.TEST: 1, Split.VALIDATION: 2}
+
+
+def _split_file_postfix(split_index: int) -> str:
+    """Filename postfix for one split file.
+
+    Inputs: split_index (int), position in make_splits' split_ratios.
+    Output: str, "train"/"test"/"validation" for 0/1/2, else
+        "split_{index}".
+    Side effects: none. Exceptions: none.
+    """
+    names = {0: "train", 1: "test", 2: "validation"}
+    return names.get(split_index, f"split_{split_index}")
 
 
 class ParquetChunkReader:
     """Adapter: wraps a pyarrow `ParquetFile`'s row-group batch iteration
-    so it yields pandas DataFrames, matching the shape callers already get
-    from pandas' `TextFileReader` (FileManagerCSV's chunked reader) —
-    `pandas.read_parquet` has no `chunksize=` equivalent, so this stands in
-    for it.
+    so it yields pandas DataFrames, like pandas' chunked `TextFileReader`
+    does for CSV — `pandas.read_parquet` has no `chunksize=` equivalent, so
+    this stands in for it.
     """
 
     def __init__(self, path: Path, batch_size: int) -> None:
@@ -69,7 +79,7 @@ class FileManagerParquet:
         """
         Inputs:
             path_to_training_data: source .parquet file (e.g. a metric
-                scanner's output, see AveragePickNumberMetric.finalize()).
+                parquet output).
             output_directory: directory the split files are written to.
             output_file_prefix: filename prefix for each split file.
             seed: RNG seed for shuffling; None means non-deterministic.
@@ -81,11 +91,7 @@ class FileManagerParquet:
             FileNotFoundError if path_to_training_data doesn't exist.
             ValueError if it doesn't have a .parquet suffix, or is empty.
             Whatever pyarrow.parquet.ParquetFile raises for a corrupt or
-            non-parquet file (parity with FileManagerCSV's __init__,
-            which similarly reads nrows=1 to confirm the CSV parses).
-
-        Note: unlike FileManagerCSV, there is no header_row concept —
-        parquet always carries its own schema.
+            non-parquet file.
         """
         self.path_to_training_data = path_to_training_data
         self.rng = random.Random(seed) if seed is not None else random.Random()
@@ -139,8 +145,8 @@ class FileManagerParquet:
             split_ratios: unnormalized ratios, see TTVSplits.from_unnormalized.
             delete_old_splits: remove pre-existing split files first.
             shuffle: shuffle the rows within each streamed batch before
-                splitting (same caveat as FileManagerCSV: this shuffles
-                within a batch, not across the whole file).
+                splitting (this shuffles within a batch, not across the
+                whole file).
             batch_size: rows per chunk in the returned readers.
             load_row_group_batch_size: rows read from the source file at
                 a time while streaming.
@@ -215,7 +221,7 @@ class FileManagerParquet:
     def _split_path(self, split_index: int) -> Path:
         return (
             self.output_directory
-            / f"{self.output_file_prefix}_{get_split_file_postfix(split_index)}.parquet"
+            / f"{self.output_file_prefix}_{_split_file_postfix(split_index)}.parquet"
         )
 
     def shuffle_split_index(
@@ -226,7 +232,7 @@ class FileManagerParquet:
 
         Inputs:
             split_index: which split file (0=train, 1=test, 2=validation,
-                see get_split_file_postfix).
+                see _split_file_postfix).
             batch_size: rows per chunk in the returned reader.
         Output: a ParquetChunkReader over the freshly-shuffled split file.
         Side effects: overwrites the target split file in place.
@@ -256,8 +262,8 @@ class FileManagerParquet:
             delete_old_splits: remove files matching this instance's
                 output_file_prefix under output_directory first.
         Output: one Path per split, in split order (not yet written to —
-            unlike FileManagerCSV, parquet has no header row to pre-write),
-            named via the shared get_split_file_postfix.
+            parquet has no header row to pre-write), named via
+            _split_file_postfix.
         Side effects: creates output_directory if missing; deletes old
             split files when delete_old_splits is True.
         Exceptions: none expected.
@@ -270,7 +276,7 @@ class FileManagerParquet:
                 path.unlink()
         return [
             self.output_directory
-            / f"{self.output_file_prefix}_{get_split_file_postfix(i)}.parquet"
+            / f"{self.output_file_prefix}_{_split_file_postfix(i)}.parquet"
             for i in range(num_splits)
         ]
 

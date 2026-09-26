@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.dojos.file_managers.DeckBoxDealer import DeckBoxDealer
+from src.dojos.file_managers.deck_box_dealer import DeckBoxDealer
 from src.schema.card import GenericDeck
 from src.schema.game_id import GameId
 from src.schema.splits import Split
@@ -157,7 +157,7 @@ class TestInit:
         # second batch's insert raise, simulating a crash mid-assignment
         # after the first batch has already been written to the
         # connection (but not yet committed).
-        import src.dojos.file_managers.DeckBoxDealer as deck_box_dealer_module
+        import src.dojos.file_managers.deck_box_dealer as deck_box_dealer_module
 
         monkeypatch.setattr(deck_box_dealer_module, "_ASSIGN_SPLITS_BATCH_SIZE", 2)
         box, _ = _box_with_decks(5)
@@ -229,7 +229,7 @@ class TestInit:
         # opens its own fresh connection) - this is a synthetic probe of
         # the `with self._connection:` idiom itself, the only way to
         # isolate it given DeckBoxDealer has no public re-entry point.
-        import src.dojos.file_managers.DeckBoxDealer as deck_box_dealer_module
+        import src.dojos.file_managers.deck_box_dealer as deck_box_dealer_module
 
         box, _ = _box_with_decks(5)
         dealer = DeckBoxDealer(

@@ -5,18 +5,15 @@ log</b>` section below it, which game_log_parser.py parses on top of this
 module (this module is not modified by that one). The six header metrics
 (opening-buy, pile-exhaustion/game-ending) need nothing from the log body.
 
-USES BEAUTIFULSOUP, MATCHING THIS PROJECT'S OWN CONVENTION for every
-other HTML raw source (../../fabtcg_decklists/fragment_parsing.py,
-../../../card_binder/gwent_one/ingestion_stage.py) - an earlier draft
-of this file hand-rolled regex-based tag stripping instead, confirmed
-live to be a real correctness bug waiting to happen: real files contain
-HTML entities (e.g. `&mdash;` as the 2013-era turn-boundary marker,
-`&#8217;`-style apostrophes are NOT used - apostrophes in card names
-like "Fool's Gold" are literal - but `&mdash;` alone was enough to
-prove hand-rolled stripping would silently mis-parse a real file, not
-just a hypothetical one). `Tag.get_text()` decodes entities and strips
-every nested tag uniformly, in one call, regardless of which of the two
-confirmed span-attribute shapes below a given file uses.
+USES BEAUTIFULSOUP, like every other HTML raw source in this project
+(../../../deck_box/fabtcg_decklists/fragment_parsing.py,
+../../../card_binder/gwent_one/ingestion_stage.py). Hand-rolled regex
+tag stripping would mis-parse real files: they contain HTML entities
+(e.g. `&mdash;` as the 2013-era turn-boundary marker; apostrophes in
+card names like "Fool's Gold" are literal). `Tag.get_text()` decodes
+entities and strips every nested tag uniformly, in one call, regardless
+of which of the two confirmed span-attribute shapes below a given file
+uses.
 
 CONFIRMED HEADER SHAPE (direct sampling, both surviving days -
 2010-10-11's 108 games and 2013-03-15's 10,815 games - via

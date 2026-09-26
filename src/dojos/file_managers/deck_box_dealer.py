@@ -1,21 +1,9 @@
 """Mechanical train/test/validation wrapper over a DeckBox, backed by
 its own small SQLite index file.
 
-See plans/deckbox_sqlite.md's "Rewriting DeckBoxDealer" section for the
-full design this implements. RELOCATED here from
-src/dojos/contrastive/deck_box_dealer.py, where it originally lived -
-it was never conceptually contrastive-specific, and this repo already
-reserves src/dojos/file_managers/ for exactly this shape of component
-(FileManagerCSV, FileManagerParquet). Parallel in role to those two:
-same "split management for training consumption" job, on a different
-storage technology.
-
-REWRITTEN from an eager, fully in-memory design (load every uuid for a
-game into one Python list, shuffle/partition it, hold all three lists
-for the instance's lifetime) onto SQLite - the old design's only real
-limitation was that eager materialization, not a permanent difference
-in need from any other DeckBox consumer; a single, uniform
-implementation now serves every scale.
+The DeckBox counterpart of file_manager_parquet.py: the same "split
+management for training consumption" job, on SQLite instead of parquet.
+Nothing is held in memory per split; every read is a query.
 
 THE SPLIT ASSIGNMENT is exact-ratio and computed ONCE, at construction
 (unless index_path already holds one for source_game and
@@ -33,17 +21,14 @@ is complete, not concurrently with it. A growing box after assignment
 would make the fixed "80% by rank" boundary drift; nothing in this
 codebase has that shape today.
 
-A REAL, ACCEPTED TRADE-OFF: the one-time split ASSIGNMENT is seeded and
+REPRODUCIBILITY: the one-time split ASSIGNMENT is seeded and
 reproducible (via uuids_ranked_randomly()'s own deterministic
 ordering), but the PER-EPOCH RESHUFFLE (decks_for(..., shuffle=True),
 used for TRAIN) is NOT - it issues a fresh, unseeded `ORDER BY RANDOM()`
 per call, so two runs with the same seed get identical split
-MEMBERSHIP but a DIFFERENT per-epoch read ORDER. The old in-memory
-implementation was fully reproducible end-to-end (one seeded
-random.Random instance advancing deterministically across every
-reshuffle call). This was discussed and accepted: chasing full
-reproducibility here would mean holding a split's full uuid list in
-memory again, which is exactly what this rewrite exists to avoid.
+MEMBERSHIP but a DIFFERENT per-epoch read ORDER. Full reproducibility
+would mean holding a split's full uuid list in memory, which this class
+exists to avoid.
 """
 
 import sqlite3
@@ -69,7 +54,7 @@ CREATE INDEX IF NOT EXISTS idx_deck_splits_split ON deck_splits(split);
 
 # _assign_splits() batches inserts at this size rather than collecting
 # every row before writing - keeping peak memory bounded regardless of
-# how many decks a game has, the whole point of this rewrite.
+# how many decks a game has.
 _ASSIGN_SPLITS_BATCH_SIZE = 10_000
 
 

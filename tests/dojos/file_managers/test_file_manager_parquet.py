@@ -4,7 +4,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 import pytest
 
-from src.dojos.file_managers.FileManagerParquet import FileManagerParquet
+from src.dojos.file_managers.file_manager_parquet import FileManagerParquet
 from src.schema.splits import Split
 
 

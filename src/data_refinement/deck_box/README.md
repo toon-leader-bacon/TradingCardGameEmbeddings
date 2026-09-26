@@ -150,7 +150,7 @@ merged or cross-referenced.
   `uuids_ranked_randomly(source_game, seed) -> Iterator[tuple[UUID,
   int, int]]` ranks every one of a game's decks by a one-time
   randomized order, entirely inside this connection — the primitive
-  `DeckBoxDealer` (`src/dojos/file_managers/DeckBoxDealer.py`) builds
+  `DeckBoxDealer` (`src/dojos/file_managers/deck_box_dealer.py`) builds
   an exact-ratio train/test/validation split on top of, without either
   side needing to materialize a full uuid list in Python or leak
   schema details across the boundary. SQLite's own `RANDOM()` isn't

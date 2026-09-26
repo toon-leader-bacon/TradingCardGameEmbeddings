@@ -1,8 +1,7 @@
-"""Shared HTML-walking logic for one fabtcg.com decklist fragment.
+"""HTML-walking logic for one fabtcg.com decklist fragment.
 
-Sole current consumer is src/data_refinement/deck_box/fabtcg_decklists/
-extraction_stage.py. This module owns only the "how to walk a fragment
-into (quantity, name) pairs" mechanics; what a caller does with each
+Consumed by the sibling extraction_stage.py. This module owns only the
+"how to walk a fragment into (quantity, name) pairs" mechanics; what a caller does with each
 pair (resolve it, and how to handle a miss) is entirely that caller's
 own concern.
 

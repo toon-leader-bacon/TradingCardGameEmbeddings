@@ -7,10 +7,8 @@ src/data_refinement/deck_box/sts_gg/extraction_stage.py for the sibling
 this was deliberately modeled on.
 
 FRAGMENT SHAPE AND PARSING: the actual HTML-walking mechanics
-(selectors, quantity/name splitting) live in
-src/data_refinement/fabtcg_decklists/fragment_parsing.py, shared with
-the pre-existing src/data_refinement/fabtcg_decklists/
-decklist_cards_metric.py — see that module's docstring for the full
+(selectors, quantity/name splitting) live in the sibling
+fragment_parsing.py — see that module's docstring for the full
 reasoning. This stage only supplies its own per-card resolution/failure
 policy (substitute the Unknown sentinel, never drop a slot — see
 UNRESOLVED CARDS below).
@@ -113,7 +111,7 @@ from tqdm import tqdm
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.data_refinement.fabtcg_decklists.fragment_parsing import (
+from src.data_refinement.deck_box.fabtcg_decklists.fragment_parsing import (
     iter_card_quantities_and_names,
 )
 from src.data_retrieval.fabtcg_decklists.downloader import FabtcgDecklistDownloader

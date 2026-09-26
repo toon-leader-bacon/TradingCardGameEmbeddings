@@ -41,13 +41,13 @@ declares its own `train_only: bool` at construction (default `True`)
   the task itself (e.g. `MaskTargetKeyMod`, which must keep a field
   masked at test/validation time too, or the model could just read the
   answer off the input) is constructed with `train_only=False`.
-- `[file_managers/FileManagerParquet.py](file_managers/FileManagerParquet.py)` -
+- `[file_managers/file_manager_parquet.py](file_managers/file_manager_parquet.py)` -
 `FileManagerParquet`/`ParquetChunkReader`, splits a metric's output
 parquet file into train/test/validation files and streams each in
 chunks. `splits_exist()` lets a caller check whether that's already been
 done for a given output directory/prefix, so a repeat construction can
 skip re-splitting.
-- `[file_managers/DeckBoxDealer.py](file_managers/DeckBoxDealer.py)` -
+- `[file_managers/deck_box_dealer.py](file_managers/deck_box_dealer.py)` -
 `DeckBoxDealer`, a `FileManagerParquet`-equivalent for `DeckBox` (same
 split-management role, SQLite-native rather than parquet-native, since
 `DeckBox` itself is SQLite-backed - see `../data_refinement/deck_box/README.md`):
@@ -263,7 +263,7 @@ embedding in a batch jointly (to build the similarity comparison
 across in-batch positives and negatives), not the row-independent
 `decoder_output, labels -> loss` shape every generic cell assumes.
 
-- `DeckBoxDealer` (`[file_managers/DeckBoxDealer.py](file_managers/DeckBoxDealer.py)`,
+- `DeckBoxDealer` (`[file_managers/deck_box_dealer.py](file_managers/deck_box_dealer.py)`,
   documented under "Shared plumbing" above) is this cell's source of
   raw deck samples - it isn't contrastive-specific itself, just this
   cell's main current consumer.
