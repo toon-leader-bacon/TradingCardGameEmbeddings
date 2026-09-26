@@ -184,16 +184,11 @@ Across every metric here, a card that fails to resolve against the
 build) is logged and excluded from that one deck entry only — never
 drops the run. `CardUpgradeRateMetric`, `CardWinRateAtAct2Metric`,
 `DeckLabelMetric`, `CardAverageMetric`, and
-`CardCharacterPredictionMetric` each independently duplicate the same
-`"CARD."`-prefix-strip + `CardBinder.get_by_alias` resolution rule
-(same rule as
-[`../legacy/sts_gg/deck_outcome_metric.py`](../legacy/sts_gg/deck_outcome_metric.py))
-rather than sharing a helper — deliberate, pending a later
-cross-cutting dedup pass across every sts_gg/sts2runs site with this
-same logic. Neither `DeckLabelMetric`'s twelve subclasses nor
-`CardAverageMetric`'s nine repeat this duplication among themselves —
-that's exactly what each family's own Template Method base collapses
-to one copy.
+`CardCharacterPredictionMetric` each repeat the same `"CARD."`-prefix-strip
++ `CardBinder.get_by_alias` card rule rather than sharing a helper (the
+sts2runs deck extraction stage repeats it too); within each family, the
+Template Method base (`DeckLabelMetric`'s eleven subclasses,
+`CardAverageMetric`'s nine) keeps it to one copy.
 
 ## How to run
 

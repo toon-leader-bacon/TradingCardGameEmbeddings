@@ -51,6 +51,12 @@ larger amount of configuration surface - judged not worth it.
 ## Files
 
 - `metric.py` - `Metric[RawRowT]`, the accumulator-family Protocol.
+- `version_metadata.py` - writes/reads the `CardBinder` (and, where
+  needed, `DeckBox`) version a metric's parquet output was built from,
+  as parquet schema metadata; dojos check it at construction.
+- `parquet_builder.py` - `ParquetBuilder`, buffers per-row writes into
+  bounded row groups so a metric over a tens-of-millions-row source
+  keeps flat memory.
 - `deck_ids.py` - content-addressed deck-id hashing shared across
   `Metric[RawRowT]`-family containers (see its own module docstring);
   not used by the `CorpusScanMetric` family, which has no deck concept.
@@ -62,7 +68,7 @@ Every raw-source subdirectory here holds that source's own concrete
 metric classes; most are still candidate-only (`BRAINSTORM.md`, no
 implementation yet). Implemented today:
 
-- **`sts_gg/`** - twenty-one `Metric[dict]` accumulator/streaming
+- **`sts_gg/`** - twenty-four `Metric[dict]` accumulator/streaming
   metrics over Slay the Spire 2 run data. See
   [`sts_gg/README.md`](sts_gg/README.md).
 - **`gwent_one/`** - eight `MaskedFieldMetric` masking metrics over
@@ -101,4 +107,3 @@ implementation yet). Implemented today:
   from this same source are still unbuilt - see
   [`isotropic/BRAINSTORM.md`](isotropic/BRAINSTORM.md).
 
-This file grows as more raw sources get real metric implementations.

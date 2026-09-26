@@ -107,8 +107,8 @@ str(leader_id))` lookup. Deliberately *not* the guide's own embedded
 `leader.name` text — playgwent.com's raw guide text and gwent.one's
 card names have disagreed on at least two leaders' spelling
 (`"Reckless Fury"` vs. `"Reckless Flurry"`), so counting by guide text
-previously produced a `LEADER_NAMES` vocabulary that silently
-mismatched what the metric validates against. Used to generate
+would produce a vocabulary that mismatches what the metric validates
+against. Used to generate
 `leader_labels.LEADER_NAMES`, a frozen tuple of the 42 distinct leaders
 observed across 60,197 guides as of 2026-09-25 (well-balanced: 492–2559
 decks per leader, no long tail) — see that file's own FRESHNESS caveat

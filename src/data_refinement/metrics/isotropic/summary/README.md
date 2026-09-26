@@ -125,8 +125,7 @@ sequential metric ideas `../BRAINSTORM.md` flags as Flavor-B-only.
   order, as parallel `deck_uuids`/`ranks` lists, canonically sorted by
   `deck_uuid` for the same ordering-leakage reason as the pair metric
   above. A single resignation anywhere in the game discards the whole
-  row (not just that one player) - the simplest resolution to a
-  question `../BRAINSTORM.md` originally left open.
+  row (not just that one player).
 
 ## Known biases / known-unknowns
 
