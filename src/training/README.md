@@ -2,11 +2,11 @@
 
 Trains the card-embedding encoder (`../encoder_model/`) against a suite of
 dojos (`../dojos/`). The encoder is the product; dojos are the teachers.
-Status: implemented and tested against fake dojos and a fake encoder; not
-yet run on real dojos. `demo_training_loop.py` is stale reference material,
-not part of this design.
+Status: implemented and tested; run end to end on CPU against two real
+Gwent dojos (`scripts/smoke_test_training_loop.py`). No training driver or
+config file yet (see `TODO.md`, section D).
 
-Start with `[trainer.py](trainer.py)`. It is the only file that knows the
+Start with [`trainer.py`](trainer.py). It is the only file that knows the
 whole story; every other file is a piece it delegates to.
 
 ## How it fits
@@ -41,6 +41,9 @@ Top level:
   `evaluation/`.
 - [trainable_encoder.py](trainable_encoder.py): the slice of the model the
   trainer needs.
+- [TODO.md](TODO.md): the checklist to a first real training run.
+  [Notes.md](Notes.md): the dated findings behind it (hardware, GPU
+  measurements, serialization analysis).
 
 Subdirectories:
 

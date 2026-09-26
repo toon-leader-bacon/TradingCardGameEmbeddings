@@ -1,6 +1,7 @@
 # Notes (training): findings from the pre-training review
 
-Findings behind `TODO.md`, recorded 2026-09-21. Facts are measured on this
+Findings behind `TODO.md`, recorded 2026-09-21: a dated snapshot, not
+kept current (current status lives in `TODO.md`). Facts are measured on this
 machine unless marked "from the web". Scratch scripts were not kept except
 `scripts/verify_gpu.py`.
 

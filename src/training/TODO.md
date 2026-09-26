@@ -1,10 +1,10 @@
 # TODO (training): getting to a first real training run
 
-Written 2026-09-21 from a review of the codebase, the hardware and the
-data on disk. The trainer (`trainer.py`) is implemented and tested against
-fake dojos and a fake encoder; nothing here has run on real dojos, a real
-text encoder or a GPU yet. Work through the sections roughly in order:
-A blocks everything, and B and C can proceed in parallel once A is done.
+Started 2026-09-21 from a review of the codebase, the hardware and the
+data on disk (findings: `Notes.md`). The trainer has run end to end on CPU
+against two real Gwent dojos and ModernBERT (section E); it has not yet
+run on the GPU or with a training driver/config (section D). A is done;
+B is done; C and D are the remaining path to a first real run.
 
 ## Findings this list is based on
 
@@ -106,7 +106,7 @@ a median of ~200 tokens and FaB to ~570.
   the default checkpoint in `reference_singlecard_models.py` and
   `reference_multicard_models.py` (was `distilbert-base-uncased`); confirmed
   it loads with `attn_implementation="sdpa"` by default, no override needed.
-- [ ] **Lean `raw_content` in each ingestion stage** (decision 2026-09-21:
+- [x] **Lean `raw_content` in each ingestion stage** (decision 2026-09-21:
   simplification lives in `src/data_refinement/card_binder/*/ingestion_stage.py`,
   not the serializer). Rules: `card_binder/README.md`, "What goes in
   `raw_content`"; evidence: `Notes.md` section 7 (MTG 2,352 to ~141 median
@@ -179,39 +179,20 @@ a median of ~200 tokens and FaB to ~570.
 
 ## C. Data and dojo readiness
 
-- [ ] **Build a real inventory.** `docs/metric_dojo_inventory.csv` is stale
-  (references paths and dojo names that don't exist). Script it: metric
-  parquet, dojo class, row count, whether cards resolve in the binder.
-- [x] **MSH PremierDraft draft-data metrics are corrupt - shelved, not
-  fixing now** (found while starting the inventory: scanned every
-  `data/metrics/**/*.parquet` for a valid PAR1 head/tail; only these two
-  failed). `pool_conditioned_pick.parquet` (1.8 GB) and
-  `pack_to_pick_choice_set.parquet` (949 MB) are both truncated (no footer).
-  Raw data is intact (`data/raw/17lands/draft_data/MSH.PremierDraft.csv`,
-  4.3 GB), so tried regenerating via `scripts/run_metrics.py --source
-  seventeenlands_draft_data --raw-path .../MSH.PremierDraft.csv`. **Do not
-  retry this as-is:** the process's memory grew unbounded (4.8 GB to 6.4+ GB
-  and still climbing) while barely progressing through the CSV, badly
-  degrading the whole machine (a trivial shell command took 2 minutes; the
-  process's own tqdm line logged 10 hours elapsed for 10% progress) - killed
-  it. This is almost certainly what corrupted the files the first time (an
-  OOM/kill mid-write, not a disk issue).
-
-  Root cause found: both metrics already stream (no cross-row
-  accumulation), but `accumulate()` calls `ParquetWriter.write_table()`
-  once per CSV row - for a ~40M-row file that's tens of millions of
-  one-row parquet row groups, and `ParquetWriter` keeps per-row-group
-  metadata in memory for its whole lifetime, so RAM grows and throughput
-  collapses across the run. Filed as inline `# TODO:` comments at the
-  `write_table()` call in both
-  `src/data_refinement/metrics/seventeenlands/draft_data/pool_conditioned_pick_metric.py`
-  and `.../pack_to_pick_choice_set_metric.py` (likely fix: batch a few
-  thousand rows into one `write_table()` call, or pass `row_group_size`,
-  instead of one row group per row). Explicitly shelved per user decision
-  (2026-09-23) in favor of reaching a first training run; MSH PremierDraft
-  draft metrics stay corrupt and excluded from the first-run dojo set until
-  someone does that rewrite and regenerates this file. Both files are
-  unchanged in effect from before the killed attempt (still unreadable).
+- [ ] **Build a real inventory.** The code half is done:
+  `scripts/report_metric_dojo_inventory.py` regenerates
+  `docs/metric_dojo_inventory.csv` (every metric class, its output path,
+  its dojo and cell; a test keeps it current). Still to add, needs data:
+  row count per parquet and whether its cards resolve in the binder.
+- [ ] **Regenerate the corrupt MSH PremierDraft draft metrics.**
+  `pool_conditioned_pick.parquet` (1.8 GB) and
+  `pack_to_pick_choice_set.parquet` (949 MB) are truncated (no footer),
+  most likely from an OOM kill mid-write. The cause, one parquet row group
+  per CSV row, is fixed in code: both metrics now write through
+  `ParquetBuilder` (bounded row groups). Re-run
+  `scripts/run_metrics.py --source seventeenlands_draft_data --raw-path
+  data/raw/17lands/draft_data/MSH.PremierDraft.csv` and watch memory;
+  until then these two stay out of the first-run dojo set.
 - [ ] **Report card-loading health per game.** Unresolved names, alias
   collisions, 17lands-name -> Scryfall-UUID resolution rate for MSH and
   KTK. Check STS2: 578 cards against 7.8k decks.
@@ -222,17 +203,19 @@ a median of ~200 tokens and FaB to ~570.
   sets (game and draft) via `scripts/run_metrics.py`; Play-Gwent and FaB
   decklists still need metrics. Defer replay data and Dominion (no raw data
   or binder on disk).
-- [ ] **Fix split-file collisions.** Dojo `name` is the parquet stem and
-  splits go to flat `data/splits/<stem>_*.parquet` (see the TODO at
-  `src/dojos/generic/generic_dojo.py:73`). `KTK/TradSealed/deck_win_prediction`
-  and `MSH/.../deck_win_prediction` collide, and duplicate names make
-  `Trainer` raise. Namespace dojo names and split prefixes by expansion and
-  format.
-- [ ] **Make splits deterministic and cheap.** Every dojo constructor
-  re-runs `make_splits`, streaming the whole parquet (1.8 GB for
-  `pool_conditioned_pick`). With `rng_seed=None` a restart reshuffles the
-  splits, so runs are not comparable. Pass seeds; skip rebuilding splits
-  that already exist.
+- [ ] **Fix split-file collisions.** Dojo `name` defaults to the parquet
+  stem and splits go to flat `data/splits/<stem>_*.parquet`, so
+  `KTK/TradSealed/deck_win_prediction` and `MSH/.../deck_win_prediction`
+  collide, and duplicate names make `Trainer` raise. `DojoConfig.name`
+  (which also sets the split prefix) is the fix, but no per-metric wrapper
+  accepts a `DojoConfig` yet (they take only `rng_seed` and
+  `strict_version_check`); thread it through, or derive the name from the
+  expansion/format directory.
+- [ ] **Make splits deterministic.** Existing split files are now reused
+  (`FileManagerParquet.splits_exist()`; `force_resplit` rebuilds), so a
+  restart no longer re-streams the parquet. Remaining: `rng_seed=None` is
+  the wrappers' default, so a first build is unseeded; pass a seed from
+  the training config.
 - [x] **Scryfall ingestion fixes** (details in `Notes.md` section 8; the
   `keep_incoming` switch was needed by the lean-`raw_content` work in
   section B). Skip `token`/`double_faced_token`/`emblem`/`scheme`/
@@ -262,7 +245,7 @@ a median of ~200 tokens and FaB to ~570.
   pull one TRAIN batch, run `compute_loss` on random embeddings, confirm
   head dims match `card_embedding_size`.
 
-## D. Training driver (does not exist yet)
+## D. Training driver
 
 - [ ] **Write `scripts/run_training.py`.** Load binders and deck boxes,
   build the model, dojos and `TrainingPlan`, call `Trainer.run()`. Today
@@ -318,9 +301,9 @@ a median of ~200 tokens and FaB to ~570.
 
 ## F. Housekeeping
 
-- [ ] **Fix or remove stale files.** `scripts/smoke_test.py` calls the
-  removed `training_data()` API; `src/training/demo_training_loop.py` and
-  the "training" paragraph in `src/README.md` are stale.
+- [x] **Fix or remove stale files** (2026-09-26): `scripts/smoke_test.py`
+  and `src/training/demo_training_loop.py` deleted; `src/README.md`
+  updated.
 - [ ] **Update `requirements.txt` and `scripts/check.sh`.** Document the
   ROCm torch install (command in section A); `check.sh` uses `python3`,
   which is fragile on this Windows setup. Also decide whether the project
