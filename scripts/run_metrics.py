@@ -37,7 +37,8 @@ import argparse
 import sys
 import traceback
 from pathlib import Path
-from typing import Callable
+from dataclasses import dataclass
+from typing import Any, Callable, Sequence
 
 import pandas as pd
 
@@ -330,7 +331,53 @@ def _parse_expansion_format(csv_path: Path) -> tuple[str, str]:
     return expansion, format_code
 
 
-def _draft_data_metrics(
+@dataclass(frozen=True)
+class _SeventeenLandsMetric:
+    """One 17lands metric class a family scans, and whether its
+    constructor takes the family's DeckBox (after binder/header/game)."""
+
+    metric_class: Any  # a 17lands Metric subclass with DEFAULT_OUTPUT_PATH
+    takes_deck_box: bool = False
+
+
+_DRAFT_DATA_METRICS = (
+    _SeventeenLandsMetric(CardTakeRateMetric),
+    _SeventeenLandsMetric(FirstPickRateMetric),
+    _SeventeenLandsMetric(RankStratifiedTakeRateMetric),
+    _SeventeenLandsMetric(PickNumberDecayCurveMetric),
+    _SeventeenLandsMetric(PackToPickChoiceSetMetric),
+    _SeventeenLandsMetric(PoolConditionedPickMetric),
+)
+
+_GAME_DATA_METRICS = (
+    _SeventeenLandsMetric(WinRateWhenInDeckMetric),
+    _SeventeenLandsMetric(OpeningHandWinRateMetric),
+    _SeventeenLandsMetric(DrawnWinRateMetric),
+    _SeventeenLandsMetric(GameLengthAssociationMetric),
+    _SeventeenLandsMetric(OnPlayWinRateDeltaMetric),
+    _SeventeenLandsMetric(GameTutorTargetRateMetric),
+    _SeventeenLandsMetric(DeckWinPredictionMetric, takes_deck_box=True),
+    _SeventeenLandsMetric(DeckGameLengthPredictionMetric, takes_deck_box=True),
+    _SeventeenLandsMetric(DeckRankTierPredictionMetric, takes_deck_box=True),
+    _SeventeenLandsMetric(OnPlayWinRateSensitivityByDeckMetric, takes_deck_box=True),
+    _SeventeenLandsMetric(TutorTargetPoolMetric),
+)
+
+_REPLAY_DATA_METRICS = (
+    _SeventeenLandsMetric(AverageTurnCastMetric),
+    _SeventeenLandsMetric(CastRateMetric),
+    _SeventeenLandsMetric(TurnsToGameEndAfterCastMetric),
+    _SeventeenLandsMetric(DiscardRateMetric),
+    _SeventeenLandsMetric(ReplayTutorTargetRateMetric),
+    _SeventeenLandsMetric(CombatKillInvolvementRateMetric),
+    _SeventeenLandsMetric(CombatDamagePushThroughRateMetric),
+    _SeventeenLandsMetric(CombatAggressionProfileMetric, takes_deck_box=True),
+    _SeventeenLandsMetric(AttackerBlockerCombatOutcomeMetric),
+)
+
+
+def _namespaced_metrics(
+    specs: Sequence[_SeventeenLandsMetric],
     binder: CardBinder,
     header: pd.Index,
     source_game: GameId,
@@ -338,271 +385,34 @@ def _draft_data_metrics(
     format_code: str,
     deck_box: DeckBox | None,
 ) -> list[Metric[dict]]:
-    return [
-        CardTakeRateMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                CardTakeRateMetric.DEFAULT_OUTPUT_PATH, expansion, format_code
-            ),
-        ),
-        FirstPickRateMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                FirstPickRateMetric.DEFAULT_OUTPUT_PATH, expansion, format_code
-            ),
-        ),
-        RankStratifiedTakeRateMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                RankStratifiedTakeRateMetric.DEFAULT_OUTPUT_PATH, expansion, format_code
-            ),
-        ),
-        PickNumberDecayCurveMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                PickNumberDecayCurveMetric.DEFAULT_OUTPUT_PATH, expansion, format_code
-            ),
-        ),
-        PackToPickChoiceSetMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                PackToPickChoiceSetMetric.DEFAULT_OUTPUT_PATH, expansion, format_code
-            ),
-        ),
-        PoolConditionedPickMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                PoolConditionedPickMetric.DEFAULT_OUTPUT_PATH, expansion, format_code
-            ),
-        ),
-    ]
+    """Construct every metric in specs for one 17lands CSV, each writing
+    to its DEFAULT_OUTPUT_PATH namespaced by expansion/format_code.
 
-
-def _game_data_metrics(
-    binder: CardBinder,
-    header: pd.Index,
-    source_game: GameId,
-    expansion: str,
-    format_code: str,
-    deck_box: DeckBox | None,
-) -> list[Metric[dict]]:
-    assert deck_box is not None
-
-    return [
-        WinRateWhenInDeckMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                WinRateWhenInDeckMetric.DEFAULT_OUTPUT_PATH, expansion, format_code
-            ),
-        ),
-        OpeningHandWinRateMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                OpeningHandWinRateMetric.DEFAULT_OUTPUT_PATH, expansion, format_code
-            ),
-        ),
-        DrawnWinRateMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                DrawnWinRateMetric.DEFAULT_OUTPUT_PATH, expansion, format_code
-            ),
-        ),
-        GameLengthAssociationMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                GameLengthAssociationMetric.DEFAULT_OUTPUT_PATH, expansion, format_code
-            ),
-        ),
-        OnPlayWinRateDeltaMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                OnPlayWinRateDeltaMetric.DEFAULT_OUTPUT_PATH, expansion, format_code
-            ),
-        ),
-        GameTutorTargetRateMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                GameTutorTargetRateMetric.DEFAULT_OUTPUT_PATH, expansion, format_code
-            ),
-        ),
-        DeckWinPredictionMetric(
-            binder,
-            header,
-            source_game,
-            deck_box,
-            output_path=_namespaced_output_path(
-                DeckWinPredictionMetric.DEFAULT_OUTPUT_PATH, expansion, format_code
-            ),
-        ),
-        DeckGameLengthPredictionMetric(
-            binder,
-            header,
-            source_game,
-            deck_box,
-            output_path=_namespaced_output_path(
-                DeckGameLengthPredictionMetric.DEFAULT_OUTPUT_PATH,
-                expansion,
-                format_code,
-            ),
-        ),
-        DeckRankTierPredictionMetric(
-            binder,
-            header,
-            source_game,
-            deck_box,
-            output_path=_namespaced_output_path(
-                DeckRankTierPredictionMetric.DEFAULT_OUTPUT_PATH, expansion, format_code
-            ),
-        ),
-        OnPlayWinRateSensitivityByDeckMetric(
-            binder,
-            header,
-            source_game,
-            deck_box,
-            output_path=_namespaced_output_path(
-                OnPlayWinRateSensitivityByDeckMetric.DEFAULT_OUTPUT_PATH,
-                expansion,
-                format_code,
-            ),
-        ),
-        TutorTargetPoolMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                TutorTargetPoolMetric.DEFAULT_OUTPUT_PATH, expansion, format_code
-            ),
-        ),
-    ]
-
-
-def _replay_data_metrics(
-    binder: CardBinder,
-    header: pd.Index,
-    source_game: GameId,
-    expansion: str,
-    format_code: str,
-    deck_box: DeckBox | None,
-) -> list[Metric[dict]]:
-    assert deck_box is not None
-
-    return [
-        AverageTurnCastMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                AverageTurnCastMetric.DEFAULT_OUTPUT_PATH, expansion, format_code
-            ),
-        ),
-        CastRateMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                CastRateMetric.DEFAULT_OUTPUT_PATH, expansion, format_code
-            ),
-        ),
-        TurnsToGameEndAfterCastMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                TurnsToGameEndAfterCastMetric.DEFAULT_OUTPUT_PATH,
-                expansion,
-                format_code,
-            ),
-        ),
-        DiscardRateMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                DiscardRateMetric.DEFAULT_OUTPUT_PATH, expansion, format_code
-            ),
-        ),
-        ReplayTutorTargetRateMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                ReplayTutorTargetRateMetric.DEFAULT_OUTPUT_PATH, expansion, format_code
-            ),
-        ),
-        CombatKillInvolvementRateMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                CombatKillInvolvementRateMetric.DEFAULT_OUTPUT_PATH,
-                expansion,
-                format_code,
-            ),
-        ),
-        CombatDamagePushThroughRateMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                CombatDamagePushThroughRateMetric.DEFAULT_OUTPUT_PATH,
-                expansion,
-                format_code,
-            ),
-        ),
-        CombatAggressionProfileMetric(
-            binder,
-            header,
-            source_game,
-            deck_box,
-            output_path=_namespaced_output_path(
-                CombatAggressionProfileMetric.DEFAULT_OUTPUT_PATH,
-                expansion,
-                format_code,
-            ),
-        ),
-        AttackerBlockerCombatOutcomeMetric(
-            binder,
-            header,
-            source_game,
-            output_path=_namespaced_output_path(
-                AttackerBlockerCombatOutcomeMetric.DEFAULT_OUTPUT_PATH,
-                expansion,
-                format_code,
-            ),
-        ),
-    ]
+    Inputs: specs, plus the constructor arguments every 17lands metric
+        shares (deck_box is passed only to specs that take it).
+    Output: list[Metric[dict]], in specs order.
+    Side effects: none beyond the metric constructors'.
+    Exceptions: ValueError if a spec takes a deck box but deck_box is None.
+    """
+    metrics: list[Metric[dict]] = []
+    for spec in specs:
+        output_path = _namespaced_output_path(
+            spec.metric_class.DEFAULT_OUTPUT_PATH, expansion, format_code
+        )
+        if not spec.takes_deck_box:
+            args: tuple = (binder, header, source_game)
+        elif deck_box is None:
+            raise ValueError(f"{spec.metric_class.__name__} needs a DeckBox")
+        else:
+            args = (binder, header, source_game, deck_box)
+        metrics.append(spec.metric_class(*args, output_path=output_path))
+    return metrics
 
 
 def _run_seventeenlands_family(
     name: str,
     family_dir: Path,
-    build_metrics: Callable[
-        [CardBinder, pd.Index, GameId, str, str, DeckBox | None], list[Metric[dict]]
-    ],
+    metric_specs: Sequence[_SeventeenLandsMetric],
     scan: Callable[[Path, list[Metric[dict]]], None],
     deck_box_output_path: Path | None,
     raw_path: Path | None,
@@ -622,8 +432,8 @@ def _run_seventeenlands_family(
     for csv_path in csv_paths:
         expansion, format_code = _parse_expansion_format(csv_path)
         header = pd.read_csv(csv_path, nrows=0).columns
-        metrics = build_metrics(
-            binder, header, GameId.MTG, expansion, format_code, deck_box
+        metrics = _namespaced_metrics(
+            metric_specs, binder, header, GameId.MTG, expansion, format_code, deck_box
         )
 
         print(f"=== {name}: {csv_path} ({expansion}.{format_code}) ===")
@@ -639,7 +449,7 @@ def run_seventeenlands_draft_data(raw_path: Path | None) -> None:
     _run_seventeenlands_family(
         "seventeenlands_draft_data",
         SeventeenLandsDownloader.DEFAULT_RAW_DATA_DIR / "draft_data",
-        _draft_data_metrics,
+        _DRAFT_DATA_METRICS,
         scan_draft_csv,
         deck_box_output_path=None,
         raw_path=raw_path,
@@ -650,7 +460,7 @@ def run_seventeenlands_game_data(raw_path: Path | None) -> None:
     _run_seventeenlands_family(
         "seventeenlands_game_data",
         SeventeenLandsDownloader.DEFAULT_RAW_DATA_DIR / "game_data",
-        _game_data_metrics,
+        _GAME_DATA_METRICS,
         scan_game_csv,
         deck_box_output_path=Path(
             "data/metrics/seventeenlands/game_data/deck_box.jsonl"
@@ -663,7 +473,7 @@ def run_seventeenlands_replay_data(raw_path: Path | None) -> None:
     _run_seventeenlands_family(
         "seventeenlands_replay_data",
         SeventeenLandsDownloader.DEFAULT_RAW_DATA_DIR / "replay_data",
-        _replay_data_metrics,
+        _REPLAY_DATA_METRICS,
         scan_replay_csv,
         deck_box_output_path=Path(
             "data/metrics/seventeenlands/replay_data/deck_box.jsonl"
