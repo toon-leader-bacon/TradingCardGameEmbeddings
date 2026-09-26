@@ -1,14 +1,9 @@
-"""Thin per-metric wrappers over dominiontabs' two classification
-metrics (src/data_refinement/metrics/dominiontabs/{type,set}_mask_metric.py).
-Mirrors gwent_one/masked_field_dojos.py's convention: each wrapper adds
-no behavior of its own, only configuration, pulling its paired
-metric's own LABEL_VALUES/DEFAULT_OUTPUT_PATH ClassVars by reference.
+"""Per-metric wrappers over dominiontabs' two classification metrics
+(src/data_refinement/metrics/dominiontabs/{type,set}_mask_metric.py).
 
-MASKING MOD, train_only=False (TypeMaskDojo only - see SetMaskDojo's
-own docstring for why it has none): the masked field must stay masked
-on test/validation input too, not just training, or the model could
-just read the answer off raw_content instead of predicting it - same
-rationale as gwent_one's wrappers.
+TypeMaskDojo is a MaskedFieldMetricDojo (../generic/paired_metric_dojos.py).
+SetMaskDojo is not: its metric is not a MaskedFieldMetric and there is
+nothing to mask (see its own docstring).
 """
 
 from pathlib import Path
@@ -16,49 +11,21 @@ from pathlib import Path
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.dominiontabs.set_mask_metric import SetMaskMetric
 from src.data_refinement.metrics.dominiontabs.type_mask_metric import TypeMaskMetric
+from src.dojos.generic.paired_metric_dojos import MaskedFieldMetricDojo
 from src.dojos.generic.data_constructors import MaskedFieldDataConstructor
 from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.single_card_fixed_classification.dojo import (
     SingleCardFixedClassificationDojo,
 )
-from src.dojos.mods.common_mods import MaskTargetKeyMod
-from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
 
 
-class TypeMaskDojo(SingleCardFixedClassificationDojo):
+class TypeMaskDojo(MaskedFieldMetricDojo):
     """Card, primary type masked -> predicted primary type
     (TypeMaskMetric). label_values=TypeMaskMetric.LABEL_VALUES
     unchanged - OTHER_LABEL is already baked into that tuple."""
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or TypeMaskMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=MaskedFieldDataConstructor("label"),
-            label_values=TypeMaskMetric.LABEL_VALUES,
-            card_embedding_size=card_embedding_size,
-            mod_pipeline=ModPipeline(
-                [
-                    MaskTargetKeyMod(
-                        key=TypeMaskMetric.MASKED_FIELD[-1], train_only=False
-                    )
-                ]
-            ),
-            config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = TypeMaskMetric
 
 
 class SetMaskDojo(SingleCardFixedClassificationDojo):

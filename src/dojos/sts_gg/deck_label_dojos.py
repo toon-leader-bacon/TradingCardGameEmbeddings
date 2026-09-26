@@ -1,17 +1,8 @@
 """Thin per-metric wrappers over DeckLabelMetric's int64-labeled
 concrete subclasses (src/data_refinement/metrics/sts_gg/deck_label_metrics.py).
 
-Each wrapper is a thin MultiCardRegressionDojo subclass - it adds no
-behavior of its own, only configuration: it pulls its paired metric
-class's own LABEL_COLUMN/DEFAULT_OUTPUT_PATH ClassVars by reference
-(never duplicated as a literal) and passes them to
-MultiCardRegressionDojo.__init__ via a DeckLabelDataConstructor
-configured for that one label column. No wrapper instantiates its
-paired metric class - that class's own constructor needs a card_binder/
-deck_box a dojo has no reason to fabricate.
-
 SCOPE: the 8 int64-labeled DeckLabelMetric subclasses are wrapped as
-MultiCardRegressionDojo subclasses (RelicCountMetric,
+DeckLabelMetricDojo subclasses (../generic/paired_metric_dojos.py) (RelicCountMetric,
 TotalDamageTakenMetric, TotalCardsPickedMetric, TotalCardsSkippedMetric,
 TotalTurnsMetric, ElitesKilledMetric, FloorsClearedMetric,
 TotalCombatsMetric); WinMetric (bool) is wrapped as a
@@ -56,6 +47,7 @@ from src.data_refinement.metrics.sts_gg.deck_label_metrics import (
     TotalTurnsMetric,
     WinMetric,
 )
+from src.dojos.generic.paired_metric_dojos import DeckLabelMetricDojo
 from src.dojos.generic.data_constructors import DeckLabelDataConstructor
 from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.multi_card_binary_classification.dojo import (
@@ -64,232 +56,55 @@ from src.dojos.generic.multi_card_binary_classification.dojo import (
 from src.dojos.generic.multi_card_fixed_classification.dojo import (
     MultiCardFixedClassificationDojo,
 )
-from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
 from src.schema.holdout import HoldoutSpec
 
 
-class DeckRelicCountDojo(MultiCardRegressionDojo):
+class DeckRelicCountDojo(DeckLabelMetricDojo):
     """Deck -> final relicCount (RelicCountMetric)."""
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        deck_box: DeckBox,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or RelicCountMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=DeckLabelDataConstructor(
-                deck_box, RelicCountMetric.LABEL_COLUMN
-            ),
-            card_embedding_size=card_embedding_size,
-            config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = RelicCountMetric
 
 
-class DeckTotalDamageTakenDojo(MultiCardRegressionDojo):
+class DeckTotalDamageTakenDojo(DeckLabelMetricDojo):
     """Deck -> stats.totalDamageTaken (TotalDamageTakenMetric)."""
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        deck_box: DeckBox,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or TotalDamageTakenMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=DeckLabelDataConstructor(
-                deck_box, TotalDamageTakenMetric.LABEL_COLUMN
-            ),
-            card_embedding_size=card_embedding_size,
-            config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = TotalDamageTakenMetric
 
 
-class DeckTotalCardsPickedDojo(MultiCardRegressionDojo):
+class DeckTotalCardsPickedDojo(DeckLabelMetricDojo):
     """Deck -> stats.totalCardsPicked (TotalCardsPickedMetric)."""
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        deck_box: DeckBox,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or TotalCardsPickedMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=DeckLabelDataConstructor(
-                deck_box, TotalCardsPickedMetric.LABEL_COLUMN
-            ),
-            card_embedding_size=card_embedding_size,
-            config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = TotalCardsPickedMetric
 
 
-class DeckTotalCardsSkippedDojo(MultiCardRegressionDojo):
+class DeckTotalCardsSkippedDojo(DeckLabelMetricDojo):
     """Deck -> stats.totalCardsSkipped (TotalCardsSkippedMetric)."""
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        deck_box: DeckBox,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or TotalCardsSkippedMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=DeckLabelDataConstructor(
-                deck_box, TotalCardsSkippedMetric.LABEL_COLUMN
-            ),
-            card_embedding_size=card_embedding_size,
-            config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = TotalCardsSkippedMetric
 
 
-class DeckTotalTurnsDojo(MultiCardRegressionDojo):
+class DeckTotalTurnsDojo(DeckLabelMetricDojo):
     """Deck -> stats.totalTurns (TotalTurnsMetric)."""
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        deck_box: DeckBox,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or TotalTurnsMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=DeckLabelDataConstructor(
-                deck_box, TotalTurnsMetric.LABEL_COLUMN
-            ),
-            card_embedding_size=card_embedding_size,
-            config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = TotalTurnsMetric
 
 
-class DeckElitesKilledDojo(MultiCardRegressionDojo):
+class DeckElitesKilledDojo(DeckLabelMetricDojo):
     """Deck -> stats.elitesKilled (ElitesKilledMetric)."""
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        deck_box: DeckBox,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or ElitesKilledMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=DeckLabelDataConstructor(
-                deck_box, ElitesKilledMetric.LABEL_COLUMN
-            ),
-            card_embedding_size=card_embedding_size,
-            config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = ElitesKilledMetric
 
 
-class DeckFloorsClearedDojo(MultiCardRegressionDojo):
+class DeckFloorsClearedDojo(DeckLabelMetricDojo):
     """Deck -> stats.floorsCleared (FloorsClearedMetric)."""
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        deck_box: DeckBox,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or FloorsClearedMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=DeckLabelDataConstructor(
-                deck_box, FloorsClearedMetric.LABEL_COLUMN
-            ),
-            card_embedding_size=card_embedding_size,
-            config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = FloorsClearedMetric
 
 
-class DeckTotalCombatsDojo(MultiCardRegressionDojo):
+class DeckTotalCombatsDojo(DeckLabelMetricDojo):
     """Deck -> stats.totalCombats (TotalCombatsMetric)."""
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        deck_box: DeckBox,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or TotalCombatsMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=DeckLabelDataConstructor(
-                deck_box, TotalCombatsMetric.LABEL_COLUMN
-            ),
-            card_embedding_size=card_embedding_size,
-            config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = TotalCombatsMetric
 
 
 class WinDojo(MultiCardBinaryClassificationDojo):

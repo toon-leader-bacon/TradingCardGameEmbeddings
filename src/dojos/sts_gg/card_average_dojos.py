@@ -1,19 +1,10 @@
-"""Thin per-metric wrappers over CardAverageMetric's nine concrete
-subclasses (src/data_refinement/metrics/sts_gg/card_average_metrics.py).
+"""Per-metric wrappers over CardAverageMetric's nine concrete subclasses
+(src/data_refinement/metrics/sts_gg/card_average_metrics.py).
 
-Each wrapper is a thin SingleCardRegressionDojo subclass - it adds no
-behavior of its own, only configuration: it pulls its paired metric
-class's own LABEL_COLUMN/DEFAULT_OUTPUT_PATH ClassVars by reference
-(never duplicated as a literal) and passes them to
-SingleCardRegressionDojo.__init__ via a CardAverageDataConstructor
-configured for that one label column. No wrapper instantiates its
-paired metric class - that class's own constructor needs a card_binder
-a dojo has no reason to fabricate.
+Each is a CardAverageMetricDojo (../generic/paired_metric_dojos.py)
+that only names its paired metric.
 """
 
-from pathlib import Path
-
-from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.sts_gg.card_average_metrics import (
     CardDeckSizeMetric,
     CardElitesKilledMetric,
@@ -25,229 +16,58 @@ from src.data_refinement.metrics.sts_gg.card_average_metrics import (
     CardTotalTurnsMetric,
     CardWinRateMetric,
 )
-from src.dojos.generic.data_constructors import CardAverageDataConstructor
-from src.dojos.generic.dojo_config import DojoConfig
-from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
-from src.schema.holdout import HoldoutSpec
+from src.dojos.generic.paired_metric_dojos import CardAverageMetricDojo
 
 
-class CardRelicCountDojo(SingleCardRegressionDojo):
+class CardRelicCountDojo(CardAverageMetricDojo):
     """Card -> predicted average relicCount (CardRelicCountMetric)."""
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or CardRelicCountMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=CardAverageDataConstructor(
-                CardRelicCountMetric.LABEL_COLUMN
-            ),
-            card_embedding_size=card_embedding_size,
-            config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = CardRelicCountMetric
 
 
-class CardTotalDamageTakenDojo(SingleCardRegressionDojo):
+class CardTotalDamageTakenDojo(CardAverageMetricDojo):
     """Card -> predicted average stats.totalDamageTaken (CardTotalDamageTakenMetric)."""
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or CardTotalDamageTakenMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=CardAverageDataConstructor(
-                CardTotalDamageTakenMetric.LABEL_COLUMN
-            ),
-            card_embedding_size=card_embedding_size,
-            config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = CardTotalDamageTakenMetric
 
 
-class CardDeckSizeDojo(SingleCardRegressionDojo):
+class CardDeckSizeDojo(CardAverageMetricDojo):
     """Card -> predicted average deckSize (CardDeckSizeMetric)."""
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or CardDeckSizeMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=CardAverageDataConstructor(
-                CardDeckSizeMetric.LABEL_COLUMN
-            ),
-            card_embedding_size=card_embedding_size,
-            config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = CardDeckSizeMetric
 
 
-class CardTotalCardsPickedDojo(SingleCardRegressionDojo):
+class CardTotalCardsPickedDojo(CardAverageMetricDojo):
     """Card -> predicted average stats.totalCardsPicked (CardTotalCardsPickedMetric)."""
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or CardTotalCardsPickedMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=CardAverageDataConstructor(
-                CardTotalCardsPickedMetric.LABEL_COLUMN
-            ),
-            card_embedding_size=card_embedding_size,
-            config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = CardTotalCardsPickedMetric
 
 
-class CardTotalTurnsDojo(SingleCardRegressionDojo):
+class CardTotalTurnsDojo(CardAverageMetricDojo):
     """Card -> predicted average stats.totalTurns (CardTotalTurnsMetric)."""
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or CardTotalTurnsMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=CardAverageDataConstructor(
-                CardTotalTurnsMetric.LABEL_COLUMN
-            ),
-            card_embedding_size=card_embedding_size,
-            config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = CardTotalTurnsMetric
 
 
-class CardElitesKilledDojo(SingleCardRegressionDojo):
+class CardElitesKilledDojo(CardAverageMetricDojo):
     """Card -> predicted average stats.elitesKilled (CardElitesKilledMetric)."""
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or CardElitesKilledMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=CardAverageDataConstructor(
-                CardElitesKilledMetric.LABEL_COLUMN
-            ),
-            card_embedding_size=card_embedding_size,
-            config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = CardElitesKilledMetric
 
 
-class CardFloorsClearedDojo(SingleCardRegressionDojo):
+class CardFloorsClearedDojo(CardAverageMetricDojo):
     """Card -> predicted average stats.floorsCleared (CardFloorsClearedMetric)."""
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or CardFloorsClearedMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=CardAverageDataConstructor(
-                CardFloorsClearedMetric.LABEL_COLUMN
-            ),
-            card_embedding_size=card_embedding_size,
-            config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = CardFloorsClearedMetric
 
 
-class CardTotalCombatsDojo(SingleCardRegressionDojo):
+class CardTotalCombatsDojo(CardAverageMetricDojo):
     """Card -> predicted average stats.totalCombats (CardTotalCombatsMetric)."""
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or CardTotalCombatsMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=CardAverageDataConstructor(
-                CardTotalCombatsMetric.LABEL_COLUMN
-            ),
-            card_embedding_size=card_embedding_size,
-            config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = CardTotalCombatsMetric
 
 
-class CardWinRateDojo(SingleCardRegressionDojo):
+class CardWinRateDojo(CardAverageMetricDojo):
     """Card -> predicted P(win | card in final deck) (CardWinRateMetric).
 
     A regression cell despite the label being a rate in [0, 1] - see
@@ -257,23 +77,4 @@ class CardWinRateDojo(SingleCardRegressionDojo):
     two-class classification problem.
     """
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or CardWinRateMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=CardAverageDataConstructor(CardWinRateMetric.LABEL_COLUMN),
-            card_embedding_size=card_embedding_size,
-            config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = CardWinRateMetric
