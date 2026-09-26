@@ -28,9 +28,8 @@ convention — see that stage's _build_card() docstring), so the exact
 lookup above misses on every two-faced card. When it does,
 _card_uuid() falls back to card_lookup.get_by_name_regex(source_game,
 f"^{re.escape(name)}( //.*)?$") — the same front-face-match fallback
-src/data_refinement/metrics/seventeenlands/draft_data/
-pack_pool_columns.py's _match_uuid() already established for MTG's own
-split/MDFC cards — using its result only if it's unambiguous (exactly
+card_lookup.uuid_for_name_or_front_face() applies to MTG's split/MDFC
+cards — using its result only if it's unambiguous (exactly
 one match); 2+ matches is treated the same as no match, never guessed
 at.
 

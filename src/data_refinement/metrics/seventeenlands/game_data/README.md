@@ -112,21 +112,10 @@ Every metric here satisfies the shared `Metric[dict]` Protocol
 
 ## Card-name matching
 
-`GameCardColumns._match_uuid()` (private — the only place this policy
-lives) matches a bare card name against `card_binder`: an exact
-`card_binder.get_by_name(source_game, name)` match first; on 0 or 2+
-matches, a regex fallback via
-`card_binder.get_by_name_regex(source_game, f"^{re.escape(name)}( //.*)?$")`
-(treating `name` as a split/MDFC card's front face); on 0 or 2+ matches
-from that fallback, the name is unmatched — ambiguity is never guessed
-at. This is the same 17lands-wide policy
-[`../draft_data/pack_pool_columns.py`](../draft_data/pack_pool_columns.py)'s
-`DraftCardColumns._match_uuid()` implements for that sibling source,
-deliberately re-typed here rather than shared via inheritance or
-import — this container re-implements the policy itself the same way
-every `sts_gg` metric re-types its own card-id rule, rather than
-introducing a cross-source shared helper for what is deliberately kept
-as one policy per raw source.
+`card_lookup.uuid_for_name_or_front_face()` (`src/data_refinement/card_binder/card_lookup.py`) matches a bare card name: a unique exact
+`get_by_name()` match, else a unique split/MDFC front-face match (17lands'
+column names use only a card's front face; Scryfall names it `"A // B"`),
+else unmatched. Ambiguity is never guessed at. `GameCardColumns` applies it to every card column suffix.
 
 `uuid_for_name()` caches every lookup (hit or miss) so the same name is
 never queried against `card_binder` twice; `unmatched_names` exposes

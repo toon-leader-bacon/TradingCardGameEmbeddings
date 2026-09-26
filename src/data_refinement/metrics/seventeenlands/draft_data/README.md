@@ -66,15 +66,10 @@ Every metric here satisfies the shared `Metric[dict]` Protocol
 
 ## Card-name matching
 
-`DraftCardColumns._match_uuid()` (private — the only place this policy
-lives) matches a bare card name against `card_binder`: an exact
-`card_binder.get_by_name(source_game, name)` match first; on 0 or 2+
-matches, a regex fallback via
-`card_binder.get_by_name_regex(source_game, f"^{re.escape(name)}( //.*)?$")`
-(treating `name` as a split/MDFC card's front face, since 17lands'
-column-name convention uses only the front face while Scryfall's own
-`name` field is `"A // B"`); on 0 or 2+ matches from that fallback, the
-name is unmatched — ambiguity is never guessed at. `uuid_for_name()`
+`card_lookup.uuid_for_name_or_front_face()` (`src/data_refinement/card_binder/card_lookup.py`) matches a bare card name: a unique exact
+`get_by_name()` match, else a unique split/MDFC front-face match (17lands'
+column names use only a card's front face; Scryfall names it `"A // B"`),
+else unmatched. Ambiguity is never guessed at. `uuid_for_name()`
 caches every lookup (hit or miss) so the same name is never queried
 against `card_binder` twice; `unmatched_names` exposes every name this
 instance's cache has no uuid for, for a caller to log.

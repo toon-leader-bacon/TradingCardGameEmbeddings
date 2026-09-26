@@ -6,14 +6,10 @@ game_card_average_metric.py's module docstring for why this is a
 per-metric-cheap, header-sized cost rather than a shared per-scan
 object). Every opening_hand_<name>/drawn_<name>/tutored_<name>/
 deck_<name>/sideboard_<name> column is parsed and its <name> suffix
-matched against card_binder directly (no separate lookup/cache class in
-between - see _match_uuid()'s docstring for the matching policy, the
-same one draft_data/pack_pool_columns.py's DraftCardColumns._match_uuid()
-already implements for that sibling source. This is one 17lands-wide
-card-name-matching *policy*, deliberately re-typed here rather than
-imported/subclassed from draft_data - see
-plans/game_data_metrics.md's "Existing contracts this plan depends on"
-section for why this duplication is intentional, not an oversight).
+matched against card_binder with
+card_lookup.uuid_for_name_or_front_face(), the 17lands-wide matching
+policy every sibling columns index uses (no separate lookup/cache class
+in between).
 
 Unlike DraftCardColumns, game_data has no per-row cell value analogous
 to draft_data's `pick` column - every name this class ever looks up
@@ -22,13 +18,13 @@ uuid_for_name() is kept public anyway, for the same testability and
 structural consistency reasons DraftCardColumns keeps it public.
 """
 
-import re
 from typing import Iterable
 from uuid import UUID
 
 import pandas as pd
 
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.card_lookup import uuid_for_name_or_front_face
 from src.schema.game_id import GameId
 
 _OPENING_HAND_PREFIX = "opening_hand_"
@@ -234,10 +230,9 @@ class GameCardColumns:
                 "sideboard_"-prefixed column name (use the *_columns
                 properties for those).
         Output: the matching nocab_uuid, or None if no single card
-            matched (see _match_uuid()'s docstring for the exact
-            policy).
+            matched (see card_lookup.uuid_for_name_or_front_face()).
         Side effects: on a name not already cached, queries
-            self._card_binder (via _match_uuid()) and stores the result
+            self._card_binder (via uuid_for_name_or_front_face()) and stores the result
             (even if None) for every later call with the same name.
         Exceptions: none expected.
 
@@ -250,44 +245,11 @@ class GameCardColumns:
 
         # Slow path: query card_binder once, cache whatever comes back
         # (including None), so a repeat call never re-queries.
-        card_uuid = self._match_uuid(name)
+        card_uuid = uuid_for_name_or_front_face(
+            self._card_binder, self._source_game, name
+        )
         self._cache[name] = card_uuid
         return card_uuid
-
-    def _match_uuid(self, name: str) -> UUID | None:
-        """The uncached name -> nocab_uuid matching policy itself.
-
-        Private helper - single consumer is uuid_for_name(). The same
-        17lands-wide policy draft_data/pack_pool_columns.py's
-        DraftCardColumns._match_uuid() implements for that sibling
-        source, re-typed here rather than shared via inheritance or
-        import - see plans/game_data_metrics.md's "Existing contracts"
-        section for why this duplication is intentional.
-
-        Inputs:
-            name: a bare card name to match.
-        Output: the matching nocab_uuid if
-            card_binder.get_by_name(source_game, name) returns exactly
-            one card; else the matching nocab_uuid if
-            card_binder.get_by_name_regex(source_game,
-            f"^{re.escape(name)}( //.*)?$") (name as a split/MDFC card's
-            front face) returns exactly one card; else None. Ambiguity
-            (2+ matches from either method) is never guessed at -
-            treated identically to no match.
-        Side effects: none - read-only card_binder queries.
-        Exceptions: none expected.
-        """
-        exact_matches = self._card_binder.get_by_name(self._source_game, name)
-        if len(exact_matches) == 1:
-            return exact_matches[0].nocab_uuid
-
-        front_face_matches = self._card_binder.get_by_name_regex(
-            self._source_game, f"^{re.escape(name)}( //.*)?$"
-        )
-        if len(front_face_matches) == 1:
-            return front_face_matches[0].nocab_uuid
-
-        return None
 
     def present_uuids(self, row: dict, columns: list[tuple[str, UUID]]) -> list[UUID]:
         """Every matched card from `columns` whose count is > 0 on this

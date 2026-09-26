@@ -25,20 +25,10 @@ GenericDeck.card_nocab_uuids — this is what makes the result a genuine
 FULL deck list (see src/data_refinement/deck_box/README.md's
 multiset/copy-count section), not merely which cards were present.
 
-CARD RESOLUTION: each deck_<name> column's bare <name> suffix is
-matched against card_lookup the same way
-GameCardColumns._match_uuid() already does for that sibling metrics
-container: an exact card_lookup.get_by_name(self.SOURCE_GAME, name) match
-if it returns exactly one card; else a
-card_lookup.get_by_name_regex(self.SOURCE_GAME, f"^{re.escape(name)}( //.*)?$")
-front-face fallback (a split/MDFC card is stored under its combined
-name) if that returns exactly one card; else unresolved. THIS POLICY IS
-DELIBERATELY RE-IMPLEMENTED HERE, not imported from
-game_card_columns.py — deck_box never imports from metrics/ anywhere in
-this codebase, and metrics/ itself already re-types this same policy
-per raw source rather than sharing it (see that module's own
-docstring); this file follows that established precedent one level
-further, onto a second container entirely.
+CARD MATCHING: each deck_<name> column's bare <name> suffix is matched
+with card_lookup.uuid_for_name_or_front_face() (a unique exact name
+match, else a unique split/MDFC front-face match), the same policy the
+17lands metrics use; else the card is unresolved.
 
 Because a set's legal card pool differs per file, the deck_<name>
 column index is rebuilt fresh for every CSV — never shared or cached
@@ -110,7 +100,6 @@ first create().
 """
 
 import logging
-import re
 import tarfile
 from collections import Counter
 from contextlib import contextmanager
@@ -123,7 +112,10 @@ import pandas as pd
 from tqdm import tqdm
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.card_binder.card_lookup import CardLookup
+from src.data_refinement.card_binder.card_lookup import (
+    CardLookup,
+    uuid_for_name_or_front_face,
+)
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_retrieval.seventeenlands.downloader import SeventeenLandsDownloader
 from src.schema.card import GenericDeck, Provenance
@@ -361,10 +353,7 @@ class SeventeenLandsGameDataDeckExtractionStage:
 
         Private helper — single consumer is _extract_csv(). Every
         distinct <name> is resolved at most once per call (a local
-        cache), via _card_uuid_for_name() — mirrors
-        GameCardColumns.from_header()'s own column-parsing shape (see
-        module docstring's CARD RESOLUTION section) without importing
-        it.
+        cache), via _card_uuid_for_name().
 
         Inputs:
             header_columns: this CSV's own header (e.g.
@@ -396,11 +385,9 @@ class SeventeenLandsGameDataDeckExtractionStage:
     def _card_uuid_for_name(self, name: str, card_lookup: CardLookup) -> UUID:
         """Resolve one bare card name to a nocab_uuid, falling back to Unknown.
 
-        Private helper — single consumer is _deck_column_index(). Exact
-        match first, then a split/MDFC front-face regex fallback, then
-        the Unknown sentinel — see module docstring's CARD RESOLUTION
-        and UNRESOLVED CARDS sections for the exact policy and why it's
-        re-implemented here rather than imported.
+        Private helper — single consumer is _deck_column_index().
+        uuid_for_name_or_front_face(), then the Unknown sentinel — see
+        module docstring's CARD MATCHING and UNRESOLVED CARDS sections.
 
         Inputs:
             name: one deck_<name> column's bare <name> suffix.
@@ -411,15 +398,9 @@ class SeventeenLandsGameDataDeckExtractionStage:
         Exceptions: raises RuntimeError if even the Unknown sentinel
             isn't found on card_lookup.
         """
-        exact_matches = card_lookup.get_by_name(self.SOURCE_GAME, name)
-        if len(exact_matches) == 1:
-            return exact_matches[0].nocab_uuid
-
-        front_face_matches = card_lookup.get_by_name_regex(
-            self.SOURCE_GAME, f"^{re.escape(name)}( //.*)?$"
-        )
-        if len(front_face_matches) == 1:
-            return front_face_matches[0].nocab_uuid
+        card_uuid = uuid_for_name_or_front_face(card_lookup, self.SOURCE_GAME, name)
+        if card_uuid is not None:
+            return card_uuid
 
         _logger.error(
             "SeventeenLandsGameDataDeckExtractionStage: unresolved card name "

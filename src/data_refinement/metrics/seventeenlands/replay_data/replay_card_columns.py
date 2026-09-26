@@ -7,13 +7,9 @@ replay_data exposes cards through TWO independent mechanisms, not one.
 1. Name-suffixed header columns - deck_<name>/sideboard_<name> ONLY
    (replay_data has no opening_hand_<name> family the way game_data
    does - opening_hand is a single Arena-ID-list column instead, see
-   below). Parsed once at construction, via the exact same
-   _match_uuid() policy game_data.game_card_columns.GameCardColumns
-   and draft_data.pack_pool_columns.DraftCardColumns already
-   implement independently for their own sources - a third,
-   deliberate copy, already logged in
-   src/data_refinement/metrics/TODO.md as a known, intentional
-   duplication, not a fresh decision made here.
+   below). Parsed once at construction and matched with
+   card_lookup.uuid_for_name_or_front_face(), the same policy
+   GameCardColumns and DraftCardColumns use.
 2. Arena-ID pipe-delimited cells - every per-turn event column
    (creatures_cast, creatures_attacked, ...), plus
    opening_hand/candidate_hand_N/eot_{side}_*_in_play. These can't be
@@ -45,6 +41,7 @@ from uuid import UUID
 import pandas as pd
 
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.card_lookup import uuid_for_name_or_front_face
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 
@@ -205,10 +202,9 @@ class ReplayCardColumns:
                 -prefixed column name (use deck_columns/
                 sideboard_columns for those).
         Output: the matching nocab_uuid, or None if no single card
-            matched (see _match_uuid()'s docstring for the exact
-            policy).
+            matched (see card_lookup.uuid_for_name_or_front_face()).
         Side effects: on a name not already cached, queries
-            self._card_binder (via _match_uuid()) and stores the
+            self._card_binder (via uuid_for_name_or_front_face()) and stores the
             result (even if None) for every later call with the same
             name.
         Exceptions: none expected.
@@ -219,42 +215,11 @@ class ReplayCardColumns:
         if name in self._name_cache:
             return self._name_cache[name]
 
-        card_uuid = self._match_uuid(name)
+        card_uuid = uuid_for_name_or_front_face(
+            self._card_binder, self._source_game, name
+        )
         self._name_cache[name] = card_uuid
         return card_uuid
-
-    def _match_uuid(self, name: str) -> UUID | None:
-        """The uncached name -> nocab_uuid matching policy itself.
-
-        Private helper - single consumer is uuid_for_name(). The same
-        17lands-wide policy DraftCardColumns._match_uuid()/
-        GameCardColumns._match_uuid() already implement for their own
-        sources, re-typed here rather than shared via inheritance or
-        import - see src/data_refinement/metrics/TODO.md.
-
-        Inputs:
-            name: a bare card name to match.
-        Output: the matching nocab_uuid if
-            card_binder.get_by_name(source_game, name) returns exactly
-            one card; else the matching nocab_uuid if
-            card_binder.get_by_name_regex(source_game,
-            f"^{re.escape(name)}( //.*)?$") returns exactly one card;
-            else None. Ambiguity (2+ matches from either method) is
-            never guessed at - treated identically to no match.
-        Side effects: none - read-only card_binder queries.
-        Exceptions: none expected.
-        """
-        exact_matches = self._card_binder.get_by_name(self._source_game, name)
-        if len(exact_matches) == 1:
-            return exact_matches[0].nocab_uuid
-
-        front_face_matches = self._card_binder.get_by_name_regex(
-            self._source_game, f"^{re.escape(name)}( //.*)?$"
-        )
-        if len(front_face_matches) == 1:
-            return front_face_matches[0].nocab_uuid
-
-        return None
 
     def uuid_for_arena_id(self, arena_id: str) -> UUID | None:
         """Look up an already-normalized Arena id string, caching the

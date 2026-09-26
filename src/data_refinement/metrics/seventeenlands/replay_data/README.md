@@ -116,19 +116,10 @@ different ways - unlike `draft_data`/`game_data`, which only ever match
 cards by header column suffix:
 
 1. **Name-suffixed header columns** (`deck_<name>`/`sideboard_<name>`
-   only): `ReplayCardColumns._match_uuid()` (private - the only place
-   this policy lives) matches a bare card name against `card_binder`:
-   an exact `card_binder.get_by_name(source_game, name)` match first;
-   on 0 or 2+ matches, a regex fallback via
-   `card_binder.get_by_name_regex(source_game,
-   f"^{re.escape(name)}( //.*)?$")`; on 0 or 2+ matches from that
-   fallback, the name is unmatched. This is the same 17lands-wide
-   policy [`../draft_data/pack_pool_columns.py`](../draft_data/pack_pool_columns.py)'s
-   `DraftCardColumns`/[`../game_data/game_card_columns.py`](../game_data/game_card_columns.py)'s
-   `GameCardColumns` already implement for their own sources,
-   independently re-typed here rather than shared via inheritance or
-   import - see [`../../TODO.md`](../../TODO.md) for the logged
-   cross-source dedup consideration this adds a third instance of.
+   only): matched once at construction with
+   `card_lookup.uuid_for_name_or_front_face()` (a unique exact name
+   match, else a unique split/MDFC front-face match, else unmatched),
+   the same policy `draft_data`/`game_data` use.
 2. **Arena-ID pipe-delimited cells** (every per-turn event column, plus
    `opening_hand`/`candidate_hand_N`/`eot_{side}_*_in_play`):
    `uuid_for_arena_id(arena_id)` matches an already-normalized Arena id
@@ -146,7 +137,7 @@ cards by header column suffix:
    Arena alias as `str(int)` with no decimal (`"104936"`) - a naive
    `str()` call would silently miss every such cell. Unmatched ids are
    dropped into `unmatched_arena_ids` rather than raising, mirroring
-   `_match_uuid()`'s own unmatched handling.
+   the name-matching path's unmatched handling.
 
 ## Card-binder and deck-box access shape
 
