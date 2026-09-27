@@ -59,6 +59,7 @@ PYTHONPATH=. python3 scripts/run_data_retrieval.py --list
 PYTHONPATH=. python3 scripts/run_card_binder_ingestion.py --list
 PYTHONPATH=. python3 scripts/run_deck_box_ingestion.py --list
 PYTHONPATH=. python3 scripts/run_metrics.py --list
+PYTHONPATH=. python3 scripts/preflight_dojos.py         # sanity-check dojos before a run
 PYTHONPATH=. python3 scripts/smoke_test_training_loop.py
 ```
 
