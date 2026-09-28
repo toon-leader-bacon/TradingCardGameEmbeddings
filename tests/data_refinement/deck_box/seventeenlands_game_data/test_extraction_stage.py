@@ -13,6 +13,7 @@ from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.deck_box.seventeenlands_game_data.extraction_stage import (
     SeventeenLandsGameDataDeckExtractionStage,
+    _GameKey,
 )
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
@@ -47,47 +48,47 @@ def _row(
     deck_counts: dict[str, int],
     expansion: str = "MSH",
     event_type: str = "PremierDraft",
+    build_index: int = 0,
 ) -> dict:
     return {
         "expansion": expansion,
         "event_type": event_type,
         "draft_id": draft_id,
+        "build_index": build_index,
         "match_number": match_number,
         "game_number": game_number,
         "deck_counts": deck_counts,
     }
 
 
-def _game_data_csv_bytes(deck_card_names: list[str], rows: list[dict]) -> bytes:
-    fieldnames = [
-        "expansion",
-        "event_type",
-        "draft_id",
-        "match_number",
-        "game_number",
-    ] + [f"deck_{name}" for name in deck_card_names]
+def _game_data_csv_bytes(
+    deck_card_names: list[str], rows: list[dict], with_match_number: bool = True
+) -> bytes:
+    # with_match_number=False mirrors the 10 older 17Lands files, which
+    # have no match_number column at all.
+    key_columns = ["expansion", "event_type", "draft_id", "build_index"]
+    if with_match_number:
+        key_columns.append("match_number")
+    key_columns.append("game_number")
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(fieldnames)
+    writer.writerow(key_columns + [f"deck_{name}" for name in deck_card_names])
     for row in rows:
         deck_counts = row["deck_counts"]
         writer.writerow(
-            [
-                row["expansion"],
-                row["event_type"],
-                row["draft_id"],
-                row["match_number"],
-                row["game_number"],
-            ]
+            [row[column] for column in key_columns]
             + [deck_counts.get(name, 0) for name in deck_card_names]
         )
     return buffer.getvalue().encode("utf-8")
 
 
 def _write_game_data_csv(
-    path: Path, deck_card_names: list[str], rows: list[dict]
+    path: Path,
+    deck_card_names: list[str],
+    rows: list[dict],
+    with_match_number: bool = True,
 ) -> None:
-    path.write_bytes(_game_data_csv_bytes(deck_card_names, rows))
+    path.write_bytes(_game_data_csv_bytes(deck_card_names, rows, with_match_number))
 
 
 def _write_tar_wrapped_game_data_csv(
@@ -319,9 +320,7 @@ class TestExtract:
         assert deck.card_nocab_uuids.count(front_face_uuid) == 2
         assert not any(record.levelno == logging.ERROR for record in caplog.records)
 
-    def test_distinct_composite_keys_produce_distinct_decks(
-        self, tmp_path: Path
-    ) -> None:
+    def test_every_game_of_one_draft_shares_one_deck(self, tmp_path: Path) -> None:
         binder = _mtg_card_binder(["Plains"])
         box = DeckBox()
         raw_path = tmp_path / "MSH.PremierDraft.csv"
@@ -338,9 +337,195 @@ class TestExtract:
 
         changed_uuids = stage.extract(raw_path, box, binder)
 
-        assert len(changed_uuids) == 3
-        assert len(set(changed_uuids)) == 3
-        assert len(list(box.all_decks(GameId.MTG))) == 3
+        assert len(changed_uuids) == 1
+        assert len(list(box.all_decks(GameId.MTG))) == 1
+
+    def test_distinct_drafts_produce_distinct_decks(self, tmp_path: Path) -> None:
+        binder = _mtg_card_binder(["Plains"])
+        box = DeckBox()
+        raw_path = tmp_path / "MSH.PremierDraft.csv"
+        _write_game_data_csv(
+            raw_path,
+            ["Plains"],
+            [_row("d1", 1, 1, {"Plains": 17}), _row("d2", 1, 1, {"Plains": 17})],
+        )
+        stage = SeventeenLandsGameDataDeckExtractionStage()
+
+        changed_uuids = stage.extract(raw_path, box, binder)
+
+        assert len(set(changed_uuids)) == 2
+        assert len(list(box.all_decks(GameId.MTG))) == 2
+
+    @pytest.mark.parametrize(
+        "game_keys",
+        [[(1, 1), (1, 2), (2, 1)], [(2, 1), (1, 2), (1, 1)], [(1, 2), (2, 1), (1, 1)]],
+    )
+    def test_keeps_the_lowest_match_and_game_whatever_the_row_order(
+        self, tmp_path: Path, game_keys: list[tuple[int, int]]
+    ) -> None:
+        # Each game carries a different Mountain count, so the stored
+        # deck shows which game won.
+        binder = _mtg_card_binder(["Plains", "Mountain"])
+        box = DeckBox()
+        raw_path = tmp_path / "MSH.PremierDraft.csv"
+        rows = [
+            _row("d1", match, game, {"Plains": 16, "Mountain": 10 * match + game})
+            for match, game in game_keys
+        ]
+        _write_game_data_csv(raw_path, ["Plains", "Mountain"], rows)
+        stage = SeventeenLandsGameDataDeckExtractionStage()
+
+        stage.extract(raw_path, box, binder)
+
+        (deck,) = list(box.all_decks(GameId.MTG))
+        mountain_uuid = binder.get_by_name_single(GameId.MTG, "Mountain").nocab_uuid
+        assert deck.card_nocab_uuids.count(mountain_uuid) == 11
+        assert deck.provenance is not None
+        assert deck.provenance.source_id == "d1:0:1:1"
+
+    def test_reextracting_a_multi_game_draft_is_idempotent(
+        self, tmp_path: Path
+    ) -> None:
+        binder = _mtg_card_binder(["Plains", "Mountain"])
+        box = DeckBox()
+        raw_path = tmp_path / "MSH.PremierDraft.csv"
+        _write_game_data_csv(
+            raw_path,
+            ["Plains", "Mountain"],
+            [
+                _row("d1", 1, 2, {"Plains": 17}),
+                _row("d1", 1, 1, {"Plains": 16, "Mountain": 1}),
+            ],
+        )
+        stage = SeventeenLandsGameDataDeckExtractionStage()
+
+        stage.extract(raw_path, box, binder)
+        second = stage.extract(raw_path, box, binder)
+
+        assert second == []
+
+    def test_out_of_order_games_report_their_draft_once(self, tmp_path: Path) -> None:
+        binder = _mtg_card_binder(["Plains"])
+        box = DeckBox()
+        raw_path = tmp_path / "MSH.PremierDraft.csv"
+        _write_game_data_csv(
+            raw_path,
+            ["Plains"],
+            [_row("d1", 2, 1, {"Plains": 17}), _row("d1", 1, 1, {"Plains": 17})],
+        )
+        stage = SeventeenLandsGameDataDeckExtractionStage()
+
+        changed_uuids = stage.extract(raw_path, box, binder)
+
+        assert len(changed_uuids) == 1
+
+    def test_a_lower_game_in_a_later_file_replaces_the_stored_deck(
+        self, tmp_path: Path
+    ) -> None:
+        binder = _mtg_card_binder(["Plains", "Mountain"])
+        box = DeckBox()
+        later_path = tmp_path / "later.csv"
+        earlier_path = tmp_path / "earlier.csv"
+        _write_game_data_csv(
+            later_path, ["Plains", "Mountain"], [_row("d1", 2, 1, {"Plains": 17})]
+        )
+        _write_game_data_csv(
+            earlier_path,
+            ["Plains", "Mountain"],
+            [_row("d1", 1, 1, {"Plains": 16, "Mountain": 1})],
+        )
+        stage = SeventeenLandsGameDataDeckExtractionStage()
+
+        stage.extract(later_path, box, binder)
+        changed_uuids = stage.extract(earlier_path, box, binder)
+
+        (deck,) = list(box.all_decks(GameId.MTG))
+        assert changed_uuids == [deck.nocab_uuid]
+        assert deck.provenance is not None
+        assert deck.provenance.source_id == "d1:0:1:1"
+
+    def test_a_file_without_match_number_keeps_the_first_build(
+        self, tmp_path: Path
+    ) -> None:
+        # Older files number games per match and have no match_number
+        # column, so a draft repeats game_number 1; build_index picks
+        # the deck as first built.
+        binder = _mtg_card_binder(["Plains", "Mountain"])
+        box = DeckBox()
+        raw_path = tmp_path / "STX.TradSealed.csv"
+        _write_game_data_csv(
+            raw_path,
+            ["Plains", "Mountain"],
+            [
+                _row("d1", 0, 1, {"Plains": 15, "Mountain": 2}, build_index=1),
+                _row("d1", 0, 1, {"Plains": 16, "Mountain": 1}, build_index=0),
+                _row("d1", 0, 2, {"Plains": 14, "Mountain": 3}, build_index=2),
+                _row("d1", 0, 1, {"Plains": 16, "Mountain": 1}, build_index=0),
+            ],
+            with_match_number=False,
+        )
+        stage = SeventeenLandsGameDataDeckExtractionStage()
+
+        stage.extract(raw_path, box, binder)
+        second = stage.extract(raw_path, box, binder)
+
+        (deck,) = list(box.all_decks(GameId.MTG))
+        mountain_uuid = binder.get_by_name_single(GameId.MTG, "Mountain").nocab_uuid
+        assert deck.card_nocab_uuids.count(mountain_uuid) == 1
+        assert deck.provenance is not None
+        assert deck.provenance.source_id == "d1:0:0:1"
+        assert second == []
+
+
+class TestGameKey:
+    def test_float_numbers_round_trip_as_integers(self) -> None:
+        # pandas reads the columns as float when a chunk holds a NaN.
+        game_key = _GameKey.from_row(
+            {"build_index": 0.0, "match_number": 1.0, "game_number": 2.0}
+        )
+        provenance = Provenance(
+            data_source=DataSource.SEVENTEENLANDS_GAME_DATA,
+            source_id=game_key.source_id_for("d1"),
+            fetched_at=datetime.now(timezone.utc),
+        )
+
+        assert provenance.source_id == "d1:0:1:2"
+        assert _GameKey.from_provenance(provenance) == _GameKey(0, 1, 2)
+
+    def test_a_row_without_match_number_counts_it_as_zero(self) -> None:
+        assert _GameKey.from_row({"build_index": 2, "game_number": 1}) == _GameKey(
+            2, 0, 1
+        )
+
+    def test_build_index_outranks_match_and_game(self) -> None:
+        assert _GameKey(0, 3, 3) < _GameKey(1, 1, 1)
+
+    @pytest.mark.parametrize(
+        "source_id", ["deck-1", "d1:1:1", "d1:0:x:1", "d1:0.0:1.0:2.0"]
+    )
+    def test_a_source_id_this_stage_did_not_write_parses_as_none(
+        self, source_id: str
+    ) -> None:
+        provenance = Provenance(
+            data_source=DataSource.SEVENTEENLANDS_GAME_DATA,
+            source_id=source_id,
+            fetched_at=datetime.now(timezone.utc),
+        )
+
+        assert _GameKey.from_provenance(provenance) is None
+
+    def test_no_provenance_parses_as_none(self) -> None:
+        assert _GameKey.from_provenance(None) is None
+
+    def test_a_nan_game_number_raises(self) -> None:
+        with pytest.raises(ValueError):
+            _GameKey.from_row(
+                {"build_index": 0, "match_number": 1, "game_number": float("nan")}
+            )
+
+    def test_a_missing_build_index_raises(self) -> None:
+        with pytest.raises(KeyError):
+            _GameKey.from_row({"match_number": 1, "game_number": 1})
 
     def test_created_deck_carries_seventeenlands_game_data_provenance(
         self, tmp_path: Path
@@ -356,4 +541,4 @@ class TestExtract:
         deck = box.get_by_uuid(changed_uuids[0])
         assert deck.provenance is not None
         assert deck.provenance.data_source == DataSource.SEVENTEENLANDS_GAME_DATA
-        assert deck.provenance.source_id == "d1:1:1"
+        assert deck.provenance.source_id == "d1:0:1:1"

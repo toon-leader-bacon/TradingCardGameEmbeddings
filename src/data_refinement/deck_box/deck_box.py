@@ -17,34 +17,59 @@ docstrings for the authoritative statement):
     - DeckBox() / load([]): a fresh ":memory:" connection, no path
       association.
     - load([one_path]): ALWAYS connects directly to one_path, whether
-      or not it exists yet. From that point on, every mutating call
-      (create/create_if_absent/update/replace/delete) wraps its own
-      row write(s) - its own deck row, its deck_cards rows, and any
-      metadata invalidation - in `with self._connection:`, which
-      commits ONCE on a clean return and rolls back everything that
-      call touched if it raises OR if the process is killed before
-      that point - either way, the database ends up exactly as if the
-      call had never been made, never a half-written row. There is no
-      separate in-memory representation to flush, so even a brand-new
-      source's first ingestion survives a crash.
+      or not it exists yet, so even a brand-new source's first
+      ingestion is durable up to its last committed batch (see
+      BATCHED COMMITS below). There is no separate in-memory copy to
+      write out.
     - load([2+ paths]): always a fresh ":memory:" merge. No given path
       is ever mutated - this is a genuine read, unlike the single-path
       case above.
 
-CRASH-SAFETY OF THE VERSION STAMP: because a single-path box now
-persists writes immediately, a run that crashes partway through
+BATCHED COMMITS: every mutating call (create/create_if_absent/update/
+replace/delete) runs its row write(s) - its own deck row, its
+deck_cards rows, and its metadata invalidation - inside one SAVEPOINT,
+nested in this box's open batch transaction (_batched_write()). A call
+whose writes raise rolls back to its savepoint: that call leaves no
+trace, and earlier calls in the same batch are kept. The batch
+transaction commits after every commit_batch_size calls that wrote
+(a rejected create(), a failed call, or a create_if_absent()
+recurrence doesn't count), and on flush()/save(). A commit costs one
+fsync on a file-backed box, so committing per call held
+seventeenlands_game_data to ~75 decks/s. A process killed mid-batch
+loses that whole uncommitted batch (SQLite rolls back its journal on
+the next open) and never keeps half of one call. A caller that writes
+through a single-path box must end with save() or flush(); decks
+still pending when the connection closes are rolled back, and other
+connections see no pending write until it commits. A large batch can
+outgrow SQLite's page cache and take the file's exclusive lock before
+its commit, so other connections reading the same file mid-run may
+get "database is locked".
+
+Two failures are batch-wide rather than per-call, and every mutating
+call can raise them:
+    - sqlite3.Error from the batch commit itself, raised by the call
+      that filled the batch after its own writes succeeded. If the
+      transaction survives, those writes commit with the next batch.
+    - DeckBatchLostError: SQLite discarded the whole open transaction
+      on its own (e.g. disk full, I/O error), taking every earlier
+      pending call with it. It deliberately isn't a sqlite3.Error, so
+      a caller that catches per-row sqlite3.Error and carries on can't
+      swallow it and later save() a box missing those decks.
+
+CRASH-SAFETY OF THE VERSION STAMP: because a single-path box persists
+each batch as it commits, a run that crashes partway through
 updating an EXISTING box must not leave metadata.card_binder_version
 claiming a version that no longer accurately describes every row. Every
 mutating call touching a given source_game clears (deletes) that game's
-metadata row, inside the same `with self._connection:` block as the row
-write(s) that follow it (unconditionally - deleting an already-absent
-row is a cheap no-op, and a Python-side "already done" cache could
-desync from a rolled-back transaction). A pure-read session never
-touches metadata. A crash - or a caught, retried exception - mid-write
-therefore leaves metadata ABSENT for that game rather than falsely
-matching a stale version - card_binder_version_for() returning None for
-an absent
-row is the existing, documented contract, and existing callers already
+metadata row, inside the same savepoint as the row write(s) that follow
+it (unconditionally - deleting an already-absent row is a cheap no-op,
+and a Python-side "already done" cache could desync from a rolled-back
+savepoint). So a committed deck change is always committed together
+with its stamp's deletion. A pure-read session never touches metadata.
+A crash - or a caught, retried exception - mid-run therefore leaves
+metadata ABSENT for that game rather than falsely matching a stale
+version - card_binder_version_for() returning None for an absent row
+is the existing, documented contract, and existing callers already
 treat None as untrustworthy (see e.g.
 src/dojos/contrastive/dojo.py's ContrastiveDojo._check_deck_box_version()).
 save() re-establishes the row only once a run completes without error.
@@ -65,6 +90,7 @@ for the exact same deck, always.
 import hashlib
 import json
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar, Iterator
@@ -78,6 +104,19 @@ from src.data_refinement.deck_box._deck_tables import (
 from src.schema.card import GenericDeck, Provenance
 from src.schema.game_id import GameId
 
+# The one savepoint name every mutating call uses (see the module
+# docstring's BATCHED COMMITS section). Calls never nest, so one fixed
+# name is enough.
+_WRITE_SAVEPOINT = "deck_write"
+
+
+class DeckBatchLostError(RuntimeError):
+    """SQLite discarded a DeckBox's whole pending batch, not just one call.
+
+    See the module docstring's BATCHED COMMITS section for why this is
+    not a sqlite3.Error.
+    """
+
 
 class DeckBox:
     """Multi-game deck store, backed by one SQLite file per game.
@@ -85,34 +124,50 @@ class DeckBox:
     Single-consumer-per-instance is not the right frame here - this is
     the shared, generic storage capability every deck_box extraction
     stage (and, eventually, training) reads from and writes into.
-    Construction is always empty and unconnected to any file
-    (__init__ takes no arguments); load() is the sole entry point that
-    connects a box to real, persisted content.
+    Construction is always empty and unconnected to any file; load()
+    is the sole entry point that connects a box to real, persisted
+    content.
     """
 
     DEFAULT_OUTPUT_DIR: ClassVar[Path] = Path("data/final/decks")
     DEFAULT_OUTPUT_NAME: ClassVar[str] = "{game}.db"
+    # Mutating calls per commit (see the module docstring's BATCHED
+    # COMMITS section). At ~13 ms per fsync, 1,000 brings the commit
+    # cost to ~0.01 ms a deck, below the row inserts and the raw-file
+    # parsing around them, so a larger batch would gain little and only
+    # grow the work a crash throws away.
+    DEFAULT_COMMIT_BATCH_SIZE: ClassVar[int] = 1_000
 
-    def __init__(self) -> None:
+    def __init__(self, commit_batch_size: int = DEFAULT_COMMIT_BATCH_SIZE) -> None:
         """Construct an empty deck box, backed by an in-memory SQLite database.
 
         Prefer load([]) over calling this directly when the intent is
         "start empty for an extraction run" - this constructor exists
         because load() is itself built on top of it.
 
-        Inputs: none.
+        Inputs:
+            commit_batch_size: mutating calls per commit (see the
+                module docstring's BATCHED COMMITS section). Must be
+                at least 1; 1 commits every call on its own.
         Output: none (constructor).
         Side effects: opens a fresh ":memory:" SQLite connection and
             creates this box's schema (decks/deck_cards/metadata) on
             it.
-        Exceptions: none.
+        Exceptions: raises ValueError if commit_batch_size < 1.
         """
+        if commit_batch_size < 1:
+            raise ValueError(
+                f"DeckBox: commit_batch_size must be >= 1, got {commit_batch_size}"
+            )
         self._connection = sqlite3.connect(":memory:")
         self._tables = DeckTables(self._connection)
         # None means "not connected to any real file" (see this
         # class's docstring's load/save relationship) - save()'s
         # narrow-vs-copy branch keys off this.
         self._path: Path | None = None
+        self._commit_batch_size = commit_batch_size
+        # Mutating calls since the last commit; flush() resets it.
+        self._pending_writes = 0
         self._tables.create_schema()
 
     # region CRUD by UUID
@@ -131,19 +186,21 @@ class DeckBox:
         Output: deck, unchanged (returned for symmetry with
             update()/replace(), which do return a possibly-different
             object).
-        Side effects: mutates this box's store inside a `with
-            self._connection:` block - deck's own row, its deck_cards
-            rows, and (if this is the first mutating call this session
-            for deck.source_game) clearing that game's metadata row all
-            commit together on success, or all roll back together if
-            this call raises partway through OR the process is killed
-            before the block exits (see this class's docstring's
-            crash-safety section) - either way, never a half-written
-            row. The duplicate-uuid check happens BEFORE this block: a
-            rejected (raising) call never opens it and leaves the store
-            untouched.
+        Side effects: mutates this box's store inside one
+            _batched_write() savepoint - deck's own row, its deck_cards
+            rows, and clearing deck.source_game's metadata row are
+            kept together, or all rolled back together if this call
+            raises partway through; they become durable with this
+            call's batch (see the module docstring's BATCHED COMMITS
+            section) - never a half-written row. May commit the
+            pending batch. The duplicate-uuid check happens BEFORE the
+            savepoint: a rejected (raising) call never opens it and
+            leaves the store untouched.
         Exceptions: raises ValueError if deck.nocab_uuid is already
             stored - use update() or replace() instead.
+            Also raises the batch-wide errors in the module
+            docstring's BATCHED COMMITS section (sqlite3.Error,
+            DeckBatchLostError).
 
         Example:
             >>> box = DeckBox()
@@ -157,7 +214,7 @@ class DeckBox:
         if self._tables.deck_exists(deck.nocab_uuid):
             raise ValueError(f"create: {deck.nocab_uuid} is already stored")
 
-        with self._connection:
+        with self._batched_write():
             self._tables.clear_metadata(deck.source_game)
             self._tables.insert_deck_row(deck)
             self._tables.insert_deck_cards(deck.nocab_uuid, deck.card_nocab_uuids)
@@ -178,12 +235,14 @@ class DeckBox:
             itself on a genuinely new id, or whatever was already
             stored on a recurrence.
         Side effects: mutates this box's store only when
-            deck.nocab_uuid is new, inside a `with self._connection:`
-            block (see create()'s docstring) that also clears
+            deck.nocab_uuid is new, inside a _batched_write()
+            savepoint (see create()'s docstring) that also clears
             deck.source_game's metadata row if needed - a recurrence is
             the expected, non-error path
             here and must not pay that cost.
-        Exceptions: none.
+        Exceptions: none on a recurrence. On a new id, the
+            batch-wide errors in the module docstring's BATCHED
+            COMMITS section (sqlite3.Error, DeckBatchLostError).
 
         Example:
             >>> box = DeckBox()
@@ -194,7 +253,7 @@ class DeckBox:
         if existing is not None:
             return existing
 
-        with self._connection:
+        with self._batched_write():
             self._tables.clear_metadata(deck.source_game)
             self._tables.insert_deck_row(deck)
             self._tables.insert_deck_cards(deck.nocab_uuid, deck.card_nocab_uuids)
@@ -225,10 +284,13 @@ class DeckBox:
             provenance: new provenance, or None (default) to leave
                 unchanged.
         Output: the updated GenericDeck as now stored.
-        Side effects: mutates this box's store inside a `with
-            self._connection:` block, same as create() - see its
+        Side effects: mutates this box's store inside a
+            _batched_write() savepoint, same as create() - see its
             docstring.
         Exceptions: raises KeyError if nocab_uuid isn't stored.
+            Also raises the batch-wide errors in the module
+            docstring's BATCHED COMMITS section (sqlite3.Error,
+            DeckBatchLostError).
 
         Example:
             >>> box = DeckBox()
@@ -250,7 +312,7 @@ class DeckBox:
             provenance=(provenance if provenance is not None else existing.provenance),
         )
 
-        with self._connection:
+        with self._batched_write():
             self._tables.clear_metadata(existing.source_game)
             self._tables.update_deck_row(updated)
             if card_nocab_uuids is not None:
@@ -270,11 +332,14 @@ class DeckBox:
             deck: the new full deck content. deck.nocab_uuid MUST
                 equal nocab_uuid.
         Output: deck, unchanged.
-        Side effects: mutates this box's store inside a `with
-            self._connection:` block, same as create() - see its
+        Side effects: mutates this box's store inside a
+            _batched_write() savepoint, same as create() - see its
             docstring.
         Exceptions: raises KeyError if nocab_uuid isn't stored. Raises
             ValueError if deck.nocab_uuid != nocab_uuid.
+            Also raises the batch-wide errors in the module
+            docstring's BATCHED COMMITS section (sqlite3.Error,
+            DeckBatchLostError).
 
         Example:
             >>> box = DeckBox()
@@ -289,7 +354,7 @@ class DeckBox:
         if existing is None:
             raise KeyError(f"replace: {nocab_uuid} is not stored")
 
-        with self._connection:
+        with self._batched_write():
             self._tables.clear_metadata(deck.source_game)
             self._tables.update_deck_row(deck)
             self._tables.replace_deck_cards(nocab_uuid, deck.card_nocab_uuids)
@@ -302,10 +367,13 @@ class DeckBox:
             nocab_uuid: identity of the deck to remove. MUST already
                 be stored.
         Output: none.
-        Side effects: mutates this box's store inside a `with
-            self._connection:` block, same as create() - see its
+        Side effects: mutates this box's store inside a
+            _batched_write() savepoint, same as create() - see its
             docstring.
         Exceptions: raises KeyError if nocab_uuid isn't stored.
+            Also raises the batch-wide errors in the module
+            docstring's BATCHED COMMITS section (sqlite3.Error,
+            DeckBatchLostError).
 
         Example:
             >>> box = DeckBox()
@@ -316,7 +384,7 @@ class DeckBox:
         if existing is None:
             raise KeyError(f"delete: {nocab_uuid} is not stored")
 
-        with self._connection:
+        with self._batched_write():
             self._tables.clear_metadata(existing.source_game)
             self._tables.delete_deck_row(nocab_uuid)
             self._tables.delete_deck_cards(nocab_uuid)
@@ -481,7 +549,9 @@ class DeckBox:
     # region Persistence
 
     @staticmethod
-    def load(paths: list[Path]) -> "DeckBox":
+    def load(
+        paths: list[Path], commit_batch_size: int = DEFAULT_COMMIT_BATCH_SIZE
+    ) -> "DeckBox":
         """Connect to, or merge, one or more per-game SQLite files.
 
         Three distinct cases - see this module's docstring's "load/save
@@ -489,9 +559,9 @@ class DeckBox:
             - paths == []: a fresh ":memory:" box, not connected to any
               file. The sanctioned way to start a fresh, empty box.
             - len(paths) == 1: ALWAYS connects directly to that path,
-              whether or not it exists yet. Every mutating call after
-              this persists immediately - there is no in-memory
-              accumulation to flush.
+              whether or not it exists yet. Mutating calls after this
+              persist batch by batch (see the module docstring's
+              BATCHED COMMITS section); end with save() or flush().
             - len(paths) >= 2: always merges into a FRESH ":memory:"
               connection. No given path is ever mutated - this is a
               genuine read. Last-path-wins on a nocab_uuid appearing in
@@ -502,23 +572,26 @@ class DeckBox:
             paths: zero or more paths to data/final/decks/<game>.db-
                 shaped files. Files for different games can be mixed
                 in one call.
+            commit_batch_size: mutating calls per commit on the
+                returned box (see DeckBox.__init__()).
         Output: a DeckBox per the case above.
         Side effects: for len(paths) == 1, creates path's parent
             directory if missing and connects to (creating, if
             needed) that file directly. For 2+ paths, reads each given
             path; mutates none of them.
         Exceptions: raises if any given path exists but isn't a valid
-            file for this schema.
+            file for this schema. Raises ValueError if
+            commit_batch_size < 1.
 
         Example:
             >>> box = DeckBox.load([Path("data/final/decks/mtg.db")])
             >>> empty_box = DeckBox.load([])
         """
         if len(paths) == 0:
-            return DeckBox()
+            return DeckBox(commit_batch_size)
         if len(paths) == 1:
-            return DeckBox._connect_direct(paths[0])
-        return DeckBox._merge_into_memory(paths)
+            return DeckBox._connect_direct(paths[0], commit_batch_size)
+        return DeckBox._merge_into_memory(paths, commit_batch_size)
 
     def save(self, path: Path, source_game: GameId, card_binder_version: str) -> None:
         """Ensure path holds this box's current source_game content,
@@ -526,9 +599,10 @@ class DeckBox:
 
         Narrows to exactly two cases (see this module's docstring's
         "load/save relationship" section):
-            - This box is already directly connected to path: every
-              deck is already durable (see load()) - the only
-              remaining work is the metadata upsert, which is what
+            - This box is already directly connected to path: once
+              the pending batch is committed, every deck is durable
+              (see load()) - the only remaining work is the metadata
+              upsert, which is what
               marks the box trustworthy again after being invalidated
               on this session's first write (see
               card_binder_version_for()'s docstring).
@@ -545,10 +619,10 @@ class DeckBox:
             card_binder_version: the CardBinder version this box's
                 source_game decks were minted against.
         Output: none.
-        Side effects: creates path's parent directory if missing;
-            if not already connected to path, copies this box's full
-            state there; writes/overwrites the metadata row for
-            source_game.
+        Side effects: commits this box's pending batch (flush());
+            creates path's parent directory if missing; if not already
+            connected to path, copies this box's full state there;
+            writes/overwrites the metadata row for source_game.
         Exceptions: raises on failure to write path.
 
         Example:
@@ -558,6 +632,9 @@ class DeckBox:
             ...     card_binder.version_for(GameId.MTG),
             ... )
         """
+        # First, so the stamp below never lands before the decks it
+        # vouches for, and _backup_to() copies committed state only.
+        self.flush()
         if self._path == path:
             with self._connection:
                 self._tables.upsert_metadata(source_game, card_binder_version)
@@ -568,6 +645,28 @@ class DeckBox:
         # (":memory:" or a different file), not path, so writing through
         # self._connection would silently stamp the wrong database.
         stamp_metadata_at(path, source_game, card_binder_version)
+
+    def flush(self) -> None:
+        """Commit every mutating call still pending in this box's batch.
+
+        save() calls this itself. Call it directly only when a box
+        written through a single-path load() is abandoned without a
+        save(), or when another connection must see the writes so far
+        (see the module docstring's BATCHED COMMITS section).
+
+        Inputs: none.
+        Output: none.
+        Side effects: commits the open batch transaction, if any.
+        Exceptions: raises sqlite3.Error if the commit fails.
+
+        Example:
+            >>> box = DeckBox.load([Path("data/final/decks/mtg.db")])
+            >>> box.create(some_deck)
+            >>> box.flush()  # now visible to other connections
+        """
+        if self._connection.in_transaction:
+            self._connection.commit()
+        self._pending_writes = 0
 
     @staticmethod
     def default_output_path(source_game: GameId) -> Path:
@@ -594,8 +693,53 @@ class DeckBox:
 
     # region Private Helpers
 
+    @contextmanager
+    def _batched_write(self) -> Iterator[None]:
+        """Run one mutating call's writes inside a savepoint in the open batch.
+
+        Private helper - consumers are the five mutating CRUD methods.
+        See the module docstring's BATCHED COMMITS section. The batch
+        transaction is opened explicitly first: a SAVEPOINT that opens
+        a transaction itself would commit it on RELEASE, which is the
+        per-call commit this exists to avoid.
+
+        Inputs: none.
+        Output (yielded): none.
+        Side effects: opens the batch transaction if none is open;
+            releases the savepoint on a clean exit, or rolls back to
+            it on an exception; commits the batch (flush()) once
+            commit_batch_size calls are pending.
+        Exceptions: re-raises whatever the wrapped writes raise, after
+            rolling them back. Raises DeckBatchLostError (chained from
+            the original error) if SQLite already rolled back the whole
+            transaction. Whatever flush() raises propagates.
+        """
+        if not self._connection.in_transaction:
+            self._connection.execute("BEGIN")
+        self._connection.execute(f"SAVEPOINT {_WRITE_SAVEPOINT}")
+        try:
+            yield
+        except BaseException as error:
+            if not self._connection.in_transaction:
+                # SQLite rolled back the whole batch itself; the
+                # savepoint is gone with it, and so are this batch's
+                # earlier calls.
+                lost_writes = self._pending_writes
+                self._pending_writes = 0
+                raise DeckBatchLostError(
+                    f"SQLite discarded the open batch ({lost_writes} earlier "
+                    "call(s) plus this one); re-run the extraction"
+                ) from error
+            self._connection.execute(f"ROLLBACK TO {_WRITE_SAVEPOINT}")
+            self._connection.execute(f"RELEASE {_WRITE_SAVEPOINT}")
+            raise
+        self._connection.execute(f"RELEASE {_WRITE_SAVEPOINT}")
+        self._pending_writes += 1
+        if self._pending_writes >= self._commit_batch_size:
+            self.flush()
+
     @staticmethod
-    def _connect_direct(path: Path) -> "DeckBox":
+    def _connect_direct(path: Path, commit_batch_size: int) -> "DeckBox":
         """Build a DeckBox directly connected to path, creating it
         (and its parent directory, and its schema) if it doesn't
         already exist.
@@ -603,7 +747,7 @@ class DeckBox:
         Private helper - single consumer is load()'s single-path case.
         """
         path.parent.mkdir(parents=True, exist_ok=True)
-        box = DeckBox()
+        box = DeckBox(commit_batch_size)
         box._connection.close()
         box._connection = sqlite3.connect(str(path))
         box._tables = DeckTables(box._connection)
@@ -612,7 +756,7 @@ class DeckBox:
         return box
 
     @staticmethod
-    def _merge_into_memory(paths: list[Path]) -> "DeckBox":
+    def _merge_into_memory(paths: list[Path], commit_batch_size: int) -> "DeckBox":
         """Build a fresh ":memory:" DeckBox holding the union of every
         given path's decks and metadata, last-path-wins on a repeated
         nocab_uuid or source_game.
@@ -620,7 +764,7 @@ class DeckBox:
         Private helper - single consumer is load()'s multi-path case.
         Never mutates any path in paths (see DeckTables.merge_from()).
         """
-        box = DeckBox()
+        box = DeckBox(commit_batch_size)
         for path in paths:
             box._tables.merge_from(path)
         return box

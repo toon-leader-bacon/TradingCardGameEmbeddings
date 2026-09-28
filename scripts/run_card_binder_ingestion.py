@@ -115,12 +115,12 @@ def run_one(name: str, raw_path: Path | None) -> None:
     """Ingest one source into its game's CardBinder file, printing how
     many cards were created or content-changed."""
     stage, default_raw_path = STAGES[name]
-    resolved_raw_path = raw_path if raw_path is not None else default_raw_path()
+    effective_raw_path = raw_path if raw_path is not None else default_raw_path()
     binder_path = CardBinder.default_output_path(stage.SOURCE_GAME)
 
-    print(f"=== {name}: {resolved_raw_path} -> {binder_path} ===")
+    print(f"=== {name}: {effective_raw_path} -> {binder_path} ===")
     changed_uuids = build_or_update_card_binder(
-        raw_path=resolved_raw_path,
+        raw_path=effective_raw_path,
         ingestion_stage=stage,
         binder_path=binder_path,
     )

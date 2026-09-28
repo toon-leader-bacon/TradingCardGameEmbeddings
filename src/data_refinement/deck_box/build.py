@@ -28,19 +28,20 @@ def build_or_update_deck_box(
            own docstring). Unlike before this container's SQLite
            rewrite, this is unconditional: single-path load() now
            handles "doesn't exist yet" and "already exists" identically,
-           so every deck extraction_stage.extract() creates/updates
-           below persists to box_path immediately, as it happens - a
-           crash partway through no longer loses progress that hasn't
-           reached step 3 yet.
+           so the decks extraction_stage.extract() creates/updates
+           below persist to box_path batch by batch (see DeckBox's
+           BATCHED COMMITS docstring) - a crash partway through
+           loses at most the uncommitted batch, not everything
+           before step 3.
         2. extraction_stage.extract(raw_path, box, card_lookup) —
            creates decks on box, as a side effect, under
            extraction_stage.SOURCE_GAME.
         3. box.save(box_path, extraction_stage.SOURCE_GAME,
            card_lookup.version_for(extraction_stage.SOURCE_GAME)) —
            stamps the box with the CardBinder version its card
-           references were just resolved against. Every deck is
-           already durable by this point (see step 1) - this call's
-           only remaining job is that version stamp.
+           references were just matched against. save() first
+           commits the last partial batch, then writes that
+           version stamp.
         4. Return the list[UUID] extract() itself returned, unchanged.
 
     Inputs:

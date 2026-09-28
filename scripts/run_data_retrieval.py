@@ -65,6 +65,7 @@ from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.fabtcg_decklists.downloader import FabtcgDecklistDownloader
 from src.data_retrieval.gwent_one.downloader import GwentOneDownloader
 from src.data_retrieval.hearthstonejson.downloader import HearthstoneJsonDownloader
+from src.data_retrieval.isotropic.downloader import IsotropicGameLogDownloader
 from src.data_retrieval.pitchstack.downloader import PitchstackDeckDownloader
 from src.data_retrieval.play_gwent.downloader import PlayGwentDownloader
 from src.data_retrieval.pokemon_tcg.downloader import PokemonTcgDataDownloader
@@ -168,6 +169,10 @@ def run_dominiontabs() -> None:
     _run_standard(DominionTabsCardDownloader())
 
 
+def run_isotropic() -> None:
+    _run_standard(IsotropicGameLogDownloader())
+
+
 def run_pitchstack() -> None:
     _run_standard(PitchstackDeckDownloader())
 
@@ -195,6 +200,7 @@ DOWNLOADERS: dict[str, Callable[[], None]] = {
     "fabtcg_decklists": run_fabtcg_decklists,
     "gwent_one": run_gwent_one,
     "hearthstonejson": run_hearthstonejson,
+    "isotropic": run_isotropic,
     "pitchstack": run_pitchstack,
     "play_gwent": run_play_gwent,
     "pokemon_tcg": run_pokemon_tcg,
