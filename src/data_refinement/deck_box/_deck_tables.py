@@ -2,9 +2,12 @@
 
 Private to deck_box.py: DeckTables is a Table Data Gateway (one method
 per SQL statement DeckBox needs) so DeckBox itself only decides WHAT
-to write and WHEN to commit, never HOW a row is spelled. Nothing here
-commits - every write joins whatever `with connection:` block its
-caller has open (see DeckBox's crash-safety docstring).
+to write and WHEN to commit, never HOW a row is spelled. The row
+writes never commit - each joins whatever transaction and savepoint
+its caller has open (see DeckBox's BATCHED COMMITS docstring). The
+exceptions are create_schema() and merge_from(), which commit, and
+so must only run before any batch is open (DeckBox calls both at
+construction only).
 """
 
 import hashlib
@@ -126,7 +129,8 @@ def _deck_row_values(deck: GenericDeck) -> tuple:
 class DeckTables:
     """Every SQL statement DeckBox runs against its decks/deck_cards/
     metadata tables, on one connection. Holds no state of its own
-    beyond that connection; never commits.
+    beyond that connection. Row writes never commit; create_schema()
+    and merge_from() do (see the module docstring).
     """
 
     def __init__(self, connection: sqlite3.Connection) -> None:
@@ -142,7 +146,9 @@ class DeckTables:
         """Set row_factory and create decks/deck_cards/metadata if absent.
 
         Inputs: none. Output: none.
-        Side effects: executes the schema DDL and commits.
+        Side effects: executes the schema DDL and commits, which
+            also commits any open transaction - call it only
+            before any write.
         Exceptions: sqlite3.Error on a corrupt database.
         """
         self._connection.row_factory = sqlite3.Row
@@ -376,7 +382,9 @@ class DeckTables:
 
         Inputs: path, a DeckBox SQLite file. Output: none.
         Side effects: ATTACHes path read-only, writes and commits into
-            this connection, DETACHes. Never writes to path.
+            this connection (committing any open transaction too -
+            call it only before any write), DETACHes. Never writes
+            to path.
         Exceptions: sqlite3.Error if path isn't a valid DeckBox file.
         """
         self._connection.execute("ATTACH DATABASE ? AS merge_source", (str(path),))

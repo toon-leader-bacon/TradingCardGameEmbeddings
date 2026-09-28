@@ -83,17 +83,25 @@ merged or cross-referenced.
     (`src/dojos/file_managers/deck_box_dealer.py`) turns into exact-ratio
     splits.
   - `load([])` opens an empty in-memory box; `load([path])` connects
-    straight to `path`, so every mutating call is durable as its own
-    atomic commit; `load([p1, p2, ...])` merges read-only into memory,
-    last path wins. `save()` stamps the version (copying the box to
-    `path` first if it isn't already connected there).
-  - Crash safety: a game's first mutating call clears its version stamp
-    in the same transaction, and `save()` restores it once the run
-    finishes, so a crashed run reads as stale rather than current. This
-    relies on every stage deriving deterministic deck ids (see
+    straight to `path`; `load([p1, p2, ...])` merges read-only into
+    memory, last path wins. `save()` commits any pending writes and
+    stamps the version (copying the box to `path` first if it isn't
+    already connected there).
+  - Batched commits: each mutating call is atomic on its own (a
+    savepoint), but commits happen every `DEFAULT_COMMIT_BATCH_SIZE`
+    (1,000) calls, set per box through `load(paths, commit_batch_size=...)`.
+    Committing every call cost one fsync per deck. A caller writing
+    through `load([path])` must end with `save()` or `flush()`, or its
+    last partial batch is rolled back.
+  - Crash safety: a game's mutating calls clear its version stamp in
+    the same savepoint as their writes, and `save()` restores it once
+    the run finishes, so a crashed run reads as stale rather than
+    current. A crash loses at most the uncommitted batch. This relies
+    on every stage deriving deterministic deck ids (see
     `extraction.py`). The module docstring has the details.
 - `_deck_tables.py` — `DeckTables`, private to `deck_box.py`: one method
-  per SQL statement, never committing.
+  per SQL statement. Row writes never commit; `create_schema()` and
+  `merge_from()` do, so they run only when a box is built.
 - `extraction.py` — `DeckExtractionStage`, the Strategy Protocol every
   deck source implements: `extract(self, raw_path, box, card_lookup) ->
   list[UUID]` plus `SOURCE_GAME: ClassVar[GameId]`. A stage reads cards
@@ -119,7 +127,7 @@ card reference it can't match, rather than dropping it.
 | `sts2runs/` | `Sts2RunsDeckExtractionStage` | Slay the Spire 2 | sts2runs monthly `.json.gz` | `uuid5(ns, f"{run_id}:{player_index}")` |
 | `fabtcg_decklists/` | `FabtcgDecklistsExtractionStage` | Flesh and Blood | fabtcg.com decklist HTML (parsed by `fragment_parsing.py`) | `uuid5(ns, deck_slug)` |
 | `play_gwent/` | `PlayGwentDeckExtractionStage` | Gwent | playgwent.com `guides.jsonl` | `uuid5(ns, guide_id)` |
-| `seventeenlands_game_data/` | `SeventeenLandsGameDataDeckExtractionStage` | MTG | 17lands `game_data` CSVs (`deck_<name>` copy-count columns) | `uuid5(ns, f"{draft_id}:{match_number}:{game_number}")` |
+| `seventeenlands_game_data/` | `SeventeenLandsGameDataDeckExtractionStage` | MTG | 17lands `game_data` CSVs (`deck_<name>` copy-count columns) | `uuid5(ns, draft_id)`: one deck per draft, taken from its lowest `(build_index, match_number, game_number)`, i.e. its earliest played build |
 
 ## How it works
 

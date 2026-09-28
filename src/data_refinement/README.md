@@ -5,6 +5,10 @@ project's own schema (`src/schema/`) and training labels. Everything it
 writes lands under `data/final/` (cards, decks) or `data/metrics/`
 (labels).
 
+[`CURRENT_STATUS.md`](CURRENT_STATUS.md) tracks which retrieval
+sources have binder, deck box and metric coverage, and what to build
+next.
+
 ## Containers
 
 - **[`card_binder/`](card_binder/README.md)** - `CardBinder`, the

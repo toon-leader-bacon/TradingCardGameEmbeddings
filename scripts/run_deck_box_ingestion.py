@@ -89,7 +89,7 @@ def run_one(name: str, raw_path: Path | None) -> None:
     empty binder where every card reference would resolve to Unknown.
     """
     stage, default_raw_path = _STAGES[name]
-    resolved_raw_path = raw_path if raw_path is not None else default_raw_path()
+    effective_raw_path = raw_path if raw_path is not None else default_raw_path()
     binder_path = CardBinder.default_output_path(stage.SOURCE_GAME)
     if not binder_path.exists():
         raise SystemExit(
@@ -107,9 +107,9 @@ def run_one(name: str, raw_path: Path | None) -> None:
     binder.save(binder_path, stage.SOURCE_GAME)
 
     box_path = DeckBox.default_output_path(stage.SOURCE_GAME)
-    print(f"=== {name}: {resolved_raw_path} -> {box_path} ===")
+    print(f"=== {name}: {effective_raw_path} -> {box_path} ===")
     changed_uuids = build_or_update_deck_box(
-        raw_path=resolved_raw_path,
+        raw_path=effective_raw_path,
         extraction_stage=stage,
         box_path=box_path,
         card_lookup=binder,

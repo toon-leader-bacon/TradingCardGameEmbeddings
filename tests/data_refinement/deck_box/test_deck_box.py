@@ -1,3 +1,4 @@
+import sqlite3
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -5,7 +6,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.deck_box.deck_box import DeckBatchLostError, DeckBox
 from src.schema.card import GenericDeck, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
@@ -379,6 +380,7 @@ class TestLoad:
 
         box = DeckBox.load([path])
         box.create(_deck("Mono Red", [uuid4()]))
+        box.flush()
 
         assert path.exists()
         reopened = DeckBox.load([path])
@@ -577,12 +579,12 @@ class TestMutatingMethodsAreAtomic:
     def test_a_crash_between_the_deck_row_and_its_card_rows_commits_nothing(
         self, tmp_path: Path
     ) -> None:
-        # create() writes its deck row and its deck_cards rows, then
-        # commits ONCE at the end - not once per write - specifically
-        # so a crash between them can never leave a deck row with no
-        # cards. Simulate that crash directly: perform the row write
-        # create() does internally, without its own method's final
-        # commit, then "crash" (close without committing).
+        # create() writes its deck row and its deck_cards rows inside one
+        # savepoint, and nothing commits until its batch does, so a
+        # crash between them can never leave a deck row with no cards.
+        # Simulate that crash directly: perform the row write create()
+        # does internally, with no commit, then "crash" (close without
+        # committing).
         path = tmp_path / "mtg.db"
         box = DeckBox.load([path])
         deck = _deck("Mono Red", [uuid4(), uuid4()])
@@ -605,12 +607,12 @@ class TestMutatingMethodsAreAtomic:
         # caught by a caller who keeps reusing the SAME DeckBox instance
         # for a later, unrelated create() - real callers loop
         # create()/create_if_absent() per row against one shared box
-        # (e.g. every DeckExtractionStage). Without `with
-        # self._connection:`'s rollback, the doomed call's deck row
-        # would already be durably committed the moment
-        # insert_deck_cards raises, so it would survive even
-        # though the whole create() call never returned successfully -
-        # and would still be there after a later, unrelated call.
+        # (e.g. every DeckExtractionStage). Without the per-call
+        # savepoint's rollback, the doomed call's deck row would stay
+        # in the open batch once insert_deck_cards raises, and commit
+        # with it even though the whole create() call never returned
+        # successfully - so it would be there after a later, unrelated
+        # call.
         path = tmp_path / "mtg.db"
         box = DeckBox.load([path])
         doomed_deck = _deck("Doomed", [uuid4()])
@@ -639,6 +641,163 @@ class TestMutatingMethodsAreAtomic:
         assert box.get_by_uuid(survivor_deck.nocab_uuid) is not None
 
 
+class TestBatchedCommits:
+    def test_writes_reach_other_connections_only_once_a_batch_fills(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "mtg.db"
+        box = DeckBox.load([path], commit_batch_size=3)
+
+        box.create(_deck("One", [uuid4()]))
+        box.create(_deck("Two", [uuid4()]))
+        assert list(DeckBox.load([path]).all_uuids(GameId.MTG)) == []
+
+        box.create(_deck("Three", [uuid4()]))
+        assert len(list(DeckBox.load([path]).all_uuids(GameId.MTG))) == 3
+
+    def test_pending_writes_are_visible_through_the_writing_box(
+        self, tmp_path: Path
+    ) -> None:
+        box = DeckBox.load([tmp_path / "mtg.db"], commit_batch_size=100)
+        deck = _deck("Mono Red", [uuid4()])
+
+        box.create(deck)
+
+        assert box.get_by_uuid(deck.nocab_uuid) == deck
+
+    def test_save_commits_a_partial_batch(self, tmp_path: Path) -> None:
+        path = tmp_path / "mtg.db"
+        box = DeckBox.load([path], commit_batch_size=100)
+        box.create(_deck("Mono Red", [uuid4()]))
+
+        box.save(path, GameId.MTG, "binder-v1")
+        box._connection.close()
+
+        reopened = DeckBox.load([path])
+        assert len(list(reopened.all_uuids(GameId.MTG))) == 1
+        assert reopened.card_binder_version_for(GameId.MTG) == "binder-v1"
+
+    def test_a_failed_call_keeps_earlier_pending_calls_in_its_batch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The savepoint rolls back only the failing call, not the whole
+        # uncommitted batch it sits in.
+        path = tmp_path / "mtg.db"
+        box = DeckBox.load([path], commit_batch_size=100)
+        kept_deck = _deck("Kept", [uuid4()])
+        box.create(kept_deck)
+
+        def _raise(*args: object, **kwargs: object) -> None:
+            raise RuntimeError("simulated mid-create failure")
+
+        monkeypatch.setattr(box._tables, "insert_deck_cards", _raise)
+        doomed_deck = _deck("Doomed", [uuid4()])
+        with pytest.raises(RuntimeError):
+            box.create(doomed_deck)
+        monkeypatch.undo()
+        box.flush()
+
+        reopened = DeckBox.load([path])
+        assert reopened.get_by_uuid(kept_deck.nocab_uuid) == kept_deck
+        assert reopened.get_by_uuid(doomed_deck.nocab_uuid) is None
+
+    def test_rejects_a_batch_size_below_one(self) -> None:
+        with pytest.raises(ValueError, match="commit_batch_size"):
+            DeckBox(commit_batch_size=0)
+
+    def test_a_batch_size_of_one_commits_every_call(self, tmp_path: Path) -> None:
+        path = tmp_path / "mtg.db"
+        box = DeckBox.load([path], commit_batch_size=1)
+
+        box.create(_deck("Mono Red", [uuid4()]))
+
+        assert len(list(DeckBox.load([path]).all_uuids(GameId.MTG))) == 1
+
+    def test_every_writing_call_counts_toward_the_batch_but_rejected_ones_do_not(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "mtg.db"
+        box = DeckBox.load([path], commit_batch_size=4)
+        deck = _deck("Mono Red", [uuid4()])
+        doomed = _deck("Doomed", [uuid4()])
+
+        box.create(deck)  # 1
+        with pytest.raises(ValueError):
+            box.create(deck)  # rejected: doesn't count
+        box.create_if_absent(deck)  # recurrence: doesn't count
+        box.update(deck.nocab_uuid, name="Renamed")  # 2
+        box.create(doomed)  # 3
+        assert list(DeckBox.load([path]).all_uuids(GameId.MTG)) == []
+
+        box.delete(doomed.nocab_uuid)  # 4: fills the batch
+        reopened = DeckBox.load([path])
+        assert list(reopened.all_uuids(GameId.MTG)) == [deck.nocab_uuid]
+        assert reopened.get_by_uuid(deck.nocab_uuid).name == "Renamed"
+
+    def test_a_crash_after_a_committed_batch_leaves_the_stamp_cleared(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "mtg.db"
+        seed = DeckBox.load([path])
+        seed.create(_deck("Seed", [uuid4()]))
+        seed.save(path, GameId.MTG, "binder-v1")
+        seed._connection.close()
+
+        run = DeckBox.load([path], commit_batch_size=2)
+        for name in ("One", "Two", "Three"):
+            run.create(_deck(name, [uuid4()]))
+        run._connection.close()  # crash: "Three" was still pending
+
+        after_crash = DeckBox.load([path])
+        assert len(list(after_crash.all_uuids(GameId.MTG))) == 3
+        assert after_crash.card_binder_version_for(GameId.MTG) is None
+
+    def test_a_crash_before_any_batch_commits_leaves_the_box_as_it_was(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "mtg.db"
+        seed = DeckBox.load([path])
+        seed_deck = _deck("Seed", [uuid4()])
+        seed.create(seed_deck)
+        seed.save(path, GameId.MTG, "binder-v1")
+        seed._connection.close()
+
+        run = DeckBox.load([path], commit_batch_size=10)
+        run.create(_deck("Pending", [uuid4()]))
+        run._connection.close()  # crash before the batch filled
+
+        after_crash = DeckBox.load([path])
+        assert list(after_crash.all_uuids(GameId.MTG)) == [seed_deck.nocab_uuid]
+        assert after_crash.card_binder_version_for(GameId.MTG) == "binder-v1"
+
+    def test_sqlite_discarding_the_whole_batch_raises_deck_batch_lost_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Stands in for SQLITE_FULL/SQLITE_IOERR, where SQLite rolls back
+        # the whole transaction and the savepoint goes with it.
+        path = tmp_path / "mtg.db"
+        box = DeckBox.load([path], commit_batch_size=100)
+        earlier_deck = _deck("Earlier", [uuid4()])
+        box.create(earlier_deck)
+
+        def _discard_transaction(*args: object, **kwargs: object) -> None:
+            box._connection.rollback()
+            raise sqlite3.OperationalError("database or disk is full")
+
+        monkeypatch.setattr(box._tables, "insert_deck_cards", _discard_transaction)
+        with pytest.raises(DeckBatchLostError) as raised:
+            box.create(_deck("Doomed", [uuid4()]))
+        monkeypatch.undo()
+
+        assert isinstance(raised.value.__cause__, sqlite3.OperationalError)
+        assert box.get_by_uuid(earlier_deck.nocab_uuid) is None
+        # The box stays usable for a fresh batch.
+        survivor = _deck("Survivor", [uuid4()])
+        box.create(survivor)
+        box.flush()
+        assert list(DeckBox.load([path]).all_uuids(GameId.MTG)) == [survivor.nocab_uuid]
+
+
 class TestCrashDuringExtractionThenRetry:
     def test_retry_after_a_partial_run_converges_without_duplicating(
         self, tmp_path: Path
@@ -663,12 +822,17 @@ class TestCrashDuringExtractionThenRetry:
                     )
 
         # First (partial) run: only processes the first 3 of 5 rows,
-        # then "crashes" - never reaches save().
-        first_run = DeckBox.load([path])
+        # then "crashes" - never reaches save(). With a batch of 2, the
+        # first two decks were committed and the third was still
+        # pending; closing without a commit is what a killed process
+        # leaves behind.
+        first_run = DeckBox.load([path], commit_batch_size=2)
         _extract_idempotently(first_run, all_uuids[:3])
+        first_run._connection.close()
 
-        assert path.exists()  # already durable, per the direct-connect design
-        assert DeckBox.load([path]).card_binder_version_for(GameId.MTG) is None
+        after_crash = DeckBox.load([path])
+        assert set(after_crash.all_uuids(GameId.MTG)) == set(all_uuids[:2])
+        assert after_crash.card_binder_version_for(GameId.MTG) is None
 
         # Retry: a fresh process re-runs extraction from the start over
         # the SAME full raw source (all 5 uuids), then saves.
