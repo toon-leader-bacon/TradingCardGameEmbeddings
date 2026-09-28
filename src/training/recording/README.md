@@ -11,8 +11,10 @@ hooks for observers.
 - [checkpointer.py](checkpointer.py): `Checkpointer` Protocol and
   `DirectoryCheckpointer`, which writes a weights snapshot, an
   encoder-only file (the seam for Hugging Face export) and a manifest.
-- [run_listener.py](run_listener.py): `RunListener` Observer Protocol and a
-  logging listener.
+- [run_listener.py](run_listener.py): `RunListener` Observer Protocol,
+  `LoggingRunListener`, and `CsvRunListener` (appends per-round, per-dojo
+  losses and checkpoint records to two CSV files, for tailing or loading
+  with pandas during an overnight run).
 
 ## How it works
 

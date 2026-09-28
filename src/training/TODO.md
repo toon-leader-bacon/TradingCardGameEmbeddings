@@ -263,8 +263,13 @@ a median of ~200 tokens and FaB to ~570.
 - [ ] **Set `max_batch_cost` sensibly.** It counts cards, not tokens, and a
   40-card deck counts as 40. Start small (~32) and raise it while watching
   VRAM.
-- [ ] **Add run logging.** Only `LoggingRunListener` exists; a CSV or
-  TensorBoard listener would help for overnight runs.
+- [x] **Add run logging** (2026-09-28). `CsvRunListener`
+  (`recording/run_listener.py`) appends one row per (round, dojo) to a
+  rounds CSV and one row per checkpoint to a checkpoints CSV, both openable
+  mid-run (pandas, `tail -f`, a spreadsheet). Long format, not one column
+  per dojo, since a phase's dojo set can differ from the next phase's. No
+  TensorBoard listener; not needed until a run is long enough to want live
+  plots rather than a CSV.
 - [ ] **Decide about resume.** Not supported (tracker and RNG state are not
   saved); accept that for the first run or scope it.
 
