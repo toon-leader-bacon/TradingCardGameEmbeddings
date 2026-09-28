@@ -41,6 +41,11 @@ Top level:
   `evaluation/`.
 - [trainable_encoder.py](trainable_encoder.py): the slice of the model the
   trainer needs.
+- [preflight.py](preflight.py): `preflight_dojo()` exercises one already-
+  built dojo (one TRAIN batch, `compute_loss` against random embeddings)
+  without an encoder, so a stale split file or a `card_embedding_size`
+  mismatch surfaces before an unattended run reaches it. Run over the
+  first-run candidates by `scripts/preflight_dojos.py`.
 - [TODO.md](TODO.md): the checklist to a first real training run.
   [Notes.md](Notes.md): the dated findings behind it (hardware, GPU
   measurements, serialization analysis).

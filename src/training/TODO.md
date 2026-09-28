@@ -241,9 +241,15 @@ a median of ~200 tokens and FaB to ~570.
   `raw_content` before calling `_is_eligible()`, so no per-subclass
   fix is needed; tested (`test_masked_field_metric.py`, new
   `test_masked_field_regression_metric.py`).
-- [ ] **Exercise every chosen dojo once before training.** Construct it,
-  pull one TRAIN batch, run `compute_loss` on random embeddings, confirm
-  head dims match `card_embedding_size`.
+- [x] **Exercise every chosen dojo once before training** (2026-09-27).
+  `src/training/preflight.py`'s `preflight_dojo()` constructs one TRAIN
+  batch, builds random embeddings nested exactly like the batch's own
+  `GenericCard` structure (no encoder, no GPU needed), and runs
+  `compute_loss` against them - the same shape mismatch or 0-example
+  staleness (see the gwent_one incident in section E) surfaces in
+  seconds instead of a quarantined round. `scripts/preflight_dojos.py`
+  runs it over the gwent_one and sts_gg first-run candidates; not yet
+  run against real data (no `data/` in this cloud session).
 
 ## D. Training driver
 
