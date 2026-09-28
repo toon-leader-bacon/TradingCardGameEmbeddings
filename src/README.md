@@ -45,7 +45,7 @@ Two flows hand data between containers as files on disk:
 | [`encoder_model/`](encoder_model/README.md) | in progress | The embedding model (PyTorch only): text encoder + embedding head, single- and multi-card. |
 | [`dojos/`](dojos/README.md) | in progress | Training tasks: each yields batches within the trainer's budget and scores embeddings with its own small decoder head and loss. |
 | [`training/`](training/README.md) | in progress | `Trainer`: phases, rounds and steps over a diet of dojos, with saturation-based stopping, fault isolation and checkpointing. Run on CPU against real dojos; no driver script yet. |
-| [`evaluation/`](evaluation/) | not started | Post-training evaluation of the embedding itself (intrinsic: how the space is used, clusters; extrinsic: unseen dojos, cards and games). Distinct from the dojos' own train/test/validation splits. |
+| [`evaluation/`](evaluation/README.md) | design only | Post-training evaluation of the embedding itself (intrinsic: cluster agreement and tightness against known card labels; extrinsic: fresh-decoder-head training curves on a dojo). Distinct from the dojos' own train/test/validation splits. |
 
 ## A naming note: `Dojo` vs. `Gym`
 
