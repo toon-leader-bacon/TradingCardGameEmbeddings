@@ -13,11 +13,12 @@ canonical forward(), which always treats its input as a batch.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Mapping, cast
+from typing import List, Mapping, Sequence, cast
 
 import torch
 import torch.nn as nn
 
+from src.encoder_model.precision import Precision, inference_context
 from src.schema.card import GenericCard
 from src.schema.type_hints import (
     BatchedModelOutput,
@@ -73,6 +74,47 @@ class CardEncoderModel(nn.Module, ABC):
         Side effects: none beyond autograd.
         Exceptions: whatever the model's text encoder or head raises.
         """
+
+    @property
+    @abstractmethod
+    def embedding_dim(self) -> int:
+        """The width of one card embedding (every Tensor this model returns).
+
+        Inputs: none. Output: int. Side effects: none. Exceptions: none.
+        """
+
+    def isolated_embeddings(
+        self, cards: Sequence[GenericCard], precision: Precision = "fp32"
+    ) -> torch.Tensor:
+        """Every card embedded on its own, for storage and analysis.
+
+        Context-free by construction: goes through
+        forward_batched_single_card, so row i depends only on cards[i] (for
+        MultiCardModel this is its no-context encoding: self-attention over
+        a length-one sequence). Deterministic: eval mode, so no dropout.
+
+        Inputs: cards (Sequence[GenericCard]), from any onboarded game, may
+            be empty; precision (Precision) for the forward pass.
+        Output: float32 Tensor (len(cards), embedding_dim) on the CPU,
+            detached; (0, embedding_dim) for no cards.
+        Side effects: none lasting; the model's train/eval mode is switched
+            to eval for the call and restored, even on error.
+        Exceptions: whatever the text encoder, head or attention raise;
+            entering autocast can raise for a dtype the device does not
+            support.
+
+        Example:
+            >>> model.isolated_embeddings([card_a, card_b], "fp16").shape
+            torch.Size([2, 256])
+        """
+        # No cards: no forward pass, just an empty table of the right width
+        if not cards:
+            return torch.empty((0, self.embedding_dim), dtype=torch.float32)
+        # Embed each card apart, without training, at `precision`
+        with inference_context(self, precision):
+            embeddings = self.forward_batched_single_card(list(cards))
+        # Stack into one float32 CPU table (autocast may have produced fp16)
+        return torch.stack(embeddings).float().cpu()
 
     def encoder_only_state_dict(self) -> Mapping[str, torch.Tensor]:
         """Every weight of this model. Dojo decoder heads live in their

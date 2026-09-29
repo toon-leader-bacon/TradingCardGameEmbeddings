@@ -28,21 +28,27 @@ class MultiCardModel(CardEncoderModel):
         self,
         text_encoder: TextEncoder,
         embedding_head: EmbeddingHead,
-        card_embedding_size: int,
         num_heads: int = 4,
         num_layers: int = 2,
     ):
+        """Inputs: text_encoder, embedding_head (its output_dim is the
+            model's embedding width and self-attention's d_model),
+            num_heads, num_layers.
+        Side effects: builds the self-attention layers.
+        Exceptions: AssertionError from torch if embedding_head.output_dim
+            is not divisible by num_heads.
+        """
         super().__init__()
         # Strategy + dependency injection, the same seam as SingleCardModel:
         # text_encoder/embedding_head turn each card into a base embedding
-        # (card_embedding_size wide). self_attention below then lets every
-        # card in a group attend to every other card.
+        # (embedding_head.output_dim wide). self_attention below then lets
+        # every card in a group attend to every other card, at that same
+        # width: the head is the one source of the embedding size.
         self.text_encoder: TextEncoder = text_encoder
         self.embedding_head: EmbeddingHead = embedding_head
-        self.card_embedding_size = card_embedding_size
 
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=card_embedding_size,
+            d_model=embedding_head.output_dim,
             nhead=num_heads,
             batch_first=True,
         )
@@ -50,16 +56,22 @@ class MultiCardModel(CardEncoderModel):
             encoder_layer, num_layers=num_layers
         )
 
+    @property
+    def embedding_dim(self) -> int:
+        """The head's output_dim (self-attention keeps that width).
+        Inputs: none. Output: int. Side effects: none. Exceptions: none."""
+        return self.embedding_head.output_dim
+
     def embed_together(self, cards: List[GenericCard]) -> List[torch.Tensor]:
         """One contextualized embedding per card, same order. Every card
         attends to every other card in `cards`.
 
         Inputs: cards (List[GenericCard]), one group, non-empty.
-        Output: List[Tensor] of shape (card_embedding_size,), same order.
+        Output: List[Tensor] of shape (embedding_dim,), same order.
         Side effects: none beyond autograd.
         Exceptions: whatever the text encoder, head or attention raise.
         """
-        base = self._base_embeddings(cards)  # (num_cards, card_embedding_size)
+        base = self._base_embeddings(cards)  # (num_cards, embedding_dim)
         # One group = one sequence: add a batch dim of 1, then drop it
         contextualized = self.self_attention(base.unsqueeze(0)).squeeze(0)
         return list(contextualized.unbind(0))
@@ -73,12 +85,12 @@ class MultiCardModel(CardEncoderModel):
         one card alone, without one text-encode call per card.
 
         Inputs: cards (List[GenericCard]), unrelated cards, non-empty.
-        Output: List[Tensor] of shape (card_embedding_size,), same order.
+        Output: List[Tensor] of shape (embedding_dim,), same order.
         Side effects: none beyond autograd.
         Exceptions: whatever the text encoder, head or attention raise.
         """
-        base = self._base_embeddings(cards)  # (num_cards, card_embedding_size)
-        # Each card is its own sequence: (num_cards, 1, card_embedding_size)
+        base = self._base_embeddings(cards)  # (num_cards, embedding_dim)
+        # Each card is its own sequence: (num_cards, 1, embedding_dim)
         isolated = self.self_attention(base.unsqueeze(1)).squeeze(1)
         return list(isolated.unbind(0))
 
@@ -87,7 +99,7 @@ class MultiCardModel(CardEncoderModel):
         self-attention.
 
         Inputs: cards (List[GenericCard]).
-        Output: Tensor (len(cards), card_embedding_size).
+        Output: Tensor (len(cards), embedding_dim).
         Side effects: none beyond autograd.
         Exceptions: whatever the text encoder or head raise.
         """

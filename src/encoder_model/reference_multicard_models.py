@@ -1,7 +1,7 @@
 """A handful of concrete MultiCardModel presets, each fixing one
 TextEncoder + EmbeddingHead pair, to demonstrate how the two Strategy
 seams (text_encoder.py, embedding_head.py) mix and match for the
-self-attention-over-a-card-group model - mirrors reference_models.py's
+self-attention-over-a-card-group model - mirrors reference_singlecard_models.py's
 presets for SingleCardModel.
 
 These are reference examples, not the primary way to construct a
@@ -48,7 +48,6 @@ class LinearProjectionMultiCardModel(MultiCardModel):
         super().__init__(
             text_encoder=text_encoder,
             embedding_head=embedding_head,
-            card_embedding_size=card_embedding_size,
             num_heads=num_heads,
             num_layers=num_layers,
         )
@@ -78,7 +77,6 @@ class ResidualMlpMultiCardModel(MultiCardModel):
         super().__init__(
             text_encoder=text_encoder,
             embedding_head=embedding_head,
-            card_embedding_size=card_embedding_size,
             num_heads=num_heads,
             num_layers=num_layers,
         )
@@ -104,7 +102,6 @@ class AttentionPoolingMultiCardModel(MultiCardModel):
         super().__init__(
             text_encoder=text_encoder,
             embedding_head=embedding_head,
-            card_embedding_size=card_embedding_size,
             num_heads=num_heads,
             num_layers=num_layers,
         )
@@ -136,7 +133,6 @@ class FromScratchMultiCardModel(MultiCardModel):
         super().__init__(
             text_encoder=text_encoder,
             embedding_head=embedding_head,
-            card_embedding_size=card_embedding_size,
             num_heads=num_heads,
             num_layers=num_layers,
         )

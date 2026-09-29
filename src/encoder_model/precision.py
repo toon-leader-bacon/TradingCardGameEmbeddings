@@ -1,9 +1,11 @@
-"""Numeric precision for a model's forward pass: one home for autocast.
+"""Forward-pass settings shared by training and inference: numeric
+precision (autocast) and the no-training context used whenever a model is
+only scored or embedded, never trained.
 
-Used by training/ (optimizer steps, per-round scoring) and by the
-CardEmbedder adapters (evaluation's intrinsic embedding). It lives here,
-not in training/, because running a forward pass at a given precision is
-about the model; training is one of its callers.
+Used by training/ (optimizer steps, per-round scoring) and by
+CardEncoderModel.isolated_embeddings (evaluation's intrinsic embedding).
+It lives here, not in training/, because running a forward pass at a given
+precision is about the model; training is one of its callers.
 """
 
 import contextlib
@@ -25,6 +27,15 @@ class ParameterOwner(Protocol):
     TrainableEncoder (which is not typed as an nn.Module)."""
 
     def parameters(self) -> Iterator[nn.Parameter]: ...
+
+
+class InferenceModel(ParameterOwner, Protocol):
+    """A ParameterOwner with a train/eval mode (adds `training` and
+    `train(mode)`): an nn.Module, or a TrainableEncoder."""
+
+    training: bool
+
+    def train(self, mode: bool = True) -> object: ...
 
 
 def device_type_of(model: ParameterOwner) -> str:
@@ -68,6 +79,33 @@ def autocast_for(model: ParameterOwner, precision: Precision) -> ContextManager[
     if dtype is None:
         return contextlib.nullcontext()
     return torch.autocast(device_type=device_type_of(model), dtype=dtype)
+
+
+@contextlib.contextmanager
+def inference_context(model: InferenceModel, precision: Precision) -> Iterator[None]:
+    """Run the enclosed forward passes without training: eval mode (no
+    dropout), no autograd graph, and autocast at `precision`.
+
+    Inputs: model (InferenceModel), precision (Precision).
+    Output: a context manager yielding None.
+    Side effects: puts model in eval mode for the duration and restores its
+        prior train/eval mode on exit, even if the body raises.
+    Exceptions: whatever the body raises (after the mode is restored); on
+        entry, whatever autocast_for's context raises for an unsupported
+        dtype.
+
+    Example:
+        >>> with inference_context(model, "fp16"):
+        ...     losses = dojo.compute_loss(model(batch.inputs), batch)
+    """
+    was_training = model.training
+    model.train(False)
+    try:
+        # No graph, and the requested precision, for everything in the body
+        with torch.no_grad(), autocast_for(model, precision):
+            yield
+    finally:
+        model.train(was_training)
 
 
 def _autocast_dtype(precision: Precision) -> torch.dtype | None:

@@ -11,7 +11,7 @@ from typing import Mapping, Sequence
 import torch
 
 from src.dojos.dojo import BatchBudget, Dojo
-from src.encoder_model.precision import Precision, autocast_for
+from src.encoder_model.precision import Precision, inference_context
 from src.schema.splits import Split
 from src.training.trainable_encoder import TrainableEncoder
 
@@ -31,7 +31,8 @@ def evaluate_split_losses(
 
     Inputs: model, dojos (every dojo to score), split (the rows to score),
         budget, max_examples (per-dojo cap passed to Dojo.batches), and
-        precision (forward passes run under autocast_for(model, precision)).
+        precision (forward passes run under inference_context(model,
+        precision): eval mode, no_grad, autocast).
     Output: dojo.name -> per-example mean loss, weighting each batch by
         len(batch). A dojo whose pass fails is logged and omitted.
     Side effects: none on parameters (eval mode, torch.no_grad); the
@@ -46,22 +47,17 @@ def evaluate_split_losses(
         1.37
     """
     result: dict[str, float] = {}
-    was_training = model.training
-    model.train(False)
-    try:
-        # Score each dojo without autograd graphs, at the requested precision
-        with torch.no_grad(), autocast_for(model, precision):
-            for dojo in dojos:
-                try:
-                    result[dojo.name] = _mean_split_loss(
-                        model, dojo, split, budget, max_examples
-                    )
-                except Exception:
-                    logger.warning(
-                        "%s pass failed for %s", split.value, dojo.name, exc_info=True
-                    )
-    finally:
-        model.train(was_training)
+    # Score each dojo in eval mode, without autograd graphs, at `precision`
+    with inference_context(model, precision):
+        for dojo in dojos:
+            try:
+                result[dojo.name] = _mean_split_loss(
+                    model, dojo, split, budget, max_examples
+                )
+            except Exception:
+                logger.warning(
+                    "%s pass failed for %s", split.value, dojo.name, exc_info=True
+                )
     return result
 
 

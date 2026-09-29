@@ -31,13 +31,29 @@ def _mean_pool_tokens(encoding: TokenEncoding) -> torch.Tensor:
 
 class EmbeddingHead(nn.Module, ABC):
     """Strategy interface: one TextEncoder output in, one embedding per
-    card out."""
+    card out.
+
+    output_dim: the width of every embedding this head produces (its
+        forward's last dimension). Set once by each head's constructor, so
+        a model can report its embedding size without running a forward
+        pass.
+    """
+
+    def __init__(self, output_dim: int) -> None:
+        super().__init__()
+        self._output_dim = output_dim
+
+    @property
+    def output_dim(self) -> int:
+        """Read-only: the width fixed at construction. Inputs: none.
+        Output: int. Side effects: none. Exceptions: none."""
+        return self._output_dim
 
     @abstractmethod
     def forward(self, encoding: TokenEncoding) -> torch.Tensor:
         """
         Inputs: encoding, one TextEncoder's output for a batch of cards.
-        Output: (batch, embed_dim) tensor, one embedding per input card,
+        Output: (batch, output_dim) tensor, one embedding per input card,
             same order as encoding.
         Side effects: none.
         Exceptions: none expected.
@@ -49,7 +65,7 @@ class LinearEmbeddingHead(EmbeddingHead):
     """Baseline head: mean-pool tokens, then a single linear projection."""
 
     def __init__(self, input_dim: int, embed_dim: int):
-        super().__init__()
+        super().__init__(output_dim=embed_dim)
         self.projection = nn.Linear(input_dim, embed_dim)
 
     def forward(self, encoding: TokenEncoding) -> torch.Tensor:
@@ -82,7 +98,7 @@ class ResidualMlpEmbeddingHead(EmbeddingHead):
         hidden_dim: int = 512,
         num_blocks: int = 3,
     ):
-        super().__init__()
+        super().__init__(output_dim=embed_dim)
         self.input_projection = nn.Linear(input_dim, hidden_dim)
         self.blocks = nn.ModuleList(
             [_ResidualBlock(hidden_dim) for _ in range(num_blocks)]
@@ -104,7 +120,7 @@ class AttentionPoolingEmbeddingHead(EmbeddingHead):
     weighting every token equally the way _mean_pool_tokens does."""
 
     def __init__(self, input_dim: int, embed_dim: int):
-        super().__init__()
+        super().__init__(output_dim=embed_dim)
         self.query = nn.Parameter(torch.randn(input_dim))
         self.projection = nn.Linear(input_dim, embed_dim)
 

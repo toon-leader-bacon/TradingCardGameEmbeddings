@@ -4,7 +4,11 @@ import pytest
 import torch
 from torch import nn
 
-from src.encoder_model.precision import autocast_for, device_type_of
+from src.encoder_model.precision import (
+    autocast_for,
+    device_type_of,
+    inference_context,
+)
 
 
 def test_device_type_is_the_first_parameters_device() -> None:
@@ -37,3 +41,35 @@ def test_weights_stay_float32_while_ops_run_in_bf16() -> None:
         output = model(torch.randn(2, 4))
     assert output.dtype == torch.bfloat16
     assert model.weight.dtype == torch.float32
+
+
+class TestInferenceContext:
+    def test_runs_in_eval_mode_without_a_graph_then_restores_train_mode(
+        self,
+    ) -> None:
+        layer = nn.Linear(2, 2).train(True)
+        with inference_context(layer, "fp32"):
+            assert layer.training is False
+            assert torch.is_grad_enabled() is False
+            output = layer(torch.randn(1, 2))
+        assert not output.requires_grad
+        assert layer.training is True
+
+    def test_keeps_eval_mode_for_a_model_already_in_eval(self) -> None:
+        layer = nn.Linear(2, 2).eval()
+        with inference_context(layer, "fp32"):
+            pass
+        assert layer.training is False
+
+    def test_restores_the_mode_when_the_body_raises(self) -> None:
+        layer = nn.Linear(2, 2).train(True)
+        with pytest.raises(RuntimeError):
+            with inference_context(layer, "fp32"):
+                raise RuntimeError("forward failed")
+        assert layer.training is True
+        assert torch.is_grad_enabled() is True
+
+    def test_applies_autocast_at_the_requested_precision(self) -> None:
+        layer = nn.Linear(4, 4)
+        with inference_context(layer, "bf16"):
+            assert layer(torch.randn(2, 4)).dtype == torch.bfloat16

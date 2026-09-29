@@ -45,8 +45,8 @@ MVP limits:
 
 - Intrinsic: context-free single-card embeddings only - a
 `SingleCardModel`, or a `MultiCardModel` embedding every card as its
-own list of one (via its `CardEmbedder` adapter), i.e. its isolated-card
-encoding.
+own list of one (`CardEncoderModel.isolated_embeddings`), i.e. its
+isolated-card encoding.
 - Extrinsic: single-card-input dojos only. Either model may be passed.
 The canonical `forward` of both models (`CardEncoderModel`,
 `src/encoder_model/card_encoder_model.py`) always reads its input as a
@@ -60,8 +60,8 @@ batch.
 Near-term, and the design must not preclude it: extrinsic runs on
 multi-card dojos, comparing a contextualized `MultiCardModel` against a
 `SingleCardModel` on the same multi-card dojo. This is why the extrinsic
-run takes any frozen `TrainableEncoder` (the model itself), not a
-`CardEmbedder`. Nothing in the extrinsic path assumes context-free
+run takes any frozen `TrainableEncoder` (the model itself), not the
+context-free `CardEmbedder` view. Nothing in the extrinsic path assumes context-free
 encoding: a batch of multi-card inputs goes to
 `forward_batched_multi_card`, which contextualizes each example only
 against itself.
@@ -74,7 +74,7 @@ against itself.
 flowchart LR
     CK[checkpoint dir<br/>encoder.pt + holdout.json] --> L[checkpoint loading]
     CB[CardLookup] --> C[corpus selection]
-    L --> AD[CardEmbedder adapter]
+    L --> AD[model.isolated_embeddings<br/>= CardEmbedder]
     C --> E[embedder]
     AD --> E
     E --> T[(EmbeddingTable<br/>SQLite)]
@@ -109,22 +109,14 @@ exact set of tiers (e.g. only VALIDATION cards), which is not what
 `VisibleCardLookup` does (nested per-split visibility for training), so
 it is not reused here.
 
-### CardEmbedder adapters (outside `evaluation/`: `encoder_model/`)
+### Context-free embedding on the model - built (step 2)
 
-Placed in `encoder_model/` despite evaluation being the only consumer:
-each adapter is a view of a specific model class and depends on its
-explicit forward methods, so it changes with the model, not with
-evaluation.
-
-A context-free "cards in, one vector per card out" view of a model,
-used by the embedder (intrinsic path only). Both models already provide
-it: `forward_batched_single_card(cards)` embeds each card on its own in
-one batched pass (for `MultiCardModel`, self-attention over length-one
-sequences). The adapters call only that.
-
-The adapter owns
-eval mode and `no_grad` for its calls and exposes only the embedding
-size, so callers never reach through to the model.
+`CardEncoderModel.embedding_dim` (from `EmbeddingHead.output_dim`, the one
+source of the width) and `isolated_embeddings(cards, precision)`, sharing
+`inference_context` with `evaluate_split_losses`. See
+`src/encoder_model/README.md`. No adapter classes: evaluation depends on
+the `CardEmbedder` Protocol (step 3, in `evaluation/`), which both models
+satisfy structurally.
 
 ### Embedder
 
@@ -360,26 +352,18 @@ Built in step 1 and now existing (cited; see the training READMEs):
 New boundaries:
 
 ```python
-# --- encoder_model (context-free card embedding) ---
-class CardEmbedder(Protocol):
-    """Context-free: embed_cards(cards)[i] depends only on cards[i].
-    Runs in eval mode under no_grad regardless of caller state, and under
-    autocast_for(model, precision); the model's prior train/eval mode is
-    restored afterwards, even on error (same as evaluate_split_losses).
-    Output is cast back to float32."""
-    embedding_dim: int
-    def embed_cards(self, cards: Sequence[GenericCard]) -> Tensor: ...
-        # float32, shape (len(cards), embedding_dim), on the CPU
+# --- encoder_model: built in step 2 (see src/encoder_model/README.md) ---
+# CardEncoderModel.embedding_dim -> int; CardEncoderModel.isolated_embeddings(cards,
+#   precision="fp32") -> float32 (N, embedding_dim) CPU Tensor; EmbeddingHead.output_dim;
+#   MultiCardModel(text_encoder, embedding_head, num_heads, num_layers);
+#   precision.inference_context(model, precision)
 
-class SingleCardEmbedder:      # adapter over forward_batched_single_card
-    def __init__(self, model: SingleCardModel, embedding_dim: int,
-                 precision: Precision = "fp32") -> None: ...
-        # SingleCardModel exposes no output size, so the caller supplies it;
-        # embed_cards raises ValueError if a batch's width != embedding_dim
-        # (fails at the first batch, not later at EmbeddingTable.add)
-class IsolatedMultiCardEmbedder:   # adapter over forward_batched_single_card
-    def __init__(self, model: MultiCardModel, precision: Precision = "fp32") -> None: ...
-        # embedding_dim read from model.card_embedding_size
+# src/evaluation/ (step 3) - the consumer's view; both models satisfy it structurally
+class CardEmbedder(Protocol):
+    @property
+    def embedding_dim(self) -> int: ...
+    def isolated_embeddings(self, cards: Sequence[GenericCard],
+                            precision: Precision = "fp32") -> Tensor: ...
 
 
 # --- evaluation: corpus -> embedder -> table ---
@@ -433,7 +417,8 @@ class EmbeddingTable:
         # (len(rows), embedding_dim), same order; KeyError on an unknown nocab_uuid
 
 def embed_corpus(embedder: CardEmbedder, corpus: Iterable[GenericCard],
-                 table: EmbeddingTable, batch_size: int) -> int: ...
+                 table: EmbeddingTable, batch_size: int,
+                 precision: Precision = "fp32") -> int: ...
     # ValueError up front if embedder.embedding_dim != table.metadata.embedding_dim;
     # propagates EmbeddingTable.add's ValueError for a card of a game the table
     # was not created for (earlier batches stay committed)

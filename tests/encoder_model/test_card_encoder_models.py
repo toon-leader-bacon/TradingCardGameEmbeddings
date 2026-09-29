@@ -16,7 +16,12 @@ import pytest
 import torch
 
 from src.encoder_model.card_encoder_model import CardEncoderModel
-from src.encoder_model.embedding_head import LinearEmbeddingHead
+from src.encoder_model.embedding_head import (
+    AttentionPoolingEmbeddingHead,
+    EmbeddingHead,
+    LinearEmbeddingHead,
+    ResidualMlpEmbeddingHead,
+)
 from src.encoder_model.multi_card_model import MultiCardModel
 from src.encoder_model.single_card_model import SingleCardModel
 from src.encoder_model.text_encoder import TextEncoder, TokenEncoding
@@ -74,7 +79,6 @@ def _multi_model() -> MultiCardModel:
     model = MultiCardModel(
         _FakeTextEncoder(),
         LinearEmbeddingHead(_HIDDEN, _EMBED),
-        card_embedding_size=_EMBED,
         num_heads=2,
         num_layers=1,
     )
@@ -367,3 +371,88 @@ def test_forward_rejects_an_empty_first_group_or_example(make_model: Any) -> Non
     with pytest.raises(ValueError):
         model([[[], [A]]])
     assert model.forward_batched_multi_card([[], [A]])[0] == []
+
+
+# --- embedding_dim and isolated_embeddings ----------------------------------
+
+
+@pytest.mark.parametrize(
+    "head",
+    [
+        LinearEmbeddingHead(_HIDDEN, 5),
+        ResidualMlpEmbeddingHead(_HIDDEN, 5, hidden_dim=4, num_blocks=1),
+        AttentionPoolingEmbeddingHead(_HIDDEN, 5),
+    ],
+)
+def test_every_head_reports_the_width_it_produces(head: EmbeddingHead) -> None:
+    encoding = _FakeTextEncoder().encode(["Alpha", "Bravo"])
+    assert head.output_dim == 5
+    assert head(encoding).shape == (2, 5)
+
+
+@pytest.mark.parametrize("make_model", MODELS)
+def test_embedding_dim_is_the_real_output_width(make_model: Any) -> None:
+    model = make_model()
+    assert model.embedding_dim == _EMBED
+    assert model.forward_single_card(A).shape == (model.embedding_dim,)
+
+
+def test_multi_card_attention_is_sized_by_its_head() -> None:
+    model = MultiCardModel(
+        _FakeTextEncoder(), LinearEmbeddingHead(_HIDDEN, 6), num_heads=2, num_layers=1
+    )
+    assert model.embedding_dim == 6
+    assert model.forward_multi_card([A, B])[0].shape == (6,)
+
+
+@pytest.mark.parametrize("make_model", MODELS)
+def test_isolated_embeddings_is_a_float32_cpu_table(make_model: Any) -> None:
+    model = make_model()
+    table = model.isolated_embeddings([A, B, C])
+    assert table.shape == (3, _EMBED)
+    assert table.dtype == torch.float32
+    assert table.device.type == "cpu"
+    assert not table.requires_grad
+
+
+@pytest.mark.parametrize("make_model", MODELS)
+def test_isolated_embeddings_of_no_cards_is_an_empty_table(make_model: Any) -> None:
+    table = make_model().isolated_embeddings([])
+    assert table.shape == (0, _EMBED)
+    assert table.dtype == torch.float32
+
+
+@pytest.mark.parametrize("make_model", MODELS)
+def test_each_row_depends_only_on_its_own_card(make_model: Any) -> None:
+    model = make_model()
+    together = model.isolated_embeddings([A, B, C])
+    for index, card in enumerate([A, B, C]):
+        assert _close(together[index], model.isolated_embeddings([card])[0])
+
+
+def test_multi_card_isolated_rows_differ_from_contextualized_ones() -> None:
+    # Guards the choice of forward path: attention across A and B would
+    # change A's embedding
+    model = _multi_model()
+    isolated = model.isolated_embeddings([A, B])
+    contextualized = model.forward_multi_card([A, B])
+    assert not _close(isolated[0], contextualized[0])
+
+
+@pytest.mark.parametrize("make_model", MODELS)
+def test_isolated_embeddings_are_deterministic_and_restore_train_mode(
+    make_model: Any,
+) -> None:
+    model = make_model().train(True)
+    first = model.isolated_embeddings([A, B])
+    second = model.isolated_embeddings([A, B])
+    assert torch.equal(first, second)  # eval mode inside: no dropout
+    assert model.training is True
+
+
+@pytest.mark.parametrize("make_model", MODELS)
+def test_isolated_embeddings_at_bf16_come_back_float32(make_model: Any) -> None:
+    model = make_model()
+    table = model.isolated_embeddings([A, B], precision="bf16")
+    assert table.dtype == torch.float32
+    assert torch.allclose(table, model.isolated_embeddings([A, B]), atol=0.1)

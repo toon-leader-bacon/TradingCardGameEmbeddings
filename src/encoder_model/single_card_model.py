@@ -27,6 +27,12 @@ class SingleCardModel(CardEncoderModel):
         self.text_encoder: TextEncoder = text_encoder
         self.embedding_head: EmbeddingHead = embedding_head
 
+    @property
+    def embedding_dim(self) -> int:
+        """The injected head's output_dim. Inputs: none. Output: int.
+        Side effects: none. Exceptions: none."""
+        return self.embedding_head.output_dim
+
     def embed_together(self, cards: List[GenericCard]) -> List[torch.Tensor]:
         """Same as embed_apart: this model has no cross-card context.
 
