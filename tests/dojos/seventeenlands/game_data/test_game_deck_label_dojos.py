@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
@@ -124,3 +125,56 @@ class TestDeckRankTierPredictionDojo:
         )
 
         assert dojo.label_values == list(DeckRankTierPredictionMetric.LABEL_VALUES)
+
+
+class TestNameAvoidsSplitFileCollision:
+    def test_two_expansions_same_metric_filename_get_distinct_split_prefixes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression test for src/training/TODO.md section C's split-file
+        # collision: KTK/TradSealed/deck_win_prediction.parquet and
+        # MSH/PremierDraft/deck_win_prediction.parquet share a bare
+        # filename, so without an explicit name they'd resolve to the
+        # same Trainer name and the same split-file prefix. Chdir into
+        # tmp_path so DojoConfig's default output_directory
+        # ("data/splits") resolves under it, not the real project tree.
+        monkeypatch.chdir(tmp_path)
+        ktk_dir = tmp_path / "KTK" / "TradSealed"
+        msh_dir = tmp_path / "MSH" / "PremierDraft"
+        ktk_dir.mkdir(parents=True)
+        msh_dir.mkdir(parents=True)
+        ktk_source = ktk_dir / "deck_win_prediction.parquet"
+        msh_source = msh_dir / "deck_win_prediction.parquet"
+        _write_source(ktk_source, DeckWinPredictionMetric.LABEL_COLUMN, True)
+        _write_source(msh_source, DeckWinPredictionMetric.LABEL_COLUMN, False)
+        card_binder = CardBinder()
+        deck_box = DeckBox()
+
+        ktk_dojo = DeckWinPredictionDojo(
+            card_binder,
+            HoldoutSpec.no_holdout(),
+            deck_box,
+            card_embedding_size=4,
+            path_to_training_data=ktk_source,
+            name="KTK_TradSealed_deck_win_prediction",
+            rng_seed=0,
+            strict_version_check=False,
+        )
+        msh_dojo = DeckWinPredictionDojo(
+            card_binder,
+            HoldoutSpec.no_holdout(),
+            deck_box,
+            card_embedding_size=4,
+            path_to_training_data=msh_source,
+            name="MSH_PremierDraft_deck_win_prediction",
+            rng_seed=0,
+            strict_version_check=False,
+        )
+
+        assert ktk_dojo.name != msh_dojo.name
+        assert (
+            ktk_dojo.file_manager.output_file_prefix
+            != msh_dojo.file_manager.output_file_prefix
+        )
+        assert ktk_dojo.name == "KTK_TradSealed_deck_win_prediction"
+        assert msh_dojo.name == "MSH_PremierDraft_deck_win_prediction"
