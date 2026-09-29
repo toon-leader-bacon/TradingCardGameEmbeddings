@@ -162,69 +162,14 @@ contract, seeded `CardSample` rules and `draw_labeled_sample`; see
 `src/evaluation/README.md`. openTSNE only if sampled corpora prove too
 slow for scikit-learn's t-SNE.
 
-### Extrinsic run
+### Extrinsic run - built (step 5a); learning curves next (5b)
 
-An extrinsic run *is* a training run: dojo heads trained on a frozen
-encoder. It reuses `Trainer` unchanged in kind; evaluation owns only
-*what* to run and *how to compare*, `training/` stays the one place that
-knows *how to train*. No second training loop.
-
-For each encoder under comparison, on the same dojos (built by the
-caller with whatever `HoldoutSpec` it chooses; `Trainer` still requires
-all dojos in one run to share one): take the encoder model itself as a
-`TrainableEncoder` (a `SingleCardModel`; later a contextualized
-`MultiCardModel` on multi-card dojos, see open questions), call `reset_head()` on every
-dojo, build a `TrainingPlan` with one `Phase` (`encoder_trainable=False`,
-every passed dojo in its diet - the diet *is* the `dojos` argument, so
-no dojo is ever scored with an untrained head - no held-out dojos), and
-run `Trainer` with
-no checkpointer and a `CsvRunListener` (`training/recording/run_listener.py`:
-one row per (round, dojo)) writing into
-`<output_dir>/extrinsic/<encoder_label>/`. After `Trainer.run()`
-returns, one VALIDATION pass scores the final heads (the last round's
-weights - no best-round restore, since nothing was checkpointed) at the
-same precision and batch budget as Trainer's own TEST passes (both
-taken from `HardwareLimits`; precision is applied inside
-`evaluate_split_losses`), and is written next to the rounds CSV. If the
-run stopped early for any reason (`stopped_early_reason` set: repeated
-failures may have corrupted the weights; every dojo quarantined means
-no head finished training), the VALIDATION pass is skipped. A plotting step overlays
-every encoder's TEST curve per dojo. An untrained baseline is just
-another encoder input, not special-cased code.
-
-Every dojo must have a trainable head: a frozen encoder plus a
-head-less dojo (e.g. `ContrastiveDojo`, whose `trainable_parameters()`
-is empty) has nothing to train, so `run_extrinsic` rejects it up front.
-(A frozen encoder's contrastive TEST loss is a fixed number - closer to
-an intrinsic measurement; see open questions.)
-
-Comparability across encoders: the caller reuses the *same dojo
-objects* for every encoder. `reset_head()` restores each head to the
-state it had when the dojo was built (`GenericDojo`), so every encoder's
-run starts from an identical head; building fresh dojos per encoder
-would instead give each a different random head unless torch was
-seeded before construction. `GenericDojo` reads TRAIN in file order;
-the remaining randomness (mods drawing on global `random`, the diet
-sampler) is fixed by `run_extrinsic` seeding Python `random` and
-`torch` from `spec.seed` before each run and passing `spec.seed` as
-the plan's seed. Each run writes into a fresh directory
-(`FileExistsError` if `<output_dir>/extrinsic/<encoder_label>/` exists),
-since `CsvRunListener` appends.
-
-The run stops at the phase's saturation rule like any training phase;
-unequal curve lengths plot fine, and rounds-to-saturation is itself a
-signal. A caller wanting a fixed budget sets `patience_rounds` above
-`max_rounds`.
-
-Dojos run exactly as built, including their own `ModPipeline` (a
-masked-field dojo still masks its target field); evaluation neither
-adds nor removes mods. Comparing a dojo with and without masking means
-the caller builds it both ways. Which dojos, and whether a dojo's task
-is meaningful with frozen embeddings, is the caller's choice, not a
-property of this harness. This is also the follow-up to training's
-`TrainingPlan.held_out_dojos`: during training those are scored with
-never-trained heads; an extrinsic run trains heads for them on the
-frozen encoder.
+`run_extrinsic`, `ExtrinsicSpec`, `ExtrinsicResult` in
+`src/evaluation/extrinsic/run_extrinsic.py`; see `src/evaluation/README.md`.
+Remaining (step 5b): a plotting step overlaying every encoder's TEST curve
+per dojo (`plot_learning_curves`, below), reading rounds CSVs only through
+`read_rounds_csv`. Unequal curve lengths plot fine - rounds-to-saturation
+is itself a signal.
 
 ### `training/` support for extrinsic reuse - built (step 1)
 
@@ -358,75 +303,11 @@ New boundaries:
 # src/evaluation/analyses/projection_renderer.py - FigureStyle, ProjectionRenderer(style)
 
 
-# --- evaluation: extrinsic ---
-@dataclass(frozen=True)
-class ExtrinsicSpec:
-    diet_rule: DietRule
-    head_lr: float
-    steps_per_round: int
-    max_rounds: int
-    saturation: SaturationSpec
-    eval_examples_per_dojo: int     # cap for both the per-round TEST and final VALIDATION pass
-    seed: int
+# --- evaluation: extrinsic - run_extrinsic built in step 5a ---
+# src/evaluation/extrinsic/run_extrinsic.py - ExtrinsicSpec, ExtrinsicResult,
+#   run_extrinsic(encoder, encoder_label, dojos, spec, hardware, output_dir, *, cost_of)
 
-@dataclass(frozen=True)
-class ExtrinsicResult:
-    rounds_csv: Path | None
-        # CsvRunListener output; None if the file does not exist after the run
-        # (no round completed, or the listener's writes failed - Trainer swallows them)
-    validation_losses: Mapping[str, float] | None
-        # final heads; also written as validation.json. None if the run stopped
-        # early, and then validation.json is not written.
-    stopped_early_reason: str | None            # from TrainingResult
-    quarantined: frozenset[str]
-        # dojos quarantined by the end of the run (final RoundReport; empty if
-        # none completed). Their VALIDATION loss, if any, is for an under-trained
-        # head; also written into validation.json alongside the losses.
-
-def run_extrinsic(encoder: TrainableEncoder, encoder_label: str, dojos: Sequence[Dojo],
-                  spec: ExtrinsicSpec, hardware: HardwareLimits,
-                  output_dir: Path, *,
-                  cost_of: Callable[[GenericCard], int] = lambda card: 1,
-                  ) -> ExtrinsicResult: ...
-    # cost_of is passed to Trainer and used for the VALIDATION pass's
-    # BatchBudget (max_cost=hardware.max_batch_cost), so both passes batch alike.
-    # Fixed mapping of spec -> Phase/TrainingPlan (not caller-configurable):
-    #   Phase(name="extrinsic", dojo_names=names of `dojos` in order,
-    #         diet_rule, head_lr, steps_per_round, max_rounds, saturation from spec,
-    #         encoder_trainable=False, encoder_lr=0.0, max_grad_norm default)
-    #   TrainingPlan(phases=(that phase,), holdout=dojos[0].holdout,
-    #         held_out_dojos=frozenset(), eval_examples_per_dojo, seed from spec,
-    #         faults=FaultPolicy() default)
-    # Every RoundRow.phase in rounds.csv is therefore "extrinsic".
-    # Order: (a) validate - the FileExistsError check, run_extrinsic's own
-    # checks, then building Phase/TrainingPlan from spec, CsvRunListener (no
-    # side effect) and Trainer (its constructor is the single source
-    # of plan/dojo validation; not re-implemented here); (b) only then seed,
-    # reset_head(), run. A call that fails validation leaves nothing on disk and can be retried.
-    # Every dojo is in the one frozen phase's diet (dojo names come from `dojos`).
-    # Seeds random/torch from spec.seed; calls reset_head() on every dojo (restores
-    # the as-built head, so reusing dojo objects across encoders gives every
-    # encoder the same starting head); runs
-    # Trainer(checkpointer=None); then a VALIDATION pass unless stopped early.
-    # The run's TrainingPlan.holdout is taken from the dojos. The encoder's
-    # training HoldoutSpec is never consulted.
-    # Raises: ValueError if dojos is empty or any dojo's trainable_parameters()
-    #   yields no parameters (consume the iterable - GenericDojo returns a
-    #   generator, which is always truthy);
-    #   any ValueError from Phase/TrainingPlan construction (e.g. steps_per_round or
-    #   max_rounds < 1, negative head_lr, eval_examples_per_dojo < 1) or from
-    #   Trainer.__init__ (duplicate dojo names, dojos disagreeing on holdout),
-    #   all raised before any side effect.
-    #   FileExistsError if output_dir/extrinsic/<encoder_label>/ exists.
-    # Side effects: after validation and before Trainer.run(), creates
-    #   output_dir/extrinsic/<encoder_label>/ itself (so it exists even if no
-    #   round completes; a retry after a run-time failure then needs a new label
-    #   or the directory removed - by design, since a partial run is a real
-    #   result). Writes rounds.csv (if any round completed) and validation.json
-    #   (unless stopped early); trains the dojos' heads;
-    #   leaves the encoder with requires_grad=False and in eval mode;
-    #   reseeds the process-wide `random` and `torch` generators.
-
+# step 5b:
 def plot_learning_curves(curves: Mapping[str, Path], output_dir: Path,
                          x_axis: Literal["step", "elapsed_seconds"] = "step") -> tuple[Path, ...]: ...
     # encoder_label -> rounds CSV, read only via read_rounds_csv (evaluation never

@@ -9,9 +9,10 @@ curves. `Trainer` never calls this package.
 
 Status: in progress. Built: corpus selection, the embedding table,
 embedding a corpus into it, card labels, and the intrinsic analyses
-(cluster agreement, label compactness, projection plot). Not yet built
-(design in [`plans/evaluation.md`](../../plans/evaluation.md)): extrinsic
-runs and learning-curve plots.
+(cluster agreement, label compactness, projection plot), and extrinsic
+runs. Not yet built (design in
+[`plans/evaluation.md`](../../plans/evaluation.md)): learning-curve
+plots.
 
 ## Files
 
@@ -98,8 +99,22 @@ sharing it only with small data classes or trivial helpers.
   (`LabeledSample.size_scalars`) - a convention for label-using analyses,
   not something the Protocol enforces.
 
-Planned (see the plan): `extrinsic/` for extrinsic runs and
-learning-curve plots.
+- [extrinsic/](extrinsic/): fresh dojo heads trained on a frozen encoder.
+  - [run_extrinsic.py](extrinsic/run_extrinsic.py): `run_extrinsic`,
+    one frozen `Trainer` phase (named `"extrinsic"`) over every given dojo,
+    no checkpointer, a `CsvRunListener` writing
+    `<output_dir>/extrinsic/<encoder_label>/rounds.csv`, then one
+    VALIDATION pass over the final heads (`validation.json`, skipped if
+    the run stopped early). `ExtrinsicSpec` holds the phase settings and
+    seed; `ExtrinsicResult` reports what was written. Everything is
+    validated before anything touches disk (label, directory, a trainable
+    head per dojo, then `Phase`/`TrainingPlan`/`Trainer` construction);
+    after training starts nothing raises - a failed VALIDATION pass or
+    write is logged, so a finished run is never lost. Reuse the *same*
+    dojo objects for every encoder: each run calls `reset_head()` and
+    reseeds `random`/`torch`, so every encoder starts from identical heads.
+
+Planned (see the plan): learning-curve plots in `extrinsic/`.
 
 ## How it works
 
@@ -148,4 +163,16 @@ with EmbeddingTable.open(Path("data/evaluations/run_a/embeddings/single_v1.db"))
                                     highlighted=("mtg", "gwent"))):
         out = Path("data/evaluations/run_a/intrinsic/single_v1") / analysis.name
         print(analysis.name, dict(analysis.run(table, out).scalars))
+```
+
+Extrinsic, one run per encoder on the same dojos:
+
+```python
+spec = ExtrinsicSpec(diet_rule=Uniform(), head_lr=1e-3, steps_per_round=200,
+                     max_rounds=50, saturation=saturation, eval_examples_per_dojo=512,
+                     seed=0)
+for label, model in (("single_v1", trained), ("untrained", fresh)):
+    result = run_extrinsic(model, label, dojos, spec, hardware,
+                           Path("data/evaluations/run_a"))
+    print(label, result.validation_losses)
 ```
