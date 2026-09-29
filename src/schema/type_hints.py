@@ -47,6 +47,12 @@ class InputShape(Enum):
     isinstance against a subscripted generic). Nesting depth is the only
     thing that actually distinguishes these shapes at runtime, so
     `input_shape_of` counts it instead.
+
+    Depth alone is ambiguous at 1 and 2: a batch of single cards looks
+    like one multi-card input, and a batch of multi-card inputs looks
+    like one multi-group input. Code that knows it holds a batch, such as
+    an encoder's forward() or Batch, classifies one example instead:
+    batched_input_shape_of().
     """
 
     SINGLE_CARD = 0
@@ -82,6 +88,35 @@ def input_shape_of(
     if not isinstance(probe, GenericCard):
         raise ValueError(f"Not a valid TrainingInput shape: {x}")
     return InputShape(depth)
+
+
+def batched_input_shape_of(x: BatchedTrainingInput) -> InputShape:
+    """The shape of each example in a batch: the unambiguous reading of x.
+
+    Treats x as a batch, a list of examples, and classifies its first
+    example with input_shape_of. So [card, card] is SINGLE_CARD (a batch
+    of single cards), not MULTI_CARD, and [[card], [card]] is MULTI_CARD
+    (a batch of multi-card inputs). Like Batch, only the first example is
+    classified; Batch itself checks that every example shares it.
+
+    Inputs: x (BatchedTrainingInput), a non-empty list of examples.
+    Output: InputShape of one example: SINGLE_CARD, MULTI_CARD or
+        MULTI_GROUP for a well-formed batch. BATCHED_MULTI_GROUP means x
+        is nested one level too deep.
+    Side effects: none.
+    Exceptions: TypeError if x is not a list (e.g. a bare GenericCard,
+        which is not a batch). ValueError if x is empty, or as
+        input_shape_of raises for its first example.
+
+    Example:
+        >>> batched_input_shape_of([some_card, other_card])
+        <InputShape.SINGLE_CARD: 0>
+    """
+    if not isinstance(x, list):
+        raise TypeError(f"A batch must be a list of examples, got {type(x).__name__}")
+    if not x:
+        raise ValueError("Cannot classify the shape of an empty batch")
+    return input_shape_of(x[0])
 
 
 def iter_cards(x: Union[TrainingInput, BatchedTrainingInput]) -> Iterator[GenericCard]:

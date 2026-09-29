@@ -1,31 +1,29 @@
-from typing import List, Mapping, Union, cast
+"""MultiCardModel: card embeddings contextualized within a group by
+self-attention (see CardEncoderModel)."""
+
+from typing import List
 
 import torch
 import torch.nn as nn
 
+from src.encoder_model.card_encoder_model import CardEncoderModel
 from src.encoder_model.card_serialization import serialize_card_to_json
 from src.encoder_model.embedding_head import EmbeddingHead
 from src.encoder_model.text_encoder import TextEncoder
 from src.schema.card import GenericCard
-from src.schema.type_hints import (
-    BatchedMultiCardEmbedding,
-    BatchedMultiCardInput,
-    BatchedMultiGroupEmbedding,
-    BatchedMultiGroupInput,
-    BatchedSingleCardEmbedding,
-    BatchedSingleCardInput,
-    InputShape,
-    MultiCardEmbedding,
-    MultiCardInput,
-    MultiGroupEmbedding,
-    MultiGroupInput,
-    SingleCardEmbedding,
-    SingleCardInput,
-    input_shape_of,
-)
 
 
-class MultiCardModel(nn.Module):
+class MultiCardModel(CardEncoderModel):
+    """Each card is embedded by the text encoder and embedding head. A
+    Transformer encoder then lets every card in a group attend to the
+    others.
+
+    embed_together runs self-attention over the whole group. embed_apart
+    runs it over length-one sequences, so an unrelated card in the same
+    batch never influences another's embedding. All shape handling is in
+    CardEncoderModel.
+    """
+
     def __init__(
         self,
         text_encoder: TextEncoder,
@@ -35,10 +33,10 @@ class MultiCardModel(nn.Module):
         num_layers: int = 2,
     ):
         super().__init__()
-        # Strategy + dependency injection, same seam as SingleCardModel:
+        # Strategy + dependency injection, the same seam as SingleCardModel:
         # text_encoder/embedding_head turn each card into a base embedding
-        # (card_embedding_size wide) before self_attention below lets every
-        # card in the group attend to every other card.
+        # (card_embedding_size wide). self_attention below then lets every
+        # card in a group attend to every other card.
         self.text_encoder: TextEncoder = text_encoder
         self.embedding_head: EmbeddingHead = embedding_head
         self.card_embedding_size = card_embedding_size
@@ -52,84 +50,46 @@ class MultiCardModel(nn.Module):
             encoder_layer, num_layers=num_layers
         )
 
-    def encoder_only_state_dict(self) -> Mapping[str, torch.Tensor]:
-        """Every weight of this model (dojo decoder heads live in their
-        dojos, not here): the artifact to publish.
+    def embed_together(self, cards: List[GenericCard]) -> List[torch.Tensor]:
+        """One contextualized embedding per card, same order. Every card
+        attends to every other card in `cards`.
 
-        Inputs: none. Output: Mapping[str, Tensor], same as state_dict().
-        Side effects: none. Exceptions: none.
+        Inputs: cards (List[GenericCard]), one group, non-empty.
+        Output: List[Tensor] of shape (card_embedding_size,), same order.
+        Side effects: none beyond autograd.
+        Exceptions: whatever the text encoder, head or attention raise.
         """
-        return self.state_dict()
-
-    def internal_model(self, cards: List[GenericCard]) -> List[torch.Tensor]:
-        """One contextualized embedding per input card, same order - every
-        card attends to every other card in `cards` before its embedding
-        is returned."""
-        texts = [serialize_card_to_json(card) for card in cards]
-        encoding = self.text_encoder.encode(texts)
-        base = self.embedding_head(encoding)  # (num_cards, card_embedding_size)
-
-        # nn.TransformerEncoder expects a batch dim; treat this one group
-        # of cards as its own batch of size 1, then drop it back off.
+        base = self._base_embeddings(cards)  # (num_cards, card_embedding_size)
+        # One group = one sequence: add a batch dim of 1, then drop it
         contextualized = self.self_attention(base.unsqueeze(0)).squeeze(0)
-        # (num_cards, embedding_dim) -> List[(embedding_dim,)]
         return list(contextualized.unbind(0))
 
-    def forward(
-        self,
-        x: Union[
-            SingleCardInput, MultiCardInput, MultiGroupInput, BatchedMultiGroupInput
-        ],
-    ) -> Union[
-        SingleCardEmbedding,
-        MultiCardEmbedding,
-        MultiGroupEmbedding,
-        BatchedMultiGroupEmbedding,
-    ]:
-        shape = input_shape_of(x)
-        if shape is InputShape.SINGLE_CARD:
-            return self.forward_single_card(cast(SingleCardInput, x))
-        elif shape is InputShape.MULTI_CARD:
-            return self.forward_multi_card(
-                cast(Union[MultiCardInput, BatchedSingleCardInput], x)
-            )
-        elif shape is InputShape.MULTI_GROUP:
-            return self.forward_multi_group(
-                cast(Union[MultiGroupInput, BatchedMultiCardInput], x)
-            )
-        else:
-            return self.forward_batched_multi_group(cast(BatchedMultiGroupInput, x))
+    def embed_apart(self, cards: List[GenericCard]) -> List[torch.Tensor]:
+        """One embedding per card, same order. Each card attends only to
+        itself.
 
-    # region Forward Methods
+        The cards are encoded as one batch. Self-attention then runs over a
+        batch of length-one sequences, so the transform is the same as for
+        one card alone, without one text-encode call per card.
 
-    def forward_single_card(self, x: SingleCardInput) -> SingleCardEmbedding:
-        # Single card in, single embedding out
-        # For this multi-card model, it only accepts a list of cards and outputs
-        # a list of embeddings (one per card). So to support the single card case,
-        # we wrap the single card in a list and pass it to the internal model,
-        # then return the first (and only) embedding in the list
-        model_out: List[torch.Tensor] = self.internal_model([x])
-        return model_out[0]
+        Inputs: cards (List[GenericCard]), unrelated cards, non-empty.
+        Output: List[Tensor] of shape (card_embedding_size,), same order.
+        Side effects: none beyond autograd.
+        Exceptions: whatever the text encoder, head or attention raise.
+        """
+        base = self._base_embeddings(cards)  # (num_cards, card_embedding_size)
+        # Each card is its own sequence: (num_cards, 1, card_embedding_size)
+        isolated = self.self_attention(base.unsqueeze(1)).squeeze(1)
+        return list(isolated.unbind(0))
 
-    def forward_multi_card(
-        self, x: Union[MultiCardInput, BatchedSingleCardInput]
-    ) -> Union[MultiCardEmbedding, BatchedSingleCardEmbedding]:
-        return self.internal_model(x)
+    def _base_embeddings(self, cards: List[GenericCard]) -> torch.Tensor:
+        """Text-encode and head-project every card in one batch, before
+        self-attention.
 
-    def forward_multi_group(
-        self, x: Union[MultiGroupInput, BatchedMultiCardInput]
-    ) -> Union[MultiGroupEmbedding, BatchedMultiCardEmbedding]:
-        results: MultiGroupEmbedding = []
-        for group in x:
-            results.append(self.forward_multi_card(group))
-        return results
-
-    def forward_batched_multi_group(
-        self, x: BatchedMultiGroupInput
-    ) -> BatchedMultiGroupEmbedding:
-        results: BatchedMultiGroupEmbedding = []
-        for multi_group in x:
-            results.append(self.forward_multi_group(multi_group))
-        return results
-
-    # endregion Forward Methods
+        Inputs: cards (List[GenericCard]).
+        Output: Tensor (len(cards), card_embedding_size).
+        Side effects: none beyond autograd.
+        Exceptions: whatever the text encoder or head raise.
+        """
+        texts = [serialize_card_to_json(card) for card in cards]
+        return self.embedding_head(self.text_encoder.encode(texts))

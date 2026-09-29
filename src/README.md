@@ -43,7 +43,7 @@ Two flows hand data between containers as files on disk:
 
 | Container | Status | What it is |
 |---|---|---|
-| [`schema/`](schema/) | stable | Shared types every container uses: `GameId`, `GenericCard`, `GenericDeck`, `Provenance`, `DataSource`, `HoldoutSpec`, splits, input/output shape hints. Plain data, no README. |
+| [`schema/`](schema/) | stable | Shared types every container uses: `GameId`, `GenericCard`, `GenericDeck`, `Provenance`, `DataSource`, `HoldoutSpec`, splits, input/output shape hints, and `GenericCardFactory` (non-mutating card edits by path copying). Plain data, no README. |
 | [`data_retrieval/`](data_retrieval/README.md) | stable | One downloader per external source, writing untouched raw dumps to `data/raw/`. |
 | [`data_refinement/`](data_refinement/README.md) | in progress | Raw data -> the card binder, the deck box, and metric parquets. |
 | [`encoder_model/`](encoder_model/README.md) | in progress | The embedding model (PyTorch only): text encoder + embedding head, single- and multi-card. |
