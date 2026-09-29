@@ -7,8 +7,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
+from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.rate_limiter import RateLimiter
-from src.data_retrieval.seventeenlands.downloader import SeventeenLandsDownloader
+from src.data_retrieval.seventeenlands.downloader import (
+    DownloadBatchResult,
+    SeventeenLandsDownloader,
+)
 from src.data_retrieval.seventeenlands.refs import DataType, SeventeenLandsFileRef
 
 _GAME_MSH_PREMIER = SeventeenLandsFileRef.from_known(
@@ -336,3 +340,48 @@ class TestDownload:
         assert all(
             isinstance(outcome.error, requests.HTTPError) for outcome in result.outcomes
         )
+
+
+class TestDownloaderBaseClass:
+    def test_is_a_downloader(self) -> None:
+        assert isinstance(_make_downloader(Path("unused")), Downloader)
+
+    def test_constructor_accepts_no_arguments_like_every_other_downloader(self) -> None:
+        # rate_limiter used to be required and keyword-only; the
+        # inherited Downloader.__init__ defaults both it and
+        # raw_data_dir, matching every other source's DOWNLOADERS entry
+        # in scripts/run_data_retrieval.py (e.g. GwentOneDownloader()).
+        downloader = SeventeenLandsDownloader()
+
+        assert downloader.raw_data_dir == SeventeenLandsDownloader.DEFAULT_RAW_DATA_DIR
+        assert downloader.rate_limiter is not None
+
+
+class TestPhase1:
+    def test_downloads_the_full_known_set_and_returns_raw_data_dir(
+        self, tmp_path: Path
+    ) -> None:
+        downloader = _make_downloader(tmp_path)
+        batch_result = DownloadBatchResult(outcomes=[])
+
+        with patch.object(
+            downloader, "download", return_value=batch_result
+        ) as mock_download:
+            result = downloader.phase_1()
+
+        mock_download.assert_called_once_with()
+        assert result == tmp_path
+
+    def test_phase_2_is_a_no_op_returning_phase_1s_result(self, tmp_path: Path) -> None:
+        downloader = _make_downloader(tmp_path)
+        response = _mock_streaming_response([gzip.compress(b"data")])
+
+        with patch("requests.get", return_value=response):
+            with patch(
+                "src.data_retrieval.seventeenlands.downloader.list_known_refs",
+                return_value=[_GAME_MSH_PREMIER],
+            ):
+                phase_1_result = downloader.phase_1()
+                phase_2_result = downloader.phase_2()
+
+        assert phase_2_result == phase_1_result == tmp_path

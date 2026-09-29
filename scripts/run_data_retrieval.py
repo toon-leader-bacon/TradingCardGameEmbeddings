@@ -3,12 +3,8 @@ at once, each in its own terminal window.
 
 Every downloader here follows Downloader's phase_1()/phase_2()
 convention (phase_2() is a no-op for a source with nothing further to
-fetch, so calling both unconditionally is always safe) — except
-`seventeenlands`, which predates that base class and exposes a
-different shape (download(), no phase_1/phase_2) that this script's
-own README-documented exception carries forward rather than papering
-over. See src/data_retrieval/README.md for what each source actually
-does.
+fetch, so calling both unconditionally is always safe). See
+src/data_retrieval/README.md for what each source actually does.
 
 Several of these (spire_codex_runs, play_gwent, pitchstack,
 fabtcg_decklists, sts_gg, seventeenlands) are 10+ hour crawls, and
@@ -69,7 +65,6 @@ from src.data_retrieval.isotropic.downloader import IsotropicGameLogDownloader
 from src.data_retrieval.pitchstack.downloader import PitchstackDeckDownloader
 from src.data_retrieval.play_gwent.downloader import PlayGwentDownloader
 from src.data_retrieval.pokemon_tcg.downloader import PokemonTcgDataDownloader
-from src.data_retrieval.rate_limiter import RateLimiter
 from src.data_retrieval.scryfall.downloader import ScryfallOracleDownloader
 from src.data_retrieval.seventeenlands.downloader import SeventeenLandsDownloader
 from src.data_retrieval.spire_codex.card_downloader import SpireCodexCardDownloader
@@ -182,16 +177,7 @@ def run_fabtcg_decklists() -> None:
 
 
 def run_seventeenlands() -> None:
-    # Doesn't subclass Downloader and has no phase_1()/phase_2() — see
-    # this module's docstring and src/data_retrieval/README.md.
-    downloader = SeventeenLandsDownloader(
-        rate_limiter=RateLimiter(requests_per_minute=60)
-    )
-    result = downloader.download()
-    failed = [outcome for outcome in result.outcomes if outcome.error is not None]
-    print(
-        f"\nDone: {len(result.outcomes) - len(failed)} succeeded, {len(failed)} failed"
-    )
+    _run_standard(SeventeenLandsDownloader())
 
 
 DOWNLOADERS: dict[str, Callable[[], None]] = {

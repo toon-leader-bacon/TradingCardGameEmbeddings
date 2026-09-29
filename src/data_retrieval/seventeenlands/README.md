@@ -51,12 +51,22 @@ an extensible metric engine over raw rows, not a client for what
 - `known_files.py` — `list_known_refs()` above, backed by a static
   `_KNOWN_VALID_TRIPLES` snapshot of every combination 17Lands has
   actually published.
-- `downloader.py` — `SeventeenLandsDownloader`, `DownloadOutcome`
-  (`ref`, `path: Path | None`, `error: Exception | None` — exactly one
-  of `path`/`error` is meaningful per outcome), and
-  `DownloadBatchResult` (`outcomes: list[DownloadOutcome]`).
-  `SeventeenLandsDownloader(raw_data_dir: Path | None = None, *,
-  rate_limiter: RateLimiter)` exposes:
+- `downloader.py` — `SeventeenLandsDownloader(Downloader)`,
+  `DownloadOutcome` (`ref`, `path: Path | None`, `error: Exception |
+  None` — exactly one of `path`/`error` is meaningful per outcome), and
+  `DownloadBatchResult` (`outcomes: list[DownloadOutcome]`). Fits the
+  shared `Downloader` base class
+  (`src/data_retrieval/downloader.py`) the same way
+  `HearthstoneJsonDownloader` does: `phase_1()`/`phase_2()` cover the
+  no-argument "download everything known-valid" default, while
+  `download()`/`download_one()` stay available as the richer,
+  filterable API for direct or scripted use. `SeventeenLandsDownloader
+  (rate_limiter: RateLimiter | None = None, raw_data_dir: Path | None =
+  None)` exposes:
+  - `phase_1() -> Path` — downloads every known-valid file (equivalent
+    to `download()` with no filters) and returns `raw_data_dir`.
+    `phase_2()` is not overridden — nothing further to fetch, so it
+    inherits `Downloader`'s no-op default.
   - `download(refs: list[SeventeenLandsFileRef] | None = None, *,
     data_types: list[DataType] | None = None, expansions: list[str] |
     None = None, formats: list[str] | None = None) ->
@@ -96,7 +106,18 @@ flowchart TD
 ## How to run
 
 ```python
-from pathlib import Path
+from src.data_retrieval.seventeenlands.downloader import SeventeenLandsDownloader
+
+# Every known-valid file, via the shared Downloader interface:
+downloader = SeventeenLandsDownloader()
+raw_data_dir = downloader.phase_1()
+downloader.phase_2()  # no-op — nothing further to fetch
+```
+
+For a filtered batch, or to inspect per-ref outcomes, call `download()`
+directly instead:
+
+```python
 from src.data_retrieval.seventeenlands.downloader import SeventeenLandsDownloader
 from src.data_retrieval.seventeenlands.refs import DataType, SeventeenLandsFileRef
 from src.data_retrieval.rate_limiter import RateLimiter

@@ -12,6 +12,14 @@ BuildDownloadOutcome. See refs.py's module docstring for how refs are
 produced (LandingPageParser, SeventeenLandsFileRef.from_known(), or
 known_files.list_known_refs()) — download() falls back to the last of
 those when given no refs (or an empty refs list).
+
+Fits the shared Downloader base class the same way HearthstoneJsonDownloader
+does: download()/download_one() stay the richer, filterable API for direct
+or scripted use, and _run_phase_1() is a thin no-arg wrapper - download()
+with everything omitted already means "every known-valid file," which is
+exactly the self-contained default phase_1() needs. There's nothing further
+to fetch afterwards, so phase_2() is not overridden and inherits the base's
+no-op default.
 """
 
 import gzip
@@ -24,7 +32,7 @@ from typing import ClassVar
 from tqdm import tqdm
 
 from src.data_retrieval.download_utils import download_to_file
-from src.data_retrieval.rate_limiter import RateLimiter
+from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.seventeenlands.known_files import list_known_refs
 from src.data_retrieval.seventeenlands.refs import DataType, SeventeenLandsFileRef
 
@@ -70,7 +78,7 @@ class DownloadBatchResult:
     outcomes: list[DownloadOutcome]
 
 
-class SeventeenLandsDownloader:
+class SeventeenLandsDownloader(Downloader):
     """Downloads and extracts a filtered batch of 17Lands data files.
 
     Single-consumer to src/data_retrieval/seventeenlands/ — no other
@@ -79,30 +87,30 @@ class SeventeenLandsDownloader:
 
     DEFAULT_RAW_DATA_DIR: ClassVar[Path] = Path("data/raw/17lands")
 
-    def __init__(
-        self, raw_data_dir: Path | None = None, *, rate_limiter: RateLimiter
-    ) -> None:
+    def _run_phase_1(self) -> Path:
+        """Download every known-valid 17Lands file and return raw_data_dir.
+
+        The self-contained, no-argument default download() already
+        provides for an omitted refs list (see download()'s own
+        docstring) - this is a thin wrapper exposing that default
+        through the Downloader contract, same shape as
+        HearthstoneJsonDownloader._run_phase_1(). Per-ref outcomes
+        (including any failures) aren't returned here since
+        _run_phase_1() must return a Path - call download() directly
+        for the full DownloadBatchResult.
+
+        Inputs: none (uses self.raw_data_dir, self.rate_limiter).
+        Output: self.raw_data_dir.
+        Side effects: see download().
+        Exceptions: none — download() catches per-ref failures itself
+            (see download()'s own docstring); nothing here can raise.
+
+        Example:
+            >>> downloader = SeventeenLandsDownloader()
+            >>> raw_data_dir = downloader.phase_1()
         """
-        Inputs:
-            raw_data_dir: directory downloaded/extracted files are
-                written under. Defaults to DEFAULT_RAW_DATA_DIR when
-                omitted (expected to be data/raw/17lands, per this
-                container's README — not this class's concern to
-                enforce, just to receive). Each file lands at
-                raw_data_dir/<data_type>/<expansion>.<format_code>.csv.
-            rate_limiter: paces every outgoing download request this
-                class makes. Passed in rather than constructed
-                internally (dependency injection — PATTERNS.md), same
-                convention as HearthstoneJsonDownloader.
-        Output: none (constructor).
-        Side effects: none — no I/O happens until download() or
-            download_one() is called.
-        Exceptions: none.
-        """
-        self.raw_data_dir = (
-            raw_data_dir if raw_data_dir is not None else self.DEFAULT_RAW_DATA_DIR
-        )
-        self.rate_limiter = rate_limiter
+        self.download()
+        return self.raw_data_dir
 
     def download(
         self,
