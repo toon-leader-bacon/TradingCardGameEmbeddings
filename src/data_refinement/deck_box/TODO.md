@@ -53,40 +53,56 @@ not decks).
   cards (in `card_binder/scryfall` or in name matching,
   `card_lookup.uuid_for_name_or_front_face()`), or accept the sentinel
   for true same-name collisions and document it.
-- Confirm a full `seventeenlands_game_data` extraction (84 GB, 133 CSVs)
-  now completes under the SQLite `DeckBox`; earlier in-memory attempts
-  were OOM-killed. A one-CSV smoke test (`KTK.TradSealed.csv` into a
-  scratch box) was clean: 2,558 decks, one per game row, 0 Unknown, 40
-  cards median, version stamped. The full run started 2026-09-27 13:54
-  (log: `data/tmp/ingest_17lands.err`). It uses 0.4-3.7 GB of RAM
-  (per pandas chunk), writes about 75-80 decks/s and about 5.4 KB of `.db` per
-  deck. Against an estimated ~28M game rows, that is about 4 days and a
-  ~150 GB `mtg.db`. The run was stopped on purpose at 14:15 so two
-  fixes could land first (2026-09-27): `DeckBox` now commits every
-  1,000 writes instead of every write (one fsync per deck was the
-  bottleneck), and the 17lands stage keeps one deck per `draft_id`
-  (from its lowest match/game) instead of one per game, about 5x fewer
-  decks. A one-CSV smoke test (`MSH.TradDraft.csv`: 41,361 games,
-  6,663 drafts) gave exactly 6,663 decks at ~1,000 rows/s, now limited
-  by pandas rather than commits. The partial per-game `mtg.db` was
-  deleted, and the full re-run started 2026-09-27 (logs:
-  `data/tmp/ingest_17lands.out`/`.err`); estimate ~8 hours and a
-  ~27 GB box. At 15:24 it was stopped by low system memory (not a
-  code failure), 38% into `Cube_-_Powered.PremierDraft.csv` (AFR, BLB,
-  BRO done), leaving a 2.1 GB `mtg.db` with no version stamp. It was
-  resumed at 17:41 and stopped by low memory again at 21:16, 15% into
-  `MID.PremierDraft.csv` (file 68 of 133, ~51% of the 90 GB by bytes),
-  leaving a 14.3 GB unstamped `mtg.db`. Unmatched names seen so far
-  (Unknown sentinel, acceptable cruft): Sol'kanar the Tainted, Yera
-  and Oski, Weaver and Guide, Nia, Skysail Storyteller, Makdee and
-  Itla, Skysnarers, Luis, Pompous Pillager, Goben, Gene-Splice
-  Savant, Ademi of the Silkchutes, plus Pick Your Poison (below).
-  **To resume**, run it on its own, not beside another heavy job:
-  `PYTHONPATH=. venv/Scripts/python.exe scripts/run_deck_box_ingestion.py --source seventeenlands_game_data`.
-  Opening the box rolls back the unfinished batch, and deck ids are
-  deterministic, so finished files are re-read without writes (about
-  18 MB/s, so ~45 min for the 67 finished files) before new work
-  starts. About 4-5 hours of new work remain.
+- **Full `seventeenlands_game_data` run: done (2026-09-28).** Batched
+  commits and one deck per `draft_id` took it from ~75 decks/s (~4
+  days) to ~1,000 rows/s. Claude Code's background shell was killed by
+  low memory twice; a foreground run in a separate terminal then got
+  through VOW, and most of WOE judging by the box, before an accidental
+  Ctrl+C (log: `logs/deck_box_17_lands_sep28.log`, which ends at VOW;
+  no tracebacks). The four WOE files were then re-run on their own via
+  `--raw-path` (45,310 more decks, 17 min). Final `mtg.db`: 27.9 GB,
+  `card_binder_version` stamped, 4,812,218 decks, exactly the number of
+  distinct `draft_id`s across all 133 CSVs. Unknown sentinel: 1,375,781
+  of 193,020,442 card slots (0.71%), in 140,425 decks (2.9%), about 10
+  per affected deck, which fits the OM1 gap below.
+- **17lands card names the MTG binder can't match** (from the full-run
+  log; 162 distinct names, each logged once per file). All become the
+  Unknown sentinel, which is acceptable cruft, but most fall into a few
+  fixable groups:
+  - *`OM1` (Through the Omenpath), ~144 names* such as `Skittering
+    Kitten` and `Rizna, the Spider-Crowned`: nearly the whole Arena set.
+    None are in the oracle-cards dump
+    (`oracle-cards-20260912210156.jsonl`), probably because Scryfall
+    files them as alternate names of the Spider-Man (`SPM`) printings,
+    which only the default-cards dump carries (e.g. as `flavor_name`).
+    This is the biggest gap: OM1 decks are mostly Unknown. Check the
+    default-cards dump and add those names as aliases.
+  - *Back faces of modal double-faced cards (KHM), 13 names* such as
+    `Mistgate Pathway`, `Tibalt, Cosmic Impostor`, `Kaldring, the
+    Rimestaff`: the binder has the cards, but
+    `card_lookup.uuid_for_name_or_front_face()` only matches the front
+    face. Match back faces too.
+  - *Alchemy rebalanced `A-` names (HBG), 2 names*: `A-Baba Lysaga,
+    Night Witch`, `A-Monster Manual`. The binder has the paper cards;
+    either strip the `A-` prefix to the original card or accept them
+    as Unknown, since the rebalanced text differs.
+  - *Arena Cube cards, 7 names* such as `Ademi of the Silkchutes`,
+    `Yera and Oski, Weaver and Guide` (`Cube_-_Powered`): digital-only
+    and not in the oracle dump. Probably accept.
+  - *Corrupted in the source data*: `Bespoke B?` (TMT) is literally
+    `B?` in the 17lands CSV header (most likely `Bespoke Bō`). A
+    one-entry alias would fix it.
+  - *Same-name collisions*: `Pick Your Poison` (above) and `Red
+    Herring` (MKM, four binder entries with that name). Same decision
+    as Pick Your Poison.
+- **Read only the needed CSV columns.** `pd.read_csv` in
+  `_extract_file` parses every column, including the
+  `opening_hand_`/`drawn_`/`tutored_`/`sideboard_` card columns the
+  stage never uses (about 4/5 of the file). Passing `usecols` (the key
+  columns plus `deck_*`) should cut parse time and the 0.4-3.7 GB
+  per-chunk memory several-fold, which matters given the low-memory
+  kills. It would also remove the 13 `DtypeWarning`s (`opp_rank`,
+  `splash_colors`) from the log.
 - Possible speedup, not needed yet: for the ~80% of 17lands rows that
   are later games of a stored draft, `_extract_row` calls
   `get_by_uuid()`, which builds the whole card list only to read the
