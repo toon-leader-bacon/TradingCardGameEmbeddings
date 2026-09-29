@@ -7,7 +7,7 @@ from src.training.recording.reports import (
 
 
 def _report(losses: dict[str, float]) -> RoundReport:
-    return RoundReport("p", 0, 0, losses, {}, frozenset())
+    return RoundReport("p", 0, 0, 0.0, losses, {}, frozenset())
 
 
 def test_mean_over_only_the_named_dojos() -> None:

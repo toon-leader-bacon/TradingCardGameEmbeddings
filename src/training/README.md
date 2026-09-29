@@ -18,10 +18,15 @@ flowchart LR
     Encoder["SingleCardModel / MultiCardModel<br/>src/encoder_model"] --> Trainer
     Trainer --> Ckpt[Checkpoint on disk<br/>encoder.pt = the artifact]
     Ckpt -.-> Eval["evaluation/<br/>(post-training, separate)"]
+    Eval -.->|extrinsic runs construct| Trainer
 ```
 
 The trainer sees dojos only through the `Dojo` Protocol, so generic and
-contrastive dojos are interchangeable. It never calls `evaluation/`.
+contrastive dojos are interchangeable. It never calls `evaluation/`;
+evaluation's extrinsic runs construct a `Trainer` of their own (one frozen
+phase, no checkpointer) to train fresh dojo heads on a finished encoder.
+Mixed precision (`Precision`, `autocast_for`) lives in
+`../encoder_model/precision.py`, shared with evaluation's embedders.
 
 ## Files
 
@@ -35,10 +40,11 @@ Top level:
   dojos, which `DietRule`, learning rates, whether the encoder is frozen,
   and when to stop (`SaturationSpec`). Also `HardwareLimits`. Frozen and
   validated on construction, so a run is described entirely by its plan.
-- [round_evaluation.py](round_evaluation.py): per-round capped,
-  deterministic TEST loss for every dojo (diet or held-out). This is the
-  tracker's input. It is the loop's own signal, not the post-training
-  `evaluation/`.
+- [round_evaluation.py](round_evaluation.py): `evaluate_split_losses`, a
+  capped, deterministic scoring pass over one split for every dojo, at a
+  given precision. `Trainer` runs it on TEST each round (diet or held-out
+  dojos alike) as the tracker's input, the loop's own signal; evaluation's
+  extrinsic runs call it once on VALIDATION after training.
 - [trainable_encoder.py](trainable_encoder.py): the slice of the model the
   trainer needs.
 - [preflight.py](preflight.py): `preflight_dojo()` exercises one already-
@@ -57,6 +63,31 @@ Subdirectories:
 - [recording/](recording/README.md): what comes out of training (reports,
   checkpointer, listeners).
 
+## Vocabulary
+
+From largest unit to smallest:
+
+| Term | What it is | Where |
+|---|---|---|
+| **Run** | One `Trainer.run()`: a whole `TrainingPlan` executed against one model and a set of dojos. | `trainer.py`, `plan.py` (`TrainingPlan`) |
+| **Phase** | One stage of the plan (e.g. pretraining with everything trainable, then a head-only stage with the encoder frozen). Each has its own diet, learning rates, frozen flag and stopping rule. Phases run in order. | `plan.py` (`Phase`) |
+| **Round** | The loop's decision unit within a phase: `steps_per_round` optimizer steps, then one TEST pass over every dojo, after which the diet is re-decided, saturation checked and a checkpoint maybe written. A phase runs until enough dojos saturate or `max_rounds` is reached. | `Trainer._train_round` + `_evaluate_round` |
+| **Step** | One optimizer update: pick a dojo from the diet, take its next batch, forward, loss, backward, update. `RoundReport.step` is the running total. | `Trainer._take_step` |
+| **Batch** | What one step consumes: examples from **one** dojo, sized by a cost budget (`max_batch_cost`) rather than a fixed count. | `DojoBatch`, `BatchBudget` |
+| **Epoch** | **Not a concept here.** Each dojo's TRAIN data is an endless stream that starts another pass whenever it runs out. Dojos differ in size and sampling rate, so "one pass over the data" means something different for each dojo and nothing for the run. Rounds are the unit of progress instead. | `diet/dojo_batch_stream.py` |
+
+```
+Run
+ └─ Phase 1 … N              (in order)
+     └─ Round 0 … ≤ max_rounds
+         ├─ steps_per_round × Step   (each = one Batch from one Dojo)
+         └─ one TEST pass → RoundReport → saturation, diet, checkpoint
+```
+
+**Saturation:** a dojo whose TEST loss has stopped improving (no gain
+larger than `epsilon` for `patience_rounds` rounds) leaves the diet. It
+re-enters if its loss rises again by `reactivation_delta`.
+
 ## How it works
 
 ```mermaid
@@ -66,7 +97,7 @@ sequenceDiagram
     participant B as DojoBatchStream
     participant M as Encoder model
     participant D as Dojo
-    participant E as evaluate_test_losses
+    participant E as evaluate_split_losses
     participant K as SaturationTracker
     participant C as Checkpointer / Listeners
 
@@ -101,6 +132,14 @@ Points worth knowing:
   is passed to every dojo, so no dojo owns a batch size.
 - Held-out dojos (`TrainingPlan.held_out_dojos`) are evaluated every round
   but never trained on.
+- A phase with `encoder_trainable=False` keeps the encoder in eval mode
+  (no dropout) while the dojo heads train; the heads are not part of the
+  model, so their mode is untouched.
+- Every `RoundReport` carries `elapsed_seconds` (monotonic, since
+  `run()` began), for loss-vs-time curves.
+- The checkpointer is optional: with `checkpointer=None` nothing is saved
+  and `TrainingResult.best_checkpoint` is `None` (evaluation's extrinsic
+  runs, smoke tests, dry runs).
 - `Trainer` raises if any dojo's `holdout` differs from the plan's, so
   card holdout is consistent across dojos.
 - The best checkpoint is chosen per phase; scores are not comparable across

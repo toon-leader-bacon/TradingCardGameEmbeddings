@@ -1,8 +1,14 @@
 import csv
 from pathlib import Path
 
+import pytest
+
 from src.training.recording.reports import CheckpointRecord, DojoStatus, RoundReport
-from src.training.recording.run_listener import CsvRunListener
+from src.training.recording.run_listener import (
+    CsvRunListener,
+    RoundRow,
+    read_rounds_csv,
+)
 
 
 def _report(
@@ -15,6 +21,7 @@ def _report(
         phase=phase,
         round_index=round_index,
         step=step,
+        elapsed_seconds=12.5,
         per_dojo_test_loss={"color_mask": 0.5, "faction_mask": 1.25},
         statuses={
             "color_mask": DojoStatus.ACTIVE,
@@ -41,6 +48,7 @@ class TestOnRoundEnd:
         assert color_row["phase"] == "phase_a"
         assert color_row["round_index"] == "0"
         assert color_row["step"] == "5"
+        assert color_row["elapsed_seconds"] == "12.5"
         assert color_row["test_loss"] == "0.5"
         assert color_row["status"] == "active"
         assert color_row["quarantined"] == "False"
@@ -62,6 +70,7 @@ class TestOnRoundEnd:
             phase="phase_a",
             round_index=0,
             step=0,
+            elapsed_seconds=0.0,
             per_dojo_test_loss={"held_out": 2.0},
             statuses={},
             quarantined=frozenset(),
@@ -85,6 +94,20 @@ class TestOnRoundEnd:
         path = tmp_path / "nested" / "runs" / "rounds.csv"
         CsvRunListener(path).on_round_end(_report())
         assert path.exists()
+
+    def test_construction_touches_nothing_on_disk(self, tmp_path: Path) -> None:
+        CsvRunListener(tmp_path / "nested" / "rounds.csv")
+        assert list(tmp_path.iterdir()) == []
+
+    def test_appending_to_a_csv_with_another_header_raises(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "rounds.csv"
+        old = "phase,round_index,step,dojo,test_loss,status,quarantined\n"
+        path.write_text(old)
+        with pytest.raises(ValueError, match="header"):
+            CsvRunListener(path).on_round_end(_report())
+        assert path.read_text() == old  # nothing appended
 
 
 class TestOnCheckpoint:
@@ -147,3 +170,70 @@ class TestOnCheckpoint:
 
         assert len(_rows(tmp_path / "rounds.csv")) == 2
         assert len(_rows(tmp_path / "rounds_checkpoints.csv")) == 1
+
+
+class TestReadRoundsCsv:
+    def test_reads_back_what_the_listener_wrote(self, tmp_path: Path) -> None:
+        path = tmp_path / "rounds.csv"
+        listener = CsvRunListener(path)
+        listener.on_round_end(_report(quarantined=frozenset({"faction_mask"})))
+        listener.on_round_end(_report(round_index=1, step=9))
+
+        rows = read_rounds_csv(path)
+
+        assert len(rows) == 4
+        assert rows[0] == RoundRow(
+            phase="phase_a",
+            round_index=0,
+            step=5,
+            elapsed_seconds=12.5,
+            dojo="color_mask",
+            test_loss=0.5,
+            status=DojoStatus.ACTIVE,
+            quarantined=False,
+        )
+        assert rows[1].status is DojoStatus.SATURATED and rows[1].quarantined
+        assert [row.round_index for row in rows] == [0, 0, 1, 1]
+
+    def test_an_empty_status_reads_as_none(self, tmp_path: Path) -> None:
+        path = tmp_path / "rounds.csv"
+        report = RoundReport("p", 0, 0, 0.0, {"held_out": 2.0}, {}, frozenset())
+        CsvRunListener(path).on_round_end(report)
+        assert read_rounds_csv(path)[0].status is None
+
+    def test_a_missing_file_raises_file_not_found(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            read_rounds_csv(tmp_path / "absent.csv")
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "",
+            "phase,round_index,step,dojo,test_loss,status,quarantined\n",
+        ],
+    )
+    def test_a_wrong_or_missing_header_raises(self, tmp_path: Path, text: str) -> None:
+        path = tmp_path / "rounds.csv"
+        path.write_text(text)
+        with pytest.raises(ValueError, match="header"):
+            read_rounds_csv(path)
+
+    @pytest.mark.parametrize(
+        "row",
+        [
+            "p,0,0,0.0,a,0.5,active",  # too few cells
+            "p,zero,0,0.0,a,0.5,active,False",  # unparseable int
+            "p,0,0,0.0,a,0.5,bogus,False",  # unknown status
+            "p,0,0,0.0,a,0.5,active,maybe",  # bad bool
+        ],
+    )
+    def test_a_malformed_row_raises_naming_its_line(
+        self, tmp_path: Path, row: str
+    ) -> None:
+        path = tmp_path / "rounds.csv"
+        header = (
+            "phase,round_index,step,elapsed_seconds,dojo,test_loss,status,quarantined"
+        )
+        path.write_text(f"{header}\n{row}\n")
+        with pytest.raises(ValueError, match=":2:"):
+            read_rounds_csv(path)

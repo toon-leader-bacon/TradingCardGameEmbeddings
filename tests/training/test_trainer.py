@@ -6,7 +6,8 @@ import torch
 
 from src.dojos.dojo import Dojo
 from src.schema.holdout import HoldoutSpec
-from src.training.plan import FaultPolicy, HardwareLimits, Precision
+from src.encoder_model.precision import Precision
+from src.training.plan import FaultPolicy, HardwareLimits
 from src.training.recording.checkpointer import DirectoryCheckpointer
 from src.training.recording.reports import CheckpointRecord, RoundReport
 from src.training.trainer import Trainer
@@ -29,6 +30,18 @@ class _RecordingListener:
 
     def on_checkpoint(self, record: CheckpointRecord) -> None:
         self.checkpoints.append(record)
+
+
+class _ModeRecordingModel(FakeModel):
+    """Records self.training at every forward pass."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.modes: list[bool] = []
+
+    def forward(self, inputs: object) -> object:
+        self.modes.append(self.training)
+        return super().forward(inputs)
 
 
 class _ExplodingListener:
@@ -187,6 +200,41 @@ class TestRun:
         ).run()
         assert result.final_report is not None
         assert result.best_checkpoint is None
+
+    def test_without_a_checkpointer_nothing_is_saved(self, tmp_path: Path) -> None:
+        listener = _RecordingListener()
+        plan = make_plan((make_phase(("a",)),))
+        result = Trainer(
+            FakeModel(),  # type: ignore[arg-type]
+            [FakeDojo("a")],  # type: ignore[list-item]
+            plan,
+            LIMITS,
+            None,
+            [listener],
+        ).run()
+        assert result.final_report is not None
+        assert result.best_checkpoint is None
+        assert listener.checkpoints == []
+        assert list(tmp_path.iterdir()) == []
+
+    def test_a_frozen_encoder_trains_in_eval_mode(self, tmp_path: Path) -> None:
+        model = _ModeRecordingModel()
+        _trainer(tmp_path, [FakeDojo("a")], model=model, encoder_trainable=False).run()
+        # Every forward pass, training steps included, saw eval mode
+        assert model.modes and not any(model.modes)
+
+    def test_a_trainable_encoder_trains_in_train_mode(self, tmp_path: Path) -> None:
+        model = _ModeRecordingModel()
+        _trainer(tmp_path, [FakeDojo("a")], model=model).run()
+        # Training steps run in train mode; the TEST passes in eval mode
+        assert True in model.modes and False in model.modes
+
+    def test_rounds_report_non_decreasing_elapsed_seconds(self, tmp_path: Path) -> None:
+        listener = _RecordingListener()
+        _trainer(tmp_path, [FakeDojo("a")], listeners=[listener]).run()
+        elapsed = [report.elapsed_seconds for report in listener.reports]
+        assert elapsed and elapsed[0] >= 0
+        assert elapsed == sorted(elapsed)
 
     def test_held_out_dojos_are_evaluated_but_not_trained(self, tmp_path: Path) -> None:
         held_out = FakeDojo("held_out", fail="train")

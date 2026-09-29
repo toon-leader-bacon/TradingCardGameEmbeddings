@@ -14,6 +14,7 @@ data_refinement/card_binder/visible_card_lookup.py.
 """
 
 import hashlib
+import json
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import cached_property
@@ -119,6 +120,52 @@ class HoldoutSpec:
                 return tier
         return CardTier.VALIDATION  # unreachable: boundaries cover the range
 
+    def to_json(self) -> str:
+        """Serialize losslessly: from_json(spec.to_json()) == spec.
+
+        Inputs: none.
+        Output: str, a JSON object {"seed": int, "tier_ratios": [3 numbers],
+            "held_out_games": [GameId values, sorted]}. Sorting makes equal
+            specs serialize to identical text.
+        Side effects: none. Exceptions: none.
+
+        Example:
+            >>> HoldoutSpec.no_holdout().to_json()
+            '{"seed": 0, "tier_ratios": [1, 0, 0], "held_out_games": []}'
+        """
+        payload = {
+            "seed": self.seed,
+            "tier_ratios": list(self.tier_ratios),
+            "held_out_games": sorted(game.value for game in self.held_out_games),
+        }
+        return json.dumps(payload)
+
+    @classmethod
+    def from_json(cls, text: str) -> "HoldoutSpec":
+        """Parse text written by to_json.
+
+        Inputs: text (str).
+        Output: HoldoutSpec equal to the one that wrote it.
+        Side effects: none.
+        Exceptions: ValueError if text is not JSON, is not an object with
+            exactly the keys seed / tier_ratios / held_out_games, a value
+            has the wrong type (seed not an int, tier_ratios not three
+            numbers, a game not a GameId value), or the spec itself is
+            invalid (__post_init__).
+
+        Example:
+            >>> HoldoutSpec.from_json(spec.to_json()) == spec
+            True
+        """
+        # Parse the JSON text into a dict (json.JSONDecodeError is a ValueError)
+        payload = _holdout_fields_of(json.loads(text))
+        # Convert each field to its typed form; __post_init__ checks the ratios
+        return cls(
+            seed=_parse_seed(payload["seed"]),
+            tier_ratios=_parse_tier_ratios(payload["tier_ratios"]),
+            held_out_games=_parse_held_out_games(payload["held_out_games"]),
+        )
+
     def visible_tiers(self, view: Split) -> frozenset[CardTier]:
         """Return the tiers whose cards a given split's view may see.
 
@@ -138,3 +185,54 @@ class HoldoutSpec:
         """Map (seed, uuid) to a stable integer in [0, _HASH_RESOLUTION)."""
         digest = hashlib.sha256(f"{self.seed}:{nocab_uuid}".encode()).digest()
         return int.from_bytes(digest[:8], "big") % _HASH_RESOLUTION
+
+
+_HOLDOUT_KEYS = frozenset({"seed", "tier_ratios", "held_out_games"})
+
+
+def _holdout_fields_of(payload: object) -> dict[str, object]:
+    """payload narrowed to a dict with exactly _HOLDOUT_KEYS; ValueError
+    otherwise (not an object, or missing/extra keys)."""
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"holdout JSON must be an object, got {type(payload).__name__}"
+        )
+    keys = set(payload)
+    if keys != _HOLDOUT_KEYS:
+        raise ValueError(
+            f"holdout JSON keys must be {sorted(_HOLDOUT_KEYS)}, got {sorted(keys)}"
+        )
+    return payload
+
+
+def _parse_seed(value: object) -> int:
+    """value as an int; ValueError if it is not one (bool rejected)."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"holdout seed must be an int, got {value!r}")
+    return value
+
+
+def _parse_tier_ratios(value: object) -> tuple[float, float, float]:
+    """value as three floats; ValueError unless a list of exactly three
+    numbers (bool rejected)."""
+    if (
+        not isinstance(value, list)
+        or len(value) != 3
+        or not all(_is_number(ratio) for ratio in value)
+    ):
+        raise ValueError(f"holdout tier_ratios must be three numbers, got {value!r}")
+    return (float(value[0]), float(value[1]), float(value[2]))
+
+
+def _parse_held_out_games(value: object) -> frozenset[GameId]:
+    """value as a frozenset of GameId; ValueError unless a list of GameId
+    values."""
+    if not isinstance(value, list):
+        raise ValueError(f"holdout held_out_games must be a list, got {value!r}")
+    # GameId(...) raises ValueError on an unknown value
+    return frozenset(GameId(game) for game in value)
+
+
+def _is_number(value: object) -> bool:
+    """True for an int or float that is not a bool."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)

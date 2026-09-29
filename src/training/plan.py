@@ -8,8 +8,9 @@ affect results but are not yet written to the checkpoint manifest).
 
 import re
 from dataclasses import dataclass
-from typing import Literal, get_args
+from typing import get_args
 
+from src.encoder_model.precision import Precision
 from src.schema.holdout import HoldoutSpec
 
 
@@ -139,8 +140,10 @@ class TrainingPlan:
     """The whole experiment.
 
     holdout: the card holdout every dojo must have been built with.
-    held_out_dojos: registered dojos never placed in any diet; evaluated
-        every round so evaluation/ can measure transfer to unseen tasks.
+    held_out_dojos: registered dojos never placed in any diet, scored
+        every round with never-trained heads: the loop's own signal of
+        transfer. evaluation/'s extrinsic runs instead train fresh heads
+        for such dojos on the frozen encoder.
     eval_examples_per_dojo: cap passed as max_examples to each per-round
         TEST pass.
     seed: seeds the diet sampler and any other trainer randomness.
@@ -169,9 +172,6 @@ class TrainingPlan:
                 raise ValueError(
                     f"phase {phase.name!r} trains held-out dojos {sorted(overlap)}"
                 )
-
-
-Precision = Literal["fp32", "fp16", "bf16"]
 
 
 @dataclass(frozen=True)

@@ -4,23 +4,25 @@ Knows only the Dojo Protocol, so generic and contrastive dojos are
 interchangeable. One optimizer step trains on one batch from one dojo.
 """
 
-import contextlib
 import gc
 import logging
 import random
-from typing import Any, Callable, ContextManager, Sequence
+import time
+from typing import Any, Callable, Sequence
 
 import torch
 
 from src.dojos.dojo import BatchBudget, Dojo, DojoBatch
+from src.encoder_model.precision import autocast_for, device_type_of
 from src.schema.card import GenericCard
+from src.schema.splits import Split
 from src.training.diet.diet_sampler import diet_sampler_for
 from src.training.diet.dojo_batch_stream import DojoBatchStream
 from src.training.diet.dojo_fault_ledger import DojoFaultLedger
 from src.training.diet.saturation_tracker import SaturationTracker
 from src.training.phase_run import PhaseRun
-from src.training.recording.checkpointer import Checkpointer
 from src.training.plan import HardwareLimits, Phase, TrainingPlan
+from src.training.recording.checkpointer import Checkpointer
 from src.training.recording.reports import (
     CheckpointRecord,
     RoundReport,
@@ -28,8 +30,8 @@ from src.training.recording.reports import (
     is_better_round,
     mean_test_loss_over,
 )
-from src.training.round_evaluation import evaluate_test_losses
 from src.training.recording.run_listener import RunListener
+from src.training.round_evaluation import evaluate_split_losses
 from src.training.trainable_encoder import TrainableEncoder
 
 logger = logging.getLogger(__name__)
@@ -39,8 +41,6 @@ logger = logging.getLogger(__name__)
 # non-finite in true units, a real fault. Clamping also stops one bad dojo
 # from driving the shared scale toward zero.
 _MIN_LOSS_SCALE = 1.0
-
-_AUTOCAST_DTYPES = {"fp16": torch.float16, "bf16": torch.bfloat16}
 
 
 class NonFiniteLossError(ValueError):
@@ -56,9 +56,10 @@ class Trainer:
     """Trains one encoder against a suite of dojos according to a plan.
 
     Inputs (constructor): model, dojos (every registered dojo, including
-        held-out ones), plan, limits, checkpointer, listeners, cost_of
-        (per-card batch cost; 1 per card by default, upgradable to token
-        count without touching any dojo).
+        held-out ones), plan, limits, checkpointer (None: never save, e.g.
+        evaluation's extrinsic runs, smoke tests, dry runs), listeners,
+        cost_of (per-card batch cost; 1 per card by default, upgradable to
+        token count without touching any dojo).
     Exceptions (constructor): ValueError if any dojo.holdout != plan.holdout,
         if a phase names an unregistered dojo, or if a phase's diet
         includes a held-out dojo.
@@ -70,7 +71,7 @@ class Trainer:
         dojos: Sequence[Dojo],
         plan: TrainingPlan,
         limits: HardwareLimits,
-        checkpointer: Checkpointer,
+        checkpointer: Checkpointer | None,
         listeners: Sequence[RunListener],
         *,
         cost_of: Callable[[GenericCard], int] = lambda card: 1,
@@ -97,9 +98,11 @@ class Trainer:
         Output: TrainingResult: the last round's report, the best
             checkpoint of the last phase that wrote one (best = strictly
             lowest mean TEST loss over the diet dojos scored in both rounds),
-            and why the run stopped early, if it did.
+            and why the run stopped early, if it did. best_checkpoint is
+            always None when the Trainer has no checkpointer.
         Side effects: updates model and dojo-head weights; writes
-            checkpoints; notifies listeners; logs every recovered failure.
+            checkpoints (if a checkpointer was given); notifies listeners;
+            logs every recovered failure.
         Exceptions: none for step, evaluation, checkpoint or listener
             failures (logged and skipped). KeyboardInterrupt propagates.
 
@@ -109,6 +112,7 @@ class Trainer:
         report: RoundReport | None = None
         last_good: CheckpointRecord | None = None
         stopped_early_reason: str | None = None
+        run_started = time.monotonic()
         # Train each phase to saturation, its round cap, or too many failures
         for phase in self._plan.phases:
             phase_run = self._open_phase(phase)
@@ -121,7 +125,7 @@ class Trainer:
                         f"too many consecutive failures in {phase.name!r}"
                     )
                     break
-                report = self._evaluate_round(phase_run, round_index)
+                report = self._evaluate_round(phase_run, round_index, run_started)
                 self._notify_round_end(report)
                 best = self._checkpoint_if_best(best, phase_run, report)
                 quarantined = phase_run.faults.quarantined_names()
@@ -178,23 +182,9 @@ class Trainer:
             },
             faults=DojoFaultLedger(self._plan.faults, phase.dojo_names),
             scaler=torch.amp.GradScaler(
-                self._device_type(), enabled=self._precision == "fp16"
+                device_type_of(self._model), enabled=self._precision == "fp16"
             ),
         )
-
-    def _device_type(self) -> str:
-        """The model's device type ("cuda" also on ROCm), read each call so
-        a model moved after construction is followed."""
-        for parameter in self._model.parameters():
-            return parameter.device.type
-        return "cpu"
-
-    def _autocast(self) -> ContextManager[Any]:
-        """torch.autocast at the configured precision; a no-op for fp32."""
-        dtype = _AUTOCAST_DTYPES.get(self._precision)
-        if dtype is None:
-            return contextlib.nullcontext()
-        return torch.autocast(device_type=self._device_type(), dtype=dtype)
 
     def _build_optimizer(self, phase: Phase) -> torch.optim.Optimizer:
         """AdamW with an encoder group at encoder_lr (only if trainable)
@@ -243,7 +233,9 @@ class Trainer:
             >>> self._train_round(phase_run)
         """
         faults = phase_run.faults
-        self._model.train(True)
+        # A frozen encoder stays in eval mode (no dropout) while heads train;
+        # dojo heads are not part of the model, so this does not touch them
+        self._model.train(phase_run.phase.encoder_trainable)
         active = self._active_dojos(phase_run)
 
         # One optimizer step per iteration, each on one batch from one dojo
@@ -275,7 +267,7 @@ class Trainer:
         batch = phase_run.streams[dojo.name].next_batch()
 
         # Forward: encoder embeds batch.inputs, the dojo scores them
-        with self._autocast():
+        with autocast_for(self._model, self._precision):
             loss = self._loss_of(dojo, batch)
         self._require_finite(loss, dojo)
 
@@ -359,21 +351,26 @@ class Trainer:
         except Exception:
             logger.error("cleanup after a failed step also failed", exc_info=True)
 
-    def _evaluate_round(self, phase_run: PhaseRun, round_index: int) -> RoundReport:
-        """evaluate_test_losses over ALL dojos, feed the tracker, assemble
-        the RoundReport."""
-        with self._autocast():
-            losses = evaluate_test_losses(
-                self._model,
-                list(self._dojos.values()),
-                self._budget,
-                self._plan.eval_examples_per_dojo,
-            )
+    def _evaluate_round(
+        self, phase_run: PhaseRun, round_index: int, run_started: float
+    ) -> RoundReport:
+        """The TEST pass over ALL dojos, feed the tracker, assemble the
+        RoundReport (elapsed_seconds measured from run_started, a
+        time.monotonic() reading)."""
+        losses = evaluate_split_losses(
+            self._model,
+            list(self._dojos.values()),
+            split=Split.TEST,
+            budget=self._budget,
+            max_examples=self._plan.eval_examples_per_dojo,
+            precision=self._precision,
+        )
         statuses = phase_run.tracker.record_round(losses)
         return RoundReport(
             phase=phase_run.phase.name,
             round_index=round_index,
             step=self._steps_taken,
+            elapsed_seconds=time.monotonic() - run_started,
             per_dojo_test_loss=losses,
             statuses=statuses,
             quarantined=phase_run.faults.quarantined_names(),
@@ -397,7 +394,10 @@ class Trainer:
         """Save and notify listeners when report beats best on the diet dojos
         both scored (or is the first round with any diet dojo scored);
         otherwise return best. A failing save or listener is
-        logged and best is returned unchanged."""
+        logged and best is returned unchanged. Without a checkpointer,
+        nothing is saved and None is returned."""
+        if self._checkpointer is None:
+            return None
         names = phase_run.phase.dojo_names
         if best is None:
             # Never checkpoint a round in which no diet dojo was scored

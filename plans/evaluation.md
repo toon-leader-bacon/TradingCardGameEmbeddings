@@ -90,18 +90,14 @@ flowchart LR
 
 
 
-### Checkpoint loading (outside `evaluation/`: `schema/holdout.py`, `training/recording/`)
+### Checkpoint loading - built (step 1)
 
-An evaluation needs the encoder weights from a checkpoint directory,
-and optionally the `HoldoutSpec` the run trained with - only as an
-input the caller may hand to a holdout-tier label, never for
-validation. Today `DirectoryCheckpointer` writes
-`encoder.pt` (`encoder_only_state_dict()`) and `manifest.json`
-containing `repr(plan)`, which cannot be parsed back. This plan adds a
-lossless JSON round trip to `HoldoutSpec`, has the checkpointer write
-`holdout.json` next to the weights, and adds loaders. Rebuilding the
-model object itself stays the caller's job for the MVP (the driver
-constructs the architecture and loads `encoder.pt` into it).
+`load_encoder_weights(dir, model)` and `load_checkpoint_holdout(dir)` in
+`training/recording/checkpointer.py`; `DirectoryCheckpointer` writes
+`holdout.json` (`HoldoutSpec.to_json`). See
+`src/training/recording/README.md`. The `HoldoutSpec` is only an input a
+caller may hand to a holdout-tier label, never used for validation.
+Rebuilding the model object stays the caller's job for the MVP.
 
 ### Corpus selection
 
@@ -199,8 +195,9 @@ or plots points takes an explicit, seeded **sampling** rule (all, or a
 per-label cap). The same table contents + seed + rule selects the same
 card rows.
 
-(Library choices - openTSNE for scale, KMeans/HDBSCAN - are feature-level
-decisions, not fixed here.)
+(Library: scikit-learn only for the MVP - its t-SNE, KMeans and HDBSCAN.
+openTSNE is added only if sampled corpora prove too slow. One
+`requirements.txt` for every machine; only torch's install source differs.)
 
 ### Extrinsic run
 
@@ -266,56 +263,13 @@ property of this harness. This is also the follow-up to training's
 never-trained heads; an extrinsic run trains heads for them on the
 frozen encoder.
 
-### Changes to `training/` that extrinsic reuse needs
+### `training/` support for extrinsic reuse - built (step 1)
 
-Each is justified for training on its own; none makes `Trainer` aware
-of evaluation.
-
-1. **Optional checkpointer.** `Trainer` accepts `checkpointer=None`:
-no saves, no `on_checkpoint` calls, `TrainingResult.best_checkpoint`
-is `None`. Chosen over a no-op `Checkpointer` object because that
-would have to return a `CheckpointRecord` with fabricated paths.
-Also serves training smoke tests and dry runs.
-2. **Frozen phases keep the encoder in eval mode.** `_train_round`
-calls `model.train(phase.encoder_trainable)` instead of
-`model.train(True)`, so a frozen encoder runs without dropout while
-heads train. Dojo heads are not the model and are unaffected. Fixes
-training's own head-only phases too.
-3. **Elapsed time on every round.** `RoundReport` gains
-`elapsed_seconds` (monotonic, since `Trainer.run()` started);
-`CsvRunListener` writes it as a new column; appending to a rounds CSV
-whose header differs raises `ValueError` rather than misaligning
-columns. `Trainer` logs and skips listener exceptions, so such a run
-continues but that CSV gets no rows (a warning each round). Enables a
-loss-vs-time axis; useful in training logs as well. A required field:
-every existing `RoundReport(...)` construction is updated
-(`trainer.py`; `tests/training/test_run_listener.py`,
-`test_reports.py`, `test_checkpointer.py`).
-4. **Split- and precision-parameterized scoring pass.**
-`evaluate_test_losses` becomes `evaluate_split_losses(..., split,
-precision, ...)`; `Trainer` calls it with `Split.TEST` and its own
-precision, `run_extrinsic` with `Split.VALIDATION`. The autocast logic
-now private to `Trainer` (`_autocast`, `_device_type`,
-`_AUTOCAST_DTYPES`) moves to one shared helper in `training/` used by
-both, so precision handling is never duplicated. Callers to update:
-`trainer.py`, `tests/training/test_round_evaluation.py`. (Change 1
-leaves existing `Trainer(...)` calls, e.g.
-`scripts/smoke_test_training_loop.py`, valid as written.) The module
-docstring, which calls the pass TEST-only, is updated to match, as is
-`src/training/README.md` (its `round_evaluation.py` entry, the
-`evaluate_test_losses` participant in its sequence diagram, and a new
-entry for `precision.py`, and its overview diagram's checkpoint-only
-`evaluation/` edge - extrinsic runs also construct `Trainer`). The
-`TrainingPlan.held_out_dojos` docstring (`plan.py`) is reworded: the
-per-round held-out scores are the loop's own signal; evaluation trains
-fresh heads for those dojos instead. `src/training/recording/README.md` gains
-`holdout.json`, the checkpoint loaders and `read_rounds_csv`/`RoundRow`.
-5. **`CsvRunListener` creates its directories on first write**, not in
-`__init__` (today `run_listener.py:75-76`). Constructing a listener then
-has no side effect, so a caller can build every object - including a
-`Trainer`, whose constructor does the plan/dojo validation - before
-anything touches disk. The module docstring's "(and, later,
-evaluation/) attach here" is dropped: evaluation adds no listener.
+Optional checkpointer, frozen phases in eval mode, `RoundReport.elapsed_seconds`,
+`evaluate_split_losses(split=..., precision=...)` with autocast shared via
+`encoder_model/precision.py`, side-effect-free `CsvRunListener` construction
+with a header check, and `RoundRow`/`read_rounds_csv`. See
+`src/training/README.md` and `src/training/recording/README.md`.
 
 Guard rule: `Trainer` never gets an "evaluation mode" flag and
 `training/` never imports `evaluation/`. If a future extrinsic need can
@@ -385,101 +339,46 @@ class TrainableEncoder(Protocol):
 # src/schema/splits.py - Split.TRAIN / VALIDATION / TEST
 ```
 
-Existing contracts this plan changes (see "Changes to `training/`", "CardEmbedder adapters" and "Extrinsic run"):
+Built in step 1 and now existing (cited; see the training READMEs):
 
 ```python
-# src/training/trainer.py
-class Trainer:
-    def __init__(self, model: TrainableEncoder, dojos: Sequence[Dojo],
-                 plan: TrainingPlan, limits: HardwareLimits,
-                 checkpointer: Checkpointer | None,          # was: Checkpointer
-                 listeners: Sequence[RunListener], *,
-                 cost_of: Callable[[GenericCard], int] = lambda card: 1) -> None: ...
-    # behavior: each round calls model.train(phase.encoder_trainable)  (was: train(True))
-
-# src/training/recording/reports.py
-@dataclass(frozen=True)
-class RoundReport:
-    phase: str
-    round_index: int
-    step: int
-    elapsed_seconds: float        # new: monotonic seconds since Trainer.run() began
-    per_dojo_test_loss: Mapping[str, float]
-    statuses: Mapping[str, DojoStatus]
-    quarantined: frozenset[str]
-# CsvRunListener: rounds CSV gains an elapsed_seconds column; __init__ has no side
-#   effect (directories created on first write); ValueError when appending to a CSV
-#   whose header differs.
-
-# src/training/recording/run_listener.py - new: the writer's module also reads it back
-@dataclass(frozen=True)
-class RoundRow:                 # one rounds-CSV row
-    phase: str
-    round_index: int
-    step: int
-    elapsed_seconds: float
-    dojo: str
-    test_loss: float
-    status: DojoStatus | None     # the CSV's "" (no status) parses to None
-    quarantined: bool
-def read_rounds_csv(path: Path) -> list[RoundRow]: ...
-    # file order; FileNotFoundError; ValueError if the header is not the current one
-
-# src/dojos/dojo.py - Dojo.reset_head docstring aligned with GenericDojo's behavior
-class Dojo(Protocol):
-    def reset_head(self) -> None: ...
-        # restores the head to its as-built initial state (was: "Re-initialize");
-        # deterministic, so repeated runs on one dojo start from the same head
-
-# src/training/precision.py - new; the logic of Trainer._autocast/_device_type/_AUTOCAST_DTYPES
-def device_type_of(model: TrainableEncoder) -> str: ...
-    # device type of the model's first parameter ("cuda" also on ROCm); "cpu" if none.
-    # Used by autocast_for and by Trainer's GradScaler construction.
-def autocast_for(model: TrainableEncoder, precision: Precision) -> ContextManager[Any]: ...
-    # torch.autocast on device_type_of(model) at `precision`; nullcontext for fp32
-
-# src/training/round_evaluation.py  (replaces evaluate_test_losses)
-def evaluate_split_losses(model: TrainableEncoder, dojos: Sequence[Dojo],
-                          split: Split, budget: BatchBudget, max_examples: int,
-                          precision: Precision) -> Mapping[str, float]: ...
-    # forward passes under autocast for `precision` on the model's device
-    # (no-op for fp32); otherwise unchanged: eval mode + no_grad, prior mode
-    # restored, a failing dojo is logged and omitted
+# src/training/trainer.py - Trainer(..., checkpointer: Checkpointer | None, listeners, *,
+#   cost_of=...); frozen phases keep the encoder in eval mode
+# src/training/recording/reports.py - RoundReport.elapsed_seconds
+# src/training/recording/run_listener.py - CsvRunListener (no side effect until first
+#   write; ValueError on header mismatch), RoundRow, read_rounds_csv(path) -> list[RoundRow]
+# src/encoder_model/precision.py - Precision, ParameterOwner,
+#   device_type_of(model) -> str, autocast_for(model, precision) -> ContextManager
+# src/training/round_evaluation.py - evaluate_split_losses(model, dojos, *, split,
+#   budget, max_examples, precision) -> Mapping[str, float]
+# src/schema/holdout.py - HoldoutSpec.to_json() / from_json(text)
+# src/training/recording/checkpointer.py - load_checkpoint_holdout(dir) -> HoldoutSpec,
+#   load_encoder_weights(dir, model) -> None
+# src/dojos/dojo.py - Dojo.reset_head restores the as-built head, deterministically
 ```
 
 New boundaries:
 
 ```python
-# --- schema/holdout.py + training/recording (checkpoint -> evaluation) ---
-class HoldoutSpec:
-    def to_json(self) -> str: ...
-    @classmethod
-    def from_json(cls, text: str) -> "HoldoutSpec": ...   # ValueError on malformed input
-
-# src/training/recording/checkpointer.py - the module that writes a checkpoint
-# also reads it back. DirectoryCheckpointer additionally writes
-# <checkpoint_dir>/holdout.json.
-def load_checkpoint_holdout(checkpoint_dir: Path) -> HoldoutSpec: ...
-    # FileNotFoundError if holdout.json is absent (checkpoints predating this plan)
-def load_encoder_weights(checkpoint_dir: Path, model: nn.Module) -> None: ...
-    # loads encoder.pt into a caller-constructed model;
-    # FileNotFoundError if encoder.pt is absent; RuntimeError on key mismatch
-
-
 # --- encoder_model (context-free card embedding) ---
 class CardEmbedder(Protocol):
     """Context-free: embed_cards(cards)[i] depends only on cards[i].
-    Runs in eval mode under no_grad regardless of caller state; the model's
-    prior train/eval mode is restored afterwards, even on error
-    (same as evaluate_split_losses)."""
+    Runs in eval mode under no_grad regardless of caller state, and under
+    autocast_for(model, precision); the model's prior train/eval mode is
+    restored afterwards, even on error (same as evaluate_split_losses).
+    Output is cast back to float32."""
     embedding_dim: int
     def embed_cards(self, cards: Sequence[GenericCard]) -> Tensor: ...
         # float32, shape (len(cards), embedding_dim), on the CPU
 
 class SingleCardEmbedder:      # adapter over forward_batched_single_card
-    def __init__(self, model: SingleCardModel, embedding_dim: int) -> None: ...
+    def __init__(self, model: SingleCardModel, embedding_dim: int,
+                 precision: Precision = "fp32") -> None: ...
+        # SingleCardModel exposes no output size, so the caller supplies it;
+        # embed_cards raises ValueError if a batch's width != embedding_dim
+        # (fails at the first batch, not later at EmbeddingTable.add)
 class IsolatedMultiCardEmbedder:   # adapter over forward_batched_single_card
-    def __init__(self, model: MultiCardModel) -> None: ...
+    def __init__(self, model: MultiCardModel, precision: Precision = "fp32") -> None: ...
         # embedding_dim read from model.card_embedding_size
 
 
@@ -610,10 +509,22 @@ class ExtrinsicResult:
 
 def run_extrinsic(encoder: TrainableEncoder, encoder_label: str, dojos: Sequence[Dojo],
                   spec: ExtrinsicSpec, hardware: HardwareLimits,
-                  output_dir: Path) -> ExtrinsicResult: ...
+                  output_dir: Path, *,
+                  cost_of: Callable[[GenericCard], int] = lambda card: 1,
+                  ) -> ExtrinsicResult: ...
+    # cost_of is passed to Trainer and used for the VALIDATION pass's
+    # BatchBudget (max_cost=hardware.max_batch_cost), so both passes batch alike.
+    # Fixed mapping of spec -> Phase/TrainingPlan (not caller-configurable):
+    #   Phase(name="extrinsic", dojo_names=names of `dojos` in order,
+    #         diet_rule, head_lr, steps_per_round, max_rounds, saturation from spec,
+    #         encoder_trainable=False, encoder_lr=0.0, max_grad_norm default)
+    #   TrainingPlan(phases=(that phase,), holdout=dojos[0].holdout,
+    #         held_out_dojos=frozenset(), eval_examples_per_dojo, seed from spec,
+    #         faults=FaultPolicy() default)
+    # Every RoundRow.phase in rounds.csv is therefore "extrinsic".
     # Order: (a) validate - the FileExistsError check, run_extrinsic's own
     # checks, then building Phase/TrainingPlan from spec, CsvRunListener (no
-    # side effect, change 5) and Trainer (its constructor is the single source
+    # side effect) and Trainer (its constructor is the single source
     # of plan/dojo validation; not re-implemented here); (b) only then seed,
     # reset_head(), run. A call that fails validation leaves nothing on disk and can be retried.
     # Every dojo is in the one frozen phase's diet (dojo names come from `dojos`).
@@ -652,6 +563,15 @@ def plot_learning_curves(curves: Mapping[str, Path], output_dir: Path,
 
 ## Open questions
 
+- **Metric-parquet label convention.** `MetricParquetLabels` is the third
+reader hard-coding `nocab_uuid` + a literal `label` column (after
+`masked_field.py` and `deck_card_mask.py`); the convention belongs to
+`data_refinement/metrics`. Give it a shared home if a fourth consumer
+appears (likely the rarity family).
+- **Left to the skeleton step:** typed constructors of `ProjectionPlot`,
+`ClusterAgreement`, `LabelCompactness`, and the exact fields of
+`validation.json` (losses + `quarantined`).
+
 - **Recording what produced an output directory.** Not needed for the
 first hand-driven runs. If repeated runs make it worth it later, a
 small README or config dump per output directory (which checkpoints,
@@ -667,9 +587,14 @@ hash holdout only. A held-out set/expansion within a game needs a new
 declarative field (not a callable, so equality and `to_json` keep
 working), and card data needs a normalized set field or a per-game
 extractor. Deferred past MVP.
-- **Architecture in the checkpoint.** Whether a checkpoint records
-enough to rebuild its model object, instead of the driver constructing
-it (and supplying `embedding_dim`).
+- **Run manifest (instead of a TrainingConfig).** Decided against a
+config schema that constructs objects: driver scripts are the config.
+If reproducibility records are needed later: lossless JSON for
+`TrainingPlan`/`HardwareLimits` (as `HoldoutSpec` gets here), written
+into the checkpoint manifest, plus a small closed `ModelSpec` (model
+class, text encoder, head type and dims) saved with each checkpoint so
+evaluation can rebuild the model without the original script (and stop
+asking the caller for `embedding_dim`). Dojos recorded by name only.
 - **`SingleCardModel` vs. `MultiCardModel` on one multi-card dojo**
 (near-term). Whether that comparison needs anything beyond two
 `run_extrinsic` runs.

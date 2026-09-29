@@ -1,4 +1,6 @@
-"""Persisting a run: a weights snapshot plus the encoder-only artifact."""
+"""Persisting a run: a weights snapshot plus the encoder-only artifact,
+and loading a checkpoint's encoder weights and HoldoutSpec back (the
+module that writes a checkpoint also reads it)."""
 
 import json
 import re
@@ -7,8 +9,10 @@ from pathlib import Path
 from typing import Protocol, Sequence
 
 import torch
+from torch import nn
 
 from src.dojos.dojo import Dojo
+from src.schema.holdout import HoldoutSpec
 from src.training.plan import TrainingPlan
 from src.training.recording.reports import CheckpointRecord, RoundReport
 from src.training.trainable_encoder import TrainableEncoder
@@ -16,6 +20,7 @@ from src.training.trainable_encoder import TrainableEncoder
 _STATE_FILE = "state.pt"
 _ENCODER_FILE = "encoder.pt"
 _MANIFEST_FILE = "manifest.json"
+_HOLDOUT_FILE = "holdout.json"
 
 
 class Checkpointer(Protocol):
@@ -45,7 +50,9 @@ class DirectoryCheckpointer:
     heads, keyed by dojo name; NOT yet resumable mid-run since tracker/rng/
     phase position are not saved) and
     `encoder.pt` (encoder_only_state_dict(), the seam for Hugging Face
-    export), plus the plan/report manifest.
+    export), `holdout.json` (plan.holdout, via HoldoutSpec.to_json, so
+    evaluation can label cards by the tiers the run trained with), plus
+    the plan/report manifest.
 
     Inputs (constructor): run_directory (Path).
     """
@@ -83,6 +90,7 @@ class DirectoryCheckpointer:
             self._write_state(staging, model, dojos, optimizer)
             self._write_encoder(staging, model)
             self._write_manifest(staging, plan, report)
+            self._write_holdout(staging, plan.holdout)
             shutil.rmtree(directory, ignore_errors=True)
             staging.rename(directory)
         except BaseException:
@@ -129,9 +137,53 @@ class DirectoryCheckpointer:
             "phase": report.phase,
             "round_index": report.round_index,
             "step": report.step,
+            "elapsed_seconds": report.elapsed_seconds,
             "per_dojo_test_loss": dict(report.per_dojo_test_loss),
             "statuses": {n: s.value for n, s in report.statuses.items()},
             "quarantined": sorted(report.quarantined),
             "plan": repr(plan),
         }
         (directory / _MANIFEST_FILE).write_text(json.dumps(manifest, indent=2))
+
+    def _write_holdout(self, directory: Path, holdout: HoldoutSpec) -> None:
+        """holdout.json: the run's HoldoutSpec, losslessly."""
+        (directory / _HOLDOUT_FILE).write_text(holdout.to_json())
+
+
+def load_checkpoint_holdout(checkpoint_dir: Path) -> HoldoutSpec:
+    """The HoldoutSpec the checkpoint's run trained with.
+
+    Inputs: checkpoint_dir (Path), one directory DirectoryCheckpointer wrote.
+    Output: HoldoutSpec parsed from checkpoint_dir/holdout.json.
+    Side effects: reads the file.
+    Exceptions: FileNotFoundError if holdout.json is absent (checkpoints
+        written before it existed); ValueError if it does not parse.
+
+    Example:
+        >>> load_checkpoint_holdout(Path("runs/a/pretrain_round0007"))
+        HoldoutSpec(seed=0, tier_ratios=(8.0, 1.0, 1.0), held_out_games=frozenset())
+    """
+    return HoldoutSpec.from_json((checkpoint_dir / _HOLDOUT_FILE).read_text())
+
+
+def load_encoder_weights(checkpoint_dir: Path, model: nn.Module) -> None:
+    """Load the checkpoint's encoder.pt into a caller-constructed model.
+
+    The caller builds the same architecture the run trained; the weights
+    are loaded onto the CPU, then copied onto whatever device model is on.
+
+    Inputs: checkpoint_dir (Path), model (nn.Module).
+    Output: None.
+    Side effects: overwrites model's weights in place.
+    Exceptions: FileNotFoundError if encoder.pt is absent; RuntimeError if
+        its keys or shapes do not match model (strict load).
+
+    Example:
+        >>> model = SingleCardModel(text_encoder, head)
+        >>> load_encoder_weights(Path("runs/a/pretrain_round0007"), model)
+    """
+    # Read on the CPU with weights_only (no pickled code), then strict-load
+    weights = torch.load(
+        checkpoint_dir / _ENCODER_FILE, map_location="cpu", weights_only=True
+    )
+    model.load_state_dict(weights, strict=True)

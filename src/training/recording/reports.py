@@ -22,11 +22,14 @@ class RoundReport:
         not, including held-out) that evaluated successfully this round;
         a dojo whose evaluation failed is omitted, not scored.
     statuses: ACTIVE/SATURATED for the current phase's dojos only.
+    elapsed_seconds: monotonic wall-clock seconds from the start of
+        Trainer.run() to this round's scoring, for loss-vs-time plots.
     """
 
     phase: str
     round_index: int
     step: int
+    elapsed_seconds: float
     per_dojo_test_loss: Mapping[str, float]
     statuses: Mapping[str, DojoStatus]
     quarantined: frozenset[str]

@@ -75,5 +75,11 @@ class Dojo(Protocol):
         ...
 
     def reset_head(self) -> None:
-        """Re-initialize the dojo's head, e.g. to measure fresh-head fit speed."""
+        """Restore the head to its as-built initial state.
+
+        Deterministic: repeated calls on one dojo give the same head, so
+        runs that each start with reset_head() start from identical heads
+        (e.g. evaluation's extrinsic runs across several encoders).
+        Side effects: overwrites the head's weights. Exceptions: none.
+        """
         ...

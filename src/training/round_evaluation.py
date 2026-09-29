@@ -1,7 +1,8 @@
-"""The per-round TEST pass that feeds the SaturationTracker.
+"""A scoring pass: every dojo's mean loss on one split, without training.
 
-This is the loop's own cheap signal. evaluation/ is separate: it inspects
-finished checkpoints and is never called from here.
+Trainer calls it each round on TEST, to feed the SaturationTracker (the
+loop's own cheap signal). evaluation/'s extrinsic runs call it once on
+VALIDATION after training finishes. It never calls evaluation/.
 """
 
 import logging
@@ -10,66 +11,80 @@ from typing import Mapping, Sequence
 import torch
 
 from src.dojos.dojo import BatchBudget, Dojo
+from src.encoder_model.precision import Precision, autocast_for
 from src.schema.splits import Split
 from src.training.trainable_encoder import TrainableEncoder
 
 logger = logging.getLogger(__name__)
 
 
-def evaluate_test_losses(
+def evaluate_split_losses(
     model: TrainableEncoder,
     dojos: Sequence[Dojo],
+    *,
+    split: Split,
     budget: BatchBudget,
     max_examples: int,
+    precision: Precision,
 ) -> Mapping[str, float]:
-    """Mean TEST loss of every dojo on a capped, deterministic subsample.
+    """Mean loss of every dojo on a capped, deterministic subsample of `split`.
 
-    Inputs: model, dojos (every registered dojo, diet or not), budget, and
-        max_examples (per-dojo cap passed to Dojo.batches).
+    Inputs: model, dojos (every dojo to score), split (the rows to score),
+        budget, max_examples (per-dojo cap passed to Dojo.batches), and
+        precision (forward passes run under autocast_for(model, precision)).
     Output: dojo.name -> per-example mean loss, weighting each batch by
         len(batch). A dojo whose pass fails is logged and omitted.
     Side effects: none on parameters (eval mode, torch.no_grad); the
         model's previous train/eval mode is restored even on error.
     Exceptions: none for a single dojo's failure (logged, dojo omitted).
+        Entering autocast itself can raise (a dtype the device does not
+        support); that is not per-dojo and propagates.
 
     Example:
-        >>> evaluate_test_losses(model, dojos, budget, 512)["pick"]
+        >>> evaluate_split_losses(model, dojos, split=Split.TEST, budget=budget,
+        ...                       max_examples=512, precision="fp16")["pick"]
         1.37
     """
     result: dict[str, float] = {}
     was_training = model.training
     model.train(False)
     try:
-        # Score each dojo without building autograd graphs
-        with torch.no_grad():
+        # Score each dojo without autograd graphs, at the requested precision
+        with torch.no_grad(), autocast_for(model, precision):
             for dojo in dojos:
                 try:
-                    result[dojo.name] = _mean_test_loss(
-                        model, dojo, budget, max_examples
+                    result[dojo.name] = _mean_split_loss(
+                        model, dojo, split, budget, max_examples
                     )
                 except Exception:
-                    logger.warning("test pass failed for %s", dojo.name, exc_info=True)
+                    logger.warning(
+                        "%s pass failed for %s", split.value, dojo.name, exc_info=True
+                    )
     finally:
         model.train(was_training)
     return result
 
 
-def _mean_test_loss(
-    model: TrainableEncoder, dojo: Dojo, budget: BatchBudget, max_examples: int
+def _mean_split_loss(
+    model: TrainableEncoder,
+    dojo: Dojo,
+    split: Split,
+    budget: BatchBudget,
+    max_examples: int,
 ) -> float:
-    """Example-weighted mean loss over one dojo's capped TEST pass.
+    """Example-weighted mean loss over one dojo's capped pass of `split`.
 
-    Raises ValueError if the dojo yields no TEST batches or a loss is
-    non-finite (caught per dojo by evaluate_test_losses).
+    Raises ValueError if the dojo yields no batches of `split` or a loss is
+    non-finite (caught per dojo by evaluate_split_losses).
     """
     total_loss = 0.0
     total_examples = 0
-    for batch in dojo.batches(Split.TEST, budget, max_examples):
+    for batch in dojo.batches(split, budget, max_examples):
         loss = dojo.compute_loss(model(batch.inputs), batch)
         if not torch.isfinite(loss).all():
-            raise ValueError(f"non-finite TEST loss for dojo {dojo.name!r}")
+            raise ValueError(f"non-finite {split.value} loss for dojo {dojo.name!r}")
         total_loss += loss.item() * len(batch)
         total_examples += len(batch)
     if total_examples == 0:
-        raise ValueError(f"dojo {dojo.name!r} yielded no TEST examples")
+        raise ValueError(f"dojo {dojo.name!r} yielded no {split.value} examples")
     return total_loss / total_examples
