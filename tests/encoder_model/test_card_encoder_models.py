@@ -9,7 +9,7 @@ text maps to a fixed vector, independent of the rest of the batch.
 """
 
 from datetime import datetime, timezone
-from typing import Any, List
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -24,35 +24,12 @@ from src.encoder_model.embedding_head import (
 )
 from src.encoder_model.multi_card_model import MultiCardModel
 from src.encoder_model.single_card_model import SingleCardModel
-from src.encoder_model.text_encoder import TextEncoder, TokenEncoding
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
+from tests.encoder_model.fakes import HIDDEN, FakeTextEncoder
 
-_HIDDEN = 8
 _EMBED = 8
-
-
-class _FakeTextEncoder(TextEncoder):
-    """Two tokens per text. Each token's features come from the text's
-    characters, so equal texts always encode equally, whatever else is in
-    the batch."""
-
-    def encode(self, texts: List[str]) -> TokenEncoding:
-        rows = []
-        for text in texts:
-            codes = torch.tensor([float(ord(c)) for c in text])
-            token_a = torch.stack(
-                [(codes * (i + 1)).sin().mean() for i in range(_HIDDEN)]
-            )
-            token_b = torch.stack(
-                [(codes / (i + 2)).cos().mean() for i in range(_HIDDEN)]
-            )
-            rows.append(torch.stack([token_a, token_b]))
-        hidden = torch.stack(rows)
-        return TokenEncoding(
-            hidden_states=hidden, attention_mask=torch.ones(len(texts), 2)
-        )
 
 
 def _card(name: str) -> GenericCard:
@@ -70,15 +47,15 @@ def _card(name: str) -> GenericCard:
 def _single_model() -> SingleCardModel:
     torch.manual_seed(0)
     return SingleCardModel(
-        _FakeTextEncoder(), LinearEmbeddingHead(_HIDDEN, _EMBED)
+        FakeTextEncoder(), LinearEmbeddingHead(HIDDEN, _EMBED)
     ).eval()
 
 
 def _multi_model() -> MultiCardModel:
     torch.manual_seed(0)
     model = MultiCardModel(
-        _FakeTextEncoder(),
-        LinearEmbeddingHead(_HIDDEN, _EMBED),
+        FakeTextEncoder(),
+        LinearEmbeddingHead(HIDDEN, _EMBED),
         num_heads=2,
         num_layers=1,
     )
@@ -379,13 +356,13 @@ def test_forward_rejects_an_empty_first_group_or_example(make_model: Any) -> Non
 @pytest.mark.parametrize(
     "head",
     [
-        LinearEmbeddingHead(_HIDDEN, 5),
-        ResidualMlpEmbeddingHead(_HIDDEN, 5, hidden_dim=4, num_blocks=1),
-        AttentionPoolingEmbeddingHead(_HIDDEN, 5),
+        LinearEmbeddingHead(HIDDEN, 5),
+        ResidualMlpEmbeddingHead(HIDDEN, 5, hidden_dim=4, num_blocks=1),
+        AttentionPoolingEmbeddingHead(HIDDEN, 5),
     ],
 )
 def test_every_head_reports_the_width_it_produces(head: EmbeddingHead) -> None:
-    encoding = _FakeTextEncoder().encode(["Alpha", "Bravo"])
+    encoding = FakeTextEncoder().encode(["Alpha", "Bravo"])
     assert head.output_dim == 5
     assert head(encoding).shape == (2, 5)
 
@@ -399,7 +376,7 @@ def test_embedding_dim_is_the_real_output_width(make_model: Any) -> None:
 
 def test_multi_card_attention_is_sized_by_its_head() -> None:
     model = MultiCardModel(
-        _FakeTextEncoder(), LinearEmbeddingHead(_HIDDEN, 6), num_heads=2, num_layers=1
+        FakeTextEncoder(), LinearEmbeddingHead(HIDDEN, 6), num_heads=2, num_layers=1
     )
     assert model.embedding_dim == 6
     assert model.forward_multi_card([A, B])[0].shape == (6,)

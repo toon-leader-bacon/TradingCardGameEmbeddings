@@ -99,15 +99,12 @@ flowchart LR
 caller may hand to a holdout-tier label, never used for validation.
 Rebuilding the model object stays the caller's job for the MVP.
 
-### Corpus selection
+### Corpus selection, Embedder, EmbeddingTable - built (step 3a)
 
-Which cards to embed: every card of one or more games from a
-`CardLookup` (`all_cards(source_game)` per game), optionally narrowed
-to cards of given `CardTier`s under a given `HoldoutSpec`. A generator
-over existing types; no new stored state. The tier filter selects an
-exact set of tiers (e.g. only VALIDATION cards), which is not what
-`VisibleCardLookup` does (nested per-split visibility for training), so
-it is not reused here.
+`select_corpus`/`CorpusSpec`/`TierFilter`, `EmbeddingTable` (SQLite, rows
+sorted by `nocab_uuid`, always finite) and `embed_corpus` (resumable;
+log-and-skip failed batches, `max_consecutive_failures` cap). See
+`src/evaluation/README.md`.
 
 ### Context-free embedding on the model - built (step 2)
 
@@ -117,26 +114,6 @@ source of the width) and `isolated_embeddings(cards, precision)`, sharing
 `src/encoder_model/README.md`. No adapter classes: evaluation depends on
 the `CardEmbedder` Protocol (step 3, in `evaluation/`), which both models
 satisfy structurally.
-
-### Embedder
-
-Takes a `CardEmbedder`, a corpus, and an open `EmbeddingTable`; embeds
-in batches and appends. A card whose `nocab_uuid` is already in the
-table is skipped, so an interrupted run resumes and a second corpus can
-extend the same table - within the games the table was created for.
-
-### EmbeddingTable
-
-A SQLite file (same precedent as `DeckBox`) with a metadata record and
-one row per card, keyed by `nocab_uuid`, holding its `source_game` and
-its vector. Two cards with identical content (e.g. functional reprints)
-simply store the same vector twice. Unlike `DeckBox` (batched commits,
-explicit `flush()`/`save()`), every `add()` is committed before it
-returns - the embedder's resume guarantee depends on it. The binder
-versions are recorded once at creation and never checked: extending a
-table from a different binder version is the caller's responsibility.
-
-One table = one encoder; comparing encoders means comparing tables.
 
 ### CardLabels
 
@@ -358,72 +335,14 @@ New boundaries:
 #   MultiCardModel(text_encoder, embedding_head, num_heads, num_layers);
 #   precision.inference_context(model, precision)
 
-# src/evaluation/ (step 3) - the consumer's view; both models satisfy it structurally
-class CardEmbedder(Protocol):
-    @property
-    def embedding_dim(self) -> int: ...
-    def isolated_embeddings(self, cards: Sequence[GenericCard],
-                            precision: Precision = "fp32") -> Tensor: ...
-
-
-# --- evaluation: corpus -> embedder -> table ---
-@dataclass(frozen=True)
-class CorpusSpec:
-    games: frozenset[GameId]
-    tier_filter: "TierFilter | None"            # None = every card
-
-@dataclass(frozen=True)
-class TierFilter:
-    holdout: HoldoutSpec
-    tiers: frozenset[CardTier]
-
-def select_corpus(cards: CardLookup, spec: CorpusSpec) -> Iterator[GenericCard]: ...
-
-@dataclass(frozen=True)
-class EmbeddingTableMetadata:
-    encoder_label: str             # name used in output paths and plots
-    checkpoint_dir: Path | None    # None for an untrained encoder
-    embedding_dim: int
-    binder_versions: Mapping[GameId, str]   # CardLookup.version_for per game
-    created_at: datetime
-
-@dataclass(frozen=True)
-class CardRow:
-    nocab_uuid: UUID
-    source_game: GameId
-
-class EmbeddingTable:
-    @classmethod
-    def create(cls, path: Path, metadata: EmbeddingTableMetadata) -> "EmbeddingTable": ...
-        # FileExistsError if path exists
-    @classmethod
-    def open(cls, path: Path) -> "EmbeddingTable": ...
-        # FileNotFoundError; ValueError if the file is not an EmbeddingTable
-    def close(self) -> None: ...
-    def __enter__(self) -> "EmbeddingTable": ...
-    def __exit__(self, *exc_info: object) -> None: ...   # calls close()
-    metadata: EmbeddingTableMetadata
-    def has_card(self, nocab_uuid: UUID) -> bool: ...
-    def add(self, rows: Sequence[CardRow], vectors: np.ndarray) -> None: ...
-        # float32 (len(rows), embedding_dim); ValueError on shape mismatch;
-        # an already-present nocab_uuid is left unchanged; committed before return;
-        # ValueError (whole call rejected, nothing committed) if any row's
-        # source_game is not a key of metadata.binder_versions - a table's
-        # games are fixed at create()
-    def rows(self) -> list[CardRow]: ...
-        # sorted by nocab_uuid - order depends only on contents, never on insertion,
-        # so seeded sampling is reproducible across tables
-    def vectors_for(self, rows: Sequence[CardRow]) -> np.ndarray: ...
-        # (len(rows), embedding_dim), same order; KeyError on an unknown nocab_uuid
-
-def embed_corpus(embedder: CardEmbedder, corpus: Iterable[GenericCard],
-                 table: EmbeddingTable, batch_size: int,
-                 precision: Precision = "fp32") -> int: ...
-    # ValueError up front if embedder.embedding_dim != table.metadata.embedding_dim;
-    # propagates EmbeddingTable.add's ValueError for a card of a game the table
-    # was not created for (earlier batches stay committed)
-    # returns cards added; cards whose nocab_uuid is already present are skipped;
-    # commits after every batch, so an interrupted run loses at most one batch
+# --- evaluation: built in step 3a (see src/evaluation/README.md) ---
+# src/evaluation/corpus.py - CorpusSpec(games, tier_filter), TierFilter(holdout, tiers),
+#   select_corpus(cards, spec) -> Iterator[GenericCard]
+# src/evaluation/embedding_table.py - CardRow(nocab_uuid, source_game),
+#   EmbeddingTableMetadata, EmbeddingTable.create/open/add/has_card/rows/vectors_for
+# src/evaluation/corpus_embedding.py - CardEmbedder Protocol,
+#   embed_corpus(embedder, corpus, table, batch_size, precision, *,
+#   max_consecutive_failures=5) -> int
 
 
 # --- evaluation: labels ---
