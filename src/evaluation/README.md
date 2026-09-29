@@ -10,8 +10,10 @@ curves. `Trainer` never calls this package.
 Status: in progress. Built: corpus selection, the embedding table,
 embedding a corpus into it, card labels, and the intrinsic analyses
 (cluster agreement, label compactness, projection plot), extrinsic
-runs, and learning-curve plots. Not yet built (design in
-[`plans/evaluation.md`](../../plans/evaluation.md)): a driver script.
+runs, and learning-curve plots. A first-draft driver,
+[`scripts/run_evaluation.py`](../../scripts/run_evaluation.py), composes
+them end to end (see How to run). Remaining design questions are in
+[`plans/evaluation.md`](../../plans/evaluation.md).
 
 ## Files
 
@@ -155,6 +157,21 @@ One table holds one encoder's embeddings; comparing encoders means
 comparing tables built from the same corpus.
 
 ## How to run
+
+The whole flow - load checkpoints, embed and analyze per encoder, extrinsic
+runs on shared dojos, learning curves - is
+[`scripts/run_evaluation.py`](../../scripts/run_evaluation.py) (a prototype:
+corpus, labels and dojos are hard-coded there as a worked example; it is
+re-runnable, skipping finished work):
+
+```bash
+PYTHONPATH=. python3 scripts/run_evaluation.py --name gwent_v1 \
+    --single-checkpoint runs/single/pretrain_round0007 \
+    --multi-checkpoint runs/multi/pretrain_round0005
+PYTHONPATH=. python3 scripts/run_evaluation.py --name smoke --smoke  # wiring check
+```
+
+The pieces, by hand:
 
 ```python
 games = frozenset({GameId.MTG, GameId.GWENT})

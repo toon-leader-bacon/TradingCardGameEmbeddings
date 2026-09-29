@@ -183,12 +183,12 @@ Guard rule: `Trainer` never gets an "evaluation mode" flag and
 only be met by `Trainer` knowing it is being used for evaluation, that
 is the point to write a separate loop - not before.
 
-### Scripts
+### Scripts - first draft built (step 6)
 
-Hand-written `scripts/` (or notebook) code composes the pieces above
-directly: load checkpoint(s), select a corpus, embed into one table per
-encoder, run whichever analyses are wanted; separately, extrinsic runs
-per encoder. No shared driver or configuration schema.
+`scripts/run_evaluation.py`: a prototype driver composing every piece
+(checkpoints -> tables -> analyses per label source; extrinsic runs on
+shared dojos -> learning curves), re-runnable, with a `--smoke` mode.
+Still no shared driver library or configuration schema, by design.
 
 ### Output layout (convention, not enforced)
 
