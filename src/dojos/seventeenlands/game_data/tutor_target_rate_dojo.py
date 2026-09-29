@@ -36,6 +36,7 @@ class TutorTargetRateDojo(SingleCardRegressionDojo):
         holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
+        name: str | None = None,
         rng_seed: int | None = None,
         strict_version_check: bool = True,
     ) -> None:
@@ -47,6 +48,6 @@ class TutorTargetRateDojo(SingleCardRegressionDojo):
             data_constructor=CardAverageDataConstructor("tutor_target_rate"),
             card_embedding_size=card_embedding_size,
             config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
+                name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),
         )

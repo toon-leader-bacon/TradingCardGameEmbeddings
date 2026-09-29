@@ -52,10 +52,6 @@ accepts an optional `rate_limiter` (default
 (default: the class's `DEFAULT_RAW_DATA_DIR`), plus any source-specific
 arguments.
 
-`SeventeenLandsDownloader` does not subclass `Downloader`: its main
-method takes a required `refs` list plus filters, which doesn't fit the
-no-argument `phase_1()` contract.
-
 ## How to run
 
 ```

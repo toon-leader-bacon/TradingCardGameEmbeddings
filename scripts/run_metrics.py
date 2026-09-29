@@ -307,6 +307,39 @@ def _require_binder(source_game: GameId, hint: str) -> CardBinder:
 # --- sts_gg ---
 
 
+# Every sts_gg metric class now takes the same (card_binder, deck_box,
+# output_path) shape - CardAverageMetric's own deck_box is unused but
+# accepted for this exact reason (see its docstring) - so building the
+# whole family is one call per class against the same two arguments,
+# rather than a hand-picked arg list per metric.
+_STS_GG_METRIC_CLASSES: tuple[Any, ...] = (
+    CardUpgradeRateMetric,
+    CardWinRateAtAct2Metric,
+    AscensionPredictionMetric,
+    RelicCountMetric,
+    DeckCharacterPredictionMetric,
+    TotalDamageTakenMetric,
+    TotalCardsPickedMetric,
+    TotalCardsSkippedMetric,
+    TotalTurnsMetric,
+    ElitesKilledMetric,
+    FloorsClearedMetric,
+    TotalCombatsMetric,
+    KilledByMetric,
+    WinMetric,
+    CardRelicCountMetric,
+    CardTotalDamageTakenMetric,
+    CardDeckSizeMetric,
+    CardTotalCardsPickedMetric,
+    CardTotalTurnsMetric,
+    CardElitesKilledMetric,
+    CardFloorsClearedMetric,
+    CardTotalCombatsMetric,
+    CardWinRateMetric,
+    CardCharacterPredictionMetric,
+)
+
+
 def run_sts_gg(raw_path: Path | None) -> None:
     effective_raw_path = raw_path or StsGgDeckExtractionStage.DEFAULT_RAW_PATH
     binder = _require_binder(
@@ -316,30 +349,7 @@ def run_sts_gg(raw_path: Path | None) -> None:
     deck_box = DeckBox()  # metrics-private — see sts_gg/README.md's "Deck references"
 
     metrics: list[Metric[dict]] = [
-        CardUpgradeRateMetric(binder),
-        CardWinRateAtAct2Metric(binder),
-        AscensionPredictionMetric(binder, deck_box),
-        RelicCountMetric(binder, deck_box),
-        DeckCharacterPredictionMetric(binder, deck_box),
-        TotalDamageTakenMetric(binder, deck_box),
-        TotalCardsPickedMetric(binder, deck_box),
-        TotalCardsSkippedMetric(binder, deck_box),
-        TotalTurnsMetric(binder, deck_box),
-        ElitesKilledMetric(binder, deck_box),
-        FloorsClearedMetric(binder, deck_box),
-        TotalCombatsMetric(binder, deck_box),
-        KilledByMetric(binder, deck_box),
-        WinMetric(binder, deck_box),
-        CardRelicCountMetric(binder),
-        CardTotalDamageTakenMetric(binder),
-        CardDeckSizeMetric(binder),
-        CardTotalCardsPickedMetric(binder),
-        CardTotalTurnsMetric(binder),
-        CardElitesKilledMetric(binder),
-        CardFloorsClearedMetric(binder),
-        CardTotalCombatsMetric(binder),
-        CardWinRateMetric(binder),
-        CardCharacterPredictionMetric(binder),
+        cls(binder, deck_box) for cls in _STS_GG_METRIC_CLASSES
     ]
 
     print(f"=== sts_gg: {effective_raw_path} ===")

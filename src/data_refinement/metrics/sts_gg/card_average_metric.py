@@ -75,10 +75,12 @@ class CardAverageMetric(ABC):
                 references against - must already have spire_codex's
                 cards ingested (this class never writes to it).
             deck_box: accepted only for constructor-shape consistency
-                with this container's deck-input metrics (e.g.
-                DeckLabelMetric subclasses) - see ../README.md. This
-                metric's output is per-card, not per-deck, so it never
-                reads from or writes into deck_box.
+                with this container's other metric family
+                (DeckLabelMetric, ../deck_label_metric.py, whose own
+                deck_box is REQUIRED - see that class's own
+                docstring) - see ../README.md. This metric's output is
+                per-card, not per-deck, so it never reads from or
+                writes into deck_box.
             output_path: overrides DEFAULT_OUTPUT_PATH when given.
         Output: none (constructor).
         Side effects: none - no I/O happens until finalize() is

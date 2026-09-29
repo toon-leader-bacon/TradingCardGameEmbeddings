@@ -20,9 +20,12 @@ A subclass fixes:
   - _deck_uuid_for_row(): ensures this row's deck exists in deck_box
     (a side effect - e.g. delegating to the game's own
     DeckExtractionStage, to avoid duplicating that class's card-
-    resolution/uuid-minting logic) and returns its uuid. Every row
-    accumulate() sees gets this call, whether or not it also has a
-    valid masking target - the deck box is kept complete regardless.
+    resolution/uuid-minting logic) and returns its uuid, or None if
+    this row has no deck to speak of at all (e.g. no resolvable
+    winner) - a real, expected outcome that skips the row entirely,
+    not an error. Every row accumulate() sees gets this call; when it
+    returns a uuid (whether or not the row also has a valid masking
+    target), the deck box is kept complete for that row.
   - _target_card_uuid_for_row(): which single card this metric masks
     out for this row - game-specific and raw-row-aware (Strategy).
     None means this row has no valid target and gets no output row -
@@ -128,12 +131,16 @@ class DeckCardMaskMetric(ABC):
                 play_gwent's guides.jsonl).
         Output: none.
         Side effects: whatever self._deck_uuid_for_row() does (at
-            minimum, ensures row's deck is stored in self._deck_box).
-            Buffers exactly one row into the open ParquetBuilder
-            (flushed to disk automatically once its batch size is
-            reached, or by finalize()) when
+            minimum, ensures row's deck is stored in self._deck_box,
+            when it finds one). Buffers exactly one row into the open
+            ParquetBuilder (flushed to disk automatically once its
+            batch size is reached, or by finalize()) when
             self._target_card_uuid_for_row() finds a target; buffers
-            nothing when it returns None.
+            nothing when row has no deck at all
+            (_deck_uuid_for_row() returns None - a real, expected
+            "skip this row" outcome, not an error) or when it has a
+            deck but no valid masking target
+            (_target_card_uuid_for_row() returns None).
         Exceptions: whatever _deck_uuid_for_row()/
             _target_card_uuid_for_row()/_label_for_card() raise.
             Raises RuntimeError if _target_card_uuid_for_row() returns
@@ -147,8 +154,12 @@ class DeckCardMaskMetric(ABC):
             >>> metric.finalize()
         """
         # Every row's deck is kept up to date in the box regardless of
-        # whether this row also has a masking target.
+        # whether this row also has a masking target - but a row with
+        # no deck at all (e.g. no resolvable winner) has nothing left
+        # to do here.
         deck_uuid = self._deck_uuid_for_row(row, self._deck_box)
+        if deck_uuid is None:
+            return
 
         target_uuid = self._target_card_uuid_for_row(row, self._card_lookup)
         if target_uuid is None:
@@ -193,8 +204,9 @@ class DeckCardMaskMetric(ABC):
         return self._output_path
 
     @abstractmethod
-    def _deck_uuid_for_row(self, row: dict, deck_box: DeckBox) -> UUID:
-        """Ensure row's deck exists in deck_box, and return its uuid.
+    def _deck_uuid_for_row(self, row: dict, deck_box: DeckBox) -> UUID | None:
+        """Ensure row's deck exists in deck_box, and return its uuid -
+        or None if row has no deck to speak of at all.
 
         Called once per row, unconditionally - every row's deck is
         kept up to date in deck_box regardless of whether this row
@@ -210,11 +222,18 @@ class DeckCardMaskMetric(ABC):
             row: one raw record, same row accumulate() received.
             deck_box: same box passed to __init__.
         Output: the uuid of row's deck, now guaranteed present in
-            deck_box.
+            deck_box - or None if row has no deck at all under this
+            subclass's own game-specific rules (e.g. no resolvable
+            winner) - a real, expected "skip this row entirely"
+            outcome, not an error condition, distinct from raising.
         Side effects: implementation-defined (expected: creates or
-            updates exactly one deck on deck_box).
+            updates exactly one deck on deck_box when returning a
+            uuid; none when returning None).
         Exceptions: implementation-defined (expected: raises if row is
-            missing a field this subclass's deck extraction needs).
+            missing a field this subclass's deck extraction needs -
+            reserved for real data-shape violations, not the ordinary
+            "no deck for this row" case, which should return None
+            instead).
         """
         raise NotImplementedError
 

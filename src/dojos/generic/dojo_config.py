@@ -36,15 +36,23 @@ class DojoConfig:
     # field, not straight from path_to_training_data.stem, so setting
     # name alone avoids a split-file collision for free).
     #
-    # None (the default) falls back to path_to_training_data.stem -
-    # fine for the common case of one dojo instance per metric file.
+    # None (the default) falls back to path_to_training_data.stem - fine
+    # for the common case of one dojo instance per metric file. An empty
+    # string ("") falls back the same way (GenericDojo.__init__ resolves
+    # it with `config.name or path_to_training_data.stem`, and "" is
+    # falsy) - a caller threading an optional name through from a config
+    # file or CLI flag doesn't need to special-case "unset" vs. None.
     #
     # STRONGLY ENCOURAGED to set explicitly whenever more than one dojo
     # is built from metric files that share a bare filename (e.g. the
     # same metric name under two different 17lands expansion/format
     # directories, such as .../KTK/TradSealed/deck_win_prediction.parquet
     # and .../MSH/PremierDraft/deck_win_prediction.parquet) - both would
-    # otherwise resolve to the same name and collide.
+    # otherwise resolve to the same name and collide. Also set it
+    # whenever the same metric's ingestion is deliberately run more than
+    # once (e.g. comparing two rng_seeds/shuffles side by side) - each
+    # run needs its own name, or the second run's splits silently
+    # overwrite the first's.
     name: str | None = None
     # endregion
 

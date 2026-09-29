@@ -50,21 +50,22 @@ def test_basics_only_deck_has_no_valid_masking_target(tmp_path: Path) -> None:
     assert len(df) == 0
 
 
-def test_no_resolvable_winner_raises(tmp_path: Path) -> None:
+def test_no_resolvable_winner_is_skipped_quietly(tmp_path: Path) -> None:
     binder = binder_from_card_names(["Witch"], tmp_path)
     deck_box = DeckBox()
     metric = WinningDeckMaskedCardMetric(
         binder, deck_box, output_path=tmp_path / "out.parquet"
     )
 
-    # Per this metric's own contract (a deck is required for every row
-    # it's fed): the shared scanner's per-row isolation is what's
-    # expected to absorb this in real use, not this metric itself.
-    with pytest.raises(ValueError):
-        metric.accumulate(
-            summary_row(["Witch"], [player_entry("solo", 1, resigned=True)])
-        )
+    # A row with no resolvable winner (e.g. a solo/resigned game) has
+    # no deck to speak of - it's skipped outright, not raised: no
+    # output row, no deck written, no exception.
+    metric.accumulate(summary_row(["Witch"], [player_entry("solo", 1, resigned=True)]))
     metric.finalize()
+
+    df = pd.read_parquet(tmp_path / "out.parquet")
+    assert len(df) == 0
+    assert list(deck_box.all_uuids()) == []
 
 
 def test_default_output_path() -> None:

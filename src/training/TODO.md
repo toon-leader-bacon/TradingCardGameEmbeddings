@@ -203,14 +203,19 @@ a median of ~200 tokens and FaB to ~570.
   sets (game and draft) via `scripts/run_metrics.py`; Play-Gwent and FaB
   decklists still need metrics. Defer replay data and Dominion (no raw data
   or binder on disk).
-- [ ] **Fix split-file collisions.** Dojo `name` defaults to the parquet
-  stem and splits go to flat `data/splits/<stem>_*.parquet`, so
-  `KTK/TradSealed/deck_win_prediction` and `MSH/.../deck_win_prediction`
-  collide, and duplicate names make `Trainer` raise. `DojoConfig.name`
-  (which also sets the split prefix) is the fix, but no per-metric wrapper
-  accepts a `DojoConfig` yet (they take only `rng_seed` and
-  `strict_version_check`); thread it through, or derive the name from the
-  expansion/format directory.
+- [x] **Fix split-file collisions** (2026-09-29). Every per-metric wrapper
+  constructor (all `GenericDojo`-based ones - `paired_metric_dojos.py`'s 3
+  Template Method bases plus the 22 standalone wrappers that build their
+  own `DojoConfig`) now takes an optional `name: str | None = None` and
+  threads it into `config=DojoConfig(name=name, ...)`, alongside the
+  existing `rng_seed`/`strict_version_check`. `ContrastiveDojo` already had
+  `name`. Callers building two dojos from same-stem files across
+  expansion/format directories (e.g. `KTK/TradSealed/deck_win_prediction`
+  and `MSH/PremierDraft/deck_win_prediction`) now pass distinct `name`s to
+  avoid the collision; nothing constructs those dojos yet (no training
+  driver, see section D), so no call site needed updating. Regression test:
+  `tests/dojos/seventeenlands/game_data/test_game_deck_label_dojos.py`'s
+  `TestNameAvoidsSplitFileCollision`.
 - [ ] **Make splits deterministic.** Existing split files are now reused
   (`FileManagerParquet.splits_exist()`; `force_resplit` rebuilds), so a
   restart no longer re-streams the parquet. Remaining: `rng_seed=None` is

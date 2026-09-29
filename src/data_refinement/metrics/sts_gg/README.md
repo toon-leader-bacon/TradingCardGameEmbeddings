@@ -86,12 +86,14 @@ since they all mint the same id from the same content — this only
 works because `deck_uuid_from_cards()` is one shared function, not
 each metric hashing independently.
 
-Every metric in this container takes a `deck_box` constructor
-parameter in the same position for a consistent shape. The two
-per-card metrics (`CardUpgradeRateMetric`/`CardWinRateAtAct2Metric`)
-never reference a deck, so theirs defaults to `None` and is stored
-unused; every `DeckLabelMetric` subclass genuinely needs one, so
-theirs is required with no default.
+Every metric in this container takes `deck_box: DeckBox | None = None`
+in the same constructor position for a consistent shape, whether or
+not it's actually used. The two per-card metrics
+(`CardUpgradeRateMetric`/`CardWinRateAtAct2Metric`) never reference a
+deck, so theirs is accepted and stored unused; every `DeckLabelMetric`
+subclass genuinely needs one, so its own `__init__` raises `ValueError`
+if `deck_box` is `None` - required in practice, Optional in type only,
+so its signature still matches every other metric's.
 
 ## Deck-to-scalar metrics
 
@@ -151,7 +153,7 @@ duplicating that one small rule per file (see "How it works" below)
 rather than centralizing it.
 
 Every metric in this family takes `deck_box: DeckBox | None = None`
-in its constructor for the same cross-container consistency reason
+in its constructor for the same in-container consistency reason
 `CardUpgradeRateMetric`/`CardWinRateAtAct2Metric` do — none of them
 reference a deck, so it's accepted and stored unused.
 
@@ -224,15 +226,18 @@ from src.schema.game_id import GameId
 
 binder = CardBinder.load([Path("data/final/cards/slay_the_spire_2.jsonl")])
 deck_box = DeckBox()  # metrics-private - never the published deck box
+# Every metric's constructor is (card_binder, deck_box, output_path) -
+# a per-card metric just ignores deck_box, so one deck_box can be
+# passed to all of them uniformly.
 metrics = [
-    CardUpgradeRateMetric(binder),  # accepts deck_box but never uses it
-    CardWinRateAtAct2Metric(binder),  # accepts deck_box but never uses it
+    CardUpgradeRateMetric(binder, deck_box),
+    CardWinRateAtAct2Metric(binder, deck_box),
     AscensionPredictionMetric(binder, deck_box),
     RelicCountMetric(binder, deck_box),
     WinMetric(binder, deck_box),
-    CardRelicCountMetric(binder),  # per-card: accepts deck_box but never uses it
-    CardWinRateMetric(binder),
-    CardCharacterPredictionMetric(binder),
+    CardRelicCountMetric(binder, deck_box),
+    CardWinRateMetric(binder, deck_box),
+    CardCharacterPredictionMetric(binder, deck_box),
 ]
 scan_runs_jsonl(Path("data/raw/sts_gg/runs.jsonl"), metrics)
 # each metric's DEFAULT_OUTPUT_PATH now exists

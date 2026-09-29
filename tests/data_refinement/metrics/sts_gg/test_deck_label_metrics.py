@@ -108,6 +108,13 @@ def test_killed_by_is_a_real_null_on_a_loss(tmp_path: Path) -> None:
     assert table.to_pylist()[0]["killed_by"] == "ENCOUNTER.THE_KIN_BOSS"
 
 
+def test_missing_deck_box_raises(tmp_path: Path) -> None:
+    binder = _binder_from_rows([{"id": "STRIKE_SILENT", "name": "Strike"}], tmp_path)
+
+    with pytest.raises(ValueError):
+        RelicCountMetric(binder, None, tmp_path / "out.parquet")
+
+
 def test_default_output_paths_are_all_distinct() -> None:
     output_paths = {metric_cls.DEFAULT_OUTPUT_PATH for metric_cls, _ in _CASES}
     assert len(output_paths) == len(_CASES)
