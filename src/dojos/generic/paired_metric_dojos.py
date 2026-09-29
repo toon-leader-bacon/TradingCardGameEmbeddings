@@ -69,6 +69,7 @@ class CardAverageMetricDojo(SingleCardRegressionDojo):
         holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
+        name: str | None = None,
         rng_seed: int | None = None,
         strict_version_check: bool = True,
     ) -> None:
@@ -78,6 +79,11 @@ class CardAverageMetricDojo(SingleCardRegressionDojo):
             holdout: card holdout shared by every dojo in a run.
             card_embedding_size: width of the encoder's card embeddings.
             path_to_training_data: overrides METRIC.DEFAULT_OUTPUT_PATH.
+            name: this dojo's Trainer-facing name and split-file prefix;
+                None falls back to path_to_training_data.stem (see
+                DojoConfig.name). Set explicitly whenever more than one
+                dojo of this class is built from metric files that share
+                a bare filename, to avoid a split-file collision.
             rng_seed: split/shuffle seed; None means unseeded.
             strict_version_check: raise (rather than warn) on a metric
                 file built against a different CardBinder version.
@@ -96,7 +102,7 @@ class CardAverageMetricDojo(SingleCardRegressionDojo):
             data_constructor=CardAverageDataConstructor(self.METRIC.LABEL_COLUMN),
             card_embedding_size=card_embedding_size,
             config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
+                name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),
         )
 
@@ -118,6 +124,7 @@ class DeckLabelMetricDojo(MultiCardRegressionDojo):
         deck_box: DeckBox,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
+        name: str | None = None,
         rng_seed: int | None = None,
         strict_version_check: bool = True,
     ) -> None:
@@ -141,7 +148,7 @@ class DeckLabelMetricDojo(MultiCardRegressionDojo):
             ),
             card_embedding_size=card_embedding_size,
             config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
+                name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),
         )
 
@@ -170,6 +177,7 @@ class MaskedFieldMetricDojo(SingleCardFixedClassificationDojo):
         holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
+        name: str | None = None,
         rng_seed: int | None = None,
         strict_version_check: bool = True,
     ) -> None:
@@ -196,6 +204,6 @@ class MaskedFieldMetricDojo(SingleCardFixedClassificationDojo):
                 [MaskTargetKeyMod(key=key, train_only=False) for key in masked_keys]
             ),
             config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
+                name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),
         )

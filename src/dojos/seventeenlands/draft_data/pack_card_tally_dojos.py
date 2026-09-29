@@ -58,6 +58,7 @@ class CardTakeRateDojo(SingleCardRegressionDojo):
         holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
+        name: str | None = None,
         rng_seed: int | None = None,
         strict_version_check: bool = True,
     ) -> None:
@@ -69,7 +70,7 @@ class CardTakeRateDojo(SingleCardRegressionDojo):
             data_constructor=CardAverageDataConstructor("take_rate"),
             card_embedding_size=card_embedding_size,
             config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
+                name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),
         )
 
@@ -84,6 +85,7 @@ class FirstPickRateDojo(SingleCardRegressionDojo):
         holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
+        name: str | None = None,
         rng_seed: int | None = None,
         strict_version_check: bool = True,
     ) -> None:
@@ -95,7 +97,7 @@ class FirstPickRateDojo(SingleCardRegressionDojo):
             data_constructor=CardAverageDataConstructor("take_rate"),
             card_embedding_size=card_embedding_size,
             config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
+                name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),
         )
 
@@ -112,6 +114,7 @@ class RankStratifiedTakeRateDojo(SingleCardRegressionDojo):
         holdout: HoldoutSpec,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
+        name: str | None = None,
         rng_seed: int | None = None,
         strict_version_check: bool = True,
     ) -> None:
@@ -123,6 +126,6 @@ class RankStratifiedTakeRateDojo(SingleCardRegressionDojo):
             data_constructor=CardAverageDataConstructor("take_rate"),
             card_embedding_size=card_embedding_size,
             config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
+                name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),
         )

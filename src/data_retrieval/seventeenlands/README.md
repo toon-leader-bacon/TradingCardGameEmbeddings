@@ -51,12 +51,22 @@ an extensible metric engine over raw rows, not a client for what
 - `known_files.py` — `list_known_refs()` above, backed by a static
   `_KNOWN_VALID_TRIPLES` snapshot of every combination 17Lands has
   actually published.
-- `downloader.py` — `SeventeenLandsDownloader`, `DownloadOutcome`
-  (`ref`, `path: Path | None`, `error: Exception | None` — exactly one
-  of `path`/`error` is meaningful per outcome), and
-  `DownloadBatchResult` (`outcomes: list[DownloadOutcome]`).
-  `SeventeenLandsDownloader(raw_data_dir: Path | None = None, *,
-  rate_limiter: RateLimiter)` exposes:
+- `downloader.py` — `SeventeenLandsDownloader(Downloader)`,
+  `DownloadOutcome` (`ref`, `path: Path | None`, `error: Exception |
+  None` — exactly one of `path`/`error` is meaningful per outcome), and
+  `DownloadBatchResult` (`outcomes: list[DownloadOutcome]`). Fits the
+  shared `Downloader` base class
+  (`src/data_retrieval/downloader.py`) the same way
+  `HearthstoneJsonDownloader` does: `phase_1()`/`phase_2()` cover the
+  no-argument "download everything known-valid" default, while
+  `download()`/`download_one()` stay available as the richer,
+  filterable API for direct or scripted use. `SeventeenLandsDownloader
+  (rate_limiter: RateLimiter | None = None, raw_data_dir: Path | None =
+  None)` exposes:
+  - `phase_1() -> Path` — downloads every known-valid file (equivalent
+    to `download()` with no filters) and returns `raw_data_dir`.
+    `phase_2()` is not overridden — nothing further to fetch, so it
+    inherits `Downloader`'s no-op default.
   - `download(refs: list[SeventeenLandsFileRef] | None = None, *,
     data_types: list[DataType] | None = None, expansions: list[str] |
     None = None, formats: list[str] | None = None) ->
@@ -66,16 +76,23 @@ an extensible metric engine over raw rows, not a client for what
     first, so `download()` means "every known-valid file" rather than
     "nothing" — filters still apply on top of that full set.
     Collect-and-continue: one ref failing is recorded in the result,
-    not raised — a large batch always finishes.
+    not raised — a large batch always finishes. Resumable: a ref whose
+    destination file already exists is skipped (reported as a success
+    with that existing path) rather than re-downloaded, same
+    convention as `HearthstoneJsonDownloader.download_missing_builds()`
+    — a re-run only fetches what's still missing.
   - `download_one(ref: SeventeenLandsFileRef) -> Path` — downloads +
-    decompresses a single ref; used internally by `download()`, but
-    also usable directly. Most objects are a plain gzip of the CSV,
-    but a handful of older sets' objects (CONFIRMED: `AFR`/`KHM`/
-    `MID`/`STX`/`VOW`) are instead a gzip of a TAR archive wrapping one
-    CSV member — `download_one()` detects this per-object (peeking the
-    decompressed stream's own ustar magic, not a fixed table of
-    expansions) and un-tars it, so the CSV this method writes to
-    `raw_data_dir` is always a plain CSV either way.
+    decompresses a single ref, always overwriting any existing
+    destination file (the skip-if-present check is `download()`'s own
+    batch-loop behavior, not this method's); used internally by
+    `download()`, but also usable directly to force a re-download. Most
+    objects are a plain gzip of the CSV, but a handful of older sets'
+    objects (CONFIRMED: `AFR`/`KHM`/`MID`/`STX`/`VOW`) are instead a
+    gzip of a TAR archive wrapping one CSV member — `download_one()`
+    detects this per-object (peeking the decompressed stream's own
+    ustar magic, not a fixed table of expansions) and un-tars it, so
+    the CSV this method writes to `raw_data_dir` is always a plain CSV
+    either way.
 
 ## How it works
 
@@ -83,8 +100,9 @@ an extensible metric engine over raw rows, not a client for what
 flowchart TD
     A["refs: list[SeventeenLandsFileRef]\n(from LandingPageParser.parse()\nor SeventeenLandsFileRef.from_known())"] --> B["SeventeenLandsDownloader.download(refs, ...)"]
     B --> C["filter refs\n(data_types/expansions/formats,\nNone = no filtering)"]
-    C --> D["for each surviving ref:\ndownload + extract"]
-    D --> E["rate_limiter paces the request\n+ download_to_file(ref.url, tmp .csv.gz)"]
+    C --> D{"destination file\nalready exists?"}
+    D -- yes --> H
+    D -- no --> E["rate_limiter paces the request\n+ download_to_file(ref.url, tmp .csv.gz)"]
     E --> F["gzip-decompress to\nraw_data_dir/<data_type>/<expansion>.<format_code>.csv"]
     F --> G{"succeeded?"}
     G -- yes --> H["DownloadOutcome(ref, path, error=None)"]
@@ -96,7 +114,18 @@ flowchart TD
 ## How to run
 
 ```python
-from pathlib import Path
+from src.data_retrieval.seventeenlands.downloader import SeventeenLandsDownloader
+
+# Every known-valid file, via the shared Downloader interface:
+downloader = SeventeenLandsDownloader()
+raw_data_dir = downloader.phase_1()
+downloader.phase_2()  # no-op — nothing further to fetch
+```
+
+For a filtered batch, or to inspect per-ref outcomes, call `download()`
+directly instead:
+
+```python
 from src.data_retrieval.seventeenlands.downloader import SeventeenLandsDownloader
 from src.data_retrieval.seventeenlands.refs import DataType, SeventeenLandsFileRef
 from src.data_retrieval.rate_limiter import RateLimiter

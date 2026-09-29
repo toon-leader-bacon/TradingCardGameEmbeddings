@@ -86,6 +86,7 @@ def _generic_dojo(
     tmp_path: Path,
     cards: list[GenericCard],
     rows: int = 20,
+    name: str | None = None,
     output_directory: Path | None = None,
     output_file_prefix: str | None = None,
     force_resplit: bool = False,
@@ -112,6 +113,7 @@ def _generic_dojo(
         decoder_head=SingleCardRegressionDecoderHead(4),
         loss_calculator=MseLoss(),
         config=DojoConfig(
+            name=name,
             rng_seed=0,
             strict_version_check=False,
             output_directory=(
@@ -133,6 +135,28 @@ class TestSplitReuse:
 
         assert dojo.file_manager.output_directory == tmp_path / "splits"
         assert dojo.file_manager.output_file_prefix == "source"
+
+    def test_none_name_falls_back_to_source_stem(self, tmp_path: Path) -> None:
+        dojo = _generic_dojo(tmp_path, [_card("a")], name=None)
+
+        assert dojo.name == "source"
+        assert dojo.file_manager.output_file_prefix == "source"
+
+    def test_empty_string_name_falls_back_to_source_stem_like_none(
+        self, tmp_path: Path
+    ) -> None:
+        dojo = _generic_dojo(tmp_path, [_card("a")], name="")
+
+        assert dojo.name == "source"
+        assert dojo.file_manager.output_file_prefix == "source"
+
+    def test_explicit_name_is_used_as_name_and_split_prefix(
+        self, tmp_path: Path
+    ) -> None:
+        dojo = _generic_dojo(tmp_path, [_card("a")], name="ktk_deck_win_prediction")
+
+        assert dojo.name == "ktk_deck_win_prediction"
+        assert dojo.file_manager.output_file_prefix == "ktk_deck_win_prediction"
 
     def test_custom_output_file_prefix_is_used(self, tmp_path: Path) -> None:
         dojo = _generic_dojo(
@@ -177,6 +201,26 @@ class TestSplitReuse:
 
         assert calls["n"] == 0
         assert second.example_count(Split.TRAIN) == 16
+
+    def test_distinct_names_avoid_collision_for_the_same_source_file(
+        self, tmp_path: Path
+    ) -> None:
+        # Second use case from the name param's motivation: re-running the
+        # same metric's ingestion (e.g. a different rng_seed/shuffle) under
+        # a distinct name, without the second run's splits overwriting the
+        # first's.
+        splits_dir = tmp_path / "splits"
+        first = _generic_dojo(
+            tmp_path, [_card("a")], name="run_a", output_directory=splits_dir
+        )
+        second = _generic_dojo(
+            tmp_path, [_card("a")], name="run_b", output_directory=splits_dir
+        )
+
+        assert first.file_manager.output_file_prefix == "run_a"
+        assert second.file_manager.output_file_prefix == "run_b"
+        assert (splits_dir / "run_a_train.parquet").exists()
+        assert (splits_dir / "run_b_train.parquet").exists()
 
     def test_force_resplit_rebuilds_even_when_splits_already_exist(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

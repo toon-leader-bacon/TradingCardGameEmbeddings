@@ -117,6 +117,7 @@ class WinDojo(MultiCardBinaryClassificationDojo):
         deck_box: DeckBox,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
+        name: str | None = None,
         rng_seed: int | None = None,
         strict_version_check: bool = True,
     ) -> None:
@@ -128,7 +129,7 @@ class WinDojo(MultiCardBinaryClassificationDojo):
             data_constructor=DeckLabelDataConstructor(deck_box, WinMetric.LABEL_COLUMN),
             card_embedding_size=card_embedding_size,
             config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
+                name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),
         )
 
@@ -146,6 +147,7 @@ class CharacterDojo(MultiCardFixedClassificationDojo):
         deck_box: DeckBox,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
+        name: str | None = None,
         rng_seed: int | None = None,
         strict_version_check: bool = True,
     ) -> None:
@@ -162,6 +164,6 @@ class CharacterDojo(MultiCardFixedClassificationDojo):
             label_values=CharacterPredictionMetric.LABEL_VALUES,
             card_embedding_size=card_embedding_size,
             config=DojoConfig(
-                rng_seed=rng_seed, strict_version_check=strict_version_check
+                name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),
         )
