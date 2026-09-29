@@ -115,33 +115,29 @@ source of the width) and `isolated_embeddings(cards, precision)`, sharing
 the `CardEmbedder` Protocol (step 3, in `evaluation/`), which both models
 satisfy structurally.
 
-### CardLabels
+### CardLabels - built (step 3b)
 
-A Protocol mapping a card row to a categorical label or `None` (not
-labeled; excluded from that analysis). MVP implementations:
-
-- **Metric parquet labels** - reads a per-card categorical metric's
-parquet the way dojos do, using only its `nocab_uuid` and `label`
-columns (e.g. `MaskedFieldMetric` output: `nocab_uuid`,
-`masked_field`, `label`); other columns ignored; labels converted with
-`str()`. Takes one or more parquets, so a per-game metric family (e.g.
-the planned rarity metrics, one per game) forms one label source for
-a multi-game corpus. Unlike `GenericDojo`, it does not check the
-metric's embedded binder version against the current binder (same
-"recorded, never checked" policy as the table; `nocab_uuid`s are
-stable).
-- **Game labels** - `source_game.value`.
-- **Holdout tier labels** - `HoldoutSpec.tier_of(nocab_uuid, source_game)` under the checkpoint's spec: the domain-shift label.
-
-First label sets planned: game (easy), a cross-game normalized rarity
-(medium), MtG set (hard). Game labels need nothing outside this plan.
-MtG set labels come later.
+`CardLabels` Protocol with `MetricParquetLabels`, `GameLabels`,
+`HoldoutTierLabels`; see `src/evaluation/README.md`. First label sets
+planned: game (available now), a cross-game normalized rarity (medium),
+MtG set (hard, later).
 
 **Outside this plan:** the rarity labels depend on a cross-game rarity
 metric family in `data_refinement/metrics/`, which this plan does not
 design. It is tracked in `src/data_refinement/metrics/TODO.md` ("Cross-game
 rarity metric family"). Evaluation consumes it only through
 `MetricParquetLabels` over its per-game parquets.
+
+### Step 3c (next): file-level cleanup of `evaluation/`
+
+Requested by the user after 3b. Several `evaluation/` modules hold more
+than one class, with data classes (e.g. `CardRow`,
+`EmbeddingTableMetadata`, `CorpusSpec`/`TierFilter`,
+`NonFiniteEmbeddingError`) spread across the files that use them. Split
+them so each file holds one concept and shared data types have an
+obvious home. A pure restructuring: no behavior change; imports, tests
+and `src/evaluation/README.md` follow. Done before step 4 (the analyses)
+adds more files.
 
 ### Intrinsic analyses
 
@@ -345,20 +341,9 @@ New boundaries:
 #   max_consecutive_failures=5) -> int
 
 
-# --- evaluation: labels ---
-class CardLabels(Protocol):
-    name: str
-    def label_of(self, row: CardRow) -> str | None: ...
-
-class MetricParquetLabels:     # per-card categorical metric parquet
-    def __init__(self, name: str, parquet_paths: Sequence[Path]) -> None: ...
-        # ValueError if parquet_paths is empty, any parquet lacks nocab_uuid/label
-        # columns, or a nocab_uuid appears in more than one row across all the
-        # files (e.g. a per-deck metric); labels via str()
-class GameLabels:
-    def __init__(self) -> None: ...          # name = "game"
-class HoldoutTierLabels:
-    def __init__(self, holdout: HoldoutSpec) -> None: ...   # name = "holdout_tier"
+# --- evaluation: built in step 3b (see src/evaluation/README.md) ---
+# src/evaluation/card_labels.py - CardLabels Protocol (name, label_of(row) -> str | None),
+#   MetricParquetLabels(name, parquet_paths), GameLabels(), HoldoutTierLabels(holdout)
 
 
 # --- evaluation: intrinsic analyses ---

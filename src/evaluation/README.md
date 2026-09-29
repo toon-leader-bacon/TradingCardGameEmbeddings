@@ -7,10 +7,10 @@ agreement, label compactness). **Extrinsic** evaluation trains fresh dojo
 heads on a frozen encoder by reusing `Trainer`, and compares the loss
 curves. `Trainer` never calls this package.
 
-Status: in progress. Built: corpus selection, the embedding table, and
-embedding a corpus into it. Not yet built (design in
-[`plans/evaluation.md`](../../plans/evaluation.md)): card labels, the
-intrinsic analyses, extrinsic runs and learning-curve plots.
+Status: in progress. Built: corpus selection, the embedding table,
+embedding a corpus into it, and card labels. Not yet built (design in
+[`plans/evaluation.md`](../../plans/evaluation.md)): the intrinsic
+analyses, extrinsic runs and learning-curve plots.
 
 ## Files
 
@@ -32,6 +32,13 @@ intrinsic analyses, extrinsic runs and learning-curve plots.
   (`embedding_dim`, `isolated_embeddings`), which `SingleCardModel` and
   `MultiCardModel` satisfy as they are, and `embed_corpus`, which embeds
   a corpus into a table in batches.
+- [card_labels.py](card_labels.py): the `CardLabels` Protocol (`name`,
+  `label_of(row) -> str | None`, `None` meaning unlabeled) and three
+  sources: `MetricParquetLabels` (one or more per-card categorical metric
+  parquets, reading only `nocab_uuid` and `label`; a card in more than
+  one row is rejected, a null label leaves it unlabeled), `GameLabels`,
+  and `HoldoutTierLabels` (a card's tier under a `HoldoutSpec`, typically
+  the checkpoint's own: the domain-shift label).
 
 ## How it works
 
@@ -42,6 +49,7 @@ flowchart LR
     M["model (CardEmbedder)"] --> E
     E --> T[(EmbeddingTable)]
     T --> A[analyses: not yet built]
+    C[CardLabels] --> A
 ```
 
 `embed_corpus` skips every card already in the table, so an interrupted
