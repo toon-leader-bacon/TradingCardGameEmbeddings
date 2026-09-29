@@ -148,27 +148,19 @@ analyses/                    step 4
   card_sample.py             CardSample Protocol + AllCards + PerLabelCap
   labeled_sample.py          LabeledSample + draw_labeled_sample (shared by
                              every label-using analysis)
-  projection_plot.py / cluster_agreement.py / label_compactness.py
+  cluster_agreement.py / label_compactness.py / projection_plot.py (+ projection_renderer.py)
 extrinsic/                   step 5
   run_extrinsic.py           run_extrinsic + ExtrinsicSpec / ExtrinsicResult
   learning_curves.py         plot_learning_curves
 ```
 
-### Intrinsic analyses - numeric analyses built (step 4a); projection plot next (4b)
+### Intrinsic analyses - built (step 4)
 
-Built: `EmbeddingAnalysis`/`AnalysisResult` and the output helpers, the
-seeded `CardSample` rules (`AllCards`, `PerLabelCap`),
-`draw_labeled_sample`, `ClusterAgreement` and `LabelCompactness` (see
-`src/evaluation/README.md`). Both work on unit-length vectors; scalars
-never hold NaN/inf.
-
-Remaining (step 4b): **Projection plot** - 2D projection (scikit-learn
-t-SNE) colored by a label; seeded and with fixed hyperparameters so plots
-are comparable across tables. Illustrative only; always reported next to
-a quantitative analysis. Built on `draw_labeled_sample`,
-`require_fresh_output_dir` and `write_analysis_result` (passing the plot
-as an extra file); adds matplotlib. openTSNE only if sampled corpora prove
-too slow.
+`ClusterAgreement`, `LabelCompactness` and `ProjectionPlot` (with its
+`ProjectionRenderer`/`FigureStyle`), on the shared `EmbeddingAnalysis`
+contract, seeded `CardSample` rules and `draw_labeled_sample`; see
+`src/evaluation/README.md`. openTSNE only if sampled corpora prove too
+slow for scikit-learn's t-SNE.
 
 ### Extrinsic run
 
@@ -353,7 +345,7 @@ New boundaries:
 # src/evaluation/labels/metric_parquet_labels.py - MetricParquetLabels(name, parquet_paths)
 
 
-# --- evaluation: intrinsic analyses - built in step 4a (see src/evaluation/README.md) ---
+# --- evaluation: intrinsic analyses - built in step 4 (see src/evaluation/README.md) ---
 # src/evaluation/analyses/embedding_analysis.py - EmbeddingAnalysis Protocol (name,
 #   run(table, output_dir) -> AnalysisResult), AnalysisResult(files, scalars),
 #   require_fresh_output_dir, write_analysis_result(output_dir, scalars, extra_files)
@@ -361,7 +353,9 @@ New boundaries:
 # src/evaluation/analyses/labeled_sample.py - LabeledSample, draw_labeled_sample
 # src/evaluation/analyses/cluster_agreement.py - ClusterAgreement(labels, sample, seed, n_init)
 # src/evaluation/analyses/label_compactness.py - LabelCompactness(labels, sample, seed)
-# Step 4b adds src/evaluation/analyses/projection_plot.py - ProjectionPlot, same contract.
+# src/evaluation/analyses/projection_plot.py - ProjectionPlot(labels, sample, seed, *,
+#   perplexity, max_iter, highlighted, max_panels, renderer)
+# src/evaluation/analyses/projection_renderer.py - FigureStyle, ProjectionRenderer(style)
 
 
 # --- evaluation: extrinsic ---

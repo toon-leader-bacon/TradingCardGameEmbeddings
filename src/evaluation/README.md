@@ -8,10 +8,10 @@ heads on a frozen encoder by reusing `Trainer`, and compares the loss
 curves. `Trainer` never calls this package.
 
 Status: in progress. Built: corpus selection, the embedding table,
-embedding a corpus into it, card labels, and the numeric intrinsic
-analyses (cluster agreement, label compactness). Not yet built (design in
-[`plans/evaluation.md`](../../plans/evaluation.md)): the projection plot,
-extrinsic runs and learning-curve plots.
+embedding a corpus into it, card labels, and the intrinsic analyses
+(cluster agreement, label compactness, projection plot). Not yet built
+(design in [`plans/evaluation.md`](../../plans/evaluation.md)): extrinsic
+runs and learning-curve plots.
 
 ## Files
 
@@ -74,14 +74,32 @@ sharing it only with small data classes or trivial helpers.
     `LabelCompactness`: `silhouette`, and `nearest_centroid_accuracy`
     with leave-one-out centroids (a card never votes for itself) next to
     its `majority_baseline`. Needs some label with two or more cards.
+  - [projection_plot.py](analyses/projection_plot.py): `ProjectionPlot`,
+    a seeded t-SNE of the sampled cards, illustrative only (report it
+    next to a numeric analysis). Writes `projection.png` (up to the
+    style's `max_highlighted` labels colored, the rest folded into a
+    neutral "Other"), `projection_by_label.png` (small multiples: one
+    panel per label, the `max_panels` largest - 12 by default),
+    `projection.csv` (`nocab_uuid`, `source_game`, `label`, `x`, `y`: the
+    table view, and re-plotting without re-running t-SNE) and
+    `scalars.json` (`kl_divergence`, left out if not finite). `highlighted` takes a
+    count (most-sampled first, ties by name) or the labels themselves -
+    name them when comparing encoders under `PerLabelCap`, where every
+    large label ties.
+  - [projection_renderer.py](analyses/projection_renderer.py):
+    `ProjectionRenderer` draws both figures in a `FigureStyle` (a frozen
+    dataclass; defaults are the dataviz reference palette, light mode).
+    The overview's color limit is the style's `max_highlighted`
+    (`len(series)`): only three colors stay distinguishable in a scatter
+    for color-blind readers, so a custom `series` must be re-validated.
 
-  Both analyses work on unit-length vectors, so distances rank pairs like
-  cosine distance, and both report `n_cards` and `n_labels`
+  All three analyses work on unit-length vectors, so distances rank pairs like
+  cosine distance, and all report `n_cards` and `n_labels`
   (`LabeledSample.size_scalars`) - a convention for label-using analyses,
   not something the Protocol enforces.
 
-Planned (see the plan): the projection plot in `analyses/`, and
-`extrinsic/` for extrinsic runs and learning-curve plots.
+Planned (see the plan): `extrinsic/` for extrinsic runs and
+learning-curve plots.
 
 ## How it works
 
@@ -125,7 +143,9 @@ with EmbeddingTable.create(Path("data/evaluations/run_a/embeddings/single_v1.db"
 labels = GameLabels()
 with EmbeddingTable.open(Path("data/evaluations/run_a/embeddings/single_v1.db")) as table:
     for analysis in (ClusterAgreement(labels, PerLabelCap(500), seed=0),
-                     LabelCompactness(labels, PerLabelCap(500), seed=0)):
+                     LabelCompactness(labels, PerLabelCap(500), seed=0),
+                     ProjectionPlot(labels, PerLabelCap(500), seed=0,
+                                    highlighted=("mtg", "gwent"))):
         out = Path("data/evaluations/run_a/intrinsic/single_v1") / analysis.name
         print(analysis.name, dict(analysis.run(table, out).scalars))
 ```
