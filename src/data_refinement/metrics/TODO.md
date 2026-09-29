@@ -40,13 +40,30 @@
   - how each game's values map, e.g. whether Gwent's `epic` becomes
     `rare`/`legendary` or `other`;
   - what games with no rarity get: `not-applicable` rows, or no metric.
-- **Standardize metric constructor argument shape across containers.**
-  `sts_gg`'s `CardAverageMetric`/`DeckLabelMetric` always take
-  `card_binder` and `deck_box` for signature consistency within that
-  container, even when a subclass never uses one; the seventeenlands
-  metrics omit a parameter they have no use for. Decide whether one
-  convention should win project-wide, or whether each container being
-  internally consistent is enough.
+- [x] **Standardize metric constructor argument shape within sts_gg**
+  (2026-09-29). Decision: keep `sts_gg`'s existing "every metric in
+  this container takes the same params" convention, rather than
+  switching to seventeenlands' "omit what you don't use" one - a
+  deliberate style preference, not forced by any real need. Applied it
+  fully: `DeckLabelMetric.__init__` (`deck_label_metric.py`) now takes
+  `deck_box: DeckBox | None = None`, same as `CardAverageMetric`
+  already did, instead of a required `deck_box: DeckBox` - it still
+  raises `ValueError` if `deck_box` is `None`, so it's Optional in type
+  only, required in practice. Every sts_gg metric constructor now has
+  the identical `(card_binder, deck_box, output_path)` shape.
+  `scripts/run_metrics.py`'s `run_sts_gg()` was simplified accordingly:
+  the old hand-picked-args-per-metric list is now one
+  `_STS_GG_METRIC_CLASSES` tuple plus `[cls(binder, deck_box) for cls
+  in _STS_GG_METRIC_CLASSES]` - every class accepts `deck_box` now, so
+  one call shape covers all 24.
+  NOT extended to `gwent_one`/`dominiontabs`: unlike sts_gg, neither
+  container's driver function (`run_gwent_one()`/`run_dominiontabs()`)
+  constructs any deck-consuming metric at all today - their shared
+  `MaskedFieldMetric` base has no deck_box-accepting sibling to be
+  consistent with, so adding one there would be a purely speculative,
+  permanently-unused parameter with no current counterpart to match,
+  unlike sts_gg's real CardAverageMetric/DeckLabelMetric pairing.
+  Revisit if either container grows a deck-based metric.
 - **Deduplicate the running-tally Template Method shape.** `sts_gg`'s
   `CardAverageMetric` (`card_average_metric.py`), `draft_data`'s
   `PackCardTallyMetric` (`pack_card_tally_metric.py`) and `game_data`'s
