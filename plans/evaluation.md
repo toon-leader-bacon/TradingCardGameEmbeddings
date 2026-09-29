@@ -169,13 +169,14 @@ stable).
 - **Holdout tier labels** - `HoldoutSpec.tier_of(nocab_uuid, source_game)` under the checkpoint's spec: the domain-shift label.
 
 First label sets planned: game (easy), a cross-game normalized rarity
-(medium), MtG set (hard). The rarity labels come from a dependency this
-plan does not design: a standard rarity metric family in
-`data_refinement/metrics/` (one metric per game, all mapping into one
-shared rarity enum, e.g. common / uncommon / rare / legendary / promo /
-not-applicable / other), usable by dojos and by evaluation through
-metric parquet labels. `gwent_one/rarity_mask_metric.py` is today's
-per-game precedent.
+(medium), MtG set (hard). Game labels need nothing outside this plan.
+MtG set labels come later.
+
+**Outside this plan:** the rarity labels depend on a cross-game rarity
+metric family in `data_refinement/metrics/`, which this plan does not
+design. It is tracked in `src/data_refinement/metrics/TODO.md` ("Cross-game
+rarity metric family"). Evaluation consumes it only through
+`MetricParquetLabels` over its per-game parquets.
 
 ### Intrinsic analyses
 
