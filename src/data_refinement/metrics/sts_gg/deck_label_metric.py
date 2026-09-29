@@ -67,7 +67,7 @@ class DeckLabelMetric(ABC):
     def __init__(
         self,
         card_binder: CardBinder,
-        deck_box: DeckBox,
+        deck_box: DeckBox | None = None,
         output_path: Path | None = None,
     ) -> None:
         """
@@ -80,6 +80,12 @@ class DeckLabelMetric(ABC):
                 metric in the same scan pass that also takes a
                 DeckBox, so identical final decks dedupe against each
                 other. Never the published deck_box/sts_gg/ box.
+                Typed Optional for constructor-shape consistency with
+                this container's other metric family
+                (CardAverageMetric, ../card_average_metric.py, whose
+                own metrics never need one) - but REQUIRED here (see
+                Exceptions below), since every DeckLabelMetric row is
+                keyed by a deck this class itself writes.
             output_path: overrides DEFAULT_OUTPUT_PATH when given.
         Output: none (constructor).
         Side effects: creates output_path's parent directories if
@@ -87,9 +93,12 @@ class DeckLabelMetric(ABC):
             existing file) via a ParquetBuilder held open for the
             lifetime of this instance - callers MUST call finalize()
             when done, or the file is left incomplete.
-        Exceptions: whatever ParquetBuilder raises on failure to open
+        Exceptions: raises ValueError if deck_box is None. Otherwise,
+            whatever ParquetBuilder raises on failure to open
             output_path for writing.
         """
+        if deck_box is None:
+            raise ValueError(f"{type(self).__name__}: deck_box is required")
         self._card_binder = card_binder
         self._deck_box = deck_box
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
