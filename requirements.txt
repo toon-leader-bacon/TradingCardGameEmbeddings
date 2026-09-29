@@ -6,3 +6,4 @@ pyarrow
 torch
 transformers
 beautifulsoup4
+scikit-learn

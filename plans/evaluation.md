@@ -143,38 +143,32 @@ layout is expected to evolve as steps 4-5 land. Planned placement:
 
 ```
 analyses/                    step 4
-  embedding_analysis.py      EmbeddingAnalysis Protocol + AnalysisResult
+  embedding_analysis.py      EmbeddingAnalysis Protocol + AnalysisResult,
+                             require_fresh_output_dir, write_analysis_result
   card_sample.py             CardSample Protocol + AllCards + PerLabelCap
+  labeled_sample.py          LabeledSample + draw_labeled_sample (shared by
+                             every label-using analysis)
   projection_plot.py / cluster_agreement.py / label_compactness.py
 extrinsic/                   step 5
   run_extrinsic.py           run_extrinsic + ExtrinsicSpec / ExtrinsicResult
   learning_curves.py         plot_learning_curves
 ```
 
-### Intrinsic analyses
+### Intrinsic analyses - numeric analyses built (step 4a); projection plot next (4b)
 
-A Protocol with one shared call - run over an `EmbeddingTable`, write
-files into an output directory, return a result. Anything else an
-analysis needs (labels, a sampling rule, a seed, hyperparameters) is
-constructor input, so analyses with and without labels share the
-Protocol. MVP analyses:
+Built: `EmbeddingAnalysis`/`AnalysisResult` and the output helpers, the
+seeded `CardSample` rules (`AllCards`, `PerLabelCap`),
+`draw_labeled_sample`, `ClusterAgreement` and `LabelCompactness` (see
+`src/evaluation/README.md`). Both work on unit-length vectors; scalars
+never hold NaN/inf.
 
-- **Projection plot** - 2D projection colored by a label; seeded and
-with fixed hyperparameters so plots are comparable across tables.
-Illustrative only; always reported next to a quantitative analysis.
-- **Cluster agreement** - cluster with no knowledge of labels, then
-permutation-invariant agreement (ARI/NMI) against the labels.
-- **Label compactness** - how tightly cards group by their known label
-(silhouette, nearest-centroid accuracy).
-
-Corpora reach 10^4-10^5+ cards, so every analysis that is super-linear
-or plots points takes an explicit, seeded **sampling** rule (all, or a
-per-label cap). The same table contents + seed + rule selects the same
-card rows.
-
-(Library: scikit-learn only for the MVP - its t-SNE, KMeans and HDBSCAN.
-openTSNE is added only if sampled corpora prove too slow. One
-`requirements.txt` for every machine; only torch's install source differs.)
+Remaining (step 4b): **Projection plot** - 2D projection (scikit-learn
+t-SNE) colored by a label; seeded and with fixed hyperparameters so plots
+are comparable across tables. Illustrative only; always reported next to
+a quantitative analysis. Built on `draw_labeled_sample`,
+`require_fresh_output_dir` and `write_analysis_result` (passing the plot
+as an extra file); adds matplotlib. openTSNE only if sampled corpora prove
+too slow.
 
 ### Extrinsic run
 
@@ -359,29 +353,15 @@ New boundaries:
 # src/evaluation/labels/metric_parquet_labels.py - MetricParquetLabels(name, parquet_paths)
 
 
-# --- evaluation: intrinsic analyses ---
-class CardSample(Protocol):
-    def select(self, rows: Sequence[CardRow],
-               labels: CardLabels | None, seed: int) -> list[CardRow]: ...
-# MVP: AllCards(), PerLabelCap(max_per_label: int) - ValueError if labels is None.
-# Rows whose label is None are dropped by every label-using sample/analysis.
-
-@dataclass(frozen=True)
-class AnalysisResult:
-    files: tuple[Path, ...]
-    scalars: Mapping[str, float]     # e.g. {"ari": 0.41, "nmi": 0.52}; also written as scalars.json
-
-class EmbeddingAnalysis(Protocol):
-    name: str
-    def run(self, table: EmbeddingTable, output_dir: Path) -> AnalysisResult: ...
-        # output_dir is this analysis's own directory (caller composes
-        # .../intrinsic/<encoder_label>/<name>/); run creates it.
-        # FileExistsError if it already exists and is non-empty.
-# MVP: ProjectionPlot, ClusterAgreement, LabelCompactness - each takes its
-# labels / CardSample / seed / hyperparameters in its constructor.
-# run raises ValueError if, after sampling and dropping unlabeled rows, fewer
-# than two cards remain, or (for label-using analyses) fewer than two distinct
-# labels remain; nothing is written in that case.
+# --- evaluation: intrinsic analyses - built in step 4a (see src/evaluation/README.md) ---
+# src/evaluation/analyses/embedding_analysis.py - EmbeddingAnalysis Protocol (name,
+#   run(table, output_dir) -> AnalysisResult), AnalysisResult(files, scalars),
+#   require_fresh_output_dir, write_analysis_result(output_dir, scalars, extra_files)
+# src/evaluation/analyses/card_sample.py - CardSample Protocol, AllCards, PerLabelCap(n)
+# src/evaluation/analyses/labeled_sample.py - LabeledSample, draw_labeled_sample
+# src/evaluation/analyses/cluster_agreement.py - ClusterAgreement(labels, sample, seed, n_init)
+# src/evaluation/analyses/label_compactness.py - LabelCompactness(labels, sample, seed)
+# Step 4b adds src/evaluation/analyses/projection_plot.py - ProjectionPlot, same contract.
 
 
 # --- evaluation: extrinsic ---

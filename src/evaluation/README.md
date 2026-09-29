@@ -8,9 +8,10 @@ heads on a frozen encoder by reusing `Trainer`, and compares the loss
 curves. `Trainer` never calls this package.
 
 Status: in progress. Built: corpus selection, the embedding table,
-embedding a corpus into it, and card labels. Not yet built (design in
-[`plans/evaluation.md`](../../plans/evaluation.md)): the intrinsic
-analyses, extrinsic runs and learning-curve plots.
+embedding a corpus into it, card labels, and the numeric intrinsic
+analyses (cluster agreement, label compactness). Not yet built (design in
+[`plans/evaluation.md`](../../plans/evaluation.md)): the projection plot,
+extrinsic runs and learning-curve plots.
 
 ## Files
 
@@ -52,7 +53,34 @@ sharing it only with small data classes or trivial helpers.
     integer labels stay integers); a card in more than one row is
     rejected, a null label leaves it unlabeled.
 
-Planned (see the plan): `analyses/` for the intrinsic analyses and
+- [analyses/](analyses/): intrinsic measurements over a table.
+  - [embedding_analysis.py](analyses/embedding_analysis.py): the
+    `EmbeddingAnalysis` Protocol (`name`, `run(table, output_dir) ->
+    AnalysisResult`) and the shared output contract:
+    `require_fresh_output_dir` (a non-empty directory is an earlier run's
+    results: `FileExistsError`) and `write_analysis_result` (writes
+    `scalars.json`; NaN/inf is refused, never written).
+  - [card_sample.py](analyses/card_sample.py): the seeded `CardSample`
+    rules, `AllCards` and `PerLabelCap(n)` (at most n cards per label, so
+    one dominant label cannot swamp the rest). The same table + labels +
+    seed always picks the same cards.
+  - [labeled_sample.py](analyses/labeled_sample.py): `draw_labeled_sample`,
+    the preparation every label-using analysis shares (sample, drop
+    unlabeled cards, require two cards and two labels, read vectors).
+  - [cluster_agreement.py](analyses/cluster_agreement.py):
+    `ClusterAgreement`, KMeans (k = number of labels) blind to the labels,
+    scored against them: `ari`, `nmi`.
+  - [label_compactness.py](analyses/label_compactness.py):
+    `LabelCompactness`: `silhouette`, and `nearest_centroid_accuracy`
+    with leave-one-out centroids (a card never votes for itself) next to
+    its `majority_baseline`. Needs some label with two or more cards.
+
+  Both analyses work on unit-length vectors, so distances rank pairs like
+  cosine distance, and both report `n_cards` and `n_labels`
+  (`LabeledSample.size_scalars`) - a convention for label-using analyses,
+  not something the Protocol enforces.
+
+Planned (see the plan): the projection plot in `analyses/`, and
 `extrinsic/` for extrinsic runs and learning-curve plots.
 
 ## How it works
@@ -63,8 +91,9 @@ flowchart LR
     S --> E[embed_corpus]
     M["model (CardEmbedder)"] --> E
     E --> T[(EmbeddingTable)]
-    T --> A[analyses: not yet built]
+    T --> A[analyses]
     C[CardLabels] --> A
+    A --> O["output_dir/scalars.json"]
 ```
 
 `embed_corpus` skips every card already in the table, so an interrupted
@@ -80,13 +109,23 @@ comparing tables built from the same corpus.
 ## How to run
 
 ```python
-spec = CorpusSpec(games=frozenset({GameId.MTG}), tier_filter=None)
+games = frozenset({GameId.MTG, GameId.GWENT})
+spec = CorpusSpec(games=games, tier_filter=None)
 metadata = EmbeddingTableMetadata(
     encoder_label="single_v1", checkpoint_dir=checkpoint_dir,
     embedding_dim=model.embedding_dim,
-    binder_versions={GameId.MTG: binder.version_for(GameId.MTG)},
+    binder_versions={game: binder.version_for(game) for game in games},
     created_at=datetime.now(timezone.utc),
 )
 with EmbeddingTable.create(Path("data/evaluations/run_a/embeddings/single_v1.db"), metadata) as table:
     embed_corpus(model, select_corpus(binder, spec), table, batch_size=64, precision="fp16")
+```
+
+```python
+labels = GameLabels()
+with EmbeddingTable.open(Path("data/evaluations/run_a/embeddings/single_v1.db")) as table:
+    for analysis in (ClusterAgreement(labels, PerLabelCap(500), seed=0),
+                     LabelCompactness(labels, PerLabelCap(500), seed=0)):
+        out = Path("data/evaluations/run_a/intrinsic/single_v1") / analysis.name
+        print(analysis.name, dict(analysis.run(table, out).scalars))
 ```
