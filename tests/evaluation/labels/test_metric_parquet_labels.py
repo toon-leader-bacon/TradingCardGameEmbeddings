@@ -6,19 +6,15 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from src.evaluation.card_labels import (
+from src.evaluation.labels.card_labels import (
     CardLabels,
     GameLabels,
     HoldoutTierLabels,
-    MetricParquetLabels,
 )
-from src.evaluation.embedding_table import CardRow
+from src.evaluation.labels.metric_parquet_labels import MetricParquetLabels
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
-
-
-def _row(game: GameId = GameId.MTG) -> CardRow:
-    return CardRow(uuid4(), game)
+from tests.evaluation.fakes import make_row
 
 
 def _parquet(
@@ -49,7 +45,7 @@ def _arrow_parquet(path: Path, card_ids: list[object], labels: pa.Array) -> Path
 
 class TestMetricParquetLabels:
     def test_labels_come_from_the_parquet_as_strings(self, tmp_path: Path) -> None:
-        a, b = _row(), _row()
+        a, b = make_row(), make_row()
         path = _parquet(
             tmp_path / "m.parquet",
             [(a.nocab_uuid, "rare"), (b.nocab_uuid, "common")],
@@ -61,7 +57,7 @@ class TestMetricParquetLabels:
         assert labels.label_of(b) == "common"
 
     def test_non_string_labels_are_converted_with_str(self, tmp_path: Path) -> None:
-        a = _row()
+        a = make_row()
         path = _parquet(tmp_path / "m.parquet", [(a.nocab_uuid, 3), (uuid4(), 5)])
         assert MetricParquetLabels("cost", [path]).label_of(a) == "3"
 
@@ -69,7 +65,7 @@ class TestMetricParquetLabels:
         self, tmp_path: Path
     ) -> None:
         # pandas would read this column as floats: 3 -> "3.0"
-        a, b = _row(), _row()
+        a, b = make_row(), make_row()
         path = _arrow_parquet(
             tmp_path / "m.parquet",
             [a.nocab_uuid, b.nocab_uuid],
@@ -80,7 +76,7 @@ class TestMetricParquetLabels:
         assert labels.label_of(b) is None
 
     def test_a_float_nan_label_leaves_the_card_unlabeled(self, tmp_path: Path) -> None:
-        a, b = _row(), _row()
+        a, b = make_row(), make_row()
         path = _arrow_parquet(
             tmp_path / "m.parquet",
             [a.nocab_uuid, b.nocab_uuid],
@@ -96,15 +92,15 @@ class TestMetricParquetLabels:
 
     def test_an_unlisted_card_is_unlabeled(self, tmp_path: Path) -> None:
         path = _parquet(tmp_path / "m.parquet", [(uuid4(), "x")])
-        assert MetricParquetLabels("m", [path]).label_of(_row()) is None
+        assert MetricParquetLabels("m", [path]).label_of(make_row()) is None
 
     def test_a_null_label_leaves_the_card_unlabeled(self, tmp_path: Path) -> None:
-        a = _row()
+        a = make_row()
         path = _parquet(tmp_path / "m.parquet", [(a.nocab_uuid, None)])
         assert MetricParquetLabels("m", [path]).label_of(a) is None
 
     def test_several_parquets_form_one_source(self, tmp_path: Path) -> None:
-        mtg, gwent = _row(GameId.MTG), _row(GameId.GWENT)
+        mtg, gwent = make_row(GameId.MTG), make_row(GameId.GWENT)
         first = _parquet(tmp_path / "mtg.parquet", [(mtg.nocab_uuid, "common")])
         second = _parquet(tmp_path / "gwent.parquet", [(gwent.nocab_uuid, "epic")])
         labels = MetricParquetLabels("rarity", [first, second])
@@ -156,26 +152,7 @@ class TestMetricParquetLabels:
             MetricParquetLabels(name, paths)
 
 
-def test_game_labels_are_the_game_value() -> None:
-    labels = GameLabels()
-    assert labels.name == "game"
-    assert labels.label_of(_row(GameId.GWENT)) == "gwent"
-    assert labels.label_of(_row(GameId.MTG)) == "mtg"
-
-
-def test_holdout_tier_labels_agree_with_the_spec() -> None:
-    spec = HoldoutSpec(
-        seed=4, tier_ratios=(1, 1, 1), held_out_games=frozenset({GameId.GWENT})
-    )
-    labels = HoldoutTierLabels(spec)
-    assert labels.name == "holdout_tier"
-    rows = [_row() for _ in range(30)]
-    assert [labels.label_of(row) for row in rows] == [
-        spec.tier_of(row.nocab_uuid, row.source_game).value for row in rows
-    ]
-    assert labels.label_of(_row(GameId.GWENT)) == "validation"
-
-
+# Here rather than in test_card_labels.py because it needs the _parquet helper
 def test_every_source_satisfies_the_protocol(tmp_path: Path) -> None:
     path = _parquet(tmp_path / "m.parquet", [(uuid4(), "a")])
     sources: list[CardLabels] = [

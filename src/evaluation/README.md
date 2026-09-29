@@ -14,31 +14,46 @@ analyses, extrinsic runs and learning-curve plots.
 
 ## Files
 
-- [corpus.py](corpus.py): `CorpusSpec` (games, optional `TierFilter`) and
+Grouped by pipeline stage; each business-logic class has its own file,
+sharing it only with small data classes or trivial helpers.
+
+- [card_row.py](card_row.py): `CardRow` (`nocab_uuid`, `source_game`),
+  the key the embedding table, labels and analyses all share.
+- [select_corpus.py](select_corpus.py): `CorpusSpec` (games, optional `TierFilter`) and
   `select_corpus(card_lookup, spec)`, a lazy generator over the chosen
   games' cards, in `GameId` order. A `TierFilter` keeps an exact set of
   holdout tiers under a given `HoldoutSpec` (e.g. only VALIDATION cards,
   the ones a checkpoint never saw): domain shift is expressed by which
   cards go in, not by a separate evaluation mode.
-- [embedding_table.py](embedding_table.py): `EmbeddingTable`, one
-  encoder's card embeddings in a SQLite file, keyed by `nocab_uuid`.
-  `EmbeddingTableMetadata` records what produced it (encoder label,
-  checkpoint, width, binder version per game, time); its games are fixed
-  at `create()`. `rows()` is sorted by `nocab_uuid`, so seeded sampling
-  picks the same cards from any two tables over the same corpus. Every
-  `add()` is committed before it returns, and a stored table is always
-  finite (`NonFiniteEmbeddingError`).
-- [corpus_embedding.py](corpus_embedding.py): the `CardEmbedder` Protocol
-  (`embedding_dim`, `isolated_embeddings`), which `SingleCardModel` and
-  `MultiCardModel` satisfy as they are, and `embed_corpus`, which embeds
-  a corpus into a table in batches.
-- [card_labels.py](card_labels.py): the `CardLabels` Protocol (`name`,
-  `label_of(row) -> str | None`, `None` meaning unlabeled) and three
-  sources: `MetricParquetLabels` (one or more per-card categorical metric
-  parquets, reading only `nocab_uuid` and `label`; a card in more than
-  one row is rejected, a null label leaves it unlabeled), `GameLabels`,
-  and `HoldoutTierLabels` (a card's tier under a `HoldoutSpec`, typically
-  the checkpoint's own: the domain-shift label).
+- [embedding/](embedding/): cards to stored vectors.
+  - [embedding_table.py](embedding/embedding_table.py): `EmbeddingTable`,
+    one encoder's card embeddings in a SQLite file, keyed by `nocab_uuid`.
+    Its games are fixed at `create()`. `rows()` is sorted by
+    `nocab_uuid`, so seeded sampling picks the same cards from any two
+    tables over the same corpus. Every `add()` is committed before it
+    returns, and a stored table is always finite
+    (`require_finite_vectors`, `NonFiniteEmbeddingError`).
+  - [embedding_table_metadata.py](embedding/embedding_table_metadata.py):
+    `EmbeddingTableMetadata`, what produced a table (encoder label,
+    checkpoint, width, binder version per game, time), with its lossless
+    `to_json()` / `from_json()`.
+  - [embed_corpus.py](embedding/embed_corpus.py): `embed_corpus`, which
+    embeds a corpus into a table in batches, and the `CardEmbedder`
+    Protocol it takes (`embedding_dim`, `isolated_embeddings`), which
+    `SingleCardModel` and `MultiCardModel` satisfy as they are.
+- [labels/](labels/): a categorical label per card.
+  - [card_labels.py](labels/card_labels.py): the `CardLabels` Protocol
+    (`name`, `label_of(row) -> str | None`, `None` meaning unlabeled),
+    `GameLabels`, and `HoldoutTierLabels` (a card's tier under a
+    `HoldoutSpec`, typically the checkpoint's own: the domain-shift label).
+  - [metric_parquet_labels.py](labels/metric_parquet_labels.py):
+    `MetricParquetLabels`, from one or more per-card categorical metric
+    parquets (only `nocab_uuid` and `label` are read, with pyarrow so
+    integer labels stay integers); a card in more than one row is
+    rejected, a null label leaves it unlabeled.
+
+Planned (see the plan): `analyses/` for the intrinsic analyses and
+`extrinsic/` for extrinsic runs and learning-curve plots.
 
 ## How it works
 

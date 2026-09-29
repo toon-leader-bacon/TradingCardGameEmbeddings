@@ -9,12 +9,10 @@ import torch
 from src.encoder_model.embedding_head import LinearEmbeddingHead
 from src.encoder_model.multi_card_model import MultiCardModel
 from src.encoder_model.single_card_model import SingleCardModel
-from src.evaluation.corpus_embedding import CardEmbedder, embed_corpus
-from src.evaluation.embedding_table import (
-    CardRow,
-    EmbeddingTable,
-    EmbeddingTableMetadata,
-)
+from src.evaluation.card_row import CardRow
+from src.evaluation.embedding.embed_corpus import CardEmbedder, embed_corpus
+from src.evaluation.embedding.embedding_table import EmbeddingTable
+from src.evaluation.embedding.embedding_table_metadata import EmbeddingTableMetadata
 from src.schema.game_id import GameId
 from tests.encoder_model.fakes import HIDDEN, FakeTextEncoder
 from tests.evaluation.fakes import WIDTH, FakeEmbedder, make_card, vector_for

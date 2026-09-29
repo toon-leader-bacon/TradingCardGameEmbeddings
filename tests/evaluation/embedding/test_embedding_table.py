@@ -6,13 +6,13 @@ from uuid import uuid4
 import numpy as np
 import pytest
 
-from src.evaluation.embedding_table import (
-    CardRow,
+from src.evaluation.card_row import CardRow
+from src.evaluation.embedding.embedding_table import (
     EmbeddingTable,
-    EmbeddingTableMetadata,
     NonFiniteEmbeddingError,
     require_finite_vectors,
 )
+from src.evaluation.embedding.embedding_table_metadata import EmbeddingTableMetadata
 from src.schema.game_id import GameId
 
 _WIDTH = 3
@@ -228,7 +228,7 @@ def test_require_finite_vectors_accepts_finite_values() -> None:
 def test_a_failed_create_leaves_no_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import src.evaluation.embedding_table as module
+    import src.evaluation.embedding.embedding_table as module
 
     def failing_write(*args: object) -> None:
         raise sqlite3.OperationalError("disk full")

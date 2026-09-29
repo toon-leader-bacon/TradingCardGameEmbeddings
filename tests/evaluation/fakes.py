@@ -7,6 +7,7 @@ from uuid import uuid4
 import torch
 
 from src.encoder_model.precision import Precision
+from src.evaluation.card_row import CardRow
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
@@ -24,6 +25,10 @@ def make_card(name: str, game: GameId = GameId.MTG) -> GenericCard:
             DataSource.SCRYFALL, name, datetime(2026, 1, 1, tzinfo=timezone.utc)
         ),
     )
+
+
+def make_row(game: GameId = GameId.MTG) -> CardRow:
+    return CardRow(uuid4(), game)
 
 
 class FakeCardLookup:

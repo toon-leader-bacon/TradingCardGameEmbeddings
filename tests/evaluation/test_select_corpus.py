@@ -1,6 +1,6 @@
 import pytest
 
-from src.evaluation.corpus import CorpusSpec, TierFilter, select_corpus
+from src.evaluation.select_corpus import CorpusSpec, TierFilter, select_corpus
 from src.schema.game_id import GameId
 from src.schema.holdout import CardTier, HoldoutSpec
 from tests.evaluation.fakes import FakeCardLookup, make_card

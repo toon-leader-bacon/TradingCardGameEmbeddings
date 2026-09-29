@@ -112,7 +112,7 @@ log-and-skip failed batches, `max_consecutive_failures` cap). See
 source of the width) and `isolated_embeddings(cards, precision)`, sharing
 `inference_context` with `evaluate_split_losses`. See
 `src/encoder_model/README.md`. No adapter classes: evaluation depends on
-the `CardEmbedder` Protocol (step 3, in `evaluation/`), which both models
+the `CardEmbedder` Protocol (in `evaluation/embedding/embed_corpus.py`), which both models
 satisfy structurally.
 
 ### CardLabels - built (step 3b)
@@ -128,16 +128,28 @@ design. It is tracked in `src/data_refinement/metrics/TODO.md` ("Cross-game
 rarity metric family"). Evaluation consumes it only through
 `MetricParquetLabels` over its per-game parquets.
 
-### Step 3c (next): file-level cleanup of `evaluation/`
+### Package layout - built (step 3c)
 
-Requested by the user after 3b. Several `evaluation/` modules hold more
-than one class, with data classes (e.g. `CardRow`,
-`EmbeddingTableMetadata`, `CorpusSpec`/`TierFilter`,
-`NonFiniteEmbeddingError`) spread across the files that use them. Split
-them so each file holds one concept and shared data types have an
-obvious home. A pure restructuring: no behavior change; imports, tests
-and `src/evaluation/README.md` follow. Done before step 4 (the analyses)
-adds more files.
+`evaluation/` is grouped by pipeline stage: `card_row.py` and `select_corpus.py`
+at the top, then `embedding/` and `labels/` subpackages (see
+`src/evaluation/README.md`). The rule, set by the user: each business-logic
+class stands in its own file; small data classes and one or two trivial
+helper *classes* may share their main class's file; three or more such
+helper classes go to a dedicated utilities module (e.g.
+`analyses/_shared.py`). Private helper functions of a module's main class
+or function stay in its file and do not count toward that limit. No
+`__init__` re-exports; files are named after their main symbol. The
+layout is expected to evolve as steps 4-5 land. Planned placement:
+
+```
+analyses/                    step 4
+  embedding_analysis.py      EmbeddingAnalysis Protocol + AnalysisResult
+  card_sample.py             CardSample Protocol + AllCards + PerLabelCap
+  projection_plot.py / cluster_agreement.py / label_compactness.py
+extrinsic/                   step 5
+  run_extrinsic.py           run_extrinsic + ExtrinsicSpec / ExtrinsicResult
+  learning_curves.py         plot_learning_curves
+```
 
 ### Intrinsic analyses
 
@@ -331,19 +343,20 @@ New boundaries:
 #   MultiCardModel(text_encoder, embedding_head, num_heads, num_layers);
 #   precision.inference_context(model, precision)
 
-# --- evaluation: built in step 3a (see src/evaluation/README.md) ---
-# src/evaluation/corpus.py - CorpusSpec(games, tier_filter), TierFilter(holdout, tiers),
+# --- evaluation: built in steps 3a-3c (see src/evaluation/README.md) ---
+# src/evaluation/card_row.py - CardRow(nocab_uuid, source_game)
+# src/evaluation/select_corpus.py - CorpusSpec(games, tier_filter), TierFilter(holdout, tiers),
 #   select_corpus(cards, spec) -> Iterator[GenericCard]
-# src/evaluation/embedding_table.py - CardRow(nocab_uuid, source_game),
-#   EmbeddingTableMetadata, EmbeddingTable.create/open/add/has_card/rows/vectors_for
-# src/evaluation/corpus_embedding.py - CardEmbedder Protocol,
+# src/evaluation/embedding/embedding_table.py - EmbeddingTable.create/open/add/has_card/
+#   rows/vectors_for; require_finite_vectors, NonFiniteEmbeddingError
+# src/evaluation/embedding/embedding_table_metadata.py - EmbeddingTableMetadata
+#   (to_json / from_json)
+# src/evaluation/embedding/embed_corpus.py - CardEmbedder Protocol,
 #   embed_corpus(embedder, corpus, table, batch_size, precision, *,
 #   max_consecutive_failures=5) -> int
-
-
-# --- evaluation: built in step 3b (see src/evaluation/README.md) ---
-# src/evaluation/card_labels.py - CardLabels Protocol (name, label_of(row) -> str | None),
-#   MetricParquetLabels(name, parquet_paths), GameLabels(), HoldoutTierLabels(holdout)
+# src/evaluation/labels/card_labels.py - CardLabels Protocol (name,
+#   label_of(row) -> str | None), GameLabels(), HoldoutTierLabels(holdout)
+# src/evaluation/labels/metric_parquet_labels.py - MetricParquetLabels(name, parquet_paths)
 
 
 # --- evaluation: intrinsic analyses ---

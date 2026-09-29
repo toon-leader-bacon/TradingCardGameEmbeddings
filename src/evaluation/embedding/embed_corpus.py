@@ -15,8 +15,8 @@ import numpy as np
 import torch
 
 from src.encoder_model.precision import Precision
-from src.evaluation.embedding_table import (
-    CardRow,
+from src.evaluation.card_row import CardRow
+from src.evaluation.embedding.embedding_table import (
     EmbeddingTable,
     require_finite_vectors,
 )

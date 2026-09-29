@@ -1,45 +1,19 @@
-"""Card labels: a categorical label per stored card, for the intrinsic
-analyses to color, cluster and score by.
-
-A CardLabels maps a CardRow to a label string, or None when that card is
-not labeled (the analysis then leaves it out). Three sources:
-
-- MetricParquetLabels: a per-card categorical metric's parquet(s), read
-  the way dojos read them (nocab_uuid + label columns only).
-- GameLabels: the card's game.
-- HoldoutTierLabels: the card's tier under a HoldoutSpec (the
-  domain-shift label: seen in training, or held out).
-"""
-
-from pathlib import Path
-from typing import Protocol, Sequence
-from uuid import UUID
+"""MetricParquetLabels: card labels read from per-card categorical metric
+parquets, the way dojos read them (nocab_uuid + label columns only)."""
 
 import math
+from pathlib import Path
+from typing import Sequence
+from uuid import UUID
 
 import pyarrow.parquet as pq
 
-from src.evaluation.embedding_table import CardRow
-from src.schema.holdout import HoldoutSpec
+from src.evaluation.card_row import CardRow
 
 # The metric-parquet convention these labels read (plans/evaluation.md has
 # an open question on giving it a shared home)
 _UUID_COLUMN = "nocab_uuid"
 _LABEL_COLUMN = "label"
-
-
-class CardLabels(Protocol):
-    """A categorical label per card.
-
-    name: what the labels are, used in output paths and plot legends.
-    """
-
-    name: str
-
-    def label_of(self, row: CardRow) -> str | None:
-        """Inputs: row (CardRow). Output: the card's label, or None if it
-        is not labeled. Side effects: none. Exceptions: none."""
-        ...
 
 
 class MetricParquetLabels:
@@ -97,48 +71,6 @@ class MetricParquetLabels:
             True
         """
         return self._labels.get(row.nocab_uuid)
-
-
-class GameLabels:
-    """Every card labeled by its game (GameId value). name = "game"."""
-
-    def __init__(self) -> None:
-        """Inputs: none. Output: none (constructor). Side effects: none.
-        Exceptions: none."""
-        self.name = "game"
-
-    def label_of(self, row: CardRow) -> str:
-        """Inputs: row (CardRow). Output: row.source_game.value, never
-        None. Side effects: none. Exceptions: none.
-
-        Example:
-            >>> GameLabels().label_of(CardRow(card_id, GameId.GWENT))
-            'gwent'
-        """
-        return row.source_game.value
-
-
-class HoldoutTierLabels:
-    """Every card labeled by its CardTier under holdout (typically the
-    checkpoint's own, from load_checkpoint_holdout): whether training saw
-    it. name = "holdout_tier"."""
-
-    def __init__(self, holdout: HoldoutSpec) -> None:
-        """Inputs: holdout (HoldoutSpec). Output: none (constructor). Side
-        effects: none. Exceptions: none."""
-        self.name = "holdout_tier"
-        self._holdout = holdout
-
-    def label_of(self, row: CardRow) -> str:
-        """Inputs: row (CardRow). Output: the CardTier value ("train",
-        "test" or "validation"), never None. Side effects: none.
-        Exceptions: none.
-
-        Example:
-            >>> HoldoutTierLabels(spec).label_of(row)
-            'validation'
-        """
-        return self._holdout.tier_of(row.nocab_uuid, row.source_game).value
 
 
 def _require_non_empty(name: str, parquet_paths: Sequence[Path]) -> None:
