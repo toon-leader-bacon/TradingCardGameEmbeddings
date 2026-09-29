@@ -125,7 +125,7 @@ class WinningDeckMaskedCardMetric(DeckCardMaskMetric):
         "data/metrics/isotropic/winning_deck_masked_card.parquet"
     )
 
-    def _deck_uuid_for_row(self, row: dict, deck_box: DeckBox) -> UUID:
+    def _deck_uuid_for_row(self, row: dict, deck_box: DeckBox) -> UUID | None:
         """Resolve this row's winner's final deck and ensure it's
         stored in deck_box, via row_utils.deck_for_player() - the same
         shared per-player deck builder
@@ -136,20 +136,17 @@ class WinningDeckMaskedCardMetric(DeckCardMaskMetric):
             row: one parsed Flavor A summary row.
             deck_box: same box passed to __init__.
         Output: the winner's final deck's uuid, now guaranteed present
-            in deck_box. Raises if row has no resolvable winner (see
-            Exceptions below) - unlike accumulate()'s target-lookup
-            path, a deck is REQUIRED for every row this metric is fed,
-            so callers upstream (e.g. the scanner) are expected to
-            pre-filter to winner-resolvable rows, or accept the raise.
+            in deck_box - or None if row has no resolvable winner (a
+            real, expected outcome across the isotropic corpus, e.g. a
+            solo/resigned game - see BRAINSTORM.md's known-biases
+            note), which skips the row entirely rather than raising.
         Side effects: writes exactly one deck into deck_box via
-            create_if_absent().
-        Exceptions: raises if row_utils.winner_entry(row) returns None.
+            create_if_absent() when a winner resolves; none otherwise.
+        Exceptions: none.
         """
         winner = winner_entry(row)
         if winner is None:
-            raise ValueError(
-                "WinningDeckMaskedCardMetric: row has no resolvable winner"
-            )
+            return None
         deck = deck_for_player(self._card_lookup, winner)
         deck_box.create_if_absent(deck)
         return deck.nocab_uuid

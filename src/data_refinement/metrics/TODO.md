@@ -8,12 +8,21 @@
   private `data/metrics/isotropic/deck_box.db` holds 1.7M decks,
   4.4 GB). Run heavy jobs one at a time; two in parallel ran the
   machine out of memory.
-- **`WinningDeckMaskedCardMetric` raises on every game with no usable
-  winner** (`isotropic/summary/deck_card_mask_metric.py`,
-  `_deck_uuid_for_row()`) instead of skipping it quietly as its
-  sibling metrics do. The scanner isolates it, so outputs are right,
-  but a full run logs 9,411 full tracebacks, which buries real errors.
-  Filter those rows out before `accumulate()` raises.
+- [x] **`WinningDeckMaskedCardMetric` no longer raises on a game with
+  no usable winner** (2026-09-29). `../generic/deck_card_mask_metric.py`'s
+  `DeckCardMaskMetric.accumulate()` and its `_deck_uuid_for_row()`
+  contract now allow returning `None` to mean "this row has no deck at
+  all, skip it entirely" (a real, expected outcome, not an error) -
+  `accumulate()` returns immediately in that case, before touching
+  `deck_box` or the target-lookup path. `WinningDeckMaskedCardMetric`
+  (isotropic's own `_deck_uuid_for_row()`) now returns `None` instead
+  of raising `ValueError` when `row_utils.winner_entry(row)` is `None`,
+  matching how sibling metrics (e.g. `DeckPairWinnerMetric`) already
+  skip an ineligible row quietly. `play_gwent`'s
+  `LeaderMaskedFromDeckMetric` (the base's only other consumer) is
+  unaffected - its own `_deck_uuid_for_row()` always resolves a deck,
+  never returns `None`. A full run no longer logs a traceback per
+  no-winner game.
 
 - **Cross-game rarity metric family.** Build one metric per game,
   each mapping that game's own rarity into a single shared rarity
