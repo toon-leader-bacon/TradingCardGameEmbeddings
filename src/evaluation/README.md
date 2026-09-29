@@ -9,16 +9,20 @@ curves. `Trainer` never calls this package.
 
 Status: in progress. Built: corpus selection, the embedding table,
 embedding a corpus into it, card labels, and the intrinsic analyses
-(cluster agreement, label compactness, projection plot), and extrinsic
-runs. Not yet built (design in
-[`plans/evaluation.md`](../../plans/evaluation.md)): learning-curve
-plots.
+(cluster agreement, label compactness, projection plot), extrinsic
+runs, and learning-curve plots. Not yet built (design in
+[`plans/evaluation.md`](../../plans/evaluation.md)): a driver script.
 
 ## Files
 
 Grouped by pipeline stage; each business-logic class has its own file,
 sharing it only with small data classes or trivial helpers.
 
+- [chart_theme.py](chart_theme.py): `ChartTheme`, the colors and
+  resolution every figure shares (the dataviz reference palette, light
+  mode: eight categorical colors in their validated order, surface, text,
+  gridline and axis grays). Each chart's style composes it:
+  `FigureStyle` (projection scatter) and `CurveStyle` (learning curves).
 - [card_row.py](card_row.py): `CardRow` (`nocab_uuid`, `source_game`),
   the key the embedding table, labels and analyses all share.
 - [select_corpus.py](select_corpus.py): `CorpusSpec` (games, optional `TierFilter`) and
@@ -113,8 +117,19 @@ sharing it only with small data classes or trivial helpers.
     write is logged, so a finished run is never lost. Reuse the *same*
     dojo objects for every encoder: each run calls `reset_head()` and
     reseeds `random`/`torch`, so every encoder starts from identical heads.
-
-Planned (see the plan): learning-curve plots in `extrinsic/`.
+  - [learning_curves.py](extrinsic/learning_curves.py):
+    `plot_learning_curves(curves, output_dir, x_axis)`: encoder label ->
+    rounds CSV in, one `<dojo>.png` per dojo out, every encoder's TEST
+    loss against `step` or `elapsed_seconds`. Reads CSVs only through
+    `read_rounds_csv`; reads, groups and names every plot (refusing two
+    dojos that would share a file name) before writing any. The order of
+    `curves` fixes each encoder's color on every chart; up to eight
+    encoders (the validated line colors).
+  - [curve_renderer.py](extrinsic/curve_renderer.py): `CurveRenderer`
+    draws one chart in a `CurveStyle`: 2px lines ending in a ringed dot, a
+    legend for two or more encoders (one encoder: the title names it),
+    direct end labels when there are at most four and their ends don't
+    crowd, hairline gridlines. The rounds CSVs are the table view.
 
 ## How it works
 
@@ -168,6 +183,7 @@ with EmbeddingTable.open(Path("data/evaluations/run_a/embeddings/single_v1.db"))
 Extrinsic, one run per encoder on the same dojos:
 
 ```python
+curves = {}
 spec = ExtrinsicSpec(diet_rule=Uniform(), head_lr=1e-3, steps_per_round=200,
                      max_rounds=50, saturation=saturation, eval_examples_per_dojo=512,
                      seed=0)
@@ -175,4 +191,6 @@ for label, model in (("single_v1", trained), ("untrained", fresh)):
     result = run_extrinsic(model, label, dojos, spec, hardware,
                            Path("data/evaluations/run_a"))
     print(label, result.validation_losses)
+    curves[label] = result.rounds_csv
+plot_learning_curves(curves, Path("data/evaluations/run_a/extrinsic/plots"))
 ```

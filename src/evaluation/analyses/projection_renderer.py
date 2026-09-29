@@ -13,7 +13,7 @@ no global state or display backend is involved.
 """
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
@@ -21,57 +21,56 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
+from src.evaluation.chart_theme import REFERENCE_CATEGORICAL, ChartTheme
+
 _OTHER = "Other"
 _PANEL_INCHES = 3.0  # width and height of one small-multiples cell
 
 
 @dataclass(frozen=True)
 class FigureStyle:
-    """How a projection figure looks. The defaults are the dataviz
-    reference palette, light mode (these are files for reports).
+    """How a projection figure looks: the shared ChartTheme plus what a
+    scatter needs.
 
+    theme: surface, text colors and resolution (ChartTheme).
     series: the highlight colors, in slot order; its length is how many
-        labels the overview may color. The default three (blue, orange,
-        aqua) pass the skill's validator with every pair side by side, as
+        labels the overview may color. The default is the reference
+        palette's first three (blue, orange, aqua), which pass the skill's
+        validator with every pair side by side, as
         a scatter needs; a replacement must be re-validated
         (validate_palette.js --pairs all) and should not exceed three -
         documented, deliberately not enforced, since validity depends on the
         colors, not just their count. Aqua
         is below 3:1 contrast on the surface: the legend and the
         projection.csv table view are its required relief.
-    other: the "Other" fold - a neutral, never a hue. The default is the
-        palette's baseline gray, validated against the default series (the
-        darker muted gray #898781 fails against aqua).
-    receded: every other card in a panel.
-    surface, text_primary, text_secondary: background and text colors.
+    other: the "Other" fold - a neutral, never a hue. Deliberately its own
+        field, not a theme color: it was validated against the default
+        series (the darker muted gray #898781 fails against aqua), so
+        changing the series means re-validating this too. Every other card
+        in a panel is drawn in the theme's gridline gray.
     marker_area: scatter marker area in points^2 (small: dense scatter).
-    dpi: PNG resolution.
     max_panel_columns: the widest the small-multiples grid gets.
 
     Exceptions: ValueError on construction if series is empty, or
-        marker_area, dpi or max_panel_columns is not positive.
+        marker_area or max_panel_columns is not positive.
     """
 
-    series: tuple[str, ...] = ("#2a78d6", "#eb6834", "#1baf7a")
+    theme: ChartTheme = field(default_factory=ChartTheme)
+    series: tuple[str, ...] = REFERENCE_CATEGORICAL[:3]
     other: str = "#c3c2b7"
-    receded: str = "#e1e0d9"
-    surface: str = "#fcfcfb"
-    text_primary: str = "#0b0b0b"
-    text_secondary: str = "#52514e"
     marker_area: float = 6.0
-    dpi: int = 150
     max_panel_columns: int = 4
 
     def __post_init__(self) -> None:
         """Validate the fields. Inputs: none. Output: None. Side effects:
-        none. Exceptions: ValueError if series is empty,
-        or marker_area, dpi or max_panel_columns is not positive."""
+        none. Exceptions: ValueError if series is empty, or marker_area or
+        max_panel_columns is not positive."""
         if not self.series:
             raise ValueError("a FigureStyle needs at least one series color")
-        if self.marker_area <= 0 or self.dpi < 1 or self.max_panel_columns < 1:
+        if self.marker_area <= 0 or self.max_panel_columns < 1:
             raise ValueError(
-                "marker_area, dpi and max_panel_columns must be positive, got "
-                f"{self.marker_area}, {self.dpi}, {self.max_panel_columns}"
+                "marker_area and max_panel_columns must be positive, got "
+                f"{self.marker_area}, {self.max_panel_columns}"
             )
 
     @property
@@ -155,7 +154,7 @@ class ProjectionRenderer:
         path: Path,
     ) -> Path:
         """Small multiples: one panel per label, that label highlighted in
-        the first series color over every card in the receded gray, shared
+        the first series color over every card in the theme's gridline gray, shared
         axes.
 
         Inputs: coordinates (n, 2); labels (one per card); panel_labels (the
@@ -176,10 +175,10 @@ class ProjectionRenderer:
         # One panel per label: all cards receded, this label on top
         for axes, label in zip(axes_grid.flat, panel_labels):
             members = label_array == label
-            self._scatter(axes, coordinates, self.style.receded, None)
+            self._scatter(axes, coordinates, self.style.theme.gridline, None)
             self._scatter(axes, coordinates[members], self.style.series[0], None)
             axes.set_title(
-                f"{label} ({int(members.sum())})", color=self.style.text_primary
+                f"{label} ({int(members.sum())})", color=self.style.theme.text_primary
             )
 
         # Unused grid cells stay blank
@@ -216,17 +215,19 @@ class ProjectionRenderer:
         style = self._style
         # A single plot gets room for its outside legend; panels grow per cell
         size = (max(6.5, _PANEL_INCHES * columns), max(5.0, _PANEL_INCHES * rows))
-        figure = Figure(figsize=size, facecolor=style.surface, layout="constrained")
+        figure = Figure(
+            figsize=size, facecolor=style.theme.surface, layout="constrained"
+        )
         axes_grid = figure.subplots(
             rows, columns, squeeze=False, sharex=True, sharey=True
         )
         # Recessive axes: t-SNE coordinates carry no units, so no ticks
         for axes in axes_grid.flat:
-            axes.set_facecolor(style.surface)
+            axes.set_facecolor(style.theme.surface)
             axes.set_xticks([])
             axes.set_yticks([])
             for spine in axes.spines.values():
-                spine.set_color(style.receded)
+                spine.set_color(style.theme.gridline)
                 spine.set_linewidth(0.5)
         return figure, axes_grid
 
@@ -249,7 +250,7 @@ class ProjectionRenderer:
         """Inputs: axes with labeled series; fold_drawn (whether the first
         series drawn is the "Other" fold). Output: None. Side effects: adds
         a frameless legend outside the plot area, text in
-        style.text_secondary, markers enlarged so the swatch reads. The
+        style.theme.text_secondary, markers enlarged so the swatch reads. The
         fold is drawn first (beneath) but listed last, after the
         highlighted labels in slot order - found by its draw position,
         never by its text. Exceptions: none."""
@@ -266,7 +267,7 @@ class ProjectionRenderer:
             borderaxespad=0.0,
             frameon=False,
             markerscale=3.0,
-            labelcolor=self._style.text_secondary,
+            labelcolor=self._style.theme.text_secondary,
         )
 
     def _grid_shape(self, panel_count: int) -> tuple[int, int]:
@@ -280,7 +281,8 @@ class ProjectionRenderer:
 
     def _save(self, figure: Figure, path: Path) -> Path:
         """Inputs: a finished figure, its path. Output: path. Side effects:
-        writes the PNG at style.dpi on the style's surface. Exceptions:
+        writes the PNG at the theme's dpi on its surface. Exceptions:
         OSError."""
-        figure.savefig(path, dpi=self._style.dpi, facecolor=self._style.surface)
+        theme = self._style.theme
+        figure.savefig(path, dpi=theme.dpi, facecolor=theme.surface)
         return path

@@ -152,6 +152,8 @@ analyses/                    step 4
 extrinsic/                   step 5
   run_extrinsic.py           run_extrinsic + ExtrinsicSpec / ExtrinsicResult
   learning_curves.py         plot_learning_curves
+  curve_renderer.py          CurveRenderer + CurveStyle
+chart_theme.py               ChartTheme: colors/dpi shared by FigureStyle and CurveStyle
 ```
 
 ### Intrinsic analyses - built (step 4)
@@ -162,14 +164,11 @@ contract, seeded `CardSample` rules and `draw_labeled_sample`; see
 `src/evaluation/README.md`. openTSNE only if sampled corpora prove too
 slow for scikit-learn's t-SNE.
 
-### Extrinsic run - built (step 5a); learning curves next (5b)
+### Extrinsic run - built (step 5)
 
-`run_extrinsic`, `ExtrinsicSpec`, `ExtrinsicResult` in
-`src/evaluation/extrinsic/run_extrinsic.py`; see `src/evaluation/README.md`.
-Remaining (step 5b): a plotting step overlaying every encoder's TEST curve
-per dojo (`plot_learning_curves`, below), reading rounds CSVs only through
-`read_rounds_csv`. Unequal curve lengths plot fine - rounds-to-saturation
-is itself a signal.
+`run_extrinsic` and `plot_learning_curves` (with `CurveRenderer` /
+`CurveStyle` on the shared `ChartTheme`) in `src/evaluation/extrinsic/`;
+see `src/evaluation/README.md`.
 
 ### `training/` support for extrinsic reuse - built (step 1)
 
@@ -303,17 +302,13 @@ New boundaries:
 # src/evaluation/analyses/projection_renderer.py - FigureStyle, ProjectionRenderer(style)
 
 
-# --- evaluation: extrinsic - run_extrinsic built in step 5a ---
+# --- evaluation: extrinsic - built in step 5 (see src/evaluation/README.md) ---
 # src/evaluation/extrinsic/run_extrinsic.py - ExtrinsicSpec, ExtrinsicResult,
 #   run_extrinsic(encoder, encoder_label, dojos, spec, hardware, output_dir, *, cost_of)
-
-# step 5b:
-def plot_learning_curves(curves: Mapping[str, Path], output_dir: Path,
-                         x_axis: Literal["step", "elapsed_seconds"] = "step") -> tuple[Path, ...]: ...
-    # encoder_label -> rounds CSV, read only via read_rounds_csv (evaluation never
-    # parses the CSV itself); one overlay plot per dojo of TEST loss vs x_axis.
-    # output_dir is the plots directory itself; created if missing; existing
-    # plot files of the same name are overwritten (plots are cheap to regenerate).
+# src/evaluation/extrinsic/learning_curves.py - plot_learning_curves(curves, output_dir,
+#   x_axis="step", *, renderer=CurveRenderer()) -> tuple[Path, ...]
+# src/evaluation/extrinsic/curve_renderer.py - CurveStyle, CurveRenderer(style)
+# src/evaluation/chart_theme.py - ChartTheme (shared by FigureStyle and CurveStyle)
 ```
 
 

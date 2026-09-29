@@ -19,7 +19,7 @@ class TestFigureStyle:
 
     @pytest.mark.parametrize(
         "overrides",
-        [{"series": ()}, {"marker_area": 0.0}, {"dpi": 0}, {"max_panel_columns": 0}],
+        [{"series": ()}, {"marker_area": 0.0}, {"max_panel_columns": 0}],
     )
     def test_invalid_fields_are_rejected(self, overrides: dict) -> None:
         with pytest.raises(ValueError):
@@ -27,7 +27,7 @@ class TestFigureStyle:
 
     def test_is_frozen(self) -> None:
         with pytest.raises(FrozenInstanceError):
-            FigureStyle().dpi = 10  # type: ignore[misc]
+            FigureStyle().marker_area = 10.0  # type: ignore[misc]
 
 
 class TestProjectionRenderer:
