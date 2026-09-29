@@ -42,7 +42,14 @@ row, or by deck for contrastive) layer under it.
   before batching (`MaskTargetKeyMod`, `ShuffleDeckMod`, `NoOpMod`). A
   mod declares `train_only`: augmentations run on TRAIN only, while a
   mod the task depends on (masking the field a dojo predicts) is built
-  with `train_only=False` so it applies on every split.
+  with `train_only=False` so it applies on every split. **Mods never
+  mutate their input.** A mod returns new cards and lists and never
+  assigns into, appends to, or shuffles what it was given. To edit a
+  card field, use `GenericCardFactory.with_field` (`src/schema/card_factory.py`, path
+  copying: only the containers on the path are copied). For lists, use
+  the non-mutating expression forms (`[*xs, x]`, slicing, `sorted`,
+  `rng.sample`), never `append`/`insert`/`remove`/`pop`/`sort`/
+  `random.shuffle`/`+=`.
 - **`file_managers/`** - split management. `FileManagerParquet` splits a
   metric's parquet into train/test/validation files and streams them in
   chunks (`splits_exist()` lets a repeat construction reuse them).

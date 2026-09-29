@@ -66,7 +66,8 @@ class GenericCard:
     holder of the same GenericCard object (e.g. CardBinder's own
     canonical copy, if a caller ever gets a reference to it) without
     frozen catching it. Never mutate raw_content in place — build a new
-    dict and use dataclasses.replace() to get a new GenericCard instead.
+    GenericCard with GenericCardFactory.with_field() (src/schema/card_factory.py) (or a
+    new dict plus dataclasses.replace()) instead.
     CardBinder's own read accessors (get_by_uuid() etc.) return a deep
     copy for exactly this reason, so a caller mutating what it got back
     can't reach the binder's own stored card either way.

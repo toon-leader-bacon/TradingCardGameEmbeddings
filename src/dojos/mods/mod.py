@@ -15,6 +15,9 @@ class Mod(ABC):
     masking mod, where the masked field must stay masked at test/
     validation time too, or the model can just read the answer off the
     input.
+
+    Every mod must leave its input unchanged and return new objects; see
+    src/dojos/README.md (mods/) for the rule and the helpers to use.
     """
 
     def __init__(self, train_only: bool = True) -> None:
