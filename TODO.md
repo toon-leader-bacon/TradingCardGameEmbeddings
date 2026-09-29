@@ -22,14 +22,16 @@
   helpers. `scripts/run_data_retrieval.py`'s special-cased
   `run_seventeenlands()` is now `_run_standard(SeventeenLandsDownloader())`
   like every other entry.
-- `SeventeenLandsDownloader.download_one()` never checks whether a
-  ref's destination file already exists before re-downloading and
-  re-extracting it, unlike every other `Downloader` subclass
+- [x] `SeventeenLandsDownloader` is now resumable (2026-09-29).
+  `download()`'s batch loop skips a ref whose destination file already
+  exists (reporting it as a success with that existing path) instead
+  of re-downloading and re-extracting it, matching every other
+  `Downloader` subclass's convention
   (`HearthstoneJsonDownloader.download_missing_builds()`,
-  `PokemonTcgDataDownloader`, etc.), which skip files already on disk.
-  `scripts/run_data_retrieval.py`'s own module docstring claims "every
-  downloader is independently resumable," but 17lands currently isn't
-  - a re-run redownloads everything, despite 17lands runs being called
-  out there as "10+ hour crawls." Fix: skip a ref in `download()`/
-  `download_one()` when `_destination_path(ref)` already exists,
-  mirroring `download_missing_builds()`'s check.
+  `PokemonTcgDataDownloader`, etc.) and making
+  `scripts/run_data_retrieval.py`'s "every downloader is independently
+  resumable" claim actually true for 17lands. `download_one()`, called
+  directly, is unchanged and still always (re-)downloads and
+  overwrites - the skip is `download()`'s own batch-loop behavior, same
+  relationship `download_build()` has to
+  `download_missing_builds()`.

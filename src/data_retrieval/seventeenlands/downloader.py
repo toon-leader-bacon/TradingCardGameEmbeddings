@@ -13,6 +13,14 @@ produced (LandingPageParser, SeventeenLandsFileRef.from_known(), or
 known_files.list_known_refs()) — download() falls back to the last of
 those when given no refs (or an empty refs list).
 
+Resumable: download() skips a ref whose destination file already
+exists rather than re-downloading it, same convention as
+HearthstoneJsonDownloader.download_missing_builds() - a re-run only
+fetches what's still missing. download_one(), called directly, still
+always (re-)downloads and overwrites, same as
+HearthstoneJsonDownloader.download_build() - the skip is download()'s
+own batch-loop behavior, not download_one()'s.
+
 Fits the shared Downloader base class the same way HearthstoneJsonDownloader
 does: download()/download_one() stay the richer, filterable API for direct
 or scripted use, and _run_phase_1() is a thin no-arg wrapper - download()
@@ -128,10 +136,10 @@ class SeventeenLandsDownloader(Downloader):
         before filtering, so a caller with no specific refs in hand
         can still pass expansions=[...]/formats=[...] to narrow that
         full set down. Composed of _filter_refs() followed by one
-        download_one() call per surviving ref — no additional logic
-        beyond calling the two and collecting results. Best-effort: one
-        ref's failure is recorded and the loop continues to the next
-        ref, rather than aborting the whole batch — see download_one().
+        download_one() call per surviving ref not already on disk — see
+        the resumability note below. Best-effort: one ref's failure is
+        recorded and the loop continues to the next ref, rather than
+        aborting the whole batch — see download_one().
 
         Inputs:
             refs: candidate files to download. None (the default) or
@@ -149,12 +157,16 @@ class SeventeenLandsDownloader(Downloader):
         Output: one DownloadOutcome per ref that survived filtering, in
             the same order as the filtered refs.
         Side effects: creates raw_data_dir (and per-data-type
-            subdirectories) if missing; one paced network request and
-            (on success) two file writes (compressed download, then
-            extracted CSV) per surviving ref; prints a tqdm progress
-            bar to stderr covering the filtered refs, and one
-            tqdm.write() line per failed ref — same convention as
-            HearthstoneJsonDownloader.download_missing_builds().
+            subdirectories) if missing; for each surviving ref not
+            already present at its destination path, one paced network
+            request and (on success) two file writes (compressed
+            download, then extracted CSV); prints a tqdm progress bar to
+            stderr covering the filtered refs, and one tqdm.write() line
+            per failed ref — same convention as
+            HearthstoneJsonDownloader.download_missing_builds(),
+            including the resumability: a ref whose destination file
+            already exists is skipped (reported as a success with that
+            existing path) rather than re-downloaded.
         Exceptions: none — download_one() failures are caught here, not
             propagated (see download_one()).
 
@@ -176,6 +188,13 @@ class SeventeenLandsDownloader(Downloader):
 
         outcomes: list[DownloadOutcome] = []
         for ref in tqdm(filtered_refs, desc="17Lands files", unit="file"):
+            destination_path = self._destination_path(ref)
+            if destination_path.exists():
+                outcomes.append(
+                    DownloadOutcome(ref=ref, path=destination_path, error=None)
+                )
+                continue
+
             try:
                 path = self.download_one(ref)
             except Exception as error:

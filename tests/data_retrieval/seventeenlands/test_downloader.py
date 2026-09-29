@@ -217,6 +217,65 @@ class TestDownloadOne:
         assert not result_path.with_suffix(".csv.gz").exists()
 
 
+class TestDownloadResumability:
+    def test_skips_a_ref_whose_destination_file_already_exists(
+        self, tmp_path: Path
+    ) -> None:
+        downloader = _make_downloader(tmp_path)
+        existing_path = downloader._destination_path(_GAME_MSH_PREMIER)
+        existing_path.parent.mkdir(parents=True)
+        existing_path.write_bytes(b"already here")
+
+        with patch("requests.get") as mock_get:
+            result = downloader.download([_GAME_MSH_PREMIER])
+
+        mock_get.assert_not_called()
+        assert len(result.outcomes) == 1
+        outcome = result.outcomes[0]
+        assert outcome.ref == _GAME_MSH_PREMIER
+        assert outcome.path == existing_path
+        assert outcome.error is None
+        assert existing_path.read_bytes() == b"already here"
+
+    def test_downloads_only_the_missing_ref_when_one_already_exists(
+        self, tmp_path: Path
+    ) -> None:
+        downloader = _make_downloader(tmp_path)
+        existing_path = downloader._destination_path(_GAME_MSH_PREMIER)
+        existing_path.parent.mkdir(parents=True)
+        existing_path.write_bytes(b"already here")
+        response = _mock_streaming_response([gzip.compress(b"fresh data")])
+
+        with patch("requests.get", return_value=response) as mock_get:
+            result = downloader.download([_GAME_MSH_PREMIER, _GAME_WOE_TRAD])
+
+        mock_get.assert_called_once()
+        assert mock_get.call_args.args[0] == _GAME_WOE_TRAD.url
+        assert [outcome.path for outcome in result.outcomes] == [
+            existing_path,
+            tmp_path / "game_data" / "WOE.TradDraft.csv",
+        ]
+
+    def test_download_one_always_overwrites_regardless_of_existing_file(
+        self, tmp_path: Path
+    ) -> None:
+        # The skip-if-present check lives in download()'s batch loop,
+        # not download_one() - calling download_one() directly still
+        # always (re-)downloads, same as
+        # HearthstoneJsonDownloader.download_build().
+        downloader = _make_downloader(tmp_path)
+        existing_path = downloader._destination_path(_GAME_MSH_PREMIER)
+        existing_path.parent.mkdir(parents=True)
+        existing_path.write_bytes(b"stale")
+        response = _mock_streaming_response([gzip.compress(b"fresh data")])
+
+        with patch("requests.get", return_value=response) as mock_get:
+            result_path = downloader.download_one(_GAME_MSH_PREMIER)
+
+        mock_get.assert_called_once()
+        assert result_path.read_bytes() == b"fresh data"
+
+
 class TestDownload:
     def test_downloads_only_filtered_refs(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)
