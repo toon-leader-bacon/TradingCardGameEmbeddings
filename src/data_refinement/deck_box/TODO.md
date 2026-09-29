@@ -30,18 +30,11 @@ not decks).
   `.db` boxes have been used for a while. `seventeenlands_game_data`
   (`mtg.db`) was still running; see below.
 
-- The play_gwent `unresolved card template id '24'` error no longer
-  happens: the 2026-09-27 run logged no unresolved ids and put 0
-  Unknown cards in 60,197 decks.
 - STS2 cards missing from the spire-codex binder. Across the 7,800 STS2
   decks there are 251 Unknown slots out of 195,027 (0.13%), in 229
   decks. Ids by count (sts2runs + sts_gg): `CARD.FOLLOW_THROUGH`
   126+26, `CARD.GRAPPLE` 41+12, `CARD.PREPARE` 40+0,
   `CARD.ABUNDANCE` 0+4, `CARD.UNDERWORLD` 0+1, `CARD.SIDESTEP` 0+1.
-- The sts_gg "0 decks" result does not happen on a fresh box: it created
-  1,004 decks, one per line of `runs.jsonl`. The likely cause of the
-  old result: the count only includes created or changed decks, and the
-  earlier run went into a box that already held identical sts_gg decks.
 - Deck-size outliers, probably faithful to the source data: 5 FaB
   decklists hold 1 card (e.g. `soh-zheng-chane-deck-the-imaginarium-skirmish-270621`),
   and 90 hold fewer than 40. sts2runs run 5330 player 0 has 0 cards,
