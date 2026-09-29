@@ -15,6 +15,22 @@
   but a full run logs 9,411 full tracebacks, which buries real errors.
   Filter those rows out before `accumulate()` raises.
 
+- **Cross-game rarity metric family.** Build one metric per game,
+  each mapping that game's own rarity into a single shared rarity
+  enum. The enum was proposed as common / uncommon / rare / legendary /
+  unique-promo / not-applicable / other, but is not final. Outputs are
+  per-card parquets with one row per `nocab_uuid` and a `label` column
+  holding the enum value. That shape lets dojos (masking) and
+  `src/evaluation/` use it the same way: evaluation reads several
+  per-game parquets as one label source (`MetricParquetLabels`). This
+  is the "medium" label set for intrinsic evaluation. The "easy" set,
+  game labels, needs no metric; the "hard" set, MtG set labels, comes
+  later. The precedent is `gwent_one/rarity_mask_metric.py`, which is
+  per-game and not normalized. Open decisions:
+  - where the enum lives;
+  - how each game's values map, e.g. whether Gwent's `epic` becomes
+    `rare`/`legendary` or `other`;
+  - what games with no rarity get: `not-applicable` rows, or no metric.
 - **Standardize metric constructor argument shape across containers.**
   `sts_gg`'s `CardAverageMetric`/`DeckLabelMetric` always take
   `card_binder` and `deck_box` for signature consistency within that
