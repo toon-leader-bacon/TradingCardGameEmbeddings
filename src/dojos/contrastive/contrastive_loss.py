@@ -52,7 +52,9 @@ def _pairwise_cosine_similarity(embeddings: list[Embedding]) -> torch.Tensor:
     return normalized @ normalized.T
 
 
-def _valid_negative_mask(identities: Sequence[Hashable]) -> torch.Tensor:
+def _valid_negative_mask(
+    identities: Sequence[Hashable], device: torch.device
+) -> torch.Tensor:
     """Which (i, j) pairs may ever serve as anchor/negative.
 
     Shared by every concrete ContrastiveLoss in this file. Excludes
@@ -66,7 +68,8 @@ def _valid_negative_mask(identities: Sequence[Hashable]) -> torch.Tensor:
         identities: one hashable identity per comparison unit, same
             order as the embeddings _pairwise_cosine_similarity() was
             given.
-    Output: an (N, N) boolean tensor, N = len(identities); True where
+        device: where the similarity matrix lives; the mask is moved there.
+    Output: an (N, N) boolean tensor on device, N = len(identities); True where
         unit j is a legitimate negative candidate for anchor i (a
         positive pair, or an anchor's own excluded group, may still
         separately override this at use-site - this mask governs
@@ -82,7 +85,8 @@ def _valid_negative_mask(identities: Sequence[Hashable]) -> torch.Tensor:
             if identities[i] == identities[j]:
                 mask[i, j] = False
                 mask[j, i] = False
-    return mask
+    # Filled on the CPU (one element write each), then moved once
+    return mask.to(device)
 
 
 def _anchor_loss(
@@ -245,7 +249,7 @@ class SingleCardInfoNCELoss:
         single_card_embeddings = cast(BatchedSingleCardEmbedding, item_embeddings)
 
         similarity = _pairwise_cosine_similarity(single_card_embeddings)
-        valid_negative_mask = _valid_negative_mask(identities)
+        valid_negative_mask = _valid_negative_mask(identities, similarity.device)
         positives_by_anchor = self._positives_by_anchor(positive_cliques)
 
         # Accumulate each anchor's own InfoNCE loss, then average - an
@@ -369,7 +373,7 @@ class MultiCardInfoNCELoss:
             multi_card_embeddings, identities
         )
         similarity = _pairwise_cosine_similarity(flat_embeddings)
-        valid_negative_mask = _valid_negative_mask(flat_identities)
+        valid_negative_mask = _valid_negative_mask(flat_identities, similarity.device)
         positives_by_anchor, excluded_by_anchor = (
             self._positives_and_exclusions_by_anchor(item_of_card, positive_cliques)
         )

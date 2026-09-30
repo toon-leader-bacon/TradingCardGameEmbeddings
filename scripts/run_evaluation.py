@@ -34,10 +34,13 @@ Usage (from the project root):
 import argparse
 import itertools
 import logging
+import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
+
+import torch
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.gwent_one.faction_mask_metric import FactionMaskMetric
@@ -50,6 +53,7 @@ from src.encoder_model.reference_multicard_models import LinearProjectionMultiCa
 from src.encoder_model.reference_singlecard_models import LinearProjectionCardModel
 from src.evaluation.analyses.card_sample import PerLabelCap
 from src.evaluation.analyses.cluster_agreement import ClusterAgreement
+from src.evaluation.analyses.effective_rank import EffectiveRank
 from src.evaluation.analyses.embedding_analysis import EmbeddingAnalysis
 from src.evaluation.analyses.label_compactness import LabelCompactness
 from src.evaluation.analyses.projection_plot import ProjectionPlot
@@ -104,19 +108,23 @@ def build_encoders(args: argparse.Namespace) -> list[EncoderUnderTest]:
     """The encoders to compare. A checkpoint's weights are loaded into a
     freshly built model of the architecture it was trained as (the
     checkpoint does not record its architecture yet - see the plan's open
-    questions)."""
+    questions). Every model is moved to args.device after its weights load;
+    extrinsic dojo heads follow it there (Trainer.run moves them)."""
     result: list[EncoderUnderTest] = []
     if args.single_checkpoint:
         model = LinearProjectionCardModel(embed_dim=_EMBED_DIM)
         load_encoder_weights(args.single_checkpoint, model)
+        model.to(args.device)
         result.append(EncoderUnderTest("single", model, args.single_checkpoint))
     if args.multi_checkpoint:
         multi = LinearProjectionMultiCardModel(card_embedding_size=_EMBED_DIM)
         load_encoder_weights(args.multi_checkpoint, multi)
+        multi.to(args.device)
         result.append(EncoderUnderTest("multi", multi, args.multi_checkpoint))
     # The untrained baseline: same architecture, pretrained text encoder,
     # randomly initialised head - what training has to beat
     untrained = LinearProjectionCardModel(embed_dim=_EMBED_DIM)
+    untrained.to(args.device)
     result.append(EncoderUnderTest("untrained", untrained, None))
     return result
 
@@ -171,8 +179,10 @@ def budget_for(smoke: bool) -> Budget:
     spec = ExtrinsicSpec(
         diet_rule=Uniform(),
         head_lr=1e-3,
-        steps_per_round=200,
-        max_rounds=50,
+        # Short rounds: a head on ~1k TRAIN cards overfits within a few
+        # hundred steps, and it trains patience_rounds rounds past its best
+        steps_per_round=50,
+        max_rounds=60,
         saturation=_saturation(patience_rounds=3),
         eval_examples_per_dojo=512,
         seed=_SEED,
@@ -183,10 +193,13 @@ def budget_for(smoke: bool) -> Budget:
 
 
 def _saturation(patience_rounds: int) -> SaturationSpec:
+    """Saturation for an extrinsic run. Never reactivates: the encoder is
+    frozen and each dojo has its own head, so a rising TEST loss can only be
+    that head overfitting, and training it more would make it worse."""
     return SaturationSpec(
         epsilon=1e-3,
         patience_rounds=patience_rounds,
-        reactivation_delta=0.05,
+        reactivation_delta=math.inf,
         target_saturated_fraction=1.0,
     )
 
@@ -232,9 +245,13 @@ def analyze_encoder(
     budget: Budget,
 ) -> None:
     """Stage 1b: every analysis x every label source, into
-    intrinsic/<encoder>/<label source>/<analysis>/. Existing results are
-    kept (skipped), so an interrupted run can be resumed."""
+    intrinsic/<encoder>/<label source>/<analysis>/, plus the label-free
+    analyses into intrinsic/<encoder>/unlabeled/<analysis>/. Existing
+    results are kept (skipped), so an interrupted run can be resumed."""
     with EmbeddingTable.open(table_path) as table:
+        unlabeled = run_dir / "intrinsic" / encoder.label / "unlabeled"
+        effective_rank = EffectiveRank()
+        _run_analysis(effective_rank, table, unlabeled / effective_rank.name)
         for labels in label_sources:
             sample = PerLabelCap(budget.per_label_cap)
             analyses: list[EmbeddingAnalysis] = [
@@ -306,6 +323,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-root", type=Path, default=_OUTPUT_ROOT)
     parser.add_argument("--precision", choices=["fp32", "fp16", "bf16"], default="fp32")
     parser.add_argument("--max-batch-cost", type=int, default=64)
+    parser.add_argument(
+        "--device", type=torch.device, default=torch.device("cpu"), help="e.g. cuda"
+    )
     parser.add_argument(
         "--smoke", action="store_true", help="tiny corpus and budgets: wiring check"
     )

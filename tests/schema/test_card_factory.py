@@ -498,3 +498,22 @@ def test_a_missing_step_before_a_mismatch_is_handled_by_the_policy() -> None:
     assert _edit(card, ("missing", 0), 1, missing=MissingPathPolicy.PASS) is card
     with pytest.raises(KeyError):
         _edit(card, ("missing", 0), 1, missing=MissingPathPolicy.STRICT)
+
+
+class TestHasField:
+    def test_true_for_existing_paths(self) -> None:
+        card = _card({"a": {"b": [1, {"c": 2}]}})
+        assert GenericCardFactory.has_field(card, ("a",))
+        assert GenericCardFactory.has_field(card, ("a", "b", 1, "c"))
+
+    @pytest.mark.parametrize(
+        "path",
+        [("missing",), ("a", "b", 5), ("a", "b", "x"), ("a", "b", 0, "c"), ("a", 0)],
+    )
+    def test_false_for_missing_or_mismatched_paths(self, path: FieldPath) -> None:
+        card = _card({"a": {"b": [1, {"c": 2}]}})
+        assert not GenericCardFactory.has_field(card, path)
+
+    def test_malformed_path_still_raises(self) -> None:
+        with pytest.raises(ValueError):
+            GenericCardFactory.has_field(_card({}), ())

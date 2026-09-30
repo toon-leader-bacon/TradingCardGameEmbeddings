@@ -1,6 +1,6 @@
 from typing import List
 
-from src.dojos.mods.mod import Mod
+from src.dojos.mods.mod import Mod, ModTally
 from src.schema.type_hints import TrainingDatum
 
 
@@ -20,6 +20,23 @@ class ModPipeline:
 
     def __init__(self, mods: List[Mod]):
         self.mods = mods
+
+    def mod_tallies(self) -> dict[str, ModTally]:
+        """The ModTally of every mod that keeps one, keyed
+        "<position>:<class name>" so two mods of one class stay apart.
+
+        Inputs: none. Output: dict[str, ModTally] (the live objects).
+        Side effects: none. Exceptions: none.
+
+        Example:
+            >>> ModPipeline([ShuffleKeysMod()]).mod_tallies()
+            {'0:ShuffleKeysMod': ModTally(cards_seen=0, ...)}
+        """
+        return {
+            f"{position}:{type(mod).__name__}": mod.tally
+            for position, mod in enumerate(self.mods)
+            if mod.tally is not None
+        }
 
     def apply_single(
         self, data: TrainingDatum, is_training: bool = True

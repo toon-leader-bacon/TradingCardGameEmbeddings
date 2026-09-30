@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 import tempfile
 from datetime import datetime, timezone
@@ -13,6 +14,9 @@ from src.dojos.contrastive.contrastive_batch import ContrastiveBatch
 from src.dojos.contrastive.dojo import ContrastiveDojo
 from src.dojos.dojo import BatchBudget, Dojo
 from src.dojos.file_managers.deck_box_dealer import DeckBoxDealer
+from src.dojos.mods.card_field_mods import RandomKeyMaskMod
+from src.dojos.mods.mod import MASK_TOKEN
+from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
 from src.schema.card import GenericCard, GenericDeck, Provenance
@@ -66,7 +70,9 @@ class _RecordingLoss:
         return torch.tensor(0.0)
 
 
-def _dealer_with_decks(count: int) -> DeckBoxDealer:
+def _dealer_with_decks(
+    count: int, split_ratios: list[float] = [1, 0, 0]
+) -> DeckBoxDealer:
     box = DeckBox()
     for _ in range(count):
         box.create(_deck())
@@ -75,7 +81,7 @@ def _dealer_with_decks(count: int) -> DeckBoxDealer:
     # fresh tempdir per call avoids threading a tmp_path fixture
     # through every one of this module's test methods.
     index_path = Path(tempfile.mkdtemp()) / "dealer.db"
-    return DeckBoxDealer(box, GameId.MTG, index_path, split_ratios=[1, 0, 0], seed=1)
+    return DeckBoxDealer(box, GameId.MTG, index_path, split_ratios=split_ratios, seed=1)
 
 
 _BUDGET = BatchBudget(max_cost=10, cost_of=lambda card: 1)
@@ -288,3 +294,53 @@ class TestVersionCheck:
         )
 
         assert dojo.example_count(Split.TRAIN) == 2
+
+
+class TestMods:
+    def _batch(self) -> ContrastiveBatch:
+        cards = [
+            dataclasses.replace(
+                _card(f"c{i}"), raw_content={"name": f"c{i}", "cost": i}
+            )
+            for i in range(4)
+        ]
+        return ContrastiveBatch(
+            inputs=cards,
+            identities=[(card.nocab_uuid,) for card in cards],
+            positive_cliques=[[0, 1], [2, 3]],
+        )
+
+    def _dojo(self, batch: ContrastiveBatch, mods: list) -> ContrastiveDojo:
+        return ContrastiveDojo(
+            dealer=_dealer_with_decks(10, split_ratios=[1, 1, 0]),
+            pair_constructor=_ScriptedPairConstructor([batch] * 3),
+            card_lookup=CardBinder(),
+            holdout=HoldoutSpec.no_holdout(),
+            strict_version_check=False,
+            decks_per_sample=2,
+            mod_pipeline=ModPipeline(mods),
+        )
+
+    def test_train_batches_are_modded_with_structure_kept(self) -> None:
+        original = self._batch()
+        dojo = self._dojo(original, [RandomKeyMaskMod(rng_seed=0)])
+
+        modded = next(dojo.batches(Split.TRAIN, _BUDGET))
+
+        assert modded.identities == original.identities
+        assert modded.positive_cliques == original.positive_cliques
+        assert all(MASK_TOKEN in card.raw_content.values() for card in modded.inputs)
+        assert all(MASK_TOKEN not in c.raw_content.values() for c in original.inputs)
+        assert dojo.mod_tallies()["0:RandomKeyMaskMod"].cards_changed == 4
+
+    def test_train_only_mods_skip_test_batches(self) -> None:
+        original = self._batch()
+        dojo = self._dojo(original, [RandomKeyMaskMod(rng_seed=0)])
+        batch = next(dojo.batches(Split.TEST, _BUDGET))
+        assert batch.inputs == original.inputs
+
+    def test_no_mods_yields_the_batch_itself(self) -> None:
+        original = self._batch()
+        dojo = self._dojo(original, [])
+        assert next(dojo.batches(Split.TRAIN, _BUDGET)) is original
+        assert dojo.mod_tallies() == {}

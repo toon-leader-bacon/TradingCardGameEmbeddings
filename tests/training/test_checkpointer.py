@@ -69,6 +69,66 @@ def test_a_failed_write_leaves_no_partial_checkpoint(tmp_path: Path) -> None:
     assert list(tmp_path.iterdir()) == []
 
 
+def _report(phase: str, round_index: int) -> RoundReport:
+    return RoundReport(
+        phase, round_index, round_index, 0.0, {"a": 0.5}, {}, frozenset()
+    )
+
+
+def _save_rounds(
+    checkpointer: DirectoryCheckpointer, rounds: list[tuple[str, int]]
+) -> None:
+    model = FakeModel()
+    optimizer = torch.optim.AdamW(model.parameters())
+    plan = make_plan((make_phase(("a",)),))
+    for phase, round_index in rounds:
+        checkpointer.save(model, [FakeDojo("a")], optimizer, plan, _report(phase, round_index))  # type: ignore[list-item,arg-type]  # noqa: E501
+
+
+def test_a_new_best_deletes_only_its_own_phase_previous_best(tmp_path: Path) -> None:
+    _save_rounds(
+        DirectoryCheckpointer(tmp_path),
+        [("pre", 0), ("pre", 3), ("post", 1), ("post", 4)],
+    )
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "post_round0004",
+        "pre_round0003",
+    ]
+
+
+def test_a_failed_new_best_keeps_the_previous_best(tmp_path: Path) -> None:
+    class Broken(FakeModel):
+        def encoder_only_state_dict(self):  # type: ignore[no-untyped-def]
+            raise OSError("disk full")
+
+    checkpointer = DirectoryCheckpointer(tmp_path)
+    _save_rounds(checkpointer, [("p", 0)])
+    model = Broken()
+    plan = make_plan((make_phase(("a",)),))
+    with pytest.raises(OSError):
+        checkpointer.save(model, [FakeDojo("a")], torch.optim.AdamW(model.parameters()), plan, _report("p", 1))  # type: ignore[list-item,arg-type]  # noqa: E501
+    assert [p.name for p in tmp_path.iterdir()] == ["p_round0000"]
+    # ... and the next successful best still replaces it
+    _save_rounds(checkpointer, [("p", 2)])
+    assert [p.name for p in tmp_path.iterdir()] == ["p_round0002"]
+
+
+def test_latest_is_replaced_every_round_and_bests_are_untouched(
+    tmp_path: Path,
+) -> None:
+    checkpointer = DirectoryCheckpointer(tmp_path)
+    _save_rounds(checkpointer, [("p", 0)])
+    model = FakeModel()
+    optimizer = torch.optim.AdamW(model.parameters())
+    plan = make_plan((make_phase(("a",)),))
+    for round_index in (1, 2):
+        record = checkpointer.save_latest(model, [FakeDojo("a")], optimizer, plan, _report("p", round_index))  # type: ignore[list-item,arg-type]  # noqa: E501
+    assert record.path == tmp_path / "latest" / "state.pt"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["latest", "p_round0000"]
+    manifest = json.loads((tmp_path / "latest" / "manifest.json").read_text())
+    assert manifest["round_index"] == 2
+
+
 def test_the_holdout_round_trips_through_the_checkpoint(tmp_path: Path) -> None:
     directory, _ = _save(tmp_path)
     assert load_checkpoint_holdout(directory) == HoldoutSpec.no_holdout()

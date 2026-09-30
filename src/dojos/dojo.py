@@ -7,11 +7,12 @@ hands the embeddings back to `compute_loss`.
 """
 
 from dataclasses import dataclass
-from typing import Callable, Iterable, Iterator, Protocol
+from typing import Callable, Iterable, Iterator, Mapping, Protocol
 
 import torch
 from torch import nn
 
+from src.dojos.mods.mod import ModTally
 from src.schema.card import GenericCard
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
@@ -72,6 +73,23 @@ class Dojo(Protocol):
 
     def trainable_parameters(self) -> Iterable[nn.Parameter]:
         """The dojo's own (decoder head) parameters, excluding the encoder."""
+        ...
+
+    def mod_tallies(self) -> Mapping[str, ModTally]:
+        """Live tallies of this dojo's augmentation mods, keyed by a label
+        naming each mod (e.g. "1:WeightedFieldMaskMod"); empty when the
+        dojo has none. For reports only: callers must not change them.
+        Side effects: none. Exceptions: none.
+        """
+        ...
+
+    def move_head_to(self, device: torch.device) -> None:
+        """Move the head's parameters and buffers to device, in place.
+
+        The trainer calls this so heads sit beside the encoder's output.
+        Side effects: moves the head. Exceptions: whatever torch raises
+        for an unavailable device.
+        """
         ...
 
     def reset_head(self) -> None:

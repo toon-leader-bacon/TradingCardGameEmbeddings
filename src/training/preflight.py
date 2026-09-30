@@ -10,12 +10,14 @@ no GPU, no LM download needed), so that kind of mistake surfaces in
 seconds instead of after the first round of an unattended run.
 """
 
-from dataclasses import dataclass
-from typing import Any
+import dataclasses
+from dataclasses import dataclass, field
+from typing import Any, Mapping
 
 import torch
 
 from src.dojos.dojo import BatchBudget, Dojo
+from src.dojos.mods.mod import ModTally
 from src.schema.card import GenericCard
 from src.schema.splits import Split
 
@@ -31,6 +33,10 @@ class PreflightResult:
         embeddings; None if any earlier step failed.
     error: str(exception) from the first failing step, or None if every
         step below succeeded.
+    mod_tallies: a snapshot (copies) of the dojo's augmentation-mod
+        tallies after the one TRAIN batch, keyed as Dojo.mod_tallies.
+        Informational: a mod that never fired or failed does not make the
+        dojo fail preflight (mods are best effort by design).
     """
 
     dojo_name: str
@@ -38,6 +44,7 @@ class PreflightResult:
     test_count: int
     sample_loss: float | None
     error: str | None
+    mod_tallies: Mapping[str, ModTally] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -70,8 +77,10 @@ def preflight_dojo(
         dojo's own decoder head was built for).
     Output: PreflightResult; .ok is True only if every step below ran
         without error and produced a finite scalar loss.
-    Side effects: none - nothing calls .backward(), so no gradient is
-        ever populated on the dojo's head or anywhere else.
+    Side effects: pulling the TRAIN batch runs the dojo's augmentation
+        mods, advancing their random state and tallies (snapshotted into
+        the result, on success and failure alike). Nothing calls
+        .backward(), so no gradient is ever populated.
     Exceptions: none; every failure is caught and reported in .error.
 
     Example:
@@ -102,8 +111,35 @@ def preflight_dojo(
             )
         if not torch.isfinite(loss):
             raise ValueError(f"compute_loss returned non-finite {loss.item()}")
-        return PreflightResult(dojo.name, train_count, test_count, loss.item(), None)
+        return PreflightResult(
+            dojo.name,
+            train_count,
+            test_count,
+            loss.item(),
+            None,
+            _tally_snapshot(dojo),
+        )
     except Exception as error:
         return PreflightResult(
-            dojo.name, train_count, test_count, None, f"{type(error).__name__}: {error}"
+            dojo.name,
+            train_count,
+            test_count,
+            None,
+            f"{type(error).__name__}: {error}",
+            _tally_snapshot(dojo),
         )
+
+
+def _tally_snapshot(dojo: Dojo) -> dict[str, ModTally]:
+    """Copies of dojo's mod tallies, so later training cannot change what a
+    PreflightResult reports.
+
+    Inputs: dojo. Output: dict[str, ModTally]; empty if the dojo cannot
+        report its tallies (so preflight_dojo keeps its no-raise promise).
+    Side effects: none. Exceptions: none.
+    """
+    try:
+        tallies = dojo.mod_tallies()
+    except Exception:  # a report must never turn a check into a crash
+        return {}
+    return {label: dataclasses.replace(tally) for label, tally in tallies.items()}

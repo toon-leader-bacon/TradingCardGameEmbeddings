@@ -45,7 +45,7 @@ class TestValidNegativeMask:
     def test_excludes_the_diagonal(self) -> None:
         identities = [(uuid4(),), (uuid4(),), (uuid4(),)]
 
-        mask = _valid_negative_mask(identities)
+        mask = _valid_negative_mask(identities, torch.device("cpu"))
 
         assert not mask.diagonal().any()
 
@@ -53,7 +53,7 @@ class TestValidNegativeMask:
         duplicate_uuid = uuid4()
         identities = [(duplicate_uuid,), (uuid4(),), (duplicate_uuid,)]
 
-        mask = _valid_negative_mask(identities)
+        mask = _valid_negative_mask(identities, torch.device("cpu"))
 
         assert not mask[0, 2]
         assert not mask[2, 0]
@@ -61,7 +61,7 @@ class TestValidNegativeMask:
     def test_allows_a_non_duplicate_pair(self) -> None:
         identities = [(uuid4(),), (uuid4(),)]
 
-        mask = _valid_negative_mask(identities)
+        mask = _valid_negative_mask(identities, torch.device("cpu"))
 
         assert mask[0, 1]
         assert mask[1, 0]

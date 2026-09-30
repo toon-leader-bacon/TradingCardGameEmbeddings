@@ -53,9 +53,27 @@ def device_type_of(model: ParameterOwner) -> str:
         >>> device_type_of(model)
         'cuda'
     """
+    return parameter_device(model).type
+
+
+def parameter_device(model: ParameterOwner) -> torch.device:
+    """The device of the model's first parameter.
+
+    Read on every call, so a model moved after construction is followed.
+
+    Inputs: model (ParameterOwner).
+    Output: torch.device, e.g. cuda:0; the CPU if the model has no
+        parameters.
+    Side effects: none.
+    Exceptions: none.
+
+    Example:
+        >>> parameter_device(model)
+        device(type='cuda', index=0)
+    """
     for parameter in model.parameters():
-        return parameter.device.type
-    return "cpu"
+        return parameter.device
+    return torch.device("cpu")
 
 
 def autocast_for(model: ParameterOwner, precision: Precision) -> ContextManager[Any]:

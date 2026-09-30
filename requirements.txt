@@ -8,3 +8,4 @@ transformers
 beautifulsoup4
 scikit-learn
 matplotlib
+pyyaml

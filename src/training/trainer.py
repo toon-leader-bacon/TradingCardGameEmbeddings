@@ -13,7 +13,11 @@ from typing import Any, Callable, Sequence
 import torch
 
 from src.dojos.dojo import BatchBudget, Dojo, DojoBatch
-from src.encoder_model.precision import autocast_for, device_type_of
+from src.encoder_model.precision import (
+    autocast_for,
+    device_type_of,
+    parameter_device,
+)
 from src.schema.card import GenericCard
 from src.schema.splits import Split
 from src.training.diet.diet_sampler import diet_sampler_for
@@ -86,6 +90,8 @@ class Trainer:
         self._rng = random.Random(plan.seed)
         self._precision = limits.precision
         self._steps_taken = 0
+        # fp16 steps the GradScaler skipped since the last round's report
+        self._overflow_skips = 0
         # The encoder parameters that are trainable as built (a pretrained
         # LM frozen by its own flag stays frozen); phases toggle only these
         self._encoder_params = [p for p in model.parameters() if p.requires_grad]
@@ -113,12 +119,17 @@ class Trainer:
         last_good: CheckpointRecord | None = None
         stopped_early_reason: str | None = None
         run_started = time.monotonic()
+        # Heads live in the dojos, not the model, so follow the model's device
+        device = parameter_device(self._model)
+        for dojo in self._dojos.values():
+            dojo.move_head_to(device)
         # Train each phase to saturation, its round cap, or too many failures
         for phase in self._plan.phases:
             phase_run = self._open_phase(phase)
             best: CheckpointRecord | None = None  # best is per phase
             for round_index in range(phase.max_rounds):
                 self._train_round(phase_run)
+                self._log_overflow_skips(phase.name, round_index)
                 if phase_run.faults.gave_up():
                     # Keep the last good checkpoint: current weights may be corrupt
                     stopped_early_reason = (
@@ -128,6 +139,7 @@ class Trainer:
                 report = self._evaluate_round(phase_run, round_index, run_started)
                 self._notify_round_end(report)
                 best = self._checkpoint_if_best(best, phase_run, report)
+                self._checkpoint_latest(phase_run, report)
                 quarantined = phase_run.faults.quarantined_names()
                 if quarantined.issuperset(phase.dojo_names):
                     stopped_early_reason = f"every dojo quarantined in {phase.name!r}"
@@ -171,9 +183,11 @@ class Trainer:
         ledger (from plan.faults)."""
         for parameter in self._encoder_params:
             parameter.requires_grad_(phase.encoder_trainable)
+        optimizer = self._build_optimizer(phase)
+        self._log_trainable_parameters(phase)
         return PhaseRun(
             phase=phase,
-            optimizer=self._build_optimizer(phase),
+            optimizer=optimizer,
             tracker=SaturationTracker(phase.saturation, phase.dojo_names),
             sampler=diet_sampler_for(phase.diet_rule),
             streams={
@@ -185,6 +199,38 @@ class Trainer:
                 device_type_of(self._model), enabled=self._precision == "fp16"
             ),
         )
+
+    def _log_trainable_parameters(self, phase: Phase) -> None:
+        """Log how many parameters phase trains, per optimizer group, so a
+        config that trains nothing useful is obvious from the first line.
+        Inputs: phase. Output: None. Side effects: logs at INFO.
+        Exceptions: none."""
+        encoder_count = 0
+        if phase.encoder_trainable:
+            encoder_count = sum(p.numel() for p in self._encoder_params)
+        head_count = sum(p.numel() for p in self._head_parameters(phase))
+        logger.info(
+            "[%s] trainable parameters: encoder %d (lr %g), dojo heads %d (lr %g)",
+            phase.name,
+            encoder_count,
+            phase.encoder_lr,
+            head_count,
+            phase.head_lr,
+        )
+
+    def _log_overflow_skips(self, phase_name: str, round_index: int) -> None:
+        """Log (INFO) and reset the count of fp16 steps skipped this round.
+        Inputs: phase_name, round_index (for the log line). Output: None.
+        Side effects: logs if any were skipped; resets the counter.
+        Exceptions: none."""
+        if self._overflow_skips:
+            logger.info(
+                "[%s] round %d: %d fp16 step(s) skipped on gradient overflow",
+                phase_name,
+                round_index,
+                self._overflow_skips,
+            )
+        self._overflow_skips = 0
 
     def _build_optimizer(self, phase: Phase) -> torch.optim.Optimizer:
         """AdamW with an encoder group at encoder_lr (only if trainable)
@@ -309,6 +355,7 @@ class Trainer:
             self._steps_taken += 1
             return
         if scale_before > _MIN_LOSS_SCALE:
+            self._overflow_skips += 1
             logger.debug(
                 "fp16 overflow on %r; skipped the step, loss scale %g -> %g",
                 dojo.name,
@@ -384,6 +431,23 @@ class Trainer:
                 listener.on_round_end(report)
             except Exception:
                 logger.warning("listener failed in on_round_end", exc_info=True)
+
+    def _checkpoint_latest(self, phase_run: PhaseRun, report: RoundReport) -> None:
+        """Save this round as the run's latest checkpoint. Without a
+        checkpointer, nothing; a failing save is logged, never raised.
+        Listeners are not notified (the checkpoints CSV records bests)."""
+        if self._checkpointer is None:
+            return
+        try:
+            self._checkpointer.save_latest(
+                self._model,
+                list(self._dojos.values()),
+                phase_run.optimizer,
+                self._plan,
+                report,
+            )
+        except Exception:
+            logger.error("latest checkpoint save failed", exc_info=True)
 
     def _checkpoint_if_best(
         self,

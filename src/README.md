@@ -44,11 +44,12 @@ Two flows hand data between containers as files on disk:
 | Container | Status | What it is |
 |---|---|---|
 | [`schema/`](schema/) | stable | Shared types every container uses: `GameId`, `GenericCard`, `GenericDeck`, `Provenance`, `DataSource`, `HoldoutSpec`, splits, input/output shape hints, and `GenericCardFactory` (non-mutating card edits by path copying). Plain data, no README. |
+| [`utils/`](utils/README.md) | stable | General-purpose helpers ported from the author's other libraries, treated as a vendored external library (imports nothing else from `src/`): `DropTable`, a nestable, filterable weighted random choice. |
 | [`data_retrieval/`](data_retrieval/README.md) | stable | One downloader per external source, writing untouched raw dumps to `data/raw/`. |
 | [`data_refinement/`](data_refinement/README.md) | in progress | Raw data -> the card binder, the deck box, and metric parquets. |
 | [`encoder_model/`](encoder_model/README.md) | in progress | The embedding model (PyTorch only): text encoder + embedding head, single- and multi-card. |
 | [`dojos/`](dojos/README.md) | in progress | Training tasks: each yields batches within the trainer's budget and scores embeddings with its own small decoder head and loss. |
-| [`training/`](training/README.md) | in progress | `Trainer`: phases, rounds and steps over a diet of dojos, with saturation-based stopping, fault isolation and checkpointing. Run on CPU against real dojos; no driver script yet. |
+| [`training/`](training/README.md) | in progress | `Trainer`: phases, rounds and steps over a diet of dojos, with saturation-based stopping, fault isolation and checkpointing. Runs from a YAML config via `scripts/run_training.py`, on CPU or GPU. |
 | [`evaluation/`](evaluation/README.md) | in progress ([`plans/evaluation.md`](../plans/evaluation.md)) | Post-training evaluation of encoder checkpoints (intrinsic: embedding-table analyses against card labels; extrinsic: fresh-dojo-head curves on a frozen encoder via `Trainer`). Distinct from a training run's own TEST signal on a trainable encoder. |
 
 ## A naming note: `Dojo` vs. `Gym`

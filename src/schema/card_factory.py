@@ -99,7 +99,7 @@ class GenericCardFactory:
             True
         """
         # Validate inputs; malformed paths fail before the card is read
-        GenericCardFactory._check_path(path)
+        GenericCardFactory.check_path(path)
 
         # Walk down the path, keeping each container it passes through
         containers = GenericCardFactory._containers_along(
@@ -118,7 +118,39 @@ class GenericCardFactory:
         return dataclasses.replace(card, raw_content=cast(dict, new_child))
 
     @staticmethod
-    def _check_path(path: FieldPath) -> None:
+    def has_field(card: GenericCard, path: FieldPath) -> bool:
+        """Whether every step of path names an existing slot in card.
+
+        Inputs: card (GenericCard, never mutated), path (FieldPath).
+        Output: bool. False when a step is missing, or when a step does
+            not match its container's type (a str step into a list, any
+            step into a scalar): best effort, no TypeError.
+        Side effects: none.
+        Exceptions: ValueError / TypeError for a malformed path, as
+            check_path (a path wrong for every card, not this one).
+
+        Example:
+            >>> GenericCardFactory.has_field(card, ("card_faces", 0, "name"))
+            True
+        """
+        GenericCardFactory.check_path(path)
+        current: object = card.raw_content
+        # Step down; any missing slot or type mismatch means "not there"
+        for step in path:
+            if isinstance(current, dict) and isinstance(step, str):
+                if step not in current:
+                    return False
+                current = current[step]
+            elif isinstance(current, list) and isinstance(step, int):
+                if step >= len(current):
+                    return False
+                current = current[step]
+            else:
+                return False
+        return True
+
+    @staticmethod
+    def check_path(path: FieldPath) -> None:
         """Reject a path that is malformed whatever card it is used on.
 
         Inputs: path (FieldPath).

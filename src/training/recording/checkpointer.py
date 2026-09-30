@@ -21,6 +21,7 @@ _STATE_FILE = "state.pt"
 _ENCODER_FILE = "encoder.pt"
 _MANIFEST_FILE = "manifest.json"
 _HOLDOUT_FILE = "holdout.json"
+_LATEST_DIRECTORY = "latest"
 
 
 class Checkpointer(Protocol):
@@ -42,9 +43,33 @@ class Checkpointer(Protocol):
         """
         ...
 
+    def save_latest(
+        self,
+        model: TrainableEncoder,
+        dojos: Sequence[Dojo],
+        optimizer: torch.optim.Optimizer,
+        plan: TrainingPlan,
+        report: RoundReport,
+    ) -> CheckpointRecord:
+        """Write the most recent round's weights, replacing the previous
+        latest checkpoint.
+
+        Inputs, output, exceptions: as save.
+        Side effects: replaces the latest checkpoint only; bests are never
+            touched.
+        """
+        ...
+
 
 class DirectoryCheckpointer:
-    """Writes one subdirectory per checkpoint under a run directory.
+    """Writes checkpoint subdirectories under a run directory, keeping only
+    the best checkpoint of each phase (`<phase>_round<NNNN>/`; a new best
+    deletes the phase's previous one) and the latest round (`latest/`,
+    replaced every round). Each checkpoint holds the full model, so without
+    pruning a run would grow by about 1.2 GB (ModernBERT-base) or more
+    (optimizer state when the encoder trains) per round.
+    The checkpoints CSV still lists every best ever written; only the last
+    per phase is on disk.
 
     Each holds `state.pt` (a weights snapshot: model + optimizer + dojo
     heads, keyed by dojo name; NOT yet resumable mid-run since tracker/rng/
@@ -59,6 +84,8 @@ class DirectoryCheckpointer:
 
     def __init__(self, run_directory: Path) -> None:
         self._run_directory = run_directory
+        # Phase name -> the directory of its current best checkpoint
+        self._best_by_phase: dict[str, Path] = {}
 
     def save(
         self,
@@ -68,19 +95,69 @@ class DirectoryCheckpointer:
         plan: TrainingPlan,
         report: RoundReport,
     ) -> CheckpointRecord:
-        """Write a checkpoint.
+        """Write a new best checkpoint for report's phase and delete that
+        phase's previous best.
 
         Inputs: model, dojos (their trainable_parameters are saved),
             optimizer, plan, report.
         Output: CheckpointRecord with both paths.
-        Side effects: creates files under run_directory.
-        Exceptions: OSError on write failure.
+        Side effects: creates files under run_directory; deletes the
+            phase's previous best directory once the new one is complete.
+        Exceptions: OSError on write failure (the previous best is kept).
 
         Example:
             >>> DirectoryCheckpointer(Path("runs/a")).save(m, ds, opt, plan, rep)
         """
-        # Choose this checkpoint's directory from the report
         directory = self._directory_for(report)
+        result = self._write_checkpoint(
+            directory, model, dojos, optimizer, plan, report
+        )
+
+        # Only once the new best is complete: drop the phase's previous one
+        previous = self._best_by_phase.get(report.phase)
+        if previous is not None and previous != directory:
+            shutil.rmtree(previous, ignore_errors=True)
+        self._best_by_phase[report.phase] = directory
+        return result
+
+    def save_latest(
+        self,
+        model: TrainableEncoder,
+        dojos: Sequence[Dojo],
+        optimizer: torch.optim.Optimizer,
+        plan: TrainingPlan,
+        report: RoundReport,
+    ) -> CheckpointRecord:
+        """Write run_directory/latest/, replacing the previous latest.
+
+        Inputs, output, exceptions: as save.
+        Side effects: replaces run_directory/latest/.
+
+        Example:
+            >>> checkpointer.save_latest(m, ds, opt, plan, rep).path.parent.name
+            'latest'
+        """
+        directory = self._run_directory / _LATEST_DIRECTORY
+        return self._write_checkpoint(directory, model, dojos, optimizer, plan, report)
+
+    def _write_checkpoint(
+        self,
+        directory: Path,
+        model: TrainableEncoder,
+        dojos: Sequence[Dojo],
+        optimizer: torch.optim.Optimizer,
+        plan: TrainingPlan,
+        report: RoundReport,
+    ) -> CheckpointRecord:
+        """Write every checkpoint file into directory, replacing it whole.
+
+        Inputs: directory, then as save. Output: CheckpointRecord.
+        Side effects: replaces directory. Exceptions: OSError on write
+            failure. A failure while writing files leaves directory as it
+            was; a failure in the final swap (old directory deleted, rename
+            fails) loses it - for latest/ that means no latest checkpoint
+            until the next round.
+        """
         staging = directory.with_name(directory.name + ".tmp")
         # Write into a staging directory, then rename: a crash mid-write
         # never leaves a half-written checkpoint under the final name

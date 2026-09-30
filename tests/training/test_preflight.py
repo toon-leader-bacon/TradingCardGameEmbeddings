@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Iterator, List
+from typing import Any, Iterable, Iterator, List, Mapping
 from uuid import UUID, uuid4
 
 import pandas as pd
@@ -11,6 +11,7 @@ from torch import nn
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.dojos.dojo import BatchBudget, DojoBatch
+from src.dojos.mods.mod import ModTally
 from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
 from src.schema.card import GenericCard, Provenance
@@ -94,6 +95,12 @@ class _ListCardFakeDojo:
 
     def trainable_parameters(self) -> Iterable[nn.Parameter]:
         return self._head.parameters()
+
+    def move_head_to(self, device: torch.device) -> None:
+        self._head.to(device)
+
+    def mod_tallies(self) -> Mapping[str, ModTally]:
+        return {}
 
     def reset_head(self) -> None:
         pass
@@ -234,3 +241,30 @@ class TestPreflightAgainstARealDojo:
         result = preflight_dojo(dojo, _BUDGET, 6)
         assert not result.ok
         assert result.sample_loss is None
+
+
+class _TalliedDojo(_ListCardFakeDojo):
+    """A fake dojo with one live mod tally."""
+
+    def __init__(self, name: str, **kwargs: Any) -> None:
+        super().__init__(name, **kwargs)
+        self.tally = ModTally(cards_seen=4, cards_changed=3)
+
+    def mod_tallies(self) -> Mapping[str, ModTally]:
+        return {"0:FakeMod": self.tally}
+
+
+class TestModTallies:
+    def test_a_snapshot_is_reported(self) -> None:
+        dojo = _TalliedDojo("tallied")
+        result = preflight_dojo(dojo, _BUDGET, card_embedding_size=2)
+
+        assert result.mod_tallies["0:FakeMod"] == dojo.tally
+        assert result.mod_tallies["0:FakeMod"] is not dojo.tally
+        dojo.tally.cards_changed = 0  # later training must not rewrite the report
+        assert result.mod_tallies["0:FakeMod"].cards_changed == 3
+
+    def test_tallies_are_kept_on_failure(self) -> None:
+        result = preflight_dojo(_TalliedDojo("broken", fail="train"), _BUDGET, 2)
+        assert not result.ok
+        assert "0:FakeMod" in result.mod_tallies

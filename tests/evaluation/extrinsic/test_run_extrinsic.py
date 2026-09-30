@@ -45,6 +45,35 @@ def _run(  # type: ignore[no-untyped-def]
     return run_extrinsic(encoder, label, dojos, _spec(**kwargs), LIMITS, tmp_path)
 
 
+def test_validation_scores_the_heads_restored_to_their_best_round(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Record the order of the restore and the VALIDATION pass, and the head
+    # the pass sees: it must be the one the keeper restored
+    calls: list[str] = []
+    seen_heads: list[list[torch.Tensor]] = []
+    restore = module.BestHeadKeeper.restore_best_heads
+
+    def recording_restore(self):  # type: ignore[no-untyped-def]
+        calls.append("restore")
+        restore(self)
+        seen_heads.append([p.detach().clone() for p in self._snapshots["a"]])
+
+    def recording_evaluate(encoder, dojos, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append("validation")
+        head = [p.detach().clone() for p in dojos[0].trainable_parameters()]
+        assert all(torch.equal(x, y) for x, y in zip(head, seen_heads[0]))
+        return {dojo.name: 1.0 for dojo in dojos}
+
+    monkeypatch.setattr(module.BestHeadKeeper, "restore_best_heads", recording_restore)
+    monkeypatch.setattr(module, "evaluate_split_losses", recording_evaluate)
+
+    result = _run(FakeModel(), [FakeDojo("a")], tmp_path)
+
+    assert calls == ["restore", "validation"]
+    assert result.validation_losses == {"a": 1.0}
+
+
 def test_a_run_trains_the_heads_only_and_records_both_passes(tmp_path: Path) -> None:
     encoder = FakeModel()
     dojos = [FakeDojo("a"), FakeDojo("b")]
@@ -61,9 +90,15 @@ def test_a_run_trains_the_heads_only_and_records_both_passes(tmp_path: Path) -> 
     assert result.stopped_early_reason is None and result.quarantined == frozenset()
     assert set(result.validation_losses or {}) == {"a", "b"}
     written = json.loads((run_dir / "validation.json").read_text())
-    assert written == {
-        "losses": dict(result.validation_losses or {}),
-        "quarantined": [],
+    assert written["losses"] == dict(result.validation_losses or {})
+    assert written["quarantined"] == []
+    # The scored head of each dojo is the one from its best TEST round
+    best_rows = {
+        dojo: min((row for row in rows if row.dojo == dojo), key=lambda r: r.test_loss)
+        for dojo in ("a", "b")
+    }
+    assert written["best_test_rounds"] == {
+        dojo: row.round_index for dojo, row in best_rows.items()
     }
     # The encoder is frozen and untouched; the heads trained
     assert torch.equal(encoder.layer.weight, encoder_before)

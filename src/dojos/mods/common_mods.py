@@ -5,12 +5,10 @@ src/dojos/README.md, mods/)."""
 import random
 from typing import List, cast
 
-from src.dojos.mods.mod import Mod
+from src.dojos.mods.mod import MASK_TOKEN, Mod
 from src.schema.card import GenericCard
 from src.schema.card_factory import FieldPath, GenericCardFactory, MissingPathPolicy
 from src.schema.type_hints import TrainingDatum
-
-_MASK_TOKEN = "[MASK]"
 
 
 class NoOpMod(Mod):
@@ -72,13 +70,9 @@ class MaskTargetKeyMod(Mod):
             card, GenericCard
         ), "MaskTargetKeyMod expects a single-card TrainingDatum"
         masked = GenericCardFactory.with_field(
-            card, self._path, _MASK_TOKEN, self.missing
+            card, self._path, MASK_TOKEN, self.missing
         )
         return (masked, label)
-
-    def apply(self, data: List[TrainingDatum]) -> List[TrainingDatum]:
-        """apply_single on each datum, in order; `data` is unchanged."""
-        return [self.apply_single(datum) for datum in data]
 
 
 class ShuffleDeckMod(Mod):
@@ -110,7 +104,3 @@ class ShuffleDeckMod(Mod):
         ), "ShuffleDeckMod expects a multi-card TrainingDatum"
         cards = cast(List[GenericCard], deck)  # checked element-wise just above
         return (random.sample(cards, len(cards)), label)
-
-    def apply(self, data: List[TrainingDatum]) -> List[TrainingDatum]:
-        """apply_single on each datum, in order; `data` is unchanged."""
-        return [self.apply_single(datum) for datum in data]

@@ -7,6 +7,7 @@ import torch
 from torch import nn
 
 from src.dojos.dojo import BatchBudget, DojoBatch
+from src.dojos.mods.mod import ModTally
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
 from src.training.plan import (
@@ -78,6 +79,7 @@ class FakeDojo:
         self._nan_grad = nan_grad
         self._fail_at_batch = fail_at_batch
         self._loss_gain = loss_gain
+        self.head_device: torch.device | None = None
 
     def batches(
         self, split: Split, budget: BatchBudget, max_examples: int | None = None
@@ -103,6 +105,13 @@ class FakeDojo:
 
     def trainable_parameters(self) -> Iterable[nn.Parameter]:
         return self._head.parameters() if self._with_head else []
+
+    def move_head_to(self, device: torch.device) -> None:
+        self.head_device = device
+        self._head.to(device)
+
+    def mod_tallies(self) -> Mapping[str, ModTally]:
+        return {}
 
     def reset_head(self) -> None:
         pass

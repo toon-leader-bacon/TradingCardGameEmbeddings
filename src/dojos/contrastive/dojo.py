@@ -9,8 +9,9 @@ decks' items - so it is never split by card cost). It has no decoder
 head: the loss reads the encoder's embeddings directly.
 """
 
+import dataclasses
 import logging
-from typing import Iterable, Iterator
+from typing import Iterable, Iterator, Mapping, cast
 
 import torch
 from torch import nn
@@ -25,9 +26,11 @@ from src.dojos.contrastive.contrastive_loss import (
 from src.dojos.contrastive.pair_constructor import ContrastivePairConstructor
 from src.dojos.dojo import BatchBudget, DojoBatch
 from src.dojos.file_managers.deck_box_dealer import DeckBoxDealer
+from src.dojos.mods.mod import ModTally
+from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
-from src.schema.type_hints import BatchedModelOutput, iter_cards
+from src.schema.type_hints import BatchedModelOutput, BatchedTrainingInput, iter_cards
 
 _logger = logging.getLogger(__name__)
 
@@ -51,6 +54,7 @@ class ContrastiveDojo:
         contrastive_loss: ContrastiveLoss | None = None,
         name: str = "contrastive",
         strict_version_check: bool = True,
+        mod_pipeline: ModPipeline | None = None,
     ) -> None:
         """
         Inputs:
@@ -70,6 +74,11 @@ class ContrastiveDojo:
             contrastive_loss: the batch-level loss compute_loss
                 delegates to. Defaults to SingleCardInfoNCELoss().
             name: this dojo's name in a training plan.
+            mod_pipeline: augmentations applied to every item card after
+                the pair constructor builds a batch (identities and
+                positive cliques unchanged: a modded card is still the
+                same card). Train-only mods run on TRAIN only. None means
+                no mods.
             strict_version_check: when True (default), dealer's
                 recorded CardBinder version (dealer.card_binder_version)
                 is checked against
@@ -90,6 +99,7 @@ class ContrastiveDojo:
         self._pair_constructor = pair_constructor
         self._decks_per_sample = decks_per_sample
         self._contrastive_loss = contrastive_loss or SingleCardInfoNCELoss()
+        self._mod_pipeline = mod_pipeline or ModPipeline([])
         self._check_deck_box_version(dealer, card_lookup, strict_version_check)
         self._lookups = {
             split: VisibleCardLookup(card_lookup, holdout, split) for split in Split
@@ -134,6 +144,8 @@ class ContrastiveDojo:
                     len(deck_sample),
                 )
                 continue
+            # Mod first, so the budget check sees the batch actually yielded
+            batch = self._modded(batch, is_training=split == Split.TRAIN)
             self._check_within(batch, budget)
             yield batch
 
@@ -175,8 +187,33 @@ class ContrastiveDojo:
         """None: the contrastive loss has no learned head."""
         return []
 
+    def move_head_to(self, device: torch.device) -> None:
+        """No head to move."""
+
     def reset_head(self) -> None:
         """No head to reset."""
+
+    def mod_tallies(self) -> Mapping[str, ModTally]:
+        """See Dojo.mod_tallies: its mod pipeline's tallies."""
+        return self._mod_pipeline.mod_tallies()
+
+    def _modded(self, batch: ContrastiveBatch, is_training: bool) -> ContrastiveBatch:
+        """batch with its item cards passed through the mod pipeline (each
+        item as an (item, None) datum); identities and positive cliques
+        are kept. batch itself when the pipeline has no mods to run.
+
+        Inputs: batch, is_training (selects train-only mods).
+        Output: ContrastiveBatch.
+        Side effects: advances the mods' random state and tallies.
+        Exceptions: none from card data (the mods are best effort).
+        """
+        if not self._mod_pipeline.mods:
+            return batch
+        data = self._mod_pipeline.apply(
+            [(item, None) for item in batch.inputs], is_training=is_training
+        )
+        inputs = cast(BatchedTrainingInput, [item for item, _ in data])
+        return dataclasses.replace(batch, inputs=inputs)
 
     def _decks_within(self, budget: BatchBudget) -> int:
         """Decks per sample so a batch fits budget, assuming unit card cost."""

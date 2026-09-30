@@ -12,7 +12,11 @@ embedding a corpus into it, card labels, and the intrinsic analyses
 (cluster agreement, label compactness, projection plot), extrinsic
 runs, and learning-curve plots. A first-draft driver,
 [`scripts/run_evaluation.py`](../../scripts/run_evaluation.py), composes
-them end to end (see How to run). Remaining design questions are in
+them end to end (see How to run).
+[`scripts/plot_learning_curves.py`](../../scripts/plot_learning_curves.py)
+plots any rounds CSVs on their own (`--curve label=path`, repeatable):
+an extrinsic run that stopped partway, or a training run's own
+`rounds.csv`. Remaining design questions are in
 [`plans/evaluation.md`](../../plans/evaluation.md).
 
 ## Files
@@ -81,6 +85,12 @@ sharing it only with small data classes or trivial helpers.
     `LabelCompactness`: `silhouette`, and `nearest_centroid_accuracy`
     with leave-one-out centroids (a card never votes for itself) next to
     its `majority_baseline`. Needs some label with two or more cards.
+  - [effective_rank.py](analyses/effective_rank.py): `EffectiveRank`,
+    label-free and unsampled: exp(entropy) of the centered vectors'
+    variance shares, i.e. how many directions the embedding really uses
+    (`effective_rank`, `effective_rank_fraction`, `top1_variance_share`,
+    `top5_variance_share`). Flags dimensional collapse; the driver writes
+    it under `intrinsic/<encoder>/unlabeled/`.
   - [projection_plot.py](analyses/projection_plot.py): `ProjectionPlot`,
     a seeded t-SNE of the sampled cards, illustrative only (report it
     next to a numeric analysis). Writes `projection.png` (up to the

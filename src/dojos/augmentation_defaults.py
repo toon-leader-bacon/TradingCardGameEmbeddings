@@ -1,0 +1,102 @@
+"""Default train-only augmentations per game: which card fields to jitter
+and how often.
+
+This is data knowledge: each game's raw_content keys are chosen by its
+card-binder ingestion stage (named per section below), so a key renamed
+there must be renamed here. The preflight tally report
+(scripts/run_training.py) flags a mask that stops matching.
+
+A game's default applies to every contrastive dojo over that game's cards;
+a run config can replace it per dojo (`mods:`). Masking the deck-defining
+field (the one field that nearly identifies which deck a card came from)
+keeps same-deck contrastive positives from being solved by that field
+alone. A game with no entry gets no augmentation.
+"""
+
+from typing import Mapping
+
+from src.dojos.mods.card_field_mods import FieldMask
+from src.dojos.mods.mod_specs import (
+    ModSpec,
+    RandomKeyMaskSpec,
+    ShuffleKeysSpec,
+    WeightedFieldMaskSpec,
+)
+from src.schema.game_id import GameId
+from src.utils.drop_table import DropTable
+
+# gwent_one (card_binder/gwent_one/ingestion_stage.py). A deck is one
+# faction plus neutrals; faction-duo (15 cards) names the faction too.
+_GWENT_MASKS: DropTable[FieldMask] = DropTable.of(
+    [
+        (40, FieldMask()),
+        (35, FieldMask.of_keys("faction", "faction-duo")),
+        (15, FieldMask.of_keys("name")),
+        (10, FieldMask.of_keys("category")),
+    ]
+)
+
+# spire_codex (card_binder/spire_codex/ingestion_stage.py). A run is one
+# character's cards (color) plus colorless ones.
+_STS2_MASKS: DropTable[FieldMask] = DropTable.of(
+    [
+        (40, FieldMask()),
+        (35, FieldMask.of_keys("color")),
+        (15, FieldMask.of_keys("name")),
+        (10, FieldMask.of_keys("upgrade_description")),
+    ]
+)
+
+# cardvault_fabtcg (card_binder/cardvault_fabtcg/ingestion_stage.py). The
+# deck-defining class is a word inside typebox, not its own field, so it
+# is not masked here; back_face exists on ~2% of cards.
+_FAB_MASKS: DropTable[FieldMask] = DropTable.of(
+    [
+        (50, FieldMask()),
+        (25, FieldMask.of_keys("name")),
+        (
+            10,
+            DropTable.of(
+                [
+                    (1, FieldMask((("back_face", "name"),))),
+                    (1, FieldMask.of_keys("back_face")),
+                ]
+            ),
+        ),
+        (15, FieldMask.of_keys("typebox")),
+    ]
+)
+
+
+def _standard_augmentations(masks: DropTable[FieldMask]) -> tuple[ModSpec, ...]:
+    """Key-order shuffle, then the game's weighted masks, then a small
+    chance of one more random key masked.
+
+    Inputs: masks. Output: tuple of ModSpec. Side effects: none.
+    Exceptions: none.
+    """
+    return (
+        ShuffleKeysSpec(),
+        WeightedFieldMaskSpec(masks),
+        RandomKeyMaskSpec(probability=0.1),
+    )
+
+
+DEFAULT_AUGMENTATIONS: Mapping[GameId, tuple[ModSpec, ...]] = {
+    GameId.GWENT: _standard_augmentations(_GWENT_MASKS),
+    GameId.SLAY_THE_SPIRE_2: _standard_augmentations(_STS2_MASKS),
+    GameId.FLESH_AND_BLOOD: _standard_augmentations(_FAB_MASKS),
+}
+
+
+def default_augmentations_for(game: GameId) -> tuple[ModSpec, ...]:
+    """game's default augmentation specs; () for a game with none.
+
+    Inputs: game. Output: tuple of ModSpec.
+    Side effects: none. Exceptions: none.
+
+    Example:
+        >>> [type(spec).__name__ for spec in default_augmentations_for(GameId.GWENT)]
+        ['ShuffleKeysSpec', 'WeightedFieldMaskSpec', 'RandomKeyMaskSpec']
+    """
+    return DEFAULT_AUGMENTATIONS.get(game, ())

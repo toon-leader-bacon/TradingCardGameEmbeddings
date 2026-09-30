@@ -2,8 +2,14 @@
 
 State pattern: each dojo moves ACTIVE -> SATURATED after `patience_rounds`
 rounds without a > epsilon improvement, and back to ACTIVE if its loss
-regresses by `reactivation_delta`. "Saturated" means no further learnable
-signal, not "solved".
+rises by more than `reactivation_delta` above its loss at the moment it
+saturated. "Saturated" means no further learnable signal, not "solved".
+
+Reactivation is measured from the saturation point, not from the best
+loss: a dojo that overfit before saturating (loss above its best) is not
+trained while saturated, so only something else - another dojo moving a
+shared encoder - can raise its loss further. Measuring from the best would
+reactivate such a dojo every round, training an overfitting head more.
 """
 
 from dataclasses import dataclass
@@ -16,11 +22,13 @@ from src.training.recording.reports import DojoStatus
 @dataclass
 class _DojoTrack:
     """Mutable bookkeeping for one dojo. best_loss is None until the
-    first round reports a loss."""
+    first round reports a loss; saturated_loss is the loss of the round
+    that saturated the dojo (None while it never has)."""
 
     status: DojoStatus = DojoStatus.ACTIVE
     best_loss: float | None = None
     rounds_without_improvement: int = 0
+    saturated_loss: float | None = None
 
 
 class SaturationTracker:
@@ -107,14 +115,16 @@ class SaturationTracker:
         track.rounds_without_improvement += 1
         if track.rounds_without_improvement >= self._spec.patience_rounds:
             track.status = DojoStatus.SATURATED
+            track.saturated_loss = loss
 
     def _consider_reactivation(self, track: _DojoTrack, loss: float) -> None:
-        """Return a SATURATED dojo to ACTIVE if loss > best + reactivation_delta.
+        """Return a SATURATED dojo to ACTIVE if loss > saturated_loss +
+        reactivation_delta (see the module docstring for why not best).
 
         The new best is the regressed loss, so it must improve from there.
         """
-        assert track.best_loss is not None  # only set SATURATED after a loss
-        if loss > track.best_loss + self._spec.reactivation_delta:
+        assert track.saturated_loss is not None  # set when SATURATED is
+        if loss > track.saturated_loss + self._spec.reactivation_delta:
             track.status = DojoStatus.ACTIVE
             track.best_loss = loss
             track.rounds_without_improvement = 0

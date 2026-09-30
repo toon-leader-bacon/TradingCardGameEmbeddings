@@ -13,7 +13,7 @@ from typing import List
 import torch
 import torch.nn as nn
 
-from src.dojos.loss.nocab_loss import NocabLoss
+from src.dojos.loss.nocab_loss import NocabLoss, device_of
 
 
 class BceLoss(NocabLoss[List[torch.Tensor], List[float]]):
@@ -59,5 +59,7 @@ class BceLoss(NocabLoss[List[torch.Tensor], List[float]]):
         if not all(isinstance(label, float) for label in labels):
             raise ValueError("All labels must be floats")
         func = nn.BCEWithLogitsLoss()
-        target = torch.tensor(labels, dtype=torch.float32)
+        target = torch.tensor(
+            labels, dtype=torch.float32, device=device_of(decoder_output)
+        )
         return func(decoder_output, target)

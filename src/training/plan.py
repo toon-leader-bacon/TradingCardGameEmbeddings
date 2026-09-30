@@ -47,7 +47,7 @@ class SaturationSpec:
         more than this below the dojo's best so far.
     patience_rounds: consecutive non-improving rounds before SATURATED.
     reactivation_delta: a SATURATED dojo re-enters the diet if its TEST
-        loss rises this far above its best.
+        loss rises more than this above its loss when it saturated.
     target_saturated_fraction: the phase exits when this fraction of its
         dojos is SATURATED (in [0, 1]).
     """

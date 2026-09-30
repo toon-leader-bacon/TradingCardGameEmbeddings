@@ -22,7 +22,7 @@ from typing import List, Sequence
 import torch
 import torch.nn as nn
 
-from src.dojos.loss.nocab_loss import NocabLoss
+from src.dojos.loss.nocab_loss import NocabLoss, device_of
 
 
 class FixedClassificationLoss(NocabLoss[List[torch.Tensor], List[str]]):
@@ -85,7 +85,9 @@ class FixedClassificationLoss(NocabLoss[List[torch.Tensor], List[str]]):
         # Propagates _class_index()'s ValueError for a label outside
         # self._label_values rather than catching it - see docstring.
         target_indices = [self._class_index(label) for label in labels]
-        target = torch.tensor(target_indices, dtype=torch.long)
+        target = torch.tensor(
+            target_indices, dtype=torch.long, device=device_of(decoder_output)
+        )
 
         # One batched cross-entropy call over the whole
         # (batch_size, num_classes) tensor - not ragged, see module

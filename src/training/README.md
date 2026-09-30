@@ -2,9 +2,9 @@
 
 Trains the card-embedding encoder (`../encoder_model/`) against a suite of
 dojos (`../dojos/`). The encoder is the product; dojos are the teachers.
-Status: implemented and tested; run end to end on CPU against two real
-Gwent dojos (`scripts/smoke_test_training_loop.py`). No training driver or
-config file yet (see `TODO.md`, section D).
+Status: implemented and tested; run end to end on CPU and on the RX 6800
+against real Gwent dojos. Runs are launched from a YAML config by
+`scripts/run_training.py` (see "How to run").
 
 Start with [`trainer.py`](trainer.py). It is the only file that knows the
 whole story; every other file is a piece it delegates to.
@@ -47,6 +47,21 @@ Top level:
   extrinsic runs call it once on VALIDATION after training.
 - [trainable_encoder.py](trainable_encoder.py): the slice of the model the
   trainer needs.
+- [run_config.py](run_config.py): reads a YAML run config, applies
+  `--set key.path=value` overrides, and parses it into a `RunConfig`: the
+  `TrainingPlan`, `HardwareLimits`, device, `ModelSpec` and dojo list.
+  Unknown keys raise, with their dotted location.
+- [dojo_catalog.py](dojo_catalog.py): `DOJO_CATALOG`, every dojo a config
+  can name, keyed `"<metric source>.<metric stem>"` (e.g.
+  `gwent_one.color_mask`). The key becomes the dojo's `name`, so same-stem
+  metrics from different games cannot collide. `build_dojos()` loads each
+  game's binder (and deck box) once, through a `CardShelf`. Contrastive
+  entries (`contrastive.gwent`, `contrastive.flesh_and_blood`,
+  `contrastive.slay_the_spire_2`) read the game's final deck box directly
+  (positives: two cards from the same deck; split index under
+  `data/splits/contrastive/`) and take the game's default augmentation
+  mods, or a run config's per-dojo replacement (`mods:`); every mod gets
+  its own seed from a stream separate from the dealer's.
 - [preflight.py](preflight.py): `preflight_dojo()` exercises one already-
   built dojo (one TRAIN batch, `compute_loss` against random embeddings)
   without an encoder, so a stale split file or a `card_embedding_size`
@@ -86,7 +101,10 @@ Run
 
 **Saturation:** a dojo whose TEST loss has stopped improving (no gain
 larger than `epsilon` for `patience_rounds` rounds) leaves the diet. It
-re-enters if its loss rises again by `reactivation_delta`.
+re-enters if its loss rises more than `reactivation_delta` above its loss
+when it saturated. That can only happen when other dojos move a shared,
+trainable encoder: a saturated dojo's own head is not trained, so a head
+that overfit before saturating stays out instead of flip-flopping.
 
 ## How it works
 
@@ -144,6 +162,12 @@ Points worth knowing:
   card holdout is consistent across dojos.
 - The best checkpoint is chosen per phase; scores are not comparable across
   phases because the diet changes.
+- Retention (`DirectoryCheckpointer`): only the best checkpoint of each
+  phase stays on disk (a new best deletes the phase's previous one once it
+  is fully written), plus `latest/`, rewritten after every round. The
+  checkpoints CSV lists every best ever written, so most of its paths no
+  longer exist. Each checkpoint holds the whole model (the frozen LM too),
+  and `latest/` also holds the optimizer state.
 - Nothing here is meant to crash an overnight run. A failing step
   (exception, out-of-memory, non-finite loss or gradient), evaluation,
   checkpoint save or listener is logged and skipped. Gradients are clipped
@@ -171,8 +195,31 @@ Points worth knowing:
 
 ## How to run
 
-Assumes `model` is a `SingleCardModel`/`MultiCardModel` and `dojos` is a
-list of constructed `Dojo`s.
+From a config file (configs live in `configs/training/`; use the ROCm
+venv for a GPU run, see `TODO.md` section A):
+
+```sh
+PYTHONPATH=. python scripts/run_training.py configs/training/gpu_smoke.yaml
+PYTHONPATH=. python scripts/run_training.py configs/training/gpu_smoke.yaml \
+    --set run_directory=data/runs/smoke_2 --set phases.0.max_rounds=2
+# Build and preflight the dojos only; trains and writes nothing
+PYTHONPATH=. python scripts/run_training.py configs/training/gpu_smoke.yaml --check
+```
+
+The script builds the model and the config's dojos, preflights every dojo
+(any failure stops the run before training), then trains. Preflight also
+prints each augmentation mod's tally over its one batch (cards changed,
+failed) and warns on a mod that changed nothing or failed; that never
+stops the run. A config's optional `mods:` section replaces a contrastive
+dojo's default augmentations (see `configs/training/gwent_contrastive.yaml`);
+dojo names contain ".", so `--set` cannot reach them. The run
+directory must not already exist; it receives `run_config.yaml` (the
+config with overrides applied; defaults it left out are not written),
+`rounds.csv`, `checkpoints.csv` and the checkpoint directories. Batch cost
+is one per card, for preflight and training alike (`card_cost`).
+
+Directly from code, assuming `model` is a `SingleCardModel`/`MultiCardModel`
+and `dojos` is a list of constructed `Dojo`s:
 
 ```python
 plan = TrainingPlan(phases=(...), holdout=HoldoutSpec(...), held_out_dojos=frozenset(),

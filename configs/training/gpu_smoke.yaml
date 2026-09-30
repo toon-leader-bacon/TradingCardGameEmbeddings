@@ -1,0 +1,60 @@
+# ~10-minute GPU smoke run: frozen ModernBERT, head-only phase, fp16.
+# Checks that the full loop runs on real data on the RX 6800, not that the
+# model learns anything useful. Run with (ROCm venv):
+#   PYTHONPATH=. python scripts/run_training.py configs/training/gpu_smoke.yaml
+#
+# Floats: write 1.0e-3, not 1e-3 (PyYAML reads the latter as a string;
+# run_config accepts both for float fields, but other YAML tools may not).
+
+run_directory: data/runs/gpu_smoke
+device: cuda
+seed: 0
+
+model:
+  kind: linear_projection
+  checkpoint: answerdotai/ModernBERT-base
+  embed_dim: 256
+
+# Catalog keys (src/training/dojo_catalog.py). STS card dojos are left out
+# of this first run: their raw-scale regression losses (up to ~1e5) would
+# dominate the best-checkpoint mean.
+dojos:
+  - gwent_one.color_mask
+  - gwent_one.faction_mask
+  - gwent_one.rarity_mask
+  - gwent_one.set_mask
+  - gwent_one.type_mask
+  - gwent_one.armor_mask
+  - gwent_one.provision_mask
+  - gwent_one.power_mask
+held_out_dojos: []
+
+holdout:
+  seed: 0
+  tier_ratios: [8, 1, 1]
+  held_out_games: []
+
+hardware:
+  max_batch_cost: 32
+  precision: fp16
+
+eval_examples_per_dojo: 128
+
+phases:
+  - name: frozen
+    # no "dojos" key: trains every non-held-out run dojo
+    diet: {rule: uniform}
+    # "encoder" = the card model's trainable parameters: the projection
+    # head only (ModernBERT is frozen by the model itself)
+    encoder_trainable: true
+    encoder_lr: 1.0e-3
+    head_lr: 1.0e-3
+    # ~0.3-0.5 s/step frozen at batch 32 -> ~100 s of steps per round, plus
+    # a TEST pass of 8 x 128 examples
+    steps_per_round: 200
+    max_rounds: 5
+    saturation:
+      epsilon: 0.001
+      patience_rounds: 3
+      reactivation_delta: 0.05
+      target_saturated_fraction: 1.0

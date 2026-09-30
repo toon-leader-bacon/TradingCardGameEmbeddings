@@ -1,3 +1,4 @@
+import json
 import logging
 from pathlib import Path
 
@@ -56,6 +57,9 @@ class _ExplodingCheckpointer:
     def save(self, *args: object, **kwargs: object) -> CheckpointRecord:
         raise OSError("disk full")
 
+    def save_latest(self, *args: object, **kwargs: object) -> CheckpointRecord:
+        raise OSError("disk full")
+
 
 def _trainer(
     tmp_path: Path,
@@ -101,10 +105,24 @@ class TestRun:
         assert result.best_checkpoint is not None
         assert result.best_checkpoint.encoder_path.exists()
         assert listener.checkpoints and len(listener.reports) >= 1
+        # Only the phase's best and the latest round remain on disk
+        latest = json.loads((tmp_path / "latest" / "manifest.json").read_text())
+        assert latest["round_index"] == result.final_report.round_index
+        round_directories = [p for p in tmp_path.iterdir() if "_round" in p.name]
+        assert round_directories == [result.best_checkpoint.path.parent]
+
+    def test_moves_every_dojo_head_to_the_model_device(self, tmp_path: Path) -> None:
+        dojos = [FakeDojo("a"), FakeDojo("b")]
+
+        _trainer(tmp_path, dojos).run()
+
+        assert [dojo.head_device for dojo in dojos] == [torch.device("cpu")] * 2
 
     def test_stops_the_phase_when_saturated(self, tmp_path: Path) -> None:
-        # A dojo with no head and a frozen-free encoder still trains; zero lr
-        # makes the loss constant so it saturates after patience_rounds.
+        # Zero lr freezes every weight, so only FakeDojo's random batches move
+        # the TEST loss; seeded, so whether it saturates within max_rounds
+        # does not depend on what earlier tests drew from the global RNG
+        torch.manual_seed(0)
         trainer = _trainer(
             tmp_path, [FakeDojo("a")], encoder_lr=0.0, head_lr=0.0, max_rounds=10
         )
@@ -337,6 +355,8 @@ class TestFailureRecovery:
         assert result.stopped_early_reason is not None
         assert result.best_checkpoint is not None
         assert result.best_checkpoint.report.phase == "first"
+        # Retention is per phase: the later phase never deletes it
+        assert result.best_checkpoint.path.exists()
 
     def test_a_quarantined_dojo_does_not_block_the_phase_from_finishing(
         self, tmp_path: Path
@@ -398,27 +418,39 @@ class TestMixedPrecision:
         assert _gradient_norm(parameters) == pytest.approx(1e-3, rel=1e-2)
 
     def test_overflow_above_the_minimum_scale_skips_without_a_fault(
-        self, tmp_path: Path
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         # Overflows fp16 until the loss scale backs off to ~4 (14 halvings);
         # counted as faults, 2 in a row would quarantine the only dojo
         model = FakeModel()
         before = model.layer.weight.detach().clone()
-        result = _trainer(
-            tmp_path,
-            [FakeDojo("a", loss_gain=1e4)],
-            model=model,
-            precision="fp16",
-            steps_per_round=30,
-            max_rounds=1,
-            plan_overrides={"faults": FaultPolicy(2, 2)},
-        ).run()
+        with caplog.at_level(logging.INFO):
+            result = _trainer(
+                tmp_path,
+                [FakeDojo("a", loss_gain=1e4)],
+                model=model,
+                precision="fp16",
+                steps_per_round=30,
+                max_rounds=1,
+                plan_overrides={"faults": FaultPolicy(2, 2)},
+            ).run()
 
         assert result.stopped_early_reason is None
         assert result.final_report is not None
         assert "a" not in result.final_report.quarantined
         assert 0 < result.final_report.step < 30
         assert not torch.equal(before, model.layer.weight)
+        # Every skipped step is reported in the round's log line
+        skipped = 30 - result.final_report.step
+        assert f"{skipped} fp16 step(s) skipped" in caplog.text
+
+    def test_each_phase_logs_what_it_trains(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.INFO):
+            _trainer(tmp_path, [FakeDojo("a")], max_rounds=1).run()
+        assert "trainable parameters: encoder" in caplog.text
+        assert "dojo heads" in caplog.text
 
     def test_nan_gradients_never_update_and_fault_at_the_minimum_scale(
         self, tmp_path: Path

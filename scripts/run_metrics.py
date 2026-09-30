@@ -94,6 +94,7 @@ from src.data_refinement.metrics.sts_gg.deck_label_metrics import (
 from src.data_refinement.metrics.sts_gg.deck_label_metrics import (
     CharacterPredictionMetric as DeckCharacterPredictionMetric,
 )
+from src.data_refinement.metrics.sts_gg.deck_box_path import STS_GG_DECK_BOX_PATH
 from src.data_refinement.metrics.sts_gg.scanner import scan_runs_jsonl
 
 # --- gwent_one ---
@@ -355,7 +356,7 @@ def run_sts_gg(raw_path: Path | None) -> None:
     print(f"=== sts_gg: {effective_raw_path} ===")
     scan_runs_jsonl(effective_raw_path, metrics)
     deck_box.save(
-        Path("data/metrics/sts_gg/deck_box.db"),
+        STS_GG_DECK_BOX_PATH,
         GameId.SLAY_THE_SPIRE_2,
         binder.version_for(GameId.SLAY_THE_SPIRE_2),
     )

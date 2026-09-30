@@ -14,7 +14,7 @@ from typing import Dict, List, Sequence
 import torch
 import torch.nn.functional as F
 
-from src.dojos.loss.nocab_loss import NocabLoss
+from src.dojos.loss.nocab_loss import NocabLoss, device_of
 
 
 class SoftClassificationLoss(NocabLoss[List[torch.Tensor], List[Dict[str, float]]]):
@@ -90,7 +90,7 @@ class SoftClassificationLoss(NocabLoss[List[torch.Tensor], List[Dict[str, float]
         # stacked into one (batch_size, num_classes) target tensor aligned
         # to decoder_output's own class ordering.
         target_rows = [self._target_vector(label) for label in labels]
-        target = torch.stack(target_rows)
+        target = torch.stack(target_rows).to(device_of(decoder_output))
 
         # One batched soft cross-entropy call over the whole
         # (batch_size, num_classes) tensor - not per-example, mirrors

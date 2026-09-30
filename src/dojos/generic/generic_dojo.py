@@ -10,7 +10,7 @@ import copy
 import logging
 import random
 from pathlib import Path
-from typing import Any, Iterable, Iterator, List
+from typing import Any, Iterable, Iterator, List, Mapping
 
 import torch
 from torch import nn
@@ -26,6 +26,7 @@ from src.dojos.file_managers.file_manager_parquet import MAX_INT, FileManagerPar
 from src.dojos.generic.data_constructor import DataConstructor
 from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.loss.nocab_loss import NocabLoss
+from src.dojos.mods.mod import ModTally
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
@@ -183,8 +184,17 @@ class GenericDojo:
         """This dojo's decoder-head parameters (never the encoder's)."""
         return self.decoder_head.parameters()
 
+    def mod_tallies(self) -> Mapping[str, ModTally]:
+        """See Dojo.mod_tallies: its data_mod_pipeline's tallies."""
+        return self.data_mod_pipeline.mod_tallies()
+
+    def move_head_to(self, device: torch.device) -> None:
+        """Move the decoder head to device, in place."""
+        self.decoder_head.to(device)
+
     def reset_head(self) -> None:
-        """Restore the decoder head to its state at construction."""
+        """Restore the decoder head to its state at construction (on
+        whatever device it is on now)."""
         self.decoder_head.load_state_dict(self._initial_head_state)
 
     def _examples(

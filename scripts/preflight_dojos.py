@@ -18,10 +18,10 @@ Usage (from the project root):
 """
 
 import argparse
-from pathlib import Path
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.metrics.sts_gg.deck_box_path import STS_GG_DECK_BOX_PATH
 from src.dojos.dojo import BatchBudget, Dojo
 from src.dojos.gwent_one.masked_field_dojos import (
     ArmorMaskDojo,
@@ -59,8 +59,6 @@ from src.dojos.sts_gg.deck_label_dojos import (
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
 from src.training.preflight import preflight_dojo
-
-_STS_DECK_BOX_PATH = Path("data/metrics/sts_gg/deck_box.db")
 
 
 def build_gwent_dojos(holdout: HoldoutSpec, card_embedding_size: int) -> list[Dojo]:
@@ -111,12 +109,12 @@ def build_sts_dojos(holdout: HoldoutSpec, card_embedding_size: int) -> list[Dojo
         dojo_class(binder, holdout, card_embedding_size)
         for dojo_class in card_dojo_classes
     ]
-    if not _STS_DECK_BOX_PATH.exists():
+    if not STS_GG_DECK_BOX_PATH.exists():
         print(
-            f"  skipping sts_gg deck-level dojos: {_STS_DECK_BOX_PATH} does not exist"
+            f"  skipping sts_gg deck-level dojos: {STS_GG_DECK_BOX_PATH} does not exist"
         )
         return dojos
-    deck_box = DeckBox.load([_STS_DECK_BOX_PATH])
+    deck_box = DeckBox.load([STS_GG_DECK_BOX_PATH])
     deck_dojo_classes = [
         DeckRelicCountDojo,
         DeckTotalDamageTakenDojo,

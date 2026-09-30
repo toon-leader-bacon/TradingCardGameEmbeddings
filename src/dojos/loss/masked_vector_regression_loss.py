@@ -20,7 +20,7 @@ from typing import Dict, List, Sequence, Tuple
 
 import torch
 
-from src.dojos.loss.nocab_loss import NocabLoss
+from src.dojos.loss.nocab_loss import NocabLoss, device_of
 
 
 class MaskedVectorRegressionLoss(NocabLoss[List[torch.Tensor], List[Dict[int, float]]]):
@@ -95,8 +95,9 @@ class MaskedVectorRegressionLoss(NocabLoss[List[torch.Tensor], List[Dict[int, fl
             target, mask = self._target_and_mask(label)
             targets.append(target)
             masks.append(mask)
-        target_batch = torch.stack(targets)
-        mask_batch = torch.stack(masks)
+        device = device_of(decoder_output)
+        target_batch = torch.stack(targets).to(device)
+        mask_batch = torch.stack(masks).to(device)
 
         # decoder_output is a real (batch, num_outputs) Tensor at
         # runtime despite its List[torch.Tensor] type hint - same known

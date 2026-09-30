@@ -8,7 +8,7 @@ to the same shapes instead of each re-deriving them.
 """
 
 from enum import Enum
-from typing import Any, Iterator, List, Tuple, Union
+from typing import Any, Callable, Iterator, List, Tuple, Union, cast
 
 import torch
 
@@ -136,6 +136,28 @@ def iter_cards(x: Union[TrainingInput, BatchedTrainingInput]) -> Iterator[Generi
         return
     for element in x:
         yield from iter_cards(element)
+
+
+def map_cards(
+    x: TrainingInput, transform: Callable[[GenericCard], GenericCard]
+) -> TrainingInput:
+    """x rebuilt with transform applied to every card, same nesting and
+    order: the shape-preserving counterpart of iter_cards.
+
+    Inputs: x (a GenericCard or list nesting of them), transform.
+    Output: TrainingInput of the same shape; new lists, never x's own.
+    Side effects: whatever transform does (called once per card, depth
+        first, in order).
+    Exceptions: whatever transform raises.
+
+    Example:
+        >>> map_cards([card_a, card_b], lambda c: c)
+        [card_a, card_b]
+    """
+    if isinstance(x, GenericCard):
+        return transform(x)
+    # Recursive like iter_cards: the nesting is at most two lists deep
+    return cast(TrainingInput, [map_cards(element, transform) for element in x])
 
 
 Label = Any  # Typically a single scaler value, but could be a list of values

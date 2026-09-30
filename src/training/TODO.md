@@ -196,6 +196,29 @@ a median of ~200 tokens and FaB to ~570.
 - [ ] **Report card-loading health per game.** Unresolved names, alias
   collisions, 17lands-name -> Scryfall-UUID resolution rate for MSH and
   KTK. Check STS2: 578 cards against 7.8k decks.
+- [ ] **STS deck-level dojos need a metrics re-run.** They read
+  `STS_GG_DECK_BOX_PATH` (`data/metrics/sts_gg/deck_box.db`), but only an
+  older `deck_box.jsonl` is on disk; run `scripts/run_metrics.py --source
+  sts_gg`.
+- [ ] **Find a reasonable way to normalize loss across dojos.** Dojo
+  losses are on unrelated scales: cross-entropy sits near ln(classes),
+  InfoNCE near ln(batch items), and MSE is in the target's raw units
+  (preflight sample losses: gwent masks ~1-3, contrastive ~6, STS
+  card-average regressions up to ~7e4). Three places this matters today:
+  - the best-checkpoint rule averages TEST loss over the diet dojos, so
+    the largest-scale dojo decides which checkpoint wins;
+  - `SaturationSpec.epsilon` / `reactivation_delta` are absolute, so one
+    value means "no progress" for one dojo and "huge progress" for another;
+  - the shared encoder's (and future shared head's) gradient share per
+    dojo. Per-step clipping caps the size but not the imbalance.
+  Candidates, not mutually exclusive: standardize regression targets from
+  TRAIN-split statistics (a data-side fix for MSE only); report and compare
+  loss relative to a trivial baseline per dojo (mean predictor for MSE,
+  label prior for CE, ln(N) for InfoNCE, so 1.0 = chance everywhere) for
+  best-checkpoint and saturation decisions; learned per-dojo weights
+  (uncertainty weighting, GradNorm) for the training signal itself. Until
+  this lands, don't mix regression dojos with classification/contrastive
+  ones in one phase.
 - [ ] **Decide the first-run dojo set.** Ready today: Gwent masks, STS
   metrics. Contrastive on FaB / Gwent / STS2 needs no metric. Add MSH draft
   and KTK game dojos after the split fixes below.
@@ -216,11 +239,10 @@ a median of ~200 tokens and FaB to ~570.
   driver, see section D), so no call site needed updating. Regression test:
   `tests/dojos/seventeenlands/game_data/test_game_deck_label_dojos.py`'s
   `TestNameAvoidsSplitFileCollision`.
-- [ ] **Make splits deterministic.** Existing split files are now reused
-  (`FileManagerParquet.splits_exist()`; `force_resplit` rebuilds), so a
-  restart no longer re-streams the parquet. Remaining: `rng_seed=None` is
-  the wrappers' default, so a first build is unseeded; pass a seed from
-  the training config.
+- [x] **Make splits deterministic.** Existing split files are reused
+  (`FileManagerParquet.splits_exist()`; `force_resplit` rebuilds), and
+  `scripts/run_training.py` seeds every dojo's first split build from the
+  config's `seed`.
 - [x] **Scryfall ingestion fixes** (details in `Notes.md` section 8; the
   `keep_incoming` switch was needed by the lean-`raw_content` work in
   section B). Skip `token`/`double_faced_token`/`emblem`/`scheme`/
@@ -258,19 +280,26 @@ a median of ~200 tokens and FaB to ~570.
 
 ## D. Training driver
 
-- [ ] **Write `scripts/run_training.py`.** Load binders and deck boxes,
-  build the model, dojos and `TrainingPlan`, call `Trainer.run()`. Today
-  `README.md` only has a snippet.
-- [ ] **Add a config file (YAML/JSON) plus CLI overrides.** Dojo list and
-  diet, phases, learning rates, `HoldoutSpec`, `max_batch_cost`, run
-  directory, seed. Dojo selection is currently `Phase.dojo_names` matched
-  against whatever dojos were constructed.
-- [ ] **Decide checkpoint output.** `DirectoryCheckpointer(run_dir)` writes
-  `<phase>_roundNNNN/{state.pt, encoder.pt, manifest.json}` on every new
-  best round and never deletes old ones; each includes the full LM (several
-  hundred MB for ModernBERT). Pick a `runs/` location, a retention policy,
-  and put the resolved config in the manifest (it stores only
-  `repr(plan)` today).
+- [x] **Write `scripts/run_training.py`** (2026-09-29). YAML config
+  (`configs/training/`, parsed by `run_config.py`) plus repeatable
+  `--set key.path=value` overrides; dojos named by `dojo_catalog.py` keys
+  (gwent_one masks, sts_gg card and deck dojos); preflight before
+  training; `--check` builds and preflights only. Run directory gets the
+  config copy, `rounds.csv`, `checkpoints.csv` and checkpoints. The config
+  seed also seeds each dojo's split shuffle. `--check` on
+  `gpu_smoke.yaml` passes on real data (8/8 gwent dojos). Split files are
+  now keyed by catalog name (`gwent_one.color_mask`), so the first build
+  writes new ones.
+- [x] **Decide checkpoint retention** (2026-09-30): only the best per phase
+  plus `latest/` (rewritten every round) are kept. Still open: checkpoints
+  hold the frozen LM too (~1.2 GB each, twice: `state.pt` and `encoder.pt`).
+  Previously: `DirectoryCheckpointer(run_dir)`
+  writes `<phase>_roundNNNN/{state.pt, encoder.pt, manifest.json}` on every
+  new best round and never deletes old ones; each includes the full LM
+  (several hundred MB for ModernBERT). Runs go in `data/runs/<name>/`
+  (gitignored) with the config beside them as `run_config.yaml`; still
+  open: a retention policy, and whether the manifest itself should carry
+  the config (it stores only `repr(plan)`).
 - [ ] **Set `max_batch_cost` sensibly.** It counts cards, not tokens, and a
   40-card deck counts as 40. Start small (~32) and raise it while watching
   VRAM.
@@ -310,8 +339,22 @@ a median of ~200 tokens and FaB to ~570.
     kind of risk). The other 5 games' metrics/deck boxes are presumably
     just as stale and will need the same regeneration before their dojos
     can be smoke-tested too.
-- [ ] **GPU run.** Frozen ModernBERT, head-only phase; inspect loss curves
-  and saturation behavior.
+- [x] **Fix the CPU/GPU device mismatch** (2026-09-29). Dojo heads live
+  in the dojos, not the model, and the losses built their targets on the
+  CPU, so any GPU step would have raised and quarantined every dojo.
+  `Dojo.move_head_to(device)` is new; `Trainer.run()` moves every head to
+  the model's device (`precision.parameter_device`) before training.
+  Losses build targets on `nocab_loss.device_of(decoder_output)`; the
+  contrastive negative mask moves to the similarity matrix's device.
+  Tested on the `meta` device, and on the RX 6800: 2 gwent_one dojos, fp16,
+  15 steps, heads on `cuda:0`, loss fell every round, no quarantines.
+- [x] **GPU run** (2026-09-30): `gwent_contrastive.yaml` trained end to end
+  and was evaluated; findings, fixes and open items in
+  `plans/first_train_shakeout.md`. Frozen ModernBERT, head-only phase; inspect loss curves
+  and saturation behavior. First candidate (decided 2026-09-30):
+  `configs/training/gwent_contrastive.yaml`, one single-card contrastive
+  dojo with Gwent's default augmentations; `--check` passes on real data
+  (48k train decks; all three default mods fire, none fail).
 - [ ] **Trainable-LM phase later**, once VRAM is measured. Consider
   gradient checkpointing and a fp16 scaler.
 

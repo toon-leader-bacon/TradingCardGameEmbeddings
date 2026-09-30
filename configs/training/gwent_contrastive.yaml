@@ -1,0 +1,60 @@
+# First contrastive run: frozen ModernBERT + linear head, one single-card
+# contrastive dojo over Gwent decks (positives = two cards from the same
+# deck), with Gwent's default augmentations (src/dojos/augmentation_defaults.py).
+# Run with (ROCm venv):
+#   PYTHONPATH=. python scripts/run_training.py configs/training/gwent_contrastive.yaml
+# Check data, dojo and mods without training:
+#   ... gwent_contrastive.yaml --check
+
+run_directory: data/runs/gwent_contrastive
+device: cuda
+seed: 0
+
+model:
+  kind: linear_projection
+  checkpoint: answerdotai/ModernBERT-base
+  embed_dim: 256
+
+dojos:
+  - contrastive.gwent
+
+# Uncomment to replace Gwent's default augmentations for this dojo
+# (an empty list turns augmentation off, e.g. for an ablation). Dojo names
+# contain ".", so --set cannot reach them; edit this file instead:
+# mods:
+#   contrastive.gwent:
+#     - {kind: shuffle_keys}
+#     - kind: weighted_field_mask
+#       table:
+#         - {weight: 40}                                   # mask nothing
+#         - {weight: 35, mask: [[faction], [faction-duo]]}
+#         - {weight: 15, mask: [[name]]}
+#     - {kind: random_key_mask, probability: 0.1}
+
+holdout:
+  seed: 0
+  tier_ratios: [8, 1, 1]
+  held_out_games: []
+
+# 16 decks x 2 cards = 32 cards per batch
+hardware:
+  max_batch_cost: 32
+  precision: fp16
+
+eval_examples_per_dojo: 256
+
+phases:
+  - name: frozen
+    diet: {rule: uniform}
+    # "encoder" = the card model's trainable parameters: the projection
+    # head only (ModernBERT is frozen by the model itself)
+    encoder_trainable: true
+    encoder_lr: 1.0e-3
+    head_lr: 1.0e-3
+    steps_per_round: 200
+    max_rounds: 5
+    saturation:
+      epsilon: 0.001
+      patience_rounds: 3
+      reactivation_delta: 0.05
+      target_saturated_fraction: 1.0

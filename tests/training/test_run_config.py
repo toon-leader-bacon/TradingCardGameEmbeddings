@@ -1,0 +1,373 @@
+import copy
+from pathlib import Path
+from typing import Any, cast
+
+import pytest
+import torch
+
+from src.dojos.mods.card_field_mods import FieldMask
+from src.dojos.mods.mod_specs import (
+    RandomKeyMaskSpec,
+    ShuffleKeysSpec,
+    WeightedFieldMaskSpec,
+)
+from src.schema.game_id import GameId
+from src.training.plan import Proportional, Temperature, Uniform
+from src.training.run_config import (
+    ConfigDocument,
+    ModelKind,
+    apply_overrides,
+    parse_run_config,
+    read_config_document,
+)
+from src.utils.drop_table import DropTable
+
+_SMOKE_CONFIG = Path("configs/training/gpu_smoke.yaml")
+
+
+def _document() -> ConfigDocument:
+    """A small valid document; tests edit a fresh copy."""
+    return {
+        "run_directory": "data/runs/test",
+        "device": "cpu",
+        "seed": 3,
+        "model": {"kind": "linear_projection", "checkpoint": "ckpt", "embed_dim": 32},
+        "dojos": ["a", "b", "c"],
+        "held_out_dojos": ["c"],
+        "holdout": {"seed": 0, "tier_ratios": [8, 1, 1]},
+        "hardware": {"max_batch_cost": 16, "precision": "fp16"},
+        "eval_examples_per_dojo": 64,
+        "phases": [
+            {
+                "name": "frozen",
+                "diet": {"rule": "uniform"},
+                "encoder_trainable": False,
+                "encoder_lr": 0,
+                "head_lr": 1.0e-3,
+                "steps_per_round": 10,
+                "max_rounds": 2,
+                "saturation": {
+                    "epsilon": 0.0,
+                    "patience_rounds": 1,
+                    "reactivation_delta": 0.1,
+                    "target_saturated_fraction": 1,
+                },
+            }
+        ],
+    }
+
+
+def _with(path: list[Any], value: Any) -> ConfigDocument:
+    """_document() with the value at path replaced (or added)."""
+    document = _document()
+    container: Any = document
+    for key in path[:-1]:
+        container = container[key]
+    container[path[-1]] = value
+    return document
+
+
+def _without(path: list[Any]) -> ConfigDocument:
+    """_document() with the key at path removed."""
+    document = _document()
+    container: Any = document
+    for key in path[:-1]:
+        container = container[key]
+    del container[path[-1]]
+    return document
+
+
+class TestParseRunConfig:
+    def test_parses_every_section(self) -> None:
+        config = parse_run_config(_document())
+
+        assert config.run_directory == Path("data/runs/test")
+        assert config.device == torch.device("cpu")
+        assert config.model.kind is ModelKind.LINEAR_PROJECTION
+        assert config.model.embed_dim == 32
+        assert config.dojo_names == ("a", "b", "c")
+        assert config.plan.held_out_dojos == frozenset({"c"})
+        assert config.plan.seed == 3
+        assert config.plan.holdout.tier_ratios == (8.0, 1.0, 1.0)
+        assert config.limits.max_batch_cost == 16
+        assert config.limits.precision == "fp16"
+
+    def test_a_phase_without_dojos_trains_every_non_held_out_dojo(self) -> None:
+        phase = parse_run_config(_document()).plan.phases[0]
+        assert phase.dojo_names == ("a", "b")
+
+    def test_a_phase_can_name_its_own_dojos(self) -> None:
+        config = parse_run_config(_with(["phases", 0, "dojos"], ["b"]))
+        assert config.plan.phases[0].dojo_names == ("b",)
+
+    def test_ints_are_widened_to_float(self) -> None:
+        phase = parse_run_config(_document()).plan.phases[0]
+        assert isinstance(phase.encoder_lr, float)
+        assert isinstance(phase.saturation.target_saturated_fraction, float)
+
+    def test_numeric_strings_are_accepted_for_floats(self) -> None:
+        # PyYAML reads 1e-3 (no decimal point) as the string "1e-3"
+        config = parse_run_config(_with(["phases", 0, "head_lr"], "1e-3"))
+        assert config.plan.phases[0].head_lr == pytest.approx(1e-3)
+
+    def test_absent_optional_fields_keep_their_defaults(self) -> None:
+        config = parse_run_config(_document())
+        assert config.plan.phases[0].max_grad_norm == 1.0
+        assert config.plan.faults.max_consecutive_failures == 20
+
+    def test_optional_fields_can_be_set(self) -> None:
+        document = _with(["phases", 0, "max_grad_norm"], 0.5)
+        document["faults"] = {"max_consecutive_failures": 3}
+        config = parse_run_config(document)
+        assert config.plan.phases[0].max_grad_norm == 0.5
+        assert config.plan.faults.max_consecutive_failures == 3
+
+    def test_held_out_games_are_parsed(self) -> None:
+        document = _with(["holdout", "held_out_games"], ["gwent"])
+        config = parse_run_config(document)
+        assert config.plan.holdout.held_out_games == frozenset({GameId.GWENT})
+
+    @pytest.mark.parametrize(
+        ("diet", "expected"),
+        [
+            ({"rule": "uniform"}, Uniform()),
+            ({"rule": "proportional"}, Proportional()),
+            ({"rule": "temperature", "alpha": 0.5}, Temperature(alpha=0.5)),
+        ],
+    )
+    def test_each_diet_rule(self, diet: dict[str, Any], expected: object) -> None:
+        config = parse_run_config(_with(["phases", 0, "diet"], diet))
+        assert config.plan.phases[0].diet_rule == expected
+
+    @pytest.mark.parametrize(
+        ("path", "value", "message"),
+        [
+            (["typo"], 1, "config.typo"),
+            (["model", "typo"], 1, "config.model.typo"),
+            (["hardware", "typo"], 1, "config.hardware.typo"),
+            (["holdout", "typo"], 1, "config.holdout.typo"),
+            (["phases", 0, "typo"], 1, "config.phases.0.typo"),
+            (["phases", 0, "diet", "typo"], 1, "config.phases.0.diet.typo"),
+            (["phases", 0, "saturation", "typo"], 1, "phases.0.saturation.typo"),
+        ],
+    )
+    def test_unknown_keys_raise_at_any_depth(
+        self, path: list[Any], value: Any, message: str
+    ) -> None:
+        with pytest.raises(ValueError, match=message):
+            parse_run_config(_with(path, value))
+
+    def test_faults_typo_raises(self) -> None:
+        document = _document()
+        document["faults"] = {"max_consecutive_failure": 3}
+        with pytest.raises(ValueError, match="config.faults.max_consecutive_failure"):
+            parse_run_config(document)
+
+    @pytest.mark.parametrize(
+        "path",
+        [["device"], ["model", "embed_dim"], ["phases", 0, "head_lr"], ["hardware"]],
+    )
+    def test_missing_required_keys_raise(self, path: list[Any]) -> None:
+        with pytest.raises(ValueError, match="is required"):
+            parse_run_config(_without(path))
+
+    @pytest.mark.parametrize(
+        ("path", "value"),
+        [
+            (["seed"], True),  # bool is not an int
+            (["seed"], "3"),
+            (["phases", 0, "head_lr"], "fast"),
+            (["phases", 0, "head_lr"], "nan"),
+            (["phases", 0, "head_lr"], "inf"),
+            (["phases", 0, "head_lr"], float("inf")),  # YAML-native .inf
+            (["phases", 0, "head_lr"], 10**400),  # overflows float()
+            (["phases", 0, "encoder_trainable"], 0),
+            (["dojos"], ["a", 1]),
+            (["dojos"], "a"),
+            (["holdout", "tier_ratios"], [8, 1]),
+            (["phases"], [1]),
+        ],
+    )
+    def test_wrongly_typed_values_raise(self, path: list[Any], value: Any) -> None:
+        with pytest.raises(ValueError):
+            parse_run_config(_with(path, value))
+
+    @pytest.mark.parametrize(
+        ("path", "value", "message"),
+        [
+            (["model", "kind"], "transformer", "config.model.kind"),
+            (["phases", 0, "diet"], {"rule": "greedy"}, "diet.rule"),
+            (["holdout", "held_out_games"], ["chess"], "unknown game"),
+            (["device"], "not_a_device", "config.device"),
+            (["model", "embed_dim"], 0, "embed_dim"),
+            (["phases", 0, "max_rounds"], 0, "config.phases.0"),
+        ],
+    )
+    def test_invalid_values_raise_with_their_location(
+        self, path: list[Any], value: Any, message: str
+    ) -> None:
+        with pytest.raises(ValueError, match=message):
+            parse_run_config(_with(path, value))
+
+    def test_temperature_needs_alpha(self) -> None:
+        with pytest.raises(ValueError, match="alpha is required"):
+            parse_run_config(_with(["phases", 0, "diet"], {"rule": "temperature"}))
+
+    def test_alpha_on_uniform_is_rejected(self) -> None:
+        diet = {"rule": "uniform", "alpha": 0.5}
+        with pytest.raises(ValueError, match="diet.alpha"):
+            parse_run_config(_with(["phases", 0, "diet"], diet))
+
+    def test_duplicate_dojos_raise(self) -> None:
+        with pytest.raises(ValueError, match="more than once"):
+            parse_run_config(_with(["dojos"], ["a", "b", "a", "c"]))
+
+    def test_a_phase_naming_an_unlisted_dojo_raises(self) -> None:
+        with pytest.raises(ValueError, match="not in dojos"):
+            parse_run_config(_with(["phases", 0, "dojos"], ["z"]))
+
+    def test_an_unlisted_held_out_dojo_raises(self) -> None:
+        with pytest.raises(ValueError, match="held_out_dojos"):
+            parse_run_config(_with(["held_out_dojos"], ["z"]))
+
+    def test_a_phase_training_a_held_out_dojo_raises(self) -> None:
+        with pytest.raises(ValueError, match="held-out"):
+            parse_run_config(_with(["phases", 0, "dojos"], ["c"]))
+
+    def test_the_committed_smoke_config_parses(self) -> None:
+        config = parse_run_config(read_config_document(_SMOKE_CONFIG))
+        assert config.limits.precision == "fp16"
+        assert len(config.plan.phases[0].dojo_names) == len(config.dojo_names)
+
+
+class TestReadConfigDocument:
+    def test_rejects_a_non_mapping_top_level(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text("- a\n- b\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="mapping"):
+            read_config_document(path)
+
+    def test_missing_file_raises(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            read_config_document(tmp_path / "missing.yaml")
+
+
+class TestApplyOverrides:
+    def test_sets_nested_values_through_list_indexes(self) -> None:
+        document = apply_overrides(
+            _document(), ["phases.0.max_rounds=7", "hardware.precision=fp32"]
+        )
+        assert document["phases"][0]["max_rounds"] == 7
+        assert document["hardware"]["precision"] == "fp32"
+
+    def test_values_are_parsed_as_yaml(self) -> None:
+        document = apply_overrides(_document(), ["dojos=[a, b]", "seed=5"])
+        assert document["dojos"] == ["a", "b"]
+        assert document["seed"] == 5
+
+    def test_can_add_a_new_final_key(self) -> None:
+        document = apply_overrides(_document(), ["phases.0.max_grad_norm=0.5"])
+        assert document["phases"][0]["max_grad_norm"] == 0.5
+
+    def test_later_overrides_win(self) -> None:
+        document = apply_overrides(_document(), ["seed=1", "seed=2"])
+        assert document["seed"] == 2
+
+    def test_does_not_modify_its_input(self) -> None:
+        original = _document()
+        before = copy.deepcopy(original)
+        apply_overrides(original, ["seed=9", "phases.0.max_rounds=9"])
+        assert original == before
+
+    def test_no_overrides_is_a_copy(self) -> None:
+        assert apply_overrides(_document(), []) == _document()
+
+    def test_a_bad_final_index_names_the_whole_path(self) -> None:
+        with pytest.raises(ValueError, match="phases.3"):
+            apply_overrides(_document(), ["phases.3=x"])
+
+    @pytest.mark.parametrize(
+        "override",
+        [
+            "seed",  # no "="
+            "missing.key=1",  # intermediate key does not exist
+            "phases.5.max_rounds=1",  # index out of range
+            "phases.x.max_rounds=1",  # not an index
+            "seed.inner=1",  # walks through a scalar
+            "phases..name=x",  # empty segment
+            "phases.3=x",  # final index out of range
+        ],
+    )
+    def test_bad_overrides_raise(self, override: str) -> None:
+        with pytest.raises(ValueError):
+            apply_overrides(_document(), [override])
+
+
+def _weighted(table: Any) -> dict:
+    return {"kind": "weighted_field_mask", "table": table}
+
+
+class TestModOverrides:
+    def _with_mods(self, mods: Any) -> ConfigDocument:
+        document = _document()
+        document["mods"] = mods
+        return document
+
+    def test_parses_every_kind(self) -> None:
+        nested = [
+            {"weight": 1, "mask": [["back_face", "name"]]},
+            {"weight": 1, "mask": [["card_faces", 0, "name"]]},
+        ]
+        mods = {
+            "a": [
+                {"kind": "shuffle_keys"},
+                {"kind": "random_key_mask", "probability": 0.1},
+                _weighted(
+                    [
+                        {"weight": 40},
+                        {"weight": 35, "mask": [["faction"], ["faction-duo"]]},
+                        {"weight": 10, "table": nested},
+                    ]
+                ),
+            ]
+        }
+        specs = parse_run_config(self._with_mods(mods)).mod_overrides["a"]
+
+        assert isinstance(specs[0], ShuffleKeysSpec)
+        assert specs[1] == RandomKeyMaskSpec(probability=0.1)
+        table = cast(WeightedFieldMaskSpec, specs[2]).table
+        assert table.entries[0].outcome == FieldMask()
+        assert table.entries[1].outcome == FieldMask.of_keys("faction", "faction-duo")
+        sub = table.entries[2].outcome
+        assert isinstance(sub, DropTable)
+        assert sub.entries[1].outcome == FieldMask((("card_faces", 0, "name"),))
+
+    def test_an_empty_list_means_no_augmentation(self) -> None:
+        assert parse_run_config(self._with_mods({"a": []})).mod_overrides == {"a": ()}
+
+    def test_absent_mods_means_no_overrides(self) -> None:
+        assert parse_run_config(_document()).mod_overrides == {}
+
+    @pytest.mark.parametrize(
+        ("mods", "message"),
+        [
+            ({"z": []}, "not in dojos"),
+            ({"a": [{"kind": "jitter"}]}, "config.mods.a.0.kind"),
+            ({"a": [{"kind": "shuffle_keys", "typo": 1}]}, "config.mods.a.0.typo"),
+            ({"a": [{"kind": "random_key_mask", "probability": 2}]}, "config.mods.a.0"),
+            ({"a": [_weighted([])]}, "config.mods.a.0.table"),
+            (
+                {"a": [_weighted([{"weight": 1, "mask": [["x"]], "table": []}])]},
+                "both mask and table",
+            ),
+            ({"a": [_weighted([{"weight": 1, "mask": ["x"]}])]}, "list of steps"),
+            ({"a": [_weighted([{"weight": 1, "mask": [["x", 1.5]]}])]}, "str or int"),
+            (
+                {"a": [_weighted([{"weight": 1, "mask": [["x"], ["x", "y"]]}])]},
+                "overlap",
+            ),
+        ],
+    )
+    def test_bad_mods_raise_with_their_location(self, mods: Any, message: str) -> None:
+        with pytest.raises(ValueError, match=message):
+            parse_run_config(self._with_mods(mods))

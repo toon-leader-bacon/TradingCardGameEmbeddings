@@ -35,7 +35,9 @@ class PickPredictionCrossEntropyLoss(NocabLoss[List[torch.Tensor], List[int]]):
             )
 
         per_datum_losses = [
-            F.cross_entropy(logits.unsqueeze(0), torch.tensor([label]))
+            F.cross_entropy(
+                logits.unsqueeze(0), torch.tensor([label], device=logits.device)
+            )
             for logits, label in zip(decoder_output, labels)
         ]
         return torch.stack(per_datum_losses).mean()

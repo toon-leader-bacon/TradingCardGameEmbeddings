@@ -39,7 +39,8 @@ row, or by deck for contrastive) layer under it.
   `PickPredictionCrossEntropyLoss`). A cell builds its own loss; callers
   never construct one.
 - **`mods/`** - `Mod`/`ModPipeline`, input transformations applied
-  before batching (`MaskTargetKeyMod`, `ShuffleDeckMod`, `NoOpMod`). A
+  before batching (`MaskTargetKeyMod`, `ShuffleDeckMod`, `NoOpMod` in
+  `common_mods.py`; the card-field augmentations below). A
   mod declares `train_only`: augmentations run on TRAIN only, while a
   mod the task depends on (masking the field a dojo predicts) is built
   with `train_only=False` so it applies on every split. **Mods never
@@ -50,6 +51,27 @@ row, or by deck for contrastive) layer under it.
   the non-mutating expression forms (`[*xs, x]`, slicing, `sorted`,
   `rng.sample`), never `append`/`insert`/`remove`/`pop`/`sort`/
   `random.shuffle`/`+=`.
+  `card_field_mods.py` holds best-effort, train-only augmentations that
+  edit every card of any input shape (one card, a list, groups):
+  `ShuffleKeysMod` reorders top-level `raw_content` keys,
+  `RandomKeyMaskMod` masks one uniformly chosen top-level key (with a
+  probability), and `WeightedFieldMaskMod` pulls a `FieldMask` (a set of
+  `FieldPath`s, empty meaning "nothing") from a `DropTable`
+  (`src/utils/drop_table.py`) filtered to the masks that fit the card
+  (empty, or at least one of its paths present; a partly present mask
+  masks the paths that exist), so weight meant for fields a card lacks
+  moves to masks that do something.
+  Best effort: while applying, a card the mod cannot edit passes through
+  unchanged and training continues; constructor arguments are validated.
+  Each such mod keeps a `ModTally` (cards seen, changed, failed, and the
+  first failure) so a mod that never fires or keeps failing is visible.
+  `MASK_TOKEN` (`mod.py`) is the one mask string every masking mod writes,
+  and `ModTally` lives there too (`Mod.tally` is None for mods that keep
+  none). `mod_specs.py` holds `ModSpec`s: frozen, shareable recipes, one
+  per card-field mod, that each dojo builds into its own mods (a mod's
+  random state and tally are per dojo, so mod objects are never shared).
+  Per-game default specs are in `augmentation_defaults.py`; see
+  `contrastive/` below.
 - **`file_managers/`** - split management. `FileManagerParquet` splits a
   metric's parquet into train/test/validation files and streams them in
   chunks (`splits_exist()` lets a repeat construction reuse them).
@@ -91,7 +113,22 @@ row-independent `(output, label) -> loss`.
   becomes a deck count per batch; a batch with no positive clique of
   size >= 2 is skipped and logged. It has no trainable parameters.
   Defaults to `SingleCardInfoNCELoss`; the pair constructor and loss
-  must agree on item shape.
+  must agree on item shape. An optional `ModPipeline` runs over every
+  item card after the pair constructor builds a batch (identities and
+  positive cliques are kept: a modded card is still the same card);
+  train-only mods run on TRAIN batches only. `mod_tallies()` exposes the
+  mods' tallies, as every `Dojo` does.
+
+Augmentation defaults: `augmentation_defaults.py` (at the top of
+`dojos/`) holds each game's default train-only augmentations as
+`ModSpec`s (`mods/mod_specs.py`): a key shuffle, a `DropTable` of
+`FieldMask`s, and a small random-key mask. The tables name each game's
+`raw_content` keys, so they follow the game's card-binder ingestion stage;
+each mainly masks the field that nearly identifies a card's deck (Gwent
+`faction`, STS2 `color`), so same-deck positives cannot be matched on that
+field alone. A `ModSpec` is a frozen recipe; each dojo builds its own mods
+from it, with its own seed and tally. Today only the contrastive dojos
+take these defaults (`src/training/dojo_catalog.py`).
 
 Not built yet: multi-positive SupCon, a pooling `ContrastiveLoss`
 Decorator, and mixed contrastive + label-based training in one step.

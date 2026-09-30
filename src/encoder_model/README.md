@@ -47,6 +47,8 @@ each card's embedding is contextualized by the rest of its group.
   preset (text encoder, head) pairings, e.g. `LinearProjectionCardModel`
   (frozen ModernBERT + linear head, the floor baseline). Presets are for
   convenience; an experiment injects its own pair.
+- `TODO.md` - next steps: alternative text encoders, head architectures
+  (including a token-level head), and a thawed-encoder model.
 
 ## Input shapes
 

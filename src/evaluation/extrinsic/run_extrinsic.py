@@ -21,6 +21,7 @@ import torch
 
 from src.dojos.dojo import BatchBudget, Dojo
 from src.encoder_model.precision import Precision
+from src.evaluation.extrinsic.best_head_keeper import BestHeadKeeper
 from src.schema.card import GenericCard
 from src.schema.splits import Split
 from src.training.plan import (
@@ -74,7 +75,9 @@ class ExtrinsicResult:
     rounds_csv: the per-round TEST losses (read with read_rounds_csv);
         None if the file does not exist after the run (no round completed,
         or the listener's writes failed - Trainer logs and skips them).
-    validation_losses: final heads' VALIDATION loss per dojo (read-only);
+    validation_losses: VALIDATION loss per dojo (read-only) of each
+        dojo's head at its best TEST round (not its last: see
+        BestHeadKeeper);
         a dojo whose pass failed is omitted. None if the run stopped early
         (weights may be corrupt, or no head finished training) or the
         whole VALIDATION pass failed (logged) - then validation.json is not
@@ -110,8 +113,8 @@ def run_extrinsic(
     *,
     cost_of: Callable[[GenericCard], int] = lambda card: 1,
 ) -> ExtrinsicResult:
-    """Train every dojo's head on the frozen encoder, then score the final
-    heads on VALIDATION.
+    """Train every dojo's head on the frozen encoder, then score each head,
+    restored to its best TEST round, on VALIDATION.
 
     Two stages. (a) Validate, with no side effects: the output directory,
     this function's own checks, then Phase / TrainingPlan / CsvRunListener /
@@ -134,7 +137,8 @@ def run_extrinsic(
         no round then completes: a partial run is a real result, so a
         retry needs a new label); writes rounds.csv and, unless stopped
         early or the VALIDATION pass failed, validation.json there;
-        trains the dojos' heads; leaves the encoder frozen (requires_grad
+        trains the dojos' heads and leaves each at its best TEST round's
+        weights (not its last); leaves the encoder frozen (requires_grad
         False) and in eval mode; reseeds the process-wide random and torch
         generators.
     Exceptions: FileExistsError if the run directory exists; ValueError if
@@ -159,7 +163,10 @@ def run_extrinsic(
     _require_trainable_heads(dojos)
     plan = _build_plan(spec, dojos)
     listener = CsvRunListener(run_dir / _ROUNDS_FILE)
-    trainer = Trainer(encoder, dojos, plan, hardware, None, [listener], cost_of=cost_of)
+    keeper = BestHeadKeeper(dojos)
+    trainer = Trainer(
+        encoder, dojos, plan, hardware, None, [listener, keeper], cost_of=cost_of
+    )
 
     # (b) Run from identical starting heads, reproducibly
     run_dir.mkdir(parents=True)
@@ -168,17 +175,24 @@ def run_extrinsic(
         dojo.reset_head()
     training = trainer.run()
 
-    # Score the final heads unless the run stopped early; from here on a
-    # failure is logged, never raised, so the finished run is kept
+    # Score each head at its best TEST round unless the run stopped early;
+    # from here on a failure is logged, never raised, so the run is kept
     validation: Mapping[str, float] | None = None
     quarantined = _collect_quarantined(training)
     if training.stopped_early_reason is None:
         budget = BatchBudget(hardware.max_batch_cost, cost_of)
-        validation = _score_final_heads(
-            encoder, dojos, budget, spec.eval_examples_per_dojo, hardware.precision
+        validation = _score_best_heads(
+            keeper,
+            encoder,
+            dojos,
+            budget,
+            spec.eval_examples_per_dojo,
+            hardware.precision,
         )
     if validation is not None:
-        _write_validation(run_dir / _VALIDATION_FILE, validation, quarantined)
+        _write_validation(
+            run_dir / _VALIDATION_FILE, validation, keeper.best_rounds, quarantined
+        )
 
     rounds_csv = run_dir / _ROUNDS_FILE
     return ExtrinsicResult(
@@ -205,24 +219,28 @@ def _require_run_label(encoder_label: str) -> None:
         )
 
 
-def _score_final_heads(
+def _score_best_heads(
+    keeper: BestHeadKeeper,
     encoder: TrainableEncoder,
     dojos: Sequence[Dojo],
     budget: BatchBudget,
     max_examples: int,
     precision: Precision,
 ) -> Mapping[str, float] | None:
-    """The VALIDATION pass over the trained heads, never raising.
+    """Restore every head to its best TEST round, then the VALIDATION pass,
+    never raising.
 
-    Inputs: the encoder, dojos, the batch budget, the per-dojo cap, the
-        forward-pass precision.
+    Inputs: the keeper that watched the run, the encoder, dojos, the batch
+        budget, the per-dojo cap, the forward-pass precision.
     Output: evaluate_split_losses' dojo -> loss mapping (a failing dojo is
         already omitted there), or None if the pass as a whole failed (e.g.
         autocast unsupported on the device) - logged with its traceback.
-    Side effects: forward passes (eval mode, no_grad); logs on failure.
+    Side effects: overwrites head weights with their best snapshots;
+        forward passes (eval mode, no_grad); logs on failure.
     Exceptions: none (KeyboardInterrupt still propagates).
     """
     try:
+        keeper.restore_best_heads()
         return evaluate_split_losses(
             encoder,
             dojos,
@@ -303,14 +321,22 @@ def _collect_quarantined(training: TrainingResult) -> frozenset[str]:
 
 
 def _write_validation(
-    path: Path, losses: Mapping[str, float], quarantined: frozenset[str]
+    path: Path,
+    losses: Mapping[str, float],
+    best_rounds: Mapping[str, int],
+    quarantined: frozenset[str],
 ) -> None:
-    """Inputs: the path, VALIDATION losses, the quarantined dojos. Output:
-    None. Side effects: writes {"losses": {dojo: loss}, "quarantined":
-    [sorted names]} as indented JSON (losses are finite: evaluate_split_losses
-    omits a dojo with a non-finite loss); on an OSError, logs it and
-    writes nothing more. Exceptions: none."""
-    payload = {"losses": dict(losses), "quarantined": sorted(quarantined)}
+    """Inputs: the path, VALIDATION losses, each dojo's best TEST round
+    (the head that was scored), the quarantined dojos. Output: None.
+    Side effects: writes {"losses": {dojo: loss}, "best_test_rounds":
+    {dojo: round}, "quarantined": [sorted names]} as indented JSON (losses
+    are finite: evaluate_split_losses omits a dojo with a non-finite loss);
+    on an OSError, logs it and writes nothing more. Exceptions: none."""
+    payload = {
+        "losses": dict(losses),
+        "best_test_rounds": dict(best_rounds),
+        "quarantined": sorted(quarantined),
+    }
     try:
         path.write_text(json.dumps(payload, indent=2, sort_keys=True))
     except OSError:

@@ -40,6 +40,31 @@ def test_a_saturated_dojo_reactivates_when_its_loss_regresses() -> None:
     assert tracker.record_round({"a": 1.6})["a"] is DojoStatus.ACTIVE
 
 
+def test_an_overfit_saturated_dojo_whose_loss_holds_stays_saturated() -> None:
+    # The shakeout flip-flop: best 1.0, then the loss climbs while the head
+    # overfits, and the dojo saturates at 1.4. Untrained while saturated, its
+    # loss holds at 1.4 - above best + delta, but not above where it saturated
+    tracker = SaturationTracker(
+        saturation_spec(patience_rounds=2, reactivation_delta=0.05), ("a",)
+    )
+    tracker.record_round({"a": 1.0})
+    tracker.record_round({"a": 1.2})
+    assert tracker.record_round({"a": 1.4})["a"] is DojoStatus.SATURATED
+    for _ in range(3):
+        assert tracker.record_round({"a": 1.4})["a"] is DojoStatus.SATURATED
+
+
+def test_reactivation_is_measured_from_the_saturation_loss() -> None:
+    tracker = SaturationTracker(
+        saturation_spec(patience_rounds=1, reactivation_delta=0.5), ("a",)
+    )
+    tracker.record_round({"a": 1.0})
+    assert tracker.record_round({"a": 2.0})["a"] is DojoStatus.SATURATED
+    # 2.4 is far above the best (1.0) but within delta of 2.0
+    assert tracker.record_round({"a": 2.4})["a"] is DojoStatus.SATURATED
+    assert tracker.record_round({"a": 2.6})["a"] is DojoStatus.ACTIVE
+
+
 def test_phase_done_once_the_target_fraction_is_saturated() -> None:
     tracker = _tracker(patience_rounds=1, target_saturated_fraction=0.5)
     tracker.record_round({"a": 1.0, "b": 1.0})
