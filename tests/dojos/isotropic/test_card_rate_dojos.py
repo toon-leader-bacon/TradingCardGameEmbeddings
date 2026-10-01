@@ -11,6 +11,7 @@ from src.dojos.isotropic.card_rate_dojos import (
     OpeningBuyRateDojo,
     PileExhaustionRateDojo,
     TurnCountAssociationDojo,
+    VetoRateDojo,
 )
 from src.schema.holdout import HoldoutSpec
 
@@ -23,6 +24,7 @@ _CASES = [
     (TurnCountAssociationDojo, "turn_count_delta", "turn_count_association"),
     (OpeningBuyRateDojo, "opening_buy_rate", "opening_buy_rate"),
     (PileExhaustionRateDojo, "pile_exhaustion_rate", "pile_exhaustion_rate"),
+    (VetoRateDojo, "veto_rate", "veto_rate"),
 ]
 
 

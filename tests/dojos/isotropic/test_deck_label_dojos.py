@@ -20,6 +20,7 @@ from src.dojos.isotropic.deck_label_dojos import (
     KingdomGameLengthDojo,
     NextTurnActionCountDojo,
     build_deck_label_constructor,
+    label_capped_at,
 )
 from src.dojos.isotropic.renamed_column_data_constructor import (
     RenamedColumnDataConstructor,
@@ -135,3 +136,39 @@ class TestBuildDeckLabelConstructor:
         result = build_deck_label_constructor(DeckBox(), "kingdom_uuid", "winner_turns")
 
         assert isinstance(result, RenamedColumnDataConstructor)
+
+
+class TestLabelCaps:
+    def test_label_capped_at_clips_only_above_the_cap(self) -> None:
+        caster = label_capped_at(30.0)
+
+        assert caster(112) == 30.0
+        assert caster(2) == 2.0
+
+    @pytest.mark.parametrize(
+        "dojo_cls,group_column,label_column,raw,expected",
+        [
+            (KingdomGameLengthDojo, "kingdom_uuid", "winner_turns", 323, 50.0),
+            (
+                NextTurnActionCountDojo,
+                "partial_deck_uuid",
+                "next_turn_action_count",
+                112,
+                30.0,
+            ),
+        ],
+    )
+    def test_heavy_tailed_labels_are_capped(
+        self, dojo_cls, group_column, label_column, raw, expected, tmp_path: Path
+    ) -> None:
+        source = tmp_path / "isotropic_deck_label_source.parquet"
+        _write_source(source, group_column, label_column, raw)
+        binder, box, group = binder_and_group(["Chapel"])
+        dojo = _build(dojo_cls, source, box)
+        chunk = pd.DataFrame(
+            {group_column: [str(group.nocab_uuid)], label_column: [raw]}
+        )
+
+        [(_, label)] = dojo.data_constructor.build(chunk, binder)
+
+        assert label == expected

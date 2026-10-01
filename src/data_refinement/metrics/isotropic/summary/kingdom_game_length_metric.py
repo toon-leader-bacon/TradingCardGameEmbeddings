@@ -6,6 +6,10 @@ winner, same reasoning as turn_count_association_metric.py - this is
 that metric's multi-card counterpart, trained on the same underlying
 fact (winner turns given the kingdom) but as one joint per-kingdom
 label rather than per-card marginal associations.
+
+Also restricted to games played to the end (row_utils.is_played_to_the_end:
+2+ players, nobody resigned). Before that filter ~2% of labels were
+under 3 turns: wins by an opponent's early resignation, not game lengths.
 """
 
 import logging
@@ -21,6 +25,7 @@ from src.data_refinement.metrics.deck_ids import deck_uuid_from_cards
 from src.data_refinement.metrics.isotropic.summary.row_utils import (
     card_uuid_for_name,
     is_natural_kingdom,
+    is_played_to_the_end,
     kingdom_card_names,
     winner_entry,
 )
@@ -100,7 +105,8 @@ class KingdomGameLengthMetric:
         Output: none.
         Side effects: buffers exactly one row into the open
             ParquetBuilder when the row is a natural kingdom
-            (row_utils.is_natural_kingdom()) AND has a resolvable
+            (row_utils.is_natural_kingdom()), played to the end
+            (row_utils.is_played_to_the_end()) AND has a resolvable
             winner (row_utils.winner_entry() is not None) - writes
             nothing otherwise. Writes the kingdom into self._deck_box
             via create_if_absent().
@@ -112,7 +118,7 @@ class KingdomGameLengthMetric:
             >>> metric.accumulate(row)
             >>> metric.finalize()
         """
-        if not is_natural_kingdom(row):
+        if not is_natural_kingdom(row) or not is_played_to_the_end(row):
             return
 
         winner = winner_entry(row)

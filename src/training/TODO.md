@@ -238,6 +238,10 @@ a median of ~200 tokens and FaB to ~570.
 
   Check every regression metric's label histogram before picking; the
   isotropic C1 report also flags mid_game_next_turn_action_count (max 112).
+  Done for those two (2026-10-01): kingdom_game_length's metric now skips
+  solo/resigned games (the sub-5-turn labels) and its dojo clips at 50;
+  NextTurnActionCountDojo clips at 30 (IsotropicDeckRegressionDojo's
+  LABEL_CAP). Other regression dojos are unchecked.
 - [ ] **Two-level diet sampling: game, then dojo.** Today the diet
   sampler (`src/training/diet/diet_sampler.py`) picks one dojo per step
   with probability proportional to its TRAIN count^alpha. alpha = 0 means
