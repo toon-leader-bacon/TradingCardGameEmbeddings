@@ -25,10 +25,14 @@ from src.data_refinement.deck_box.deck_box import DeckBox
 from src.dojos.generic.data_constructors import (
     CardAverageDataConstructor,
     DeckLabelDataConstructor,
+    HeldOutDeckCardDataConstructor,
     MaskedFieldDataConstructor,
 )
 from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
+from src.dojos.generic.multi_group_option_selection.dojo import (
+    MultiGroupOptionSelectionDojo,
+)
 from src.dojos.generic.single_card_fixed_classification.dojo import (
     SingleCardFixedClassificationDojo,
 )
@@ -43,6 +47,14 @@ class LabelColumnMetric(Protocol):
 
     DEFAULT_OUTPUT_PATH: Path
     LABEL_COLUMN: str
+
+
+class OutputPathMetric(Protocol):
+    """A metric class whose wrapper needs only its output path (a
+    HeldOutDeckCardMetric subclass, see
+    src/data_refinement/metrics/generic/held_out_deck_card/metric.py)."""
+
+    DEFAULT_OUTPUT_PATH: Path
 
 
 class MaskedFieldMetricClass(Protocol):
@@ -203,6 +215,53 @@ class MaskedFieldMetricDojo(SingleCardFixedClassificationDojo):
             mod_pipeline=ModPipeline(
                 [MaskTargetKeyMod(key=key, train_only=False) for key in masked_keys]
             ),
+            config=DojoConfig(
+                name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
+        )
+
+
+class HeldOutDeckCardMetricDojo(MultiGroupOptionSelectionDojo):
+    """[candidates, deck minus one card] in -> which candidate was held
+    out of the deck.
+
+    Subclasses set METRIC to a HeldOutDeckCardMetric subclass. Rows
+    point into the game's published DeckBox, which is also handed to
+    the cell so its metric version check can verify the box.
+    """
+
+    METRIC: ClassVar[OutputPathMetric]
+
+    def __init__(
+        self,
+        card_binder: CardBinder,
+        holdout: HoldoutSpec,
+        deck_box: DeckBox,
+        card_embedding_size: int,
+        path_to_training_data: Path | None = None,
+        name: str | None = None,
+        rng_seed: int | None = None,
+        strict_version_check: bool = True,
+    ) -> None:
+        """
+        Inputs: as DeckLabelMetricDojo (deck_box is the game's published
+            box, data/final/decks/<game>.db).
+        Output: none (constructor).
+        Side effects: see MultiGroupOptionSelectionDojo (may write split
+            files).
+        Exceptions: see MultiGroupOptionSelectionDojo.
+
+        Example:
+            >>> GwentHeldOutCardDojo(binder, HoldoutSpec.no_holdout(), box, 32)
+        """
+        super().__init__(
+            path_to_training_data=path_to_training_data
+            or self.METRIC.DEFAULT_OUTPUT_PATH,
+            data_constructor=HeldOutDeckCardDataConstructor(deck_box),
+            card_lookup=card_binder,
+            holdout=holdout,
+            card_embedding_size=card_embedding_size,
+            deck_box=deck_box,
             config=DojoConfig(
                 name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),

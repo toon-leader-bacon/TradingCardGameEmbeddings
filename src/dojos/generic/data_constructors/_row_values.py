@@ -9,6 +9,7 @@ from typing import List, Tuple, cast
 from uuid import UUID
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
+from src.data_refinement.deck_box.deck_box import DeckBox
 from src.schema.card import GenericCard
 from src.schema.type_hints import MultiCardInput
 
@@ -49,6 +50,65 @@ def _label_as_float(raw_label: object) -> float | None:
     return None
 
 
+def _parsed_uuid(raw_uuid: object) -> UUID | None:
+    """One row's raw uuid cell as a UUID.
+
+    Shared by every helper here that parses a uuid cell.
+
+    Inputs: raw_uuid (expected a str parseable as a UUID).
+    Output: the UUID, or None if raw_uuid does not parse.
+    Side effects: none. Exceptions: none.
+    """
+    try:
+        return UUID(str(raw_uuid))
+    except (TypeError, ValueError):
+        return None
+
+
+def _deck_cards_excluding(
+    deck_box: DeckBox,
+    lookup: CardLookup,
+    raw_deck_uuid: object,
+    target_uuid: UUID | None,
+) -> MultiCardInput:
+    """A row's deck as the split sees it, with every copy of the target
+    removed.
+
+    Shared by DeckCardMaskDataConstructor and
+    HeldOutDeckCardDataConstructor. The target is filtered out BEFORE
+    card lookup (filter first, look up second), so no masking Mod is
+    needed for the multi-card case.
+
+    Inputs:
+        deck_box: the box raw_deck_uuid points into; only read.
+        lookup: the split's holdout-filtered card lookup.
+        raw_deck_uuid: a row's "deck_uuid" cell.
+        target_uuid: the card to remove (every copy); None removes
+            nothing.
+    Output: the deck's remaining cards that lookup can see, in the
+        deck's own order. Empty if raw_deck_uuid does not parse, the box
+        has no such deck, or nothing visible remains: callers treat
+        empty as "skip the row".
+    Side effects: reads deck_box. Exceptions: none.
+    """
+    result: MultiCardInput = []
+    deck_uuid = _parsed_uuid(raw_deck_uuid)
+    if deck_uuid is None:
+        return result
+    deck = deck_box.get_by_uuid(deck_uuid)
+    if deck is None:
+        return result
+
+    # Filter the target first, then look each remaining card up
+    for card_uuid in deck.card_nocab_uuids:
+        if card_uuid == target_uuid:
+            continue
+        card = lookup.get_by_uuid(card_uuid)
+        if card is not None:
+            result.append(card)
+    return result
+
+
 def _card_for_uuid(lookup: CardLookup, raw_nocab_uuid: object) -> GenericCard | None:
     """Look up a card for one row's raw nocab_uuid value.
 
@@ -67,9 +127,8 @@ def _card_for_uuid(lookup: CardLookup, raw_nocab_uuid: object) -> GenericCard | 
     Side effects: none.
     Exceptions: none - all failures collapse to None.
     """
-    try:
-        card_uuid = UUID(str(raw_nocab_uuid))
-    except (TypeError, ValueError):
+    card_uuid = _parsed_uuid(raw_nocab_uuid)
+    if card_uuid is None:
         return None
     return lookup.get_by_uuid(card_uuid)
 

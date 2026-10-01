@@ -31,6 +31,9 @@ genuinely shareable across data source containers:
 - `MaskedFieldMetric` - the `CorpusScanMetric`-family base above,
   reading a `CardLookup`'s already-loaded `GenericCard`s. Consumer:
   `gwent_one/`'s eight masking metrics.
+- `HeldOutDeckCardMetric` - `CorpusScanMetric`-shaped, driven from a
+  published `DeckBox`: one card held out of a deck, picked among K + 1
+  candidates. Consumer: `final_decks/`.
 - `DeckCardMaskMetric` - `Metric[dict]`-shaped (not `CorpusScanMetric`
   - it's still driven by a raw per-source row), but delegates all
   row-parsing/card-resolution to an injected per-source
@@ -94,6 +97,10 @@ implementation yet). Implemented today:
   card names against `dominiontabs`' `CardBinder`; this project's
   second `DeckCardMaskMetric` consumer, after `play_gwent/`. See
   [`isotropic/summary/README.md`](isotropic/summary/README.md).
+- **`final_decks/`** - one `HeldOutDeckCardMetric` per published deck
+  box (Pokemon, FaB, Gwent, Dominion, StS2, MTG), reading
+  `data/final/decks/<game>.db` directly. See
+  [`final_decks/README.md`](final_decks/README.md).
 - **`isotropic/games/`** - eleven metrics over isotropic's other raw
   flavor - turn-by-turn game-log HTML files, parsed via BeautifulSoup and
   sharing `isotropic/card_names.py`'s card-name resolution with

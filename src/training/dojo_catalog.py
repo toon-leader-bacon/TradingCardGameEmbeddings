@@ -31,6 +31,7 @@ from src.dojos.contrastive.dojo import ContrastiveDojo
 from src.dojos.contrastive.pair_constructor import SingleCardPairConstructor
 from src.dojos.dojo import Dojo
 from src.dojos.file_managers.deck_box_dealer import DeckBoxDealer
+from src.dojos.final_decks import held_out_card_dojos as final_decks
 from src.dojos.dominiontabs.cost_regression_dojo import CostRegressionDojo
 from src.dojos.dominiontabs.masked_field_dojos import SetMaskDojo, TypeMaskDojo
 from src.dojos.gwent_one import masked_field_dojos as gwent_one
@@ -297,6 +298,18 @@ def _recipe_for_sts_deck(dojo_class: DeckDojoConstructor) -> DeckDojoRecipe:
     return DeckDojoRecipe(GameId.SLAY_THE_SPIRE_2, dojo_class, STS_GG_DECK_BOX_PATH)
 
 
+def _recipe_for_final_deck_box(
+    game: GameId, dojo_class: DeckDojoConstructor
+) -> DeckDojoRecipe:
+    """The recipe for a dojo whose metric rows point into game's
+    published deck box, at DeckBox.default_output_path(game).
+
+    Inputs: game, dojo_class. Output: DeckDojoRecipe. Side effects: none.
+    Exceptions: none.
+    """
+    return DeckDojoRecipe(game, dojo_class, DeckBox.default_output_path(game))
+
+
 def _recipe_for_isotropic_deck(dojo_class: DeckDojoConstructor) -> DeckDojoRecipe:
     """The recipe for an isotropic deck-level dojo class.
     Inputs: dojo_class. Output: DeckDojoRecipe. Side effects: none.
@@ -379,6 +392,24 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     ),
     "sts_gg.total_turns": _recipe_for_sts_deck(sts_decks.DeckTotalTurnsDojo),
     "sts_gg.win": _recipe_for_sts_deck(sts_decks.WinDojo),
+    "final_decks.held_out_card_pokemon": _recipe_for_final_deck_box(
+        GameId.POKEMON, final_decks.PokemonHeldOutCardDojo
+    ),
+    "final_decks.held_out_card_flesh_and_blood": _recipe_for_final_deck_box(
+        GameId.FLESH_AND_BLOOD, final_decks.FleshAndBloodHeldOutCardDojo
+    ),
+    "final_decks.held_out_card_gwent": _recipe_for_final_deck_box(
+        GameId.GWENT, final_decks.GwentHeldOutCardDojo
+    ),
+    "final_decks.held_out_card_dominion": _recipe_for_final_deck_box(
+        GameId.DOMINION, final_decks.DominionHeldOutCardDojo
+    ),
+    "final_decks.held_out_card_slay_the_spire_2": _recipe_for_final_deck_box(
+        GameId.SLAY_THE_SPIRE_2, final_decks.SlayTheSpire2HeldOutCardDojo
+    ),
+    "final_decks.held_out_card_mtg": _recipe_for_final_deck_box(
+        GameId.MTG, final_decks.MtgHeldOutCardDojo
+    ),
     "contrastive.gwent": _recipe_for_contrastive(GameId.GWENT),
     "contrastive.flesh_and_blood": _recipe_for_contrastive(GameId.FLESH_AND_BLOOD),
     "contrastive.slay_the_spire_2": _recipe_for_contrastive(GameId.SLAY_THE_SPIRE_2),
