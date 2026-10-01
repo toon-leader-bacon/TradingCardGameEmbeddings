@@ -10,6 +10,10 @@ class to construct.
 Loading is lazy and shared: a CardShelf loads each game's binder (and each
 deck box) once, only when a named dojo needs it.
 
+A recipe may point an existing dojo class at another metric's output
+(metric_output): the sts2_runs keys reuse the sts_gg wrappers over
+data/metrics/sts2_runs/, whose files share the sts_gg label columns.
+
 Contrastive dojos read a game's final deck box directly (no metric) and
 take augmentation mods: the game's defaults
 (src/dojos/augmentation_defaults.py) unless the run config overrides that
@@ -25,6 +29,8 @@ from typing import Mapping, Protocol, Sequence
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.isotropic.deck_box_path import ISOTROPIC_DECK_BOX_PATH
+from src.data_refinement.metrics.sts2_runs import card_average_metrics as sts2_cards
+from src.data_refinement.metrics.sts2_runs import deck_label_metrics as sts2_decks
 from src.data_refinement.metrics.sts_gg.deck_box_path import STS_GG_DECK_BOX_PATH
 from src.dojos.augmentation_defaults import default_augmentations_for
 from src.dojos.contrastive.dojo import ContrastiveDojo
@@ -57,6 +63,7 @@ class CardDojoConstructor(Protocol):
         holdout: HoldoutSpec,
         card_embedding_size: int,
         *,
+        path_to_training_data: Path | None = None,
         name: str | None = None,
         rng_seed: int | None = None,
     ) -> Dojo: ...
@@ -74,6 +81,7 @@ class DeckDojoConstructor(Protocol):
         deck_box: DeckBox,
         card_embedding_size: int,
         *,
+        path_to_training_data: Path | None = None,
         name: str | None = None,
         rng_seed: int | None = None,
     ) -> Dojo: ...
@@ -163,10 +171,12 @@ class DojoRecipe(Protocol):
 
 @dataclass(frozen=True)
 class CardDojoRecipe:
-    """A dojo that needs only its game's CardBinder."""
+    """A dojo that needs only its game's CardBinder. metric_output, when
+    set, replaces the dojo class's own metric file."""
 
     game: GameId
     dojo_class: CardDojoConstructor
+    metric_output: Path | None = None
 
     def build(self, name: str, context: DojoBuildContext) -> Dojo:
         """See DojoRecipe.build."""
@@ -174,6 +184,7 @@ class CardDojoRecipe:
             context.shelf.card_binder(self.game),
             context.holdout,
             context.card_embedding_size,
+            path_to_training_data=self.metric_output,
             name=name,
             rng_seed=context.rng_seed,
         )
@@ -181,11 +192,13 @@ class CardDojoRecipe:
 
 @dataclass(frozen=True)
 class DeckDojoRecipe:
-    """A dojo that needs its game's CardBinder and a DeckBox."""
+    """A dojo that needs its game's CardBinder and a DeckBox. metric_output,
+    when set, replaces the dojo class's own metric file."""
 
     game: GameId
     dojo_class: DeckDojoConstructor
     deck_box_path: Path
+    metric_output: Path | None = None
 
     def build(self, name: str, context: DojoBuildContext) -> Dojo:
         """See DojoRecipe.build."""
@@ -194,6 +207,7 @@ class DeckDojoRecipe:
             context.holdout,
             context.shelf.deck_box(self.deck_box_path),
             context.card_embedding_size,
+            path_to_training_data=self.metric_output,
             name=name,
             rng_seed=context.rng_seed,
         )
@@ -297,6 +311,37 @@ def _recipe_for_sts_deck(dojo_class: DeckDojoConstructor) -> DeckDojoRecipe:
     return DeckDojoRecipe(GameId.SLAY_THE_SPIRE_2, dojo_class, STS_GG_DECK_BOX_PATH)
 
 
+def _recipe_for_sts2_runs_card(
+    dojo_class: CardDojoConstructor, metric_output: Path
+) -> CardDojoRecipe:
+    """A sts_gg card-average dojo class over an sts2_runs metric file.
+
+    Inputs: dojo_class, metric_output (an sts2_runs metric's
+        DEFAULT_OUTPUT_PATH). Output: CardDojoRecipe.
+    Side effects: none. Exceptions: none.
+    """
+    return CardDojoRecipe(GameId.SLAY_THE_SPIRE_2, dojo_class, metric_output)
+
+
+def _recipe_for_sts2_runs_deck(
+    dojo_class: DeckDojoConstructor, metric_output: Path
+) -> DeckDojoRecipe:
+    """A sts_gg deck-label dojo class over an sts2_runs metric file, whose
+    deck_uuids point into the published StS2 deck box (see
+    metrics/sts2_runs/deck_label_metric.py).
+
+    Inputs: dojo_class, metric_output (an sts2_runs metric's
+        DEFAULT_OUTPUT_PATH). Output: DeckDojoRecipe.
+    Side effects: none. Exceptions: none.
+    """
+    return DeckDojoRecipe(
+        GameId.SLAY_THE_SPIRE_2,
+        dojo_class,
+        DeckBox.default_output_path(GameId.SLAY_THE_SPIRE_2),
+        metric_output,
+    )
+
+
 def _recipe_for_isotropic_deck(dojo_class: DeckDojoConstructor) -> DeckDojoRecipe:
     """The recipe for an isotropic deck-level dojo class.
     Inputs: dojo_class. Output: DeckDojoRecipe. Side effects: none.
@@ -382,6 +427,94 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
         sts_decks.DeckTotalDamageTakenDojo
     ),
     "sts_gg.total_turns": _recipe_for_sts_deck(sts_decks.DeckTotalTurnsDojo),
+    # spire_codex + sts2runs runs, through the sts_gg wrappers (see the
+    # module docstring)
+    "sts2_runs.ascension_prediction": _recipe_for_sts2_runs_deck(
+        sts_decks.DeckAscensionDojo,
+        sts2_decks.AscensionPredictionMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.card_deck_size": _recipe_for_sts2_runs_card(
+        sts_cards.CardDeckSizeDojo, sts2_cards.CardDeckSizeMetric.DEFAULT_OUTPUT_PATH
+    ),
+    "sts2_runs.card_elites_killed": _recipe_for_sts2_runs_card(
+        sts_cards.CardElitesKilledDojo,
+        sts2_cards.CardElitesKilledMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.card_floors_cleared": _recipe_for_sts2_runs_card(
+        sts_cards.CardFloorsClearedDojo,
+        sts2_cards.CardFloorsClearedMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.card_relic_count": _recipe_for_sts2_runs_card(
+        sts_cards.CardRelicCountDojo,
+        sts2_cards.CardRelicCountMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.card_total_cards_picked": _recipe_for_sts2_runs_card(
+        sts_cards.CardTotalCardsPickedDojo,
+        sts2_cards.CardTotalCardsPickedMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.card_total_combats": _recipe_for_sts2_runs_card(
+        sts_cards.CardTotalCombatsDojo,
+        sts2_cards.CardTotalCombatsMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.card_total_damage_taken": _recipe_for_sts2_runs_card(
+        sts_cards.CardTotalDamageTakenDojo,
+        sts2_cards.CardTotalDamageTakenMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.card_total_turns": _recipe_for_sts2_runs_card(
+        sts_cards.CardTotalTurnsDojo,
+        sts2_cards.CardTotalTurnsMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.card_upgrade_rate": _recipe_for_sts2_runs_card(
+        sts_cards.CardUpgradeRateDojo,
+        sts2_cards.CardUpgradeRateMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.card_win_rate": _recipe_for_sts2_runs_card(
+        sts_cards.CardWinRateDojo, sts2_cards.CardWinRateMetric.DEFAULT_OUTPUT_PATH
+    ),
+    "sts2_runs.card_win_rate_at_act2": _recipe_for_sts2_runs_card(
+        sts_cards.CardWinRateAtAct2Dojo,
+        sts2_cards.CardWinRateAtAct2Metric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.character_prediction": _recipe_for_sts2_runs_deck(
+        sts_decks.CharacterDojo,
+        sts2_decks.CharacterPredictionMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.elites_killed": _recipe_for_sts2_runs_deck(
+        sts_decks.DeckElitesKilledDojo,
+        sts2_decks.ElitesKilledMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.floors_cleared": _recipe_for_sts2_runs_deck(
+        sts_decks.DeckFloorsClearedDojo,
+        sts2_decks.FloorsClearedMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.killed_by": _recipe_for_sts2_runs_deck(
+        sts_decks.KilledByDojo, sts2_decks.KilledByMetric.DEFAULT_OUTPUT_PATH
+    ),
+    "sts2_runs.relic_count": _recipe_for_sts2_runs_deck(
+        sts_decks.DeckRelicCountDojo, sts2_decks.RelicCountMetric.DEFAULT_OUTPUT_PATH
+    ),
+    "sts2_runs.total_cards_picked": _recipe_for_sts2_runs_deck(
+        sts_decks.DeckTotalCardsPickedDojo,
+        sts2_decks.TotalCardsPickedMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.total_cards_skipped": _recipe_for_sts2_runs_deck(
+        sts_decks.DeckTotalCardsSkippedDojo,
+        sts2_decks.TotalCardsSkippedMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.total_combats": _recipe_for_sts2_runs_deck(
+        sts_decks.DeckTotalCombatsDojo,
+        sts2_decks.TotalCombatsMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.total_damage_taken": _recipe_for_sts2_runs_deck(
+        sts_decks.DeckTotalDamageTakenDojo,
+        sts2_decks.TotalDamageTakenMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.total_turns": _recipe_for_sts2_runs_deck(
+        sts_decks.DeckTotalTurnsDojo, sts2_decks.TotalTurnsMetric.DEFAULT_OUTPUT_PATH
+    ),
+    "sts2_runs.win": _recipe_for_sts2_runs_deck(
+        sts_decks.WinDojo, sts2_decks.WinMetric.DEFAULT_OUTPUT_PATH
+    ),
     "contrastive.gwent": _recipe_for_contrastive(GameId.GWENT),
     "contrastive.flesh_and_blood": _recipe_for_contrastive(GameId.FLESH_AND_BLOOD),
     "contrastive.slay_the_spire_2": _recipe_for_contrastive(GameId.SLAY_THE_SPIRE_2),

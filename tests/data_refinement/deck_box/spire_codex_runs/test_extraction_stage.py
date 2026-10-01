@@ -55,8 +55,8 @@ def test_abandoned_runs_are_kept_unless_turned_off(
 
 
 def test_deck_ids_differ_from_sts2runs_for_the_same_run_id() -> None:
-    codex = SpireCodexRunsDeckExtractionStage()._deck_uuid("1", 0)
-    assert codex != Sts2RunsDeckExtractionStage()._deck_uuid("1", 0)
+    codex = SpireCodexRunsDeckExtractionStage().deck_uuid("1", 0)
+    assert codex != Sts2RunsDeckExtractionStage().deck_uuid("1", 0)
 
 
 def test_a_directory_without_pages_raises(tmp_path: Path) -> None:

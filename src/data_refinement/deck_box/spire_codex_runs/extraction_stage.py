@@ -6,7 +6,7 @@ game's own run record. Same schema as sts2runs' dump (players[].deck of
 {"id": "CARD.<NAME>", ...}), except the run's id is "run_hash" (a hex
 string) rather than "_serverId". So this stage is
 Sts2RunsDeckExtractionStage with that key, its own deck namespace and
-data source, over every page file.
+data source, over every page file (raw_files()).
 
 WHAT IS KEPT: one final deck per player of every run, by default. The
 project favors data quantity over quality, so abandoned runs
@@ -22,8 +22,6 @@ from pathlib import Path
 from typing import ClassVar
 from uuid import UUID
 
-from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.deck_box.sts2runs.extraction_stage import (
     Sts2RunsDeckExtractionStage,
 )
@@ -48,32 +46,26 @@ class SpireCodexRunsDeckExtractionStage(Sts2RunsDeckExtractionStage):
         Side effects: none. Exceptions: none."""
         self._keep_abandoned = keep_abandoned
 
-    def extract(
-        self, raw_path: Path | None, box: DeckBox, card_lookup: CardLookup
-    ) -> list[UUID]:
-        """Create or update the decks of every kept run in every page file.
+    def raw_files(self, raw_path: Path | None) -> list[Path]:
+        """Every page file under raw_path, in name order (or raw_path
+        itself when it is one page file).
 
         Inputs: raw_path (the pages directory, or one page file;
-            DEFAULT_RAW_PATH when None), box, card_lookup (the StS2
-            binder, with its Unknown sentinel seeded).
-        Output: nocab_uuid of every deck created or content-changed.
-        Side effects: reads the pages in name order; writes decks to
-            box; one progress bar per page.
+            DEFAULT_RAW_PATH when None).
+        Output: list[Path] of page files.
+        Side effects: lists the directory.
         Exceptions: FileNotFoundError if raw_path is missing or holds no
-            page file; otherwise as Sts2RunsDeckExtractionStage.extract.
+            page file.
 
         Example:
-            >>> SpireCodexRunsDeckExtractionStage().extract(None, box, binder)
+            >>> SpireCodexRunsDeckExtractionStage().raw_files(None)[0].name
+            'page_00000.jsonl.gz'
         """
-        result: list[UUID] = []
         path = raw_path or self.DEFAULT_RAW_PATH
         pages = [path] if path.is_file() else sorted(path.glob(_PAGE_GLOB))
         if not pages:
             raise FileNotFoundError(f"no {_PAGE_GLOB} run pages at {path}")
-
-        for page in pages:
-            result.extend(self._extract_file(page, box, card_lookup))
-        return result
+        return pages
 
     def _keeps_run(self, row: dict) -> bool:
         """False for an abandoned run when keep_abandoned is off (see the
