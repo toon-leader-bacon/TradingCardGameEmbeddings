@@ -243,7 +243,9 @@ class IsotropicContextPickDojo(MultiGroupOptionSelectionDojo):
     ) -> DeckColumnGroup:
         """How a row's options are read; the context is always the
         row's partial deck. Inputs: card_binder, deck_box.
-        Output: DeckColumnGroup. Side effects: none."""
+        Output: DeckColumnGroup. Side effects: none.
+        Exceptions: ValueError if the binder lacks a card the group
+        needs (e.g. a base supply card, see base_supply_uuids)."""
 
 
 class NextBuyDojo(IsotropicContextPickDojo):

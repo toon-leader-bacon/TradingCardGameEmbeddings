@@ -32,6 +32,9 @@ class GroupPickDataConstructor:
     options (a hidden card, a Black Market buy outside the supply, a
     trashed card the rebuilt partial deck lacks), is skipped. A row with
     fewer than 2 visible options is skipped (nothing to choose).
+    Duplicate options keep their first copy only, so each card has one
+    softmax slot. A card picked twice in one row (e.g. a Silver/Silver
+    opening) yields two identical data: that row counts twice toward it.
     """
 
     def __init__(
@@ -42,7 +45,7 @@ class GroupPickDataConstructor:
     ) -> None:
         """
         Inputs:
-            options: the row's choosable cards (distinct).
+            options: the row's choosable cards (deduplicated here).
             picks_column: the row's list[str] column of picked uuids.
             context: the conditioning group (group 1), or None for an
                 options-only input.
@@ -71,7 +74,7 @@ class GroupPickDataConstructor:
         """
         result: List[TrainingDatum] = []
         for _, row in chunk.iterrows():
-            options = self._options.cards(row, lookup)
+            options = _first_copies(self._options.cards(row, lookup))
             if len(options) < 2:
                 continue
             row_input = self._row_input(row, lookup, options)
@@ -96,6 +99,21 @@ class GroupPickDataConstructor:
             return options
         group: MultiGroupInput = [options, self._context.cards(row, lookup)]
         return group
+
+
+def _first_copies(cards: List[GenericCard]) -> List[GenericCard]:
+    """cards with each nocab_uuid kept at its first position only.
+
+    Inputs: cards. Output: a new List[GenericCard].
+    Side effects: none. Exceptions: none.
+    """
+    seen: set[UUID] = set()
+    result: List[GenericCard] = []
+    for card in cards:
+        if card.nocab_uuid not in seen:
+            seen.add(card.nocab_uuid)
+            result.append(card)
+    return result
 
 
 def _parsed_picks(raw_picks: object) -> List[UUID]:

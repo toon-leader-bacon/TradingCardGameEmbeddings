@@ -8,7 +8,6 @@ deck pairs (deck_uuid_lo, deck_uuid_hi), [partial deck, kingdom],
 [[card], kingdom].
 """
 
-import math
 from typing import Callable, List
 
 import pandas as pd
@@ -69,7 +68,7 @@ class GroupLabelDataConstructor:
         result: List[TrainingDatum] = []
         for _, row in chunk.iterrows():
             raw_label = row[self._label_column]
-            if isinstance(raw_label, float) and math.isnan(raw_label):
+            if pd.isna(raw_label):
                 continue
             groups: MultiGroupInput = [
                 group.cards(row, lookup) for group in self._groups
