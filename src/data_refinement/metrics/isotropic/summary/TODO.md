@@ -2,12 +2,12 @@
 
 Found while writing the isotropic dojos (2026-09-30).
 
-- [ ] **veto_rate is all zeros.** All 160 rows are 0.0, so the veto field
-  parse is probably wrong. No dojo was built for it.
-- [ ] **kingdom_game_length has a heavy tail.** Labels run 0-323 turns
-  (mean 19.8, std 6.4), and about 2% are under 5 turns (early
-  resignations?). Clip, filter, or log-transform before training; see
-  src/training/TODO.md, "Handle outlier regression labels".
+- [x] **veto_rate is all zeros.** Fixed 2026-10-01: vetoed cards are never
+  in board.supply, so P(vetoed | in supply) was 0 by construction. Now
+  P(vetoed | offered), offered = supply + vetoed; "*Name" vetoes resolve.
+- [x] **kingdom_game_length has a heavy tail.** Fixed 2026-10-01: solo games
+  and games with a resignation are skipped (the under-5-turn labels were
+  resignation wins); KingdomGameLengthDojo also clips labels at 50.
 - [ ] **One row per (kingdom, card) leaks across splits.**
   winning_deck_membership, winning_deck_count and
   kingdom_ending_pile_prediction write one row per (kingdom, card), so a

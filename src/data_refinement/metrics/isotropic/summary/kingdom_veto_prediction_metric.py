@@ -32,6 +32,7 @@ from src.data_refinement.metrics.isotropic.summary.row_utils import (
     card_uuid_for_name,
     is_natural_kingdom,
     kingdom_card_names,
+    vetoed_card_names,
 )
 from src.data_refinement.metrics.parquet_builder import ParquetBuilder
 from src.data_refinement.metrics.version_metadata import (
@@ -129,7 +130,7 @@ class KingdomVetoPredictionMetric:
         if not is_natural_kingdom(row):
             return
 
-        vetoed_names = row.get("vetoed", [])
+        vetoed_names = vetoed_card_names(row)
         if not vetoed_names:
             return
 
