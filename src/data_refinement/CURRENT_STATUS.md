@@ -36,6 +36,12 @@ Legend: ✅ exists · ❌ missing · 🟥 brainstorm only · 🟨 partial ·
 
 
 
+Cross-source (2026-10-01): `metrics/final_decks/` holds one held-out
+card metric per published deck box (Pokemon, FaB, Gwent, Dominion,
+StS2, MTG), each with a dojo and a `final_decks.held_out_card_<game>`
+catalog key. Outputs aren't generated yet; see that README for the
+per-box commands.
+
 ## Priority order
 
 

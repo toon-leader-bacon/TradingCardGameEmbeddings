@@ -98,6 +98,19 @@ from src.data_refinement.metrics.sts_gg.deck_label_metrics import (
 from src.data_refinement.metrics.sts_gg.deck_box_path import STS_GG_DECK_BOX_PATH
 from src.data_refinement.metrics.sts_gg.scanner import scan_runs_jsonl
 
+# --- final_decks ---
+from src.data_refinement.metrics.final_decks.held_out_card_metrics import (
+    DominionHeldOutCardMetric,
+    FleshAndBloodHeldOutCardMetric,
+    GwentHeldOutCardMetric,
+    MtgHeldOutCardMetric,
+    PokemonHeldOutCardMetric,
+    SlayTheSpire2HeldOutCardMetric,
+)
+from src.data_refinement.metrics.generic.held_out_deck_card.metric import (
+    HeldOutDeckCardMetric,
+)
+
 # --- gwent_one ---
 from src.data_refinement.metrics.gwent_one.armor_mask_metric import ArmorMaskMetric
 from src.data_refinement.metrics.gwent_one.color_mask_metric import ColorMaskMetric
@@ -369,10 +382,10 @@ def run_sts_gg(raw_path: Path | None) -> None:
 
 def _reject_raw_path(name: str, raw_path: Path | None) -> None:
     """Exit if --raw-path was given to a family whose metrics scan an
-    already-loaded CardBinder rather than one raw file."""
+    already-loaded CardBinder or DeckBox rather than one raw file."""
     if raw_path is not None:
         raise SystemExit(
-            f"{name} metrics scan an already-loaded CardBinder, not a raw file "
+            f"{name} metrics scan an already-loaded CardBinder or DeckBox, not a raw file "
             "— --raw-path is not applicable."
         )
 
@@ -717,6 +730,47 @@ def run_seventeenlands_replay_data(raw_path: Path | None) -> None:
     )
 
 
+# --- final_decks ---
+
+# Read-only scans of the published deck boxes (data/final/decks/<game>.db),
+# smallest box first. Runnable with --source only, never by --all: they
+# must run after deck-box ingestion (and play_gwent, which writes the
+# Gwent box), and the StS2/MTG scans take long.
+_FINAL_DECKS_METRICS: dict[str, type[HeldOutDeckCardMetric]] = {
+    "final_decks_pokemon": PokemonHeldOutCardMetric,
+    "final_decks_flesh_and_blood": FleshAndBloodHeldOutCardMetric,
+    "final_decks_gwent": GwentHeldOutCardMetric,
+    "final_decks_dominion": DominionHeldOutCardMetric,
+    "final_decks_slay_the_spire_2": SlayTheSpire2HeldOutCardMetric,
+    "final_decks_mtg": MtgHeldOutCardMetric,
+}
+
+
+def run_final_decks(name: str, raw_path: Path | None) -> None:
+    """Scan one published deck box into its held-out card metric.
+
+    Inputs: name (a _FINAL_DECKS_METRICS key), raw_path (must be None).
+    Output: none. Side effects: reads the game's binder and deck box,
+        writes the metric's parquet. Exceptions: SystemExit if raw_path
+        is given or the binder or box is missing; ValueError from scan()
+        on a stale box.
+    """
+    _reject_raw_path(name, raw_path)
+    metric_class = _FINAL_DECKS_METRICS[name]
+    game = metric_class.SOURCE_GAME
+    binder = _require_binder(
+        game, "run 'python3 scripts/run_card_binder_ingestion.py' for it first."
+    )
+    box_path = DeckBox.default_output_path(game)
+    if not box_path.exists():
+        raise SystemExit(f"{box_path} does not exist; run deck box ingestion first.")
+    deck_box = DeckBox.load([box_path])
+
+    print(f"=== {name}: {box_path} ===")
+    output_path = metric_class(binder, deck_box).scan()
+    print(f"wrote {output_path}")
+
+
 _FAMILIES: dict[str, Callable[[Path | None], None]] = {
     "sts_gg": run_sts_gg,
     "gwent_one": run_gwent_one,
@@ -758,7 +812,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--source",
-        choices=sorted(_FAMILIES),
+        choices=[*sorted(_FAMILIES), *_FINAL_DECKS_METRICS],
         help="Run just this one metric family.",
     )
     parser.add_argument(
@@ -783,8 +837,13 @@ def main() -> None:
     if args.list:
         for name in sorted(_FAMILIES):
             print(name)
+        for name in _FINAL_DECKS_METRICS:
+            print(f"{name} (--source only)")
         return
 
+    if args.source in _FINAL_DECKS_METRICS:
+        run_final_decks(args.source, args.raw_path)
+        return
     if args.source:
         _FAMILIES[args.source](args.raw_path)
         return

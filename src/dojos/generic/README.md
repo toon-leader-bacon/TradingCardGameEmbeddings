@@ -29,7 +29,9 @@ so one cell serves every metric family with the same shape.
   turn one raw row value into a typed label or card(s).
 - `paired_metric_dojos.py` - base classes for per-metric wrappers that
   only name their paired metric: `CardAverageMetricDojo`,
-  `DeckLabelMetricDojo`, `MaskedFieldMetricDojo` (see "Per-metric
+  `DeckLabelMetricDojo`, `MaskedFieldMetricDojo`,
+  `HeldOutDeckCardMetricDojo` (passes its deck box on, so the metric
+  version check verifies it) (see "Per-metric
   wrappers" below).
 - `pooling.py` - `EmbeddingPooler` Strategy (variable-length list of
   card embeddings -> one vector); `MeanEmbeddingPooler` is the only
@@ -103,6 +105,7 @@ Data constructors:
 | `DeckCardMaskDataConstructor` | `DeckCardMaskMetric` | deck minus one card -> that card |
 | `PackToPickChoiceSetDataConstructor` | `PackToPickChoiceSetMetric` | pack -> picked index (row skipped if any option is unmatched) |
 | `PoolConditionedPickDataConstructor` | `PoolConditionedPickMetric` | `[pack, pool]` -> picked index |
+| `HeldOutDeckCardDataConstructor` | `HeldOutDeckCardMetric` | `[candidates, deck minus every copy of the target]` -> target's index. A hidden target skips the row; a hidden decoy is dropped and the index taken after (no decoy left skips); hidden context cards are dropped (empty context skips) |
 | `AttackerBlockerCombatOutcomeDataConstructor` | `AttackerBlockerCombatOutcomeMetric` | `[attackers, blockers]` -> net kill delta (empty blockers allowed) |
 
 ## Per-metric wrappers

@@ -93,6 +93,55 @@ Output columns: `deck_uuid: str`, `target_card_uuid: str`, `label: str`.
 First (and currently only) consumer: [`../play_gwent/README.md`](../play_gwent/README.md)'s
 `LeaderMaskedFromDeckMetric`.
 
+## `HeldOutDeckCardMetric` (`held_out_deck_card/`)
+
+Holds one distinct card out of a deck in a *published* deck box
+(`data/final/decks/<game>.db`) and asks which of K + 1 same-game
+candidates it was: option selection, so it scales to MTG's ~35k cards
+where a fixed-class head over every card cannot. Satisfies
+`CorpusScanMetric` (`scan() -> Path`). Unlike `DeckCardMaskMetric`
+(raw-row driven, because its target is a role such as "the leader" that
+the box has lost), it is driven from the box: a held-out card needs only
+the deck's multiset. A subclass sets ClassVars only: `SOURCE_GAME`,
+`DEFAULT_OUTPUT_PATH`, `SAMPLING` (a `HeldOutCardSampling`). Consumers:
+[`../final_decks/`](../final_decks/README.md), one per published box.
+
+Output columns: `deck_uuid: str` (the published box's deck uuid; rows
+point into that box rather than a metric-private copy, so they stay
+independent and nothing is duplicated), `target_card_uuid: str`,
+`candidate_uuids: list[str]` (target + decoys, shuffled). Version
+metadata has `requires_deck_box=True`; `scan()` raises `ValueError` if
+the box's stamped binder version differs from the lookup's.
+
+Sampling rules:
+
+- **Deck sample.** The first `max_decks` decks, in
+  `DeckBox.uuids_ranked_randomly(game, seed)` order, that have at least
+  two distinct eligible cards (eligible = anything but the game's
+  Unknown sentinel, which is never a target or decoy). Document
+  frequencies and co-occurrence are computed over this sample.
+- **Targets.** Up to `targets_per_deck` distinct cards per deck, without
+  replacement, weighted by the staple weight
+  `w(c) = min(1, sqrt(t / f(c)))` (`f` = document frequency / sample
+  size, `t = staple_threshold`): basic lands, Copper and Estate become
+  rare targets rather than excluded ones. Every copy of the target is
+  removed from the context, or "the candidate already in the deck"
+  would be the answer.
+- **Decoys.** K per target, distinct, never in the deck. A share
+  (`cooccurrence_decoy_share`) are co-occurrence decoys: a card,
+  weighted by `w`, of another sampled deck that also holds the target.
+  These are same-set (MTG limited), same-class, same-faction hard
+  negatives, so the model has to read the deck, not the set. The rest
+  are frequency-matched, drawn with probability proportional to
+  `df(c) * w(c)`, the marginal targets are drawn from, so a candidate's
+  prior frequency carries no signal. Uniform decoys would be trivially
+  separable: most binder cards (Pokemon: 16.8k cards, 188 decks) appear
+  in no deck at all.
+- Everything is seeded, so a rerun on the same box writes the same file.
+
+The dojo side is `HeldOutDeckCardDataConstructor` feeding
+`MultiGroupOptionSelectionDojo` (`src/dojos/generic/README.md`).
+
 ## Files
 
 - `corpus_scan_metric.py` - `CorpusScanMetric`, the shared Protocol.
@@ -100,3 +149,7 @@ First (and currently only) consumer: [`../play_gwent/README.md`](../play_gwent/R
 - `masked_field_regression_metric.py` - `MaskedFieldRegressionMetric`,
   described above.
 - `deck_card_mask_metric.py` - `DeckCardMaskMetric`, described above.
+- `held_out_deck_card/` - `HeldOutDeckCardMetric`, described above:
+  `metric.py` (the base), `sampling.py` (`HeldOutCardSampling`),
+  `deck_sample.py` (the capped deck sample as numpy CSR arrays, private),
+  `candidate_sampler.py` (targets and decoys, private).
