@@ -64,6 +64,10 @@ class DataSource(str, Enum):
     # src/data_refinement/deck_box/seventeenlands_game_data/extraction_stage.py)
     # — distinct from each deck's own cards' data source (SCRYFALL, via
     # card_binder/scryfall/).
+    HEARTHSTONEJSON = "hearthstonejson"  # HearthstoneJSON per-build
+    # cards.json snapshots; source_id is a card's dbfId (see
+    # src/data_retrieval/hearthstonejson/downloader.py and
+    # src/data_refinement/card_binder/hearthstonejson/ingestion_stage.py).
     DOMINIONTABS = "dominiontabs"  # sumpfork/dominiontabs' card_db_src
     # JSON files (see src/data_retrieval/dominiontabs/downloader.py and
     # src/data_refinement/card_binder/dominiontabs/ingestion_stage.py).

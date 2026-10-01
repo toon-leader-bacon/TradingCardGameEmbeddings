@@ -123,6 +123,21 @@ _DOMINION_MASKS: DropTable[FieldMask] = DropTable.of(
 )
 
 
+# hearthstonejson (card_binder/hearthstonejson/ingestion_stage.py). A deck
+# is one class plus neutrals, so cardClass is the deck-defining field;
+# classes (multiclass cards) and runeCost (Death Knight only) name it too.
+# No Hearthstone deck box exists yet, so these weights are by analogy with
+# Gwent's faction, not measured.
+_HEARTHSTONE_MASKS: DropTable[FieldMask] = DropTable.of(
+    [
+        (25, FieldMask()),
+        (50, FieldMask.of_keys("cardClass", "classes", "runeCost")),
+        (15, FieldMask.of_keys("name")),
+        (10, FieldMask.of_keys("set")),
+    ]
+)
+
+
 def _standard_augmentations(masks: DropTable[FieldMask]) -> tuple[ModSpec, ...]:
     """Key-order shuffle, then the game's weighted masks, then a small
     chance of one more random key masked.
@@ -144,6 +159,7 @@ DEFAULT_AUGMENTATIONS: Mapping[GameId, tuple[ModSpec, ...]] = {
     GameId.MTG: _standard_augmentations(_MTG_MASKS),
     GameId.POKEMON: _standard_augmentations(_POKEMON_MASKS),
     GameId.DOMINION: _standard_augmentations(_DOMINION_MASKS),
+    GameId.HEARTHSTONE: _standard_augmentations(_HEARTHSTONE_MASKS),
 }
 
 

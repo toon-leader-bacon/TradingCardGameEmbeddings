@@ -1,6 +1,6 @@
 """Wiring tests for the single-card masked-field wrappers of the games
 added after gwent_one/dominiontabs (scryfall, pokemon_tcg,
-cardvault_fabtcg, spire_codex): each builds its cell with its metric's
+cardvault_fabtcg, spire_codex, hearthstonejson): each builds its cell with its metric's
 path, constructor and labels, and masks the field plus its leaking keys
 on every split."""
 
@@ -21,6 +21,7 @@ from src.dojos.generic.paired_metric_dojos import (
     MaskedFieldMultiLabelMetricDojo,
     MaskedFieldRegressionMetricDojo,
 )
+from src.dojos.hearthstonejson import card_mask_dojos as hearthstone
 from src.dojos.mods.common_mods import MaskTargetKeyMod
 from src.dojos.pokemon_tcg import card_mask_dojos as pokemon
 from src.dojos.scryfall import card_mask_dojos as scryfall
@@ -53,6 +54,14 @@ _WRAPPERS = [
     sts2.CardTypeMaskDojo,
     sts2.RarityMaskDojo,
     sts2.ColorMaskDojo,
+    hearthstone.CostRegressionDojo,
+    hearthstone.AttackRegressionDojo,
+    hearthstone.HealthRegressionDojo,
+    hearthstone.ClassMaskDojo,
+    hearthstone.RarityMaskDojo,
+    hearthstone.CardTypeMaskDojo,
+    hearthstone.RacesMaskDojo,
+    hearthstone.SpellSchoolMaskDojo,
 ]
 
 _CONSTRUCTOR_BY_BASE = {

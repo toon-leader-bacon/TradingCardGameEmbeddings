@@ -35,6 +35,7 @@ from src.dojos.dominiontabs.cost_regression_dojo import CostRegressionDojo
 from src.dojos.dominiontabs.masked_field_dojos import SetMaskDojo, TypeMaskDojo
 from src.dojos.gwent_one import masked_field_dojos as gwent_one
 from src.dojos.cardvault_fabtcg import card_mask_dojos as fabtcg_masks
+from src.dojos.hearthstonejson import card_mask_dojos as hearthstone_masks
 from src.dojos.pokemon_tcg import card_mask_dojos as pokemon_masks
 from src.dojos.scryfall import card_mask_dojos as scryfall_masks
 from src.dojos.spire_codex import card_mask_dojos as sts2_masks
@@ -379,6 +380,30 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     ),
     "spire_codex.color_mask": CardDojoRecipe(
         GameId.SLAY_THE_SPIRE_2, sts2_masks.ColorMaskDojo
+    ),
+    "hearthstonejson.cost_regression": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.CostRegressionDojo
+    ),
+    "hearthstonejson.attack_regression": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.AttackRegressionDojo
+    ),
+    "hearthstonejson.health_regression": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.HealthRegressionDojo
+    ),
+    "hearthstonejson.class_mask": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.ClassMaskDojo
+    ),
+    "hearthstonejson.rarity_mask": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.RarityMaskDojo
+    ),
+    "hearthstonejson.card_type_mask": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.CardTypeMaskDojo
+    ),
+    "hearthstonejson.races_mask": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.RacesMaskDojo
+    ),
+    "hearthstonejson.spell_school_mask": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.SpellSchoolMaskDojo
     ),
     "isotropic.average_copies_bought": CardDojoRecipe(
         GameId.DOMINION, isotropic.AverageCopiesBoughtDojo

@@ -18,7 +18,7 @@ Legend: ✅ exists · ❌ missing · 🟥 brainstorm only · 🟨 partial ·
 | `seventeenlands` › `game_data`   | MTG              | (uses scryfall)                                              | Yes (40-card limited decks, `deck_*` columns)                                                                                               | ✅ `seventeenlands_game_data`                                                                                  | 🟨 11 of ~19 built, all with dojos                                                                                                                                                              |
 | `seventeenlands` › `replay_data` | MTG              | (uses scryfall)                                              | Yes, but the same games as `game_data`, so redundant                                                                                        | n/a                                                                                                           | 🟨 9 of ~22 built, all with dojos                                                                                                                                                               |
 | `pokemon_tcg`                    | Pokemon          | ✅ `PokemonTcgCardIngestionStage`                             | Yes: 83 set files of official 60-card theme decks in `data/raw/pokemon_tcg/decks/`                                                          | ❌ Missing                                                                                                     | 🟨 5 single-card masks with dojos (HP, types, stage, retreat cost, weakness; 2026-10-01) |
-| `hearthstonejson`                | Hearthstone      | ❌ Missing: 84 build snapshots downloaded, no ingestion stage | No (card data only)                                                                                                                         | n/a                                                                                                           | 🟥 Brainstorm only (30)                                                                                                                                                                         |
+| `hearthstonejson`                | Hearthstone      | ✅ `HearthstoneJsonCardIngestionStage` (newest build only; 6,187 cards from build 251951) | No (card data only)                                                                                                                         | n/a                                                                                                           | 🟨 8 single-card masks with dojos (cost, attack, health, class, rarity, type, races, spell school; 2026-10-01) |
 | `gwent_one`                      | Gwent            | ✅ `GwentOneCardIngestionStage`                               | No                                                                                                                                          | n/a                                                                                                           | 🟨 8 masking metrics of ~30 ideas                                                                                                                                                               |
 | `play_gwent`                     | Gwent            | (uses gwent_one)                                             | Yes (community deck guides)                                                                                                                 | ✅ `play_gwent`                                                                                                | 🟨 1 of ~30 (`LeaderMaskedFromDeckMetric`)                                                                                                                                                      |
 | `spire_codex` (cards)            | Slay the Spire 2 | ✅ `SpireCodexCardIngestionStage`                             | No (`cards.json`)                                                                                                                           | n/a                                                                                                           | 🟨 4 single-card masks with dojos (cost, type, rarity, color; 2026-10-01) |
@@ -42,8 +42,9 @@ Legend: ✅ exists · ❌ missing · 🟥 brainstorm only · 🟨 partial ·
 
 ### 1. A card binder for every game
 
-- **Hearthstone**: the only game with raw data but no binder. Needs a
-decision on which build to ingest, or how to merge across builds.
+- **Hearthstone**: done (2026-10-01): the newest build only; older builds
+are not merged (a cross-build balance-change metric would read the raw
+builds directly).
 - **Yu-Gi-Oh**: needs a retrieval source first (`new_data_source`
 skill), or drop `GameId.YUGIOH` until one exists.
 
@@ -65,12 +66,9 @@ First metrics, deck-bearing sources:
 - `pokemon_tcg`
 - `spire_codex` runs (needs a brainstorm first)
 
-First metrics, card-only sources:
-
-- `scryfall`
-- `cardvault_fabtcg`
-- `spire_codex` cards
-- `hearthstonejson` (after its binder exists)
+First metrics, card-only sources: done (2026-10-01) for `scryfall`,
+`cardvault_fabtcg`, `spire_codex` cards and `hearthstonejson`
+(single-card masks; their other brainstorm ideas remain).
 
 Blocked: `pitchstack`, until retrieval adds the `/cards` endpoint.
 

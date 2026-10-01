@@ -1,6 +1,6 @@
 """Eligibility and labels of the single-card masking metrics over the
-scryfall, pokemon_tcg, cardvault_fabtcg and spire_codex binders, on
-raw_content shaped like each game's leaned ingestion output."""
+scryfall, pokemon_tcg, cardvault_fabtcg, spire_codex and hearthstonejson
+binders, on raw_content shaped like each game's leaned ingestion output."""
 
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,6 +11,9 @@ import pandas as pd
 import pytest
 
 from src.data_refinement.metrics.cardvault_fabtcg import card_mask_metrics as fabtcg
+from src.data_refinement.metrics.hearthstonejson import (
+    card_mask_metrics as hearthstone,
+)
 from src.data_refinement.metrics.pokemon_tcg import card_mask_metrics as pokemon
 from src.data_refinement.metrics.scryfall import card_mask_metrics as scryfall
 from src.data_refinement.metrics.spire_codex import card_mask_metrics as sts2
@@ -264,3 +267,67 @@ class TestSlayTheSpire2:
     ) -> None:
         labels = _labels(metric_cls, [{key: kept}, {key: skipped}], tmp_path)
         assert labels == [kept, None]
+
+
+class TestHearthstone:
+    def test_cost_skips_oddities(self, tmp_path: Path) -> None:
+        labels = _labels(
+            hearthstone.CostRegressionMetric, [{"cost": 3}, {"cost": 100}], tmp_path
+        )
+        assert labels == [3.0, None]
+
+    @pytest.mark.parametrize(
+        "metric_cls,key",
+        [
+            (hearthstone.AttackRegressionMetric, "attack"),
+            (hearthstone.HealthRegressionMetric, "health"),
+        ],
+    )
+    def test_stats_cover_minions_only(
+        self, metric_cls: Any, key: str, tmp_path: Path
+    ) -> None:
+        labels = _labels(
+            metric_cls,
+            [{"type": "MINION", key: 4}, {"type": "HERO", key: 30}],
+            tmp_path,
+        )
+        assert labels == [4.0, None]
+
+    def test_class_marks_multiclass_cards(self, tmp_path: Path) -> None:
+        labels = _labels(
+            hearthstone.ClassMaskMetric,
+            [
+                {"cardClass": "MAGE"},
+                {"cardClass": "NEUTRAL", "classes": ["MAGE", "PRIEST"]},
+                {"name": "classless"},
+            ],
+            tmp_path,
+        )
+        assert labels == ["MAGE", "MULTICLASS", None]
+
+    def test_races_expand_all_and_allow_none(self, tmp_path: Path) -> None:
+        labels = _labels(
+            hearthstone.RacesMaskMetric,
+            [
+                {"type": "MINION", "races": ["MURLOC", "BEAST"]},
+                {"type": "MINION", "races": ["ALL"]},
+                {"type": "MINION"},
+                {"type": "SPELL"},
+            ],
+            tmp_path,
+        )
+        assert labels[0] == ["BEAST", "MURLOC"]
+        assert len(labels[1]) == 12
+        assert labels[2:] == [[], None]
+
+    def test_spell_school_labels_schoolless_spells_none(self, tmp_path: Path) -> None:
+        labels = _labels(
+            hearthstone.SpellSchoolMaskMetric,
+            [
+                {"type": "SPELL", "spellSchool": "FIRE"},
+                {"type": "SPELL"},
+                {"type": "MINION"},
+            ],
+            tmp_path,
+        )
+        assert labels == ["FIRE", "NONE", None]
