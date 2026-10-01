@@ -86,6 +86,10 @@ implementation yet). Implemented today:
   first `DeckCardMaskMetric` consumer, driven directly off
   playgwent.com's community deck guides. See
   [`play_gwent/README.md`](play_gwent/README.md).
+- **`fabtcg_decklists/`** - hero masked from deck (a third
+  `DeckCardMaskMetric` consumer) and two card inclusion-rate metrics
+  over fabtcg.com tournament decklists, reading the published FaB deck
+  box read-only. See [`fabtcg_decklists/README.md`](fabtcg_decklists/README.md).
 - **`seventeenlands/`** - `Metric[dict]` metrics over 17lands' MTG
   draft/game/replay data exports; `draft_data/`, `game_data/`, and
   `replay_data/` are all implemented today. See

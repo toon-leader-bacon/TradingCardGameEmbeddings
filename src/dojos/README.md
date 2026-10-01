@@ -100,7 +100,7 @@ row, or by deck for contrastive) layer under it.
 - **Per-source wrappers** - `gwent_one/`, `dominiontabs/`, `play_gwent/`,
   `sts_gg/`, `seventeenlands/{draft_data,game_data,replay_data}/`,
   `isotropic/`, `final_decks/`, `scryfall/`, `pokemon_tcg/`, `cardvault_fabtcg/`,
-  `hearthstonejson/`, `spire_codex/`: one thin generic-cell subclass per metric (see
+  `hearthstonejson/`, `spire_codex/`, `fabtcg_decklists/`: one thin generic-cell subclass per metric (see
   `generic/README.md`'s "Per-metric wrappers"). Every implemented metric
   has one, except two isotropic ones: `CopiesBoughtDistributionMetric`
   (raw samples of the mean `AverageCopiesBoughtDojo` already learns) and

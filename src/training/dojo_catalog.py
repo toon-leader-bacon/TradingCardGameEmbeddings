@@ -42,6 +42,8 @@ from src.dojos.dominiontabs.cost_regression_dojo import CostRegressionDojo
 from src.dojos.dominiontabs.masked_field_dojos import SetMaskDojo, TypeMaskDojo
 from src.dojos.gwent_one import masked_field_dojos as gwent_one
 from src.dojos.cardvault_fabtcg import card_mask_dojos as fabtcg_masks
+from src.dojos.fabtcg_decklists import card_inclusion_dojos as fabtcg_inclusion
+from src.dojos.fabtcg_decklists import deck_card_mask_dojos as fabtcg_decks
 from src.dojos.hearthstonejson import card_mask_dojos as hearthstone_masks
 from src.dojos.pokemon_tcg import card_mask_dojos as pokemon_masks
 from src.dojos.scryfall import card_mask_dojos as scryfall_masks
@@ -668,6 +670,16 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     ),
     "sts2_runs.win": _recipe_for_sts2_runs_deck(
         sts_decks.WinDojo, sts2_decks.WinMetric.DEFAULT_OUTPUT_PATH
+    ),
+    # fabtcg_decklists rows point into the published FaB deck box
+    "fabtcg_decklists.hero_masked_from_deck": _recipe_for_final_deck_box(
+        GameId.FLESH_AND_BLOOD, fabtcg_decks.HeroMaskedFromDeckDojo
+    ),
+    "fabtcg_decklists.card_inclusion_rate": CardDojoRecipe(
+        GameId.FLESH_AND_BLOOD, fabtcg_inclusion.CardInclusionRateDojo
+    ),
+    "fabtcg_decklists.hero_conditioned_inclusion": CardDojoRecipe(
+        GameId.FLESH_AND_BLOOD, fabtcg_inclusion.HeroConditionedInclusionDojo
     ),
     "contrastive.gwent": _recipe_for_contrastive(GameId.GWENT),
     "contrastive.flesh_and_blood": _recipe_for_contrastive(GameId.FLESH_AND_BLOOD),
