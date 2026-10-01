@@ -100,17 +100,38 @@ def build_deck_label_constructor(
     return result
 
 
+def label_capped_at(cap: float) -> Callable[[object], float]:
+    """A label_caster that reads a numeric cell as a float clipped to at
+    most cap.
+
+    Inputs: cap (float). Output: Callable[[object], float].
+    Side effects: none. Exceptions: the returned caster raises
+        TypeError/ValueError on a non-numeric cell.
+
+    Example:
+        >>> label_capped_at(30.0)(112)
+        30.0
+    """
+
+    def caster(raw_label: object) -> float:
+        return min(float(raw_label), cap)  # type: ignore[arg-type]  # numeric cells
+
+    return caster
+
+
 class IsotropicDeckRegressionDojo(MultiCardRegressionDojo):
     """Card group in -> one number out, for an isotropic metric keyed by
     DECK_COLUMN with its label in LABEL_COLUMN.
 
-    Subclasses set OUTPUT_PATH (read off the metric class), DECK_COLUMN
-    and LABEL_COLUMN.
+    Subclasses set OUTPUT_PATH (read off the metric class), DECK_COLUMN,
+    LABEL_COLUMN and LABEL_CAP (labels above it are clipped to it, so a
+    handful of extreme labels cannot dominate a z-scored MSE).
     """
 
     OUTPUT_PATH: ClassVar[Path]
     DECK_COLUMN: ClassVar[str]
     LABEL_COLUMN: ClassVar[str]
+    LABEL_CAP: ClassVar[float]
 
     def __init__(
         self,
@@ -147,7 +168,10 @@ class IsotropicDeckRegressionDojo(MultiCardRegressionDojo):
             holdout=holdout,
             path_to_training_data=path_to_training_data or self.OUTPUT_PATH,
             data_constructor=build_deck_label_constructor(
-                deck_box, self.DECK_COLUMN, self.LABEL_COLUMN
+                deck_box,
+                self.DECK_COLUMN,
+                self.LABEL_COLUMN,
+                label_caster=label_capped_at(self.LABEL_CAP),
             ),
             card_embedding_size=card_embedding_size,
             deck_box=deck_box,
@@ -159,21 +183,26 @@ class IsotropicDeckRegressionDojo(MultiCardRegressionDojo):
 
 class KingdomGameLengthDojo(IsotropicDeckRegressionDojo):
     """Kingdom (the supply cards) -> the winner's turn count
-    (KingdomGameLengthMetric). Labels run 0-323 with a ~2% tail under 5
-    turns (early resignations); MSE is sensitive to that tail."""
+    (KingdomGameLengthMetric). The metric skips solo and resigned games;
+    one 2013 day of what is left runs 10-51 turns, so the cap of 50 only
+    guards against a stray stalled game (an older file reached 323)."""
 
     OUTPUT_PATH = KingdomGameLengthMetric.DEFAULT_OUTPUT_PATH
     DECK_COLUMN = _KINGDOM_UUID_COLUMN
     LABEL_COLUMN = _WINNER_TURNS_COLUMN
+    LABEL_CAP = 50.0
 
 
 class NextTurnActionCountDojo(IsotropicDeckRegressionDojo):
     """Mid-game partial deck -> number of Action cards that player plays
-    on their next turn (NextTurnActionCountMetric)."""
+    on their next turn (NextTurnActionCountMetric). Labels reach 112
+    (village/King's Court chains) with p99.9 = 27, so they are clipped at
+    30 (0.07% of rows)."""
 
     OUTPUT_PATH = NextTurnActionCountMetric.DEFAULT_OUTPUT_PATH
     DECK_COLUMN = _PARTIAL_DECK_UUID_COLUMN
     LABEL_COLUMN = _NEXT_TURN_ACTION_COUNT_COLUMN
+    LABEL_CAP = 30.0
 
 
 class FullDeckWinPredictionDojo(MultiCardBinaryClassificationDojo):

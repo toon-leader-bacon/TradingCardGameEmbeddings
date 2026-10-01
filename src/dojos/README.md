@@ -101,12 +101,20 @@ row, or by deck for contrastive) layer under it.
   `sts_gg/`, `seventeenlands/{draft_data,game_data,replay_data}/`,
   `isotropic/`, `final_decks/`: one thin generic-cell subclass per metric (see
   `generic/README.md`'s "Per-metric wrappers"). Every implemented metric
-  has one, except isotropic's: only its generic-cell-shaped metrics
-  are wrapped (4 single-card rates, 4 deck-label tasks, the masked
-  winning-deck card). Its kingdom and partial-deck metrics key rows by
+  has one, except two isotropic ones: `CopiesBoughtDistributionMetric`
+  (raw samples of the mean `AverageCopiesBoughtDojo` already learns) and
+  `MultiplayerPlacementMetric` (a ranking over 3-4 decks; no cell ranks
+  groups). Its kingdom and partial-deck metrics key rows by
   `kingdom_uuid`/`partial_deck_uuid`, so `isotropic/` wraps
   `DeckLabelDataConstructor` in a column-renaming Decorator
-  (`renamed_column_data_constructor.py`).
+  (`renamed_column_data_constructor.py`). Its two-group and "which
+  card(s)" metrics use `isotropic/`'s own constructors: a `CardGroup`
+  Strategy (`card_groups.py`) reads each group from a row column (a
+  DeckBox group, optionally distinct or with extra cards such as the
+  base supply, or a single card), `GroupLabelDataConstructor` builds
+  `([group_0, group_1], float)` for the multi-group binary/regression
+  cells, and `GroupPickDataConstructor` builds one option-selection
+  datum per picked card.
 
 ## `contrastive/` - InfoNCE over deck co-occurrence
 

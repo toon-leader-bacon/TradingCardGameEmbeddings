@@ -7,8 +7,10 @@ Wrapped: AverageCopiesBoughtMetric, TurnCountAssociationMetric
 (isotropic/games/). Each row is (nocab_uuid, <label>, sample_count), the
 shape CardAverageDataConstructor reads.
 
-Not wrapped: VetoRateMetric (every row's veto_rate is 0.0 today, so
-there is nothing to learn) and CopiesBoughtDistributionMetric (raw
+VetoRateMetric (isotropic/summary/) too, since its 2026-10-01 fix
+(it was 0.0 for every card before).
+
+Not wrapped: CopiesBoughtDistributionMetric (raw
 per-deck samples of the quantity AverageCopiesBoughtMetric averages; an
 MSE head on it would learn the same mean).
 
@@ -35,6 +37,9 @@ from src.data_refinement.metrics.isotropic.summary.average_copies_bought_metric 
 )
 from src.data_refinement.metrics.isotropic.summary.turn_count_association_metric import (
     TurnCountAssociationMetric,
+)
+from src.data_refinement.metrics.isotropic.summary.veto_rate_metric import (
+    VetoRateMetric,
 )
 from src.dojos.generic.data_constructors import CardAverageDataConstructor
 from src.dojos.generic.dojo_config import DojoConfig
@@ -125,3 +130,11 @@ class PileExhaustionRateDojo(IsotropicCardRateDojo):
 
     OUTPUT_PATH = PileExhaustionRateMetric.DEFAULT_OUTPUT_PATH
     LABEL_COLUMN = "pile_exhaustion_rate"
+
+
+class VetoRateDojo(IsotropicCardRateDojo):
+    """Card -> P(vetoed | offered) in games with vetoing on
+    (VetoRateMetric). A rate in [0, 1], regressed."""
+
+    OUTPUT_PATH = VetoRateMetric.DEFAULT_OUTPUT_PATH
+    LABEL_COLUMN = "veto_rate"

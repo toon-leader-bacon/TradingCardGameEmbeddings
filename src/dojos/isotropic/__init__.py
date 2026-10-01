@@ -10,6 +10,7 @@ from src.dojos.isotropic.card_rate_dojos import (
     OpeningBuyRateDojo,
     PileExhaustionRateDojo,
     TurnCountAssociationDojo,
+    VetoRateDojo,
 )
 from src.dojos.isotropic.deck_card_mask_dojos import WinningDeckMaskedCardDojo
 from src.dojos.isotropic.deck_label_dojos import (
@@ -18,15 +19,44 @@ from src.dojos.isotropic.deck_label_dojos import (
     KingdomGameLengthDojo,
     NextTurnActionCountDojo,
 )
+from src.dojos.isotropic.group_label_dojos import (
+    DeckCardSetCopyCountDojo,
+    DeckPairWinnerDojo,
+    EventualWinDojo,
+    KingdomEndingPileDojo,
+    MidGameDeckPairWinnerDojo,
+    OpeningBuyOutcomeDojo,
+    WinningDeckCountDojo,
+    WinningDeckMembershipDojo,
+)
+from src.dojos.isotropic.pick_dojos import (
+    KingdomOpeningBuyDojo,
+    KingdomVetoDojo,
+    NextBuyDojo,
+    NextTrashedCardDojo,
+)
 
 __all__ = [
     "AverageCopiesBoughtDojo",
+    "DeckCardSetCopyCountDojo",
+    "DeckPairWinnerDojo",
+    "EventualWinDojo",
     "FullDeckWinPredictionDojo",
+    "KingdomEndingPileDojo",
     "KingdomEndingTypeDojo",
     "KingdomGameLengthDojo",
+    "KingdomOpeningBuyDojo",
+    "KingdomVetoDojo",
+    "MidGameDeckPairWinnerDojo",
+    "NextBuyDojo",
+    "NextTrashedCardDojo",
     "NextTurnActionCountDojo",
+    "OpeningBuyOutcomeDojo",
     "OpeningBuyRateDojo",
     "PileExhaustionRateDojo",
     "TurnCountAssociationDojo",
+    "VetoRateDojo",
+    "WinningDeckCountDojo",
     "WinningDeckMaskedCardDojo",
+    "WinningDeckMembershipDojo",
 ]

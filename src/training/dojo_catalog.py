@@ -357,6 +357,41 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     "isotropic.winning_deck_masked_card": _recipe_for_isotropic_deck(
         isotropic.WinningDeckMaskedCardDojo
     ),
+    "isotropic.veto_rate": CardDojoRecipe(GameId.DOMINION, isotropic.VetoRateDojo),
+    "isotropic.kingdom_opening_buy_prediction": _recipe_for_isotropic_deck(
+        isotropic.KingdomOpeningBuyDojo
+    ),
+    "isotropic.kingdom_veto_prediction": _recipe_for_isotropic_deck(
+        isotropic.KingdomVetoDojo
+    ),
+    "isotropic.mid_game_next_buy": _recipe_for_isotropic_deck(isotropic.NextBuyDojo),
+    "isotropic.mid_game_next_trashed_card": _recipe_for_isotropic_deck(
+        isotropic.NextTrashedCardDojo
+    ),
+    "isotropic.deck_pair_winner": _recipe_for_isotropic_deck(
+        isotropic.DeckPairWinnerDojo
+    ),
+    "isotropic.mid_game_deck_pair_winner": _recipe_for_isotropic_deck(
+        isotropic.MidGameDeckPairWinnerDojo
+    ),
+    "isotropic.mid_game_win_probability": _recipe_for_isotropic_deck(
+        isotropic.EventualWinDojo
+    ),
+    "isotropic.opening_buy_outcome": _recipe_for_isotropic_deck(
+        isotropic.OpeningBuyOutcomeDojo
+    ),
+    "isotropic.winning_deck_membership": _recipe_for_isotropic_deck(
+        isotropic.WinningDeckMembershipDojo
+    ),
+    "isotropic.kingdom_ending_pile_prediction": _recipe_for_isotropic_deck(
+        isotropic.KingdomEndingPileDojo
+    ),
+    "isotropic.winning_deck_count": _recipe_for_isotropic_deck(
+        isotropic.WinningDeckCountDojo
+    ),
+    "isotropic.deck_card_set_copy_count": _recipe_for_isotropic_deck(
+        isotropic.DeckCardSetCopyCountDojo
+    ),
     # play_gwent writes its decks into the final gwent deck box
     "play_gwent.leader_masked_from_deck": DeckDojoRecipe(
         GameId.GWENT,
