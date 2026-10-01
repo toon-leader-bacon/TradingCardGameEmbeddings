@@ -9,6 +9,7 @@ from src.data_refinement.card_binder.spire_codex.ingestion_stage import (
     SpireCodexCardIngestionStage,
 )
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.metrics.generic.masked_field_metric import OTHER_LABEL
 from src.data_refinement.metrics.sts_gg.deck_label_metric import DeckLabelMetric
 from src.data_refinement.metrics.sts_gg.deck_label_metrics import (
     CharacterPredictionMetric,
@@ -106,6 +107,18 @@ def test_killed_by_is_a_real_null_on_a_loss(tmp_path: Path) -> None:
 
     table = pq.read_table(tmp_path / "out.parquet")
     assert table.to_pylist()[0]["killed_by"] == "ENCOUNTER.THE_KIN_BOSS"
+
+
+def test_killed_by_maps_a_rare_killer_to_other(tmp_path: Path) -> None:
+    binder = _binder_from_rows([{"id": "STRIKE_SILENT", "name": "Strike"}], tmp_path)
+    metric = KilledByMetric(binder, DeckBox(), tmp_path / "out.parquet")
+
+    metric.accumulate(_run_row(win=False, killedBy="ENCOUNTER.NOT_A_REAL_ONE"))
+    metric.accumulate(_run_row(win=True, killedBy=None))
+    metric.finalize()
+
+    labels = pq.read_table(tmp_path / "out.parquet").column("killed_by").to_pylist()
+    assert labels == [OTHER_LABEL, None]
 
 
 def test_missing_deck_box_raises(tmp_path: Path) -> None:

@@ -1,8 +1,13 @@
 """Per-metric wrappers over CardAverageMetric's nine concrete subclasses
-(src/data_refinement/metrics/sts_gg/card_average_metrics.py).
+(src/data_refinement/metrics/sts_gg/card_average_metrics.py), plus
+CardUpgradeRateMetric and CardWinRateAtAct2Metric, which have the same
+(nocab_uuid, LABEL_COLUMN, sample_count) output without subclassing
+CardAverageMetric.
 
 Each is a CardAverageMetricDojo (../generic/paired_metric_dojos.py)
-that only names its paired metric.
+that only names its paired metric. The sts2_runs catalog keys reuse
+these classes over ../../data_refinement/metrics/sts2_runs/'s outputs,
+which share each sts_gg metric's LABEL_COLUMN.
 """
 
 from src.data_refinement.metrics.sts_gg.card_average_metrics import (
@@ -15,6 +20,12 @@ from src.data_refinement.metrics.sts_gg.card_average_metrics import (
     CardTotalDamageTakenMetric,
     CardTotalTurnsMetric,
     CardWinRateMetric,
+)
+from src.data_refinement.metrics.sts_gg.card_upgrade_rate_metric import (
+    CardUpgradeRateMetric,
+)
+from src.data_refinement.metrics.sts_gg.card_win_rate_at_act2_metric import (
+    CardWinRateAtAct2Metric,
 )
 from src.dojos.generic.paired_metric_dojos import CardAverageMetricDojo
 
@@ -78,3 +89,17 @@ class CardWinRateDojo(CardAverageMetricDojo):
     """
 
     METRIC = CardWinRateMetric
+
+
+class CardUpgradeRateDojo(CardAverageMetricDojo):
+    """Card -> predicted P(upgraded by run end | card in final deck)
+    (CardUpgradeRateMetric). A regression cell, like CardWinRateDojo."""
+
+    METRIC = CardUpgradeRateMetric
+
+
+class CardWinRateAtAct2Dojo(CardAverageMetricDojo):
+    """Card -> predicted P(win | card in deck at act 2's start)
+    (CardWinRateAtAct2Metric). A regression cell, like CardWinRateDojo."""
+
+    METRIC = CardWinRateAtAct2Metric

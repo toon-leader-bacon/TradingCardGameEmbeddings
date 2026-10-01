@@ -12,8 +12,12 @@ boundary the way card_win_rate_at_act2_metric.py does, since every
 label here is a whole-run scalar, not a value tied to a specific point
 in the run.
 
-WARNING: KilledBy seems to be only null for the current data source.
-So it's not a good metric to use.
+WINS ONLY: sts.gg's source is its leaderboard, which lists winning
+runs only (all 1,004 rows of data/raw/sts_gg/runs.jsonl have win=True
+and killedBy=null, checked 2026-10-01). So WinMetric and KilledByMetric
+carry no signal on this source; they are kept for the run schema they
+document, and ../sts2_runs/ computes both from spire_codex + sts2runs
+runs, which include losses.
 NULLABLE LABEL: KilledByMetric's label is None on a win (killed_by is
 only ever set on a loss) - pyarrow's string type is nullable by
 default, so this is written as a real null, not a sentinel string.
@@ -162,20 +166,67 @@ class TotalCombatsMetric(DeckLabelMetric):
 
 
 class KilledByMetric(DeckLabelMetric):
-    """
-    WARNING: KilledBy seems to be only null for the current data
-    source. So it's not a good metric to use.
+    """Deck -> killedBy (BRAINSTORM.md multi-group #1's per-run
+    analogue - null on a win, an encounter id on a loss).
 
-    Deck -> killedBy (BRAINSTORM.md multi-group #1's per-run
-    analogue - null on a win, an encounter/event id string on a loss).
+    Always null on this source (see the module docstring's WINS ONLY).
+
+    LABEL_VALUES: every encounter that killed at least 0.5% of the
+    standard, non-abandoned lost runs in three spire_codex run pages
+    (00000, 00016, 00033: 68,640 losses, 129 distinct killers; these 36
+    cover 90.2%), plus OTHER_LABEL for the rest (rarer encounters and
+    the EVENT.* deaths). ../sts2_runs/'s KilledByMetric shares this
+    vocabulary by reference.
     """
 
     LABEL_COLUMN = "killed_by"
     LABEL_TYPE = pa.string()
     DEFAULT_OUTPUT_PATH = Path("data/metrics/sts_gg/killed_by.parquet")
+    LABEL_VALUES: ClassVar[tuple[str, ...]] = (
+        "ENCOUNTER.AEONGLASS_BOSS",
+        "ENCOUNTER.BOWLBUGS_NORMAL",
+        "ENCOUNTER.BYGONE_EFFIGY_ELITE",
+        "ENCOUNTER.BYRDONIS_ELITE",
+        "ENCOUNTER.CEREMONIAL_BEAST_BOSS",
+        "ENCOUNTER.CHOMPERS_NORMAL",
+        "ENCOUNTER.CONSTRUCT_MENAGERIE_NORMAL",
+        "ENCOUNTER.DECIMILLIPEDE_ELITE",
+        "ENCOUNTER.DOORMAKER_BOSS",
+        "ENCOUNTER.ENTOMANCER_ELITE",
+        "ENCOUNTER.EXOSKELETONS_NORMAL",
+        "ENCOUNTER.HUNTER_KILLER_NORMAL",
+        "ENCOUNTER.INFESTED_PRISMS_ELITE",
+        "ENCOUNTER.KAISER_CRAB_BOSS",
+        "ENCOUNTER.KNIGHTS_ELITE",
+        "ENCOUNTER.KNOWLEDGE_DEMON_BOSS",
+        "ENCOUNTER.LAGAVULIN_MATRIARCH_BOSS",
+        "ENCOUNTER.LOUSE_PROGENITOR_NORMAL",
+        "ENCOUNTER.MECHA_KNIGHT_ELITE",
+        "ENCOUNTER.MYTES_NORMAL",
+        "ENCOUNTER.OVICOPTER_NORMAL",
+        "ENCOUNTER.PHANTASMAL_GARDENERS_ELITE",
+        "ENCOUNTER.PHROG_PARASITE_ELITE",
+        "ENCOUNTER.QUEEN_BOSS",
+        "ENCOUNTER.SKULKING_COLONY_ELITE",
+        "ENCOUNTER.SLUMBERING_BEETLE_NORMAL",
+        "ENCOUNTER.SOUL_FYSH_BOSS",
+        "ENCOUNTER.SOUL_NEXUS_ELITE",
+        "ENCOUNTER.SPINY_TOAD_NORMAL",
+        "ENCOUNTER.TERROR_EEL_ELITE",
+        "ENCOUNTER.TEST_SUBJECT_BOSS",
+        "ENCOUNTER.THE_INSATIABLE_BOSS",
+        "ENCOUNTER.THE_KIN_BOSS",
+        "ENCOUNTER.THE_OBSCURA_NORMAL",
+        "ENCOUNTER.VANTOM_BOSS",
+        "ENCOUNTER.WATERFALL_GIANT_BOSS",
+        OTHER_LABEL,
+    )
 
     def _label_for_run(self, row: dict) -> str | None:
-        return row["killedBy"]
+        killed_by = row["killedBy"]
+        if killed_by is None or killed_by in self.LABEL_VALUES:
+            return killed_by
+        return OTHER_LABEL
 
 
 class WinMetric(DeckLabelMetric):

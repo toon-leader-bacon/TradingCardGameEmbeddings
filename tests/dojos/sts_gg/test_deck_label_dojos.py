@@ -5,10 +5,14 @@ import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.metrics.sts_gg.ascension_prediction_metric import (
+    AscensionPredictionMetric,
+)
 from src.data_refinement.metrics.sts_gg.deck_label_metrics import (
     CharacterPredictionMetric,
     ElitesKilledMetric,
     FloorsClearedMetric,
+    KilledByMetric,
     RelicCountMetric,
     TotalCardsPickedMetric,
     TotalCardsSkippedMetric,
@@ -27,6 +31,7 @@ from src.dojos.generic.multi_card_fixed_classification.dojo import (
 from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
 from src.dojos.sts_gg.deck_label_dojos import (
     CharacterDojo,
+    DeckAscensionDojo,
     DeckElitesKilledDojo,
     DeckFloorsClearedDojo,
     DeckRelicCountDojo,
@@ -35,6 +40,7 @@ from src.dojos.sts_gg.deck_label_dojos import (
     DeckTotalCombatsDojo,
     DeckTotalDamageTakenDojo,
     DeckTotalTurnsDojo,
+    KilledByDojo,
     WinDojo,
 )
 from src.schema.holdout import HoldoutSpec
@@ -51,6 +57,7 @@ _CASES = [
     (DeckElitesKilledDojo, ElitesKilledMetric),
     (DeckFloorsClearedDojo, FloorsClearedMetric),
     (DeckTotalCombatsDojo, TotalCombatsMetric),
+    (DeckAscensionDojo, AscensionPredictionMetric),
 ]
 
 
@@ -150,3 +157,27 @@ class TestCharacterDojo:
         )
 
         assert dojo.label_values == list(CharacterPredictionMetric.LABEL_VALUES)
+
+
+class TestKilledByDojo:
+    def test_wires_killed_by_column_str_caster_and_label_values(
+        self, tmp_path: Path
+    ) -> None:
+        source = tmp_path / "source.parquet"
+        _write_source(source, KilledByMetric.LABEL_COLUMN)
+
+        dojo = KilledByDojo(
+            CardBinder(),
+            HoldoutSpec.no_holdout(),
+            DeckBox(),
+            card_embedding_size=4,
+            path_to_training_data=source,
+            rng_seed=0,
+            strict_version_check=False,
+        )
+
+        assert isinstance(dojo, MultiCardFixedClassificationDojo)
+        assert isinstance(dojo.data_constructor, DeckLabelDataConstructor)
+        assert dojo.data_constructor._label_column == KilledByMetric.LABEL_COLUMN
+        assert dojo.data_constructor._label_caster is str
+        assert dojo.label_values == list(KilledByMetric.LABEL_VALUES)

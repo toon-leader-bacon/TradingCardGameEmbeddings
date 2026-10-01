@@ -169,13 +169,13 @@ Decorator, and mixed contrastive + label-based training in one step.
 ```python
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.dojos.dojo import BatchBudget
-from src.dojos.sts_gg.card_average_dojos import CardWinRateDojo
+from src.dojos.sts_gg.card_average_dojos import CardUpgradeRateDojo
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
 
 binder = CardBinder.load([CardBinder.default_output_path(GameId.SLAY_THE_SPIRE_2)])
-dojo = CardWinRateDojo(binder, HoldoutSpec.no_holdout(), card_embedding_size=32)
+dojo = CardUpgradeRateDojo(binder, HoldoutSpec.no_holdout(), card_embedding_size=32)
 for batch in dojo.batches(Split.TRAIN, BatchBudget(32, lambda card: 1)):
     loss = dojo.compute_loss(model(batch.inputs), batch)
 ```

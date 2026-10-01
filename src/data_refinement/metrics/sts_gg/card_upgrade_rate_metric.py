@@ -47,6 +47,7 @@ class CardUpgradeRateMetric:
     finalize() runs.
     """
 
+    LABEL_COLUMN: ClassVar[str] = "upgrade_rate"
     DEFAULT_OUTPUT_PATH: ClassVar[Path] = Path(
         "data/metrics/sts_gg/card_upgrade_rate.parquet"
     )
@@ -183,7 +184,7 @@ class CardUpgradeRateMetric:
         upgraded = self._upgraded_count.get(card_uuid, 0)
         return {
             "nocab_uuid": str(card_uuid),
-            "upgrade_rate": upgraded / total,
+            self.LABEL_COLUMN: upgraded / total,
             "sample_count": total,
         }
 

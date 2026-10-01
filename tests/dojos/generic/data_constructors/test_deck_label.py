@@ -147,3 +147,22 @@ class TestDeckLabelDataConstructorBuild:
         _, label = constructor.build(chunk, card_binder)[0]
 
         assert label == "CHARACTER.SILENT"
+
+    def test_skips_row_with_a_null_string_label(self) -> None:
+        card_binder = CardBinder()
+        deck_box = DeckBox()
+        card = _card("Strike", "strike")
+        card_binder.create(card)
+        deck = _deck([card])
+        deck_box.create(deck)
+        chunk = pd.DataFrame(
+            {
+                "deck_uuid": [str(deck.nocab_uuid)] * 2,
+                "killed_by": [None, "ENCOUNTER.THE_KIN_BOSS"],
+            }
+        )
+        constructor = DeckLabelDataConstructor(deck_box, "killed_by", label_caster=str)
+
+        result = constructor.build(chunk, card_binder)
+
+        assert [label for _, label in result] == ["ENCOUNTER.THE_KIN_BOSS"]

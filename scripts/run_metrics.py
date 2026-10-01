@@ -19,7 +19,9 @@ own DEFAULT_OUTPUT_PATH is namespaced by <expansion>/<format_code> so
 scanning multiple sets never overwrites a previous one's output — the
 metric classes themselves have no cross-file accumulation (each file's
 header names different cards), so "one file, one output" is the actual
-unit of work, not "one family, one output".
+unit of work, not "one family, one output". sts2_runs reads two
+fixed sources (spire_codex's ~1.7M-run pages and sts2runs' dump) in one
+pass; it is the slow one (most of an hour).
 
 Usage (from the project root):
 
@@ -32,8 +34,8 @@ Usage (from the project root):
 
 `--all` runs every family in this process, one after another (same
 reasoning as the other two scripts' `--all` — nothing here is a
-multi-hour crawl). One family's failure is logged and does not stop
-the rest.
+multi-hour crawl, though sts2_runs takes most of an hour). One family's
+failure is logged and does not stop the rest.
 """
 
 import argparse
@@ -109,6 +111,15 @@ from src.data_refinement.metrics.final_decks.held_out_card_metrics import (
 )
 from src.data_refinement.metrics.generic.held_out_deck_card.metric import (
     HeldOutDeckCardMetric,
+)
+
+# --- sts2_runs ---
+from src.data_refinement.metrics.sts2_runs import card_average_metrics as sts2_cards
+from src.data_refinement.metrics.sts2_runs import deck_label_metrics as sts2_decks
+from src.data_refinement.metrics.sts2_runs.run_record import Sts2Run
+from src.data_refinement.metrics.sts2_runs.scanner import (
+    default_run_sources,
+    scan_sts2_runs,
 )
 
 # --- gwent_one ---
@@ -377,15 +388,69 @@ def run_sts_gg(raw_path: Path | None) -> None:
     print(f"wrote {len(metrics)} metric outputs")
 
 
+# --- sts2_runs ---
+
+
+# Every sts2_runs metric takes (card_binder, output_path=None)
+_STS2_RUNS_METRIC_CLASSES: tuple[
+    type[sts2_decks.DeckLabelMetric] | type[sts2_cards.CardAverageMetric], ...
+] = (
+    sts2_decks.AscensionPredictionMetric,
+    sts2_decks.CharacterPredictionMetric,
+    sts2_decks.WinMetric,
+    sts2_decks.KilledByMetric,
+    sts2_decks.RelicCountMetric,
+    sts2_decks.TotalDamageTakenMetric,
+    sts2_decks.TotalCardsPickedMetric,
+    sts2_decks.TotalCardsSkippedMetric,
+    sts2_decks.TotalTurnsMetric,
+    sts2_decks.ElitesKilledMetric,
+    sts2_decks.FloorsClearedMetric,
+    sts2_decks.TotalCombatsMetric,
+    sts2_cards.CardRelicCountMetric,
+    sts2_cards.CardTotalDamageTakenMetric,
+    sts2_cards.CardDeckSizeMetric,
+    sts2_cards.CardTotalCardsPickedMetric,
+    sts2_cards.CardTotalTurnsMetric,
+    sts2_cards.CardElitesKilledMetric,
+    sts2_cards.CardFloorsClearedMetric,
+    sts2_cards.CardTotalCombatsMetric,
+    sts2_cards.CardWinRateMetric,
+    sts2_cards.CardUpgradeRateMetric,
+    sts2_cards.CardWinRateAtAct2Metric,
+)
+
+
+def run_sts2_runs(raw_path: Path | None) -> None:
+    """Scan spire_codex's run pages and sts2runs' dump (both at their
+    default paths) into data/metrics/sts2_runs/. The deck-level outputs
+    point into the published deck box (data/final/decks/
+    slay_the_spire_2.db); nothing is written to it."""
+    _reject_raw_path("sts2_runs", raw_path)
+    binder = _require_binder(
+        GameId.SLAY_THE_SPIRE_2,
+        "run 'python3 scripts/run_card_binder_ingestion.py --source spire_codex' first.",
+    )
+    metrics: list[Metric[Sts2Run]] = [
+        cls(binder) for cls in _STS2_RUNS_METRIC_CLASSES
+    ]
+
+    print("=== sts2_runs: spire_codex run pages + sts2runs dump ===")
+    tally = scan_sts2_runs(default_run_sources(), binder, metrics)
+    print(tally.as_dict())
+    print(f"wrote {len(metrics)} metric outputs")
+
+
 # --- gwent_one ---
 
 
 def _reject_raw_path(name: str, raw_path: Path | None) -> None:
-    """Exit if --raw-path was given to a family whose metrics scan an
-    already-loaded CardBinder or DeckBox rather than one raw file."""
+    """Exit if --raw-path was given to a family whose metrics read fixed
+    inputs (an already-loaded CardBinder or DeckBox, or sts2_runs' two
+    run sources) rather than one raw file."""
     if raw_path is not None:
         raise SystemExit(
-            f"{name} metrics scan an already-loaded CardBinder or DeckBox, not a raw file "
+            f"{name} metrics read fixed inputs, not one raw file "
             "— --raw-path is not applicable."
         )
 
@@ -773,6 +838,7 @@ def run_final_decks(name: str, raw_path: Path | None) -> None:
 
 _FAMILIES: dict[str, Callable[[Path | None], None]] = {
     "sts_gg": run_sts_gg,
+    "sts2_runs": run_sts2_runs,
     "gwent_one": run_gwent_one,
     "dominiontabs": run_dominiontabs,
     "play_gwent": run_play_gwent,
