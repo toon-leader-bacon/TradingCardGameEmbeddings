@@ -41,6 +41,11 @@ from src.dojos.final_decks import held_out_card_dojos as final_decks
 from src.dojos.dominiontabs.cost_regression_dojo import CostRegressionDojo
 from src.dojos.dominiontabs.masked_field_dojos import SetMaskDojo, TypeMaskDojo
 from src.dojos.gwent_one import masked_field_dojos as gwent_one
+from src.dojos.cardvault_fabtcg import card_mask_dojos as fabtcg_masks
+from src.dojos.hearthstonejson import card_mask_dojos as hearthstone_masks
+from src.dojos.pokemon_tcg import card_mask_dojos as pokemon_masks
+from src.dojos.scryfall import card_mask_dojos as scryfall_masks
+from src.dojos.spire_codex import card_mask_dojos as sts2_masks
 from src.dojos import isotropic
 from src.dojos.sts_gg import card_average_dojos as sts_cards
 from src.dojos.mods.mod_pipeline import ModPipeline
@@ -375,6 +380,89 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     "dominiontabs.cost_regression": CardDojoRecipe(GameId.DOMINION, CostRegressionDojo),
     "dominiontabs.set_mask": CardDojoRecipe(GameId.DOMINION, SetMaskDojo),
     "dominiontabs.type_mask": CardDojoRecipe(GameId.DOMINION, TypeMaskDojo),
+    "scryfall.cmc_regression": CardDojoRecipe(
+        GameId.MTG, scryfall_masks.CmcRegressionDojo
+    ),
+    "scryfall.card_type_mask": CardDojoRecipe(
+        GameId.MTG, scryfall_masks.CardTypeMaskDojo
+    ),
+    "scryfall.rarity_mask": CardDojoRecipe(GameId.MTG, scryfall_masks.RarityMaskDojo),
+    "scryfall.colors_mask": CardDojoRecipe(GameId.MTG, scryfall_masks.ColorsMaskDojo),
+    "scryfall.power_regression": CardDojoRecipe(
+        GameId.MTG, scryfall_masks.PowerRegressionDojo
+    ),
+    "scryfall.toughness_regression": CardDojoRecipe(
+        GameId.MTG, scryfall_masks.ToughnessRegressionDojo
+    ),
+    "pokemon_tcg.hp_regression": CardDojoRecipe(
+        GameId.POKEMON, pokemon_masks.HpRegressionDojo
+    ),
+    "pokemon_tcg.types_mask": CardDojoRecipe(
+        GameId.POKEMON, pokemon_masks.TypesMaskDojo
+    ),
+    "pokemon_tcg.stage_mask": CardDojoRecipe(
+        GameId.POKEMON, pokemon_masks.StageMaskDojo
+    ),
+    "pokemon_tcg.retreat_cost_regression": CardDojoRecipe(
+        GameId.POKEMON, pokemon_masks.RetreatCostRegressionDojo
+    ),
+    "pokemon_tcg.weakness_mask": CardDojoRecipe(
+        GameId.POKEMON, pokemon_masks.WeaknessMaskDojo
+    ),
+    "cardvault_fabtcg.pitch_mask": CardDojoRecipe(
+        GameId.FLESH_AND_BLOOD, fabtcg_masks.PitchMaskDojo
+    ),
+    "cardvault_fabtcg.cost_regression": CardDojoRecipe(
+        GameId.FLESH_AND_BLOOD, fabtcg_masks.CostRegressionDojo
+    ),
+    "cardvault_fabtcg.power_regression": CardDojoRecipe(
+        GameId.FLESH_AND_BLOOD, fabtcg_masks.PowerRegressionDojo
+    ),
+    "cardvault_fabtcg.defense_regression": CardDojoRecipe(
+        GameId.FLESH_AND_BLOOD, fabtcg_masks.DefenseRegressionDojo
+    ),
+    "cardvault_fabtcg.class_mask": CardDojoRecipe(
+        GameId.FLESH_AND_BLOOD, fabtcg_masks.ClassMaskDojo
+    ),
+    "cardvault_fabtcg.card_type_mask": CardDojoRecipe(
+        GameId.FLESH_AND_BLOOD, fabtcg_masks.CardTypeMaskDojo
+    ),
+    "spire_codex.cost_mask": CardDojoRecipe(
+        GameId.SLAY_THE_SPIRE_2, sts2_masks.CostMaskDojo
+    ),
+    "spire_codex.card_type_mask": CardDojoRecipe(
+        GameId.SLAY_THE_SPIRE_2, sts2_masks.CardTypeMaskDojo
+    ),
+    "spire_codex.rarity_mask": CardDojoRecipe(
+        GameId.SLAY_THE_SPIRE_2, sts2_masks.RarityMaskDojo
+    ),
+    "spire_codex.color_mask": CardDojoRecipe(
+        GameId.SLAY_THE_SPIRE_2, sts2_masks.ColorMaskDojo
+    ),
+    "hearthstonejson.cost_regression": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.CostRegressionDojo
+    ),
+    "hearthstonejson.attack_regression": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.AttackRegressionDojo
+    ),
+    "hearthstonejson.health_regression": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.HealthRegressionDojo
+    ),
+    "hearthstonejson.class_mask": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.ClassMaskDojo
+    ),
+    "hearthstonejson.rarity_mask": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.RarityMaskDojo
+    ),
+    "hearthstonejson.card_type_mask": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.CardTypeMaskDojo
+    ),
+    "hearthstonejson.races_mask": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.RacesMaskDojo
+    ),
+    "hearthstonejson.spell_school_mask": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.SpellSchoolMaskDojo
+    ),
     "isotropic.average_copies_bought": CardDojoRecipe(
         GameId.DOMINION, isotropic.AverageCopiesBoughtDojo
     ),

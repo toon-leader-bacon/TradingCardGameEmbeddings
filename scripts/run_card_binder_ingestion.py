@@ -43,6 +43,9 @@ from src.data_refinement.card_binder.dominiontabs.ingestion_stage import (
 from src.data_refinement.card_binder.gwent_one.ingestion_stage import (
     GwentOneCardIngestionStage,
 )
+from src.data_refinement.card_binder.hearthstonejson.ingestion_stage import (
+    HearthstoneJsonCardIngestionStage,
+)
 from src.data_refinement.card_binder.ingestion import CardIngestionStage
 from src.data_refinement.card_binder.pokemon_tcg.ingestion_stage import (
     PokemonTcgCardIngestionStage,
@@ -58,6 +61,7 @@ from src.data_retrieval.cardvault_fabtcg.card_downloader import (
 )
 from src.data_retrieval.dominiontabs.downloader import DominionTabsCardDownloader
 from src.data_retrieval.gwent_one.downloader import GwentOneDownloader
+from src.data_retrieval.hearthstonejson.downloader import HearthstoneJsonDownloader
 from src.data_retrieval.pokemon_tcg.downloader import PokemonTcgDataDownloader
 from src.data_retrieval.scryfall.downloader import ScryfallOracleDownloader
 from src.data_retrieval.spire_codex.card_downloader import SpireCodexCardDownloader
@@ -80,6 +84,27 @@ def _latest_scryfall_dump() -> Path:
             f"scripts/run_data_retrieval.py --source scryfall first."
         )
     return Path(candidates[-1])
+
+
+def _latest_hearthstone_build() -> Path:
+    """The HearthstoneJSON build file with the highest build id: each
+    build is a full card-pool snapshot, and only the newest is ingested
+    (see card_binder/hearthstonejson/ingestion_stage.py).
+
+    Inputs: none. Output: Path (data/raw/hearthstonejson/<build id>.json).
+    Side effects: lists that directory.
+    Exceptions: FileNotFoundError if no <digits>.json file is there."""
+    builds = [
+        path
+        for path in HearthstoneJsonDownloader.DEFAULT_RAW_DATA_DIR.glob("*.json")
+        if path.stem.isdigit()
+    ]
+    if not builds:
+        raise FileNotFoundError(
+            f"No <build id>.json under {HearthstoneJsonDownloader.DEFAULT_RAW_DATA_DIR}"
+            " - run scripts/run_data_retrieval.py --source hearthstonejson first."
+        )
+    return max(builds, key=lambda path: int(path.stem))
 
 
 # One (ingestion_stage, default raw_path) pair per source — the default
@@ -107,6 +132,10 @@ STAGES: dict[str, tuple[CardIngestionStage, Callable[[], Path]]] = {
         CardVaultFabtcgCardIngestionStage(),
         lambda: CardVaultFabtcgCardDownloader.DEFAULT_RAW_DATA_DIR
         / "public_card_data.csv",
+    ),
+    "hearthstonejson": (
+        HearthstoneJsonCardIngestionStage(),
+        _latest_hearthstone_build,
     ),
 }
 

@@ -18,7 +18,7 @@ NOT A Metric[RawRowT] (../metric.py): satisfies CorpusScanMetric
 module's docstring for why.
 """
 
-from abc import ABC, abstractmethod
+from abc import ABC
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import ClassVar
@@ -52,6 +52,8 @@ class _MaskedFieldRegressionRow:
     label: float
 
 
+# ABC with no abstract method: kept to mark this as a base, like its two
+# siblings; a subclass must still set the ClassVars below.
 class MaskedFieldRegressionMetric(ABC):
     """Per-card masked-field regression target: one row per eligible
     card, giving the true float value of a field a Dojo will later
@@ -194,19 +196,20 @@ class MaskedFieldRegressionMetric(ABC):
         """
         return True
 
-    @abstractmethod
     def _value_for_card(self, card: GenericCard) -> float:
         """The true float value for an already-eligible card.
 
         Only ever called (via _mask_row()) after _is_eligible(card)
-        has returned True. Expected to be implemented via
-        self._raw_field_value(card), converted to float as this
-        subclass's field requires.
+        has returned True. Default: the raw field value as a float,
+        which fits any field _is_eligible() has already checked is a
+        plain number; override where the conversion differs (e.g.
+        CostRegressionMetric's "3*"/"" costs).
 
         Inputs:
             card: one eligible card.
         Output: this card's true value for the masked field.
-        Side effects: implementation-defined (expected: none).
-        Exceptions: implementation-defined.
+        Side effects: none by default.
+        Exceptions: ValueError if the raw value is not a number (an
+            _is_eligible() gap); KeyError if the field is missing.
         """
-        raise NotImplementedError
+        return float(self._raw_field_value(card))

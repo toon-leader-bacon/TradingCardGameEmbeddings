@@ -147,6 +147,17 @@ from src.data_refinement.metrics.dominiontabs.type_mask_metric import (
     TypeMaskMetric as DominionTypeMaskMetric,
 )
 
+# --- single-card masks: scryfall, pokemon_tcg, cardvault_fabtcg, spire_codex ---
+from src.data_refinement.metrics.cardvault_fabtcg import (
+    card_mask_metrics as fabtcg_masks,
+)
+from src.data_refinement.metrics.hearthstonejson import (
+    card_mask_metrics as hearthstone_masks,
+)
+from src.data_refinement.metrics.pokemon_tcg import card_mask_metrics as pokemon_masks
+from src.data_refinement.metrics.scryfall import card_mask_metrics as scryfall_masks
+from src.data_refinement.metrics.spire_codex import card_mask_metrics as sts2_masks
+
 # --- isotropic/summary ---
 from src.data_refinement.metrics.isotropic.summary.average_copies_bought_metric import (
     AverageCopiesBoughtMetric,
@@ -509,6 +520,94 @@ def run_dominiontabs(raw_path: Path | None) -> None:
     _scan_corpus_metrics("dominiontabs", metrics)
 
 
+# --- single-card masks: scryfall, pokemon_tcg, cardvault_fabtcg, spire_codex ---
+
+
+def run_scryfall(raw_path: Path | None) -> None:
+    _reject_raw_path("scryfall", raw_path)
+    binder = _require_binder(GameId.MTG, _MTG_BINDER_HINT)
+    metrics: list[CorpusScanMetric] = [
+        scryfall_masks.CmcRegressionMetric(binder),
+        scryfall_masks.CardTypeMaskMetric(binder),
+        scryfall_masks.RarityMaskMetric(binder),
+        scryfall_masks.ColorsMaskMetric(binder),
+        scryfall_masks.PowerRegressionMetric(binder),
+        scryfall_masks.ToughnessRegressionMetric(binder),
+    ]
+    _scan_corpus_metrics("scryfall", metrics)
+
+
+def run_pokemon_tcg(raw_path: Path | None) -> None:
+    _reject_raw_path("pokemon_tcg", raw_path)
+    binder = _require_binder(
+        GameId.POKEMON,
+        "run 'python3 scripts/run_card_binder_ingestion.py --source pokemon_tcg' "
+        "first.",
+    )
+    metrics: list[CorpusScanMetric] = [
+        pokemon_masks.HpRegressionMetric(binder),
+        pokemon_masks.TypesMaskMetric(binder),
+        pokemon_masks.StageMaskMetric(binder),
+        pokemon_masks.RetreatCostRegressionMetric(binder),
+        pokemon_masks.WeaknessMaskMetric(binder),
+    ]
+    _scan_corpus_metrics("pokemon_tcg", metrics)
+
+
+def run_cardvault_fabtcg(raw_path: Path | None) -> None:
+    _reject_raw_path("cardvault_fabtcg", raw_path)
+    binder = _require_binder(
+        GameId.FLESH_AND_BLOOD,
+        "run 'python3 scripts/run_card_binder_ingestion.py --source "
+        "cardvault_fabtcg' first.",
+    )
+    metrics: list[CorpusScanMetric] = [
+        fabtcg_masks.PitchMaskMetric(binder),
+        fabtcg_masks.CostRegressionMetric(binder),
+        fabtcg_masks.PowerRegressionMetric(binder),
+        fabtcg_masks.DefenseRegressionMetric(binder),
+        fabtcg_masks.ClassMaskMetric(binder),
+        fabtcg_masks.CardTypeMaskMetric(binder),
+    ]
+    _scan_corpus_metrics("cardvault_fabtcg", metrics)
+
+
+def run_spire_codex(raw_path: Path | None) -> None:
+    _reject_raw_path("spire_codex", raw_path)
+    binder = _require_binder(
+        GameId.SLAY_THE_SPIRE_2,
+        "run 'python3 scripts/run_card_binder_ingestion.py --source spire_codex' "
+        "first.",
+    )
+    metrics: list[CorpusScanMetric] = [
+        sts2_masks.CostMaskMetric(binder),
+        sts2_masks.CardTypeMaskMetric(binder),
+        sts2_masks.RarityMaskMetric(binder),
+        sts2_masks.ColorMaskMetric(binder),
+    ]
+    _scan_corpus_metrics("spire_codex", metrics)
+
+
+def run_hearthstonejson(raw_path: Path | None) -> None:
+    _reject_raw_path("hearthstonejson", raw_path)
+    binder = _require_binder(
+        GameId.HEARTHSTONE,
+        "run 'python3 scripts/run_card_binder_ingestion.py --source "
+        "hearthstonejson' first.",
+    )
+    metrics: list[CorpusScanMetric] = [
+        hearthstone_masks.CostRegressionMetric(binder),
+        hearthstone_masks.AttackRegressionMetric(binder),
+        hearthstone_masks.HealthRegressionMetric(binder),
+        hearthstone_masks.ClassMaskMetric(binder),
+        hearthstone_masks.RarityMaskMetric(binder),
+        hearthstone_masks.CardTypeMaskMetric(binder),
+        hearthstone_masks.RacesMaskMetric(binder),
+        hearthstone_masks.SpellSchoolMaskMetric(binder),
+    ]
+    _scan_corpus_metrics("hearthstonejson", metrics)
+
+
 # --- play_gwent ---
 
 
@@ -842,6 +941,11 @@ _FAMILIES: dict[str, Callable[[Path | None], None]] = {
     "gwent_one": run_gwent_one,
     "dominiontabs": run_dominiontabs,
     "play_gwent": run_play_gwent,
+    "scryfall": run_scryfall,
+    "pokemon_tcg": run_pokemon_tcg,
+    "cardvault_fabtcg": run_cardvault_fabtcg,
+    "spire_codex": run_spire_codex,
+    "hearthstonejson": run_hearthstonejson,
     "isotropic_summary": run_isotropic_summary,
     "isotropic_games": run_isotropic_games,
     "seventeenlands_draft_data": run_seventeenlands_draft_data,
