@@ -99,7 +99,8 @@ row, or by deck for contrastive) layer under it.
 - **`contrastive/`** - `ContrastiveDojo`, below.
 - **Per-source wrappers** - `gwent_one/`, `dominiontabs/`, `play_gwent/`,
   `sts_gg/`, `seventeenlands/{draft_data,game_data,replay_data}/`,
-  `isotropic/`: one thin generic-cell subclass per metric (see
+  `isotropic/`, `scryfall/`, `pokemon_tcg/`, `cardvault_fabtcg/`,
+  `spire_codex/`: one thin generic-cell subclass per metric (see
   `generic/README.md`'s "Per-metric wrappers"). Every implemented metric
   has one, except isotropic's: only its generic-cell-shaped metrics
   are wrapped (4 single-card rates, 4 deck-label tasks, the masked

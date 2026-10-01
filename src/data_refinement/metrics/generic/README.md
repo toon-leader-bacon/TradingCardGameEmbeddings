@@ -49,14 +49,17 @@ parquet file with columns `nocab_uuid: str`, `masked_field: list[str]`
 str`) - a subclass only ever fixes the two decisions above, never
 repeats the sequence itself.
 
-First (and currently only) consumer: [`../gwent_one/README.md`](../gwent_one/README.md)'s
-eight masking metrics.
+Consumers: [`../gwent_one/README.md`](../gwent_one/README.md)'s eight
+masking metrics, and the class-label masks in `../dominiontabs/`,
+`../scryfall/`, `../pokemon_tcg/`, `../cardvault_fabtcg/` and
+`../spire_codex/`.
 
 ## `MaskedFieldRegressionMetric` (`masked_field_regression_metric.py`)
 
 `MaskedFieldMetric`'s regression-flavored twin: same `scan()` sequence
 and same `_is_eligible()` philosophy, but `_label_for_card()` becomes
-`_value_for_card(card) -> float` and there's no `LABEL_VALUES`/
+`_value_for_card(card) -> float` (default: the raw field value as a
+float; override when the conversion differs) and there's no `LABEL_VALUES`/
 `OTHER_LABEL` - a fixed-set label vocabulary with a catch-all bucket is
 a classification-only concept with no regression equivalent. A
 subclass's only tool for excluding a card whose field value can't be
@@ -68,8 +71,23 @@ generic base parameterized over label dtype - unifying them would need
 to thread the OTHER-bucket concept through a regression path that has
 no use for it.
 
-First (and currently only) consumer: [`../dominiontabs/README.md`](../dominiontabs/README.md)'s
-`CostRegressionMetric`.
+Consumers: [`../dominiontabs/README.md`](../dominiontabs/README.md)'s
+`CostRegressionMetric`, and the numeric masks in `../scryfall/`,
+`../pokemon_tcg/` and `../cardvault_fabtcg/`.
+
+## `MaskedFieldMultiLabelMetric` (`masked_field_multi_label_metric.py`)
+
+The multi-label sibling: same `scan()` sequence and `_is_eligible()`
+rule, but `_labels_for_card(card) -> frozenset[str]` returns the SET of
+`LABEL_VALUES` members the card has (an MTG card's colors, a Pokemon's
+energy types). Output columns: `nocab_uuid: str`, `masked_field:
+list[str]`, `label: list[str]` (in `LABEL_VALUES` order, possibly empty,
+e.g. a colorless card). A value outside `LABEL_VALUES` is dropped, since
+there is no single OTHER slot in a multi-label target.
+`_raw_field_values(card)` reads the list at `MASKED_FIELD`, treating an
+absent key as the empty set (ingestion drops empty values). Consumers:
+`../scryfall/`'s `ColorsMaskMetric`, `../pokemon_tcg/`'s
+`TypesMaskMetric`.
 
 ## `DeckCardMaskMetric` (`deck_card_mask_metric.py`)
 
@@ -99,4 +117,9 @@ First (and currently only) consumer: [`../play_gwent/README.md`](../play_gwent/R
 - `masked_field_metric.py` - `MaskedFieldMetric`, described above.
 - `masked_field_regression_metric.py` - `MaskedFieldRegressionMetric`,
   described above.
+- `masked_field_multi_label_metric.py` - `MaskedFieldMultiLabelMetric`,
+  described above.
+- `printed_numbers.py` - `is_small_whole_number()`, the shared
+  eligibility check for a stat a source stores as a string ("3" yes;
+  "*", "X" and a joke card's "99" no).
 - `deck_card_mask_metric.py` - `DeckCardMaskMetric`, described above.

@@ -88,6 +88,11 @@ implementation yet). Implemented today:
   `SetMaskMetric` (a bespoke `CorpusScanMetric` reading raw
   `cards_db.json` directly, not `raw_content`). See
   [`dominiontabs/README.md`](dominiontabs/README.md).
+- **`scryfall/`, `pokemon_tcg/`, `cardvault_fabtcg/`, `spire_codex/`** -
+  single-card masking metrics (`MaskedFieldMetric`,
+  `MaskedFieldRegressionMetric`, `MaskedFieldMultiLabelMetric`) over
+  each game's `CardBinder`: 6 MTG, 5 Pokemon, 6 Flesh and Blood, 4 Slay
+  the Spire 2. See each directory's `README.md`.
 - **`isotropic/summary/`** - thirteen `Metric[dict]` metrics over
   isotropic.org's Wayback-salvaged Dominion gameplay data (real
   played games - kingdoms, vetoes, final decks, outcomes), resolving

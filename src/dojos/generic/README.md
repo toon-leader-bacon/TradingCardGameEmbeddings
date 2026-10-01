@@ -29,8 +29,9 @@ so one cell serves every metric family with the same shape.
   turn one raw row value into a typed label or card(s).
 - `paired_metric_dojos.py` - base classes for per-metric wrappers that
   only name their paired metric: `CardAverageMetricDojo`,
-  `DeckLabelMetricDojo`, `MaskedFieldMetricDojo` (see "Per-metric
-  wrappers" below).
+  `DeckLabelMetricDojo`, and the three masked-field bases
+  `MaskedFieldMetricDojo`, `MaskedFieldRegressionMetricDojo` and
+  `MaskedFieldMultiLabelMetricDojo` (see "Per-metric wrappers" below).
 - `pooling.py` - `EmbeddingPooler` Strategy (variable-length list of
   card embeddings -> one vector); `MeanEmbeddingPooler` is the only
   implementation.
@@ -97,6 +98,7 @@ Data constructors:
 | `CardAverageDataConstructor` | `CardAverageMetric` and 17lands per-card rates | card -> float (`uuid_column` configurable, e.g. `"pool_card_uuid"`) |
 | `MaskedFieldDataConstructor` | `MaskedFieldMetric` | card -> masked field's class |
 | `MaskedFieldRegressionDataConstructor` | `MaskedFieldRegressionMetric` | card -> masked field's number |
+| `MaskedFieldMultiLabelDataConstructor` | `MaskedFieldMultiLabelMetric` | card -> dense `{position: 0.0/1.0}` over `label_values` |
 | `CardCharacterPredictionDataConstructor` | `CardCharacterPredictionMetric` | card -> character distribution |
 | `PickNumberDecayCurveDataConstructor` | `PickNumberDecayCurveMetric` | card -> sparse `{bucket: take_rate}` (buckets under `min_sample_count` masked) |
 | `DeckLabelDataConstructor` | `DeckLabelMetric` and 17lands per-deck labels | deck (from a `DeckBox`) -> label (`label_caster` configurable) |
@@ -118,6 +120,24 @@ class CardRelicCountDojo(CardAverageMetricDojo):
     """Card -> predicted average relicCount."""
 
     METRIC = CardRelicCountMetric
+```
+
+The three masked-field bases mask the metric's field on every split
+(`train_only=False`), plus any keys a wrapper lists because they would
+give the answer away: `EXTRA_MASKED_KEYS` (top-level keys, added as
+`"[MASK]"` where absent so every card has the same keys) and
+`EXTRA_MASKED_PATHS` (nested slots such as `("attacks", 0, "cost")`,
+masked only where present). `MaskedFieldMultiLabelMetricDojo` scores its
+`SingleCardFixedClassificationDojo` head with
+`MASKED_VECTOR_REGRESSION_LOSS_SPEC`: one sigmoid per label value, since
+a two-color MTG card is two positives, not one class.
+
+```python
+class TypesMaskDojo(MaskedFieldMultiLabelMetricDojo):
+    """Pokemon, types and attack costs masked -> P(each energy type)."""
+
+    METRIC = TypesMaskMetric
+    EXTRA_MASKED_PATHS = _ATTACK_COST_PATHS
 ```
 
 A wrapper that needs more (a label literal, a custom loss, a non-default
