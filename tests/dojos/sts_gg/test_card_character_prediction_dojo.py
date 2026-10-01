@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 
 import pandas as pd
@@ -13,6 +14,9 @@ from src.dojos.generic.single_card_fixed_classification.dojo import (
 from src.dojos.loss.soft_classification_loss import SoftClassificationLoss
 from src.dojos.sts_gg.card_character_prediction_dojo import CardCharacterPredictionDojo
 from src.schema.holdout import HoldoutSpec
+
+# Wiring tests: placeholder parquets, no real TRAIN calibration
+pytestmark = pytest.mark.usefixtures("uncalibrated_generic_dojos")
 
 
 def _write_source(path: Path) -> None:

@@ -24,16 +24,21 @@ from typing import Mapping, Protocol, Sequence
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.metrics.isotropic.deck_box_path import ISOTROPIC_DECK_BOX_PATH
 from src.data_refinement.metrics.sts_gg.deck_box_path import STS_GG_DECK_BOX_PATH
 from src.dojos.augmentation_defaults import default_augmentations_for
 from src.dojos.contrastive.dojo import ContrastiveDojo
 from src.dojos.contrastive.pair_constructor import SingleCardPairConstructor
 from src.dojos.dojo import Dojo
 from src.dojos.file_managers.deck_box_dealer import DeckBoxDealer
+from src.dojos.dominiontabs.cost_regression_dojo import CostRegressionDojo
+from src.dojos.dominiontabs.masked_field_dojos import SetMaskDojo, TypeMaskDojo
 from src.dojos.gwent_one import masked_field_dojos as gwent_one
+from src.dojos import isotropic
 from src.dojos.sts_gg import card_average_dojos as sts_cards
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.dojos.mods.mod_specs import ModSpec
+from src.dojos.play_gwent.deck_card_mask_dojos import LeaderMaskedFromDeckDojo
 from src.dojos.sts_gg import deck_label_dojos as sts_decks
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
@@ -43,8 +48,8 @@ _CONTRASTIVE_INDEX_DIRECTORY = Path("data/splits/contrastive")
 
 
 class CardDojoConstructor(Protocol):
-    """A dojo class built from a CardBinder alone (every gwent_one mask
-    dojo, every sts_gg card-average dojo)."""
+    """A dojo class built from a CardBinder alone (every gwent_one and
+    dominiontabs dojo, every sts_gg and isotropic card-level dojo)."""
 
     def __call__(
         self,
@@ -59,7 +64,8 @@ class CardDojoConstructor(Protocol):
 
 class DeckDojoConstructor(Protocol):
     """A dojo class that also needs the DeckBox its metric was built from
-    (every sts_gg deck-label dojo)."""
+    (every sts_gg and isotropic deck-level dojo, play_gwent's leader
+    mask)."""
 
     def __call__(
         self,
@@ -291,6 +297,13 @@ def _recipe_for_sts_deck(dojo_class: DeckDojoConstructor) -> DeckDojoRecipe:
     return DeckDojoRecipe(GameId.SLAY_THE_SPIRE_2, dojo_class, STS_GG_DECK_BOX_PATH)
 
 
+def _recipe_for_isotropic_deck(dojo_class: DeckDojoConstructor) -> DeckDojoRecipe:
+    """The recipe for an isotropic deck-level dojo class.
+    Inputs: dojo_class. Output: DeckDojoRecipe. Side effects: none.
+    Exceptions: none."""
+    return DeckDojoRecipe(GameId.DOMINION, dojo_class, ISOTROPIC_DECK_BOX_PATH)
+
+
 # Keys are "<metric source>.<metric file stem>"; add a line to onboard a dojo
 DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     "gwent_one.armor_mask": _recipe_for_gwent_one(gwent_one.ArmorMaskDojo),
@@ -301,6 +314,42 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     "gwent_one.rarity_mask": _recipe_for_gwent_one(gwent_one.RarityMaskDojo),
     "gwent_one.set_mask": _recipe_for_gwent_one(gwent_one.SetMaskDojo),
     "gwent_one.type_mask": _recipe_for_gwent_one(gwent_one.TypeMaskDojo),
+    "dominiontabs.cost_regression": CardDojoRecipe(GameId.DOMINION, CostRegressionDojo),
+    "dominiontabs.set_mask": CardDojoRecipe(GameId.DOMINION, SetMaskDojo),
+    "dominiontabs.type_mask": CardDojoRecipe(GameId.DOMINION, TypeMaskDojo),
+    "isotropic.average_copies_bought": CardDojoRecipe(
+        GameId.DOMINION, isotropic.AverageCopiesBoughtDojo
+    ),
+    "isotropic.opening_buy_rate": CardDojoRecipe(
+        GameId.DOMINION, isotropic.OpeningBuyRateDojo
+    ),
+    "isotropic.pile_exhaustion_rate": CardDojoRecipe(
+        GameId.DOMINION, isotropic.PileExhaustionRateDojo
+    ),
+    "isotropic.turn_count_association": CardDojoRecipe(
+        GameId.DOMINION, isotropic.TurnCountAssociationDojo
+    ),
+    "isotropic.full_deck_win_prediction": _recipe_for_isotropic_deck(
+        isotropic.FullDeckWinPredictionDojo
+    ),
+    "isotropic.kingdom_ending_type": _recipe_for_isotropic_deck(
+        isotropic.KingdomEndingTypeDojo
+    ),
+    "isotropic.kingdom_game_length": _recipe_for_isotropic_deck(
+        isotropic.KingdomGameLengthDojo
+    ),
+    "isotropic.mid_game_next_turn_action_count": _recipe_for_isotropic_deck(
+        isotropic.NextTurnActionCountDojo
+    ),
+    "isotropic.winning_deck_masked_card": _recipe_for_isotropic_deck(
+        isotropic.WinningDeckMaskedCardDojo
+    ),
+    # play_gwent writes its decks into the final gwent deck box
+    "play_gwent.leader_masked_from_deck": DeckDojoRecipe(
+        GameId.GWENT,
+        LeaderMaskedFromDeckDojo,
+        DeckBox.default_output_path(GameId.GWENT),
+    ),
     "sts_gg.card_deck_size": _recipe_for_sts_card(sts_cards.CardDeckSizeDojo),
     "sts_gg.card_elites_killed": _recipe_for_sts_card(sts_cards.CardElitesKilledDojo),
     "sts_gg.card_floors_cleared": _recipe_for_sts_card(sts_cards.CardFloorsClearedDojo),
@@ -333,6 +382,9 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     "contrastive.gwent": _recipe_for_contrastive(GameId.GWENT),
     "contrastive.flesh_and_blood": _recipe_for_contrastive(GameId.FLESH_AND_BLOOD),
     "contrastive.slay_the_spire_2": _recipe_for_contrastive(GameId.SLAY_THE_SPIRE_2),
+    "contrastive.mtg": _recipe_for_contrastive(GameId.MTG),
+    "contrastive.pokemon": _recipe_for_contrastive(GameId.POKEMON),
+    "contrastive.dominion": _recipe_for_contrastive(GameId.DOMINION),
 }
 
 

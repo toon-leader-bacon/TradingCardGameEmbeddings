@@ -106,6 +106,12 @@ class Sts2RunsDeckExtractionStage:
     """
 
     SOURCE_GAME: ClassVar[GameId] = GameId.SLAY_THE_SPIRE_2
+    # What a sibling source with the same run schema overrides (see
+    # deck_box/spire_codex_runs/extraction_stage.py)
+    RUN_ID_KEY: ClassVar[str] = "_serverId"
+    DECK_DATA_SOURCE: ClassVar[DataSource] = DataSource.STS2RUNS
+    DECK_NAMESPACE: ClassVar[UUID] = _DECK_NAMESPACE
+    DECK_NAME_PREFIX: ClassVar[str] = "sts2runs run"
 
     # sts2runs' dump filename is dated and changes monthly (see
     # STS2RunsDownloader's own module docstring) — this default tracks
@@ -170,8 +176,16 @@ class Sts2RunsDeckExtractionStage:
             >>> stage = Sts2RunsDeckExtractionStage()
             >>> changed_uuids = stage.extract(None, box, binder)
         """
-        path = raw_path or self.DEFAULT_RAW_PATH
+        return self._extract_file(raw_path or self.DEFAULT_RAW_PATH, box, card_lookup)
 
+    def _extract_file(
+        self, path: Path, box: DeckBox, card_lookup: CardLookup
+    ) -> list[UUID]:
+        """extract() for one gzip-compressed NDJSON run file; see extract().
+
+        Inputs: path, box, card_lookup. Output: changed deck uuids.
+        Side effects and exceptions: as extract().
+        """
         changed_uuids: list[UUID] = []
         total_compressed_bytes = path.stat().st_size
         # Wrap the raw compressed file ourselves (rather than
@@ -184,7 +198,7 @@ class Sts2RunsDeckExtractionStage:
             total=total_compressed_bytes,
             unit="B",
             unit_scale=True,
-            desc=f"sts2runs extract: {path.name}",
+            desc=f"{self.DECK_DATA_SOURCE.value} extract: {path.name}",
         ) as progress:
             with io.TextIOWrapper(
                 gzip.GzipFile(fileobj=compressed_file), encoding="utf-8"
@@ -198,8 +212,15 @@ class Sts2RunsDeckExtractionStage:
                     if not line.strip():
                         continue
                     row = json.loads(line)
+                    if not self._keeps_run(row):
+                        continue
                     changed_uuids.extend(self._extract_run(row, box, card_lookup))
         return changed_uuids
+
+    def _keeps_run(self, row: dict) -> bool:
+        """Whether a run's decks go in the box. sts2runs keeps every run.
+        Inputs: row. Output: bool. Side effects: none. Exceptions: none."""
+        return True
 
     def _extract_run(
         self, row: dict, box: DeckBox, card_lookup: CardLookup
@@ -234,7 +255,7 @@ class Sts2RunsDeckExtractionStage:
             or a player entry is missing "deck". Whatever _card_uuid()
             raises propagates.
         """
-        run_id = row["_serverId"]
+        run_id = row[self.RUN_ID_KEY]
         changed_uuids: list[UUID] = []
 
         # One deck per player — see module docstring's RAW SHAPE
@@ -251,9 +272,9 @@ class Sts2RunsDeckExtractionStage:
                 for card_entry in player["deck"]
             ]
 
-            deck_name = f"sts2runs run {run_id} player {player_index}"
+            deck_name = f"{self.DECK_NAME_PREFIX} {run_id} player {player_index}"
             provenance = Provenance(
-                data_source=DataSource.STS2RUNS,
+                data_source=self.DECK_DATA_SOURCE,
                 source_id=f"{run_id}:{player_index}",
                 fetched_at=datetime.now(timezone.utc),
             )
@@ -328,8 +349,7 @@ class Sts2RunsDeckExtractionStage:
             )
         return unknown_card.nocab_uuid
 
-    @staticmethod
-    def _deck_uuid(run_id: int, player_index: int) -> UUID:
+    def _deck_uuid(self, run_id: int | str, player_index: int) -> UUID:
         """Compute the deterministic nocab_uuid for one (run, player) pair.
 
         Private helper — single consumer is _extract_run(). uuid5 over
@@ -347,4 +367,4 @@ class Sts2RunsDeckExtractionStage:
         Side effects: none.
         Exceptions: none.
         """
-        return uuid5(_DECK_NAMESPACE, f"{run_id}:{player_index}")
+        return uuid5(self.DECK_NAMESPACE, f"{run_id}:{player_index}")

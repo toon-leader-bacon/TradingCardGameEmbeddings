@@ -67,3 +67,8 @@ matches exactly for **~55% of players (~65% ignoring Curses)** across 1,500
 
 To re-measure after any parser change, rebuild each player's deck from
 `GameLog.turns` and diff it against the header's `[N cards]` line.
+
+- [ ] **mid_game_next_turn_action_count has a heavy tail** (max 112).
+  Consider clipping it; see src/training/TODO.md, "Handle outlier
+  regression labels". (Found 2026-09-30 while writing the isotropic
+  dojos.)

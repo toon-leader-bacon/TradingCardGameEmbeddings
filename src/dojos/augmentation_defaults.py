@@ -67,6 +67,54 @@ _FAB_MASKS: DropTable[FieldMask] = DropTable.of(
     ]
 )
 
+# scryfall (card_binder/scryfall/ingestion_stage.py). The MTG deck box holds
+# 17lands limited decks: one set, usually two colors. set (and legalities,
+# which track the set's age) nearly names the deck, so it is masked most;
+# mana_cost spells out the colors too, so it is sometimes masked with them.
+_MTG_MASKS: DropTable[FieldMask] = DropTable.of(
+    [
+        (35, FieldMask()),
+        (35, FieldMask.of_keys("set", "legalities")),
+        (
+            15,
+            DropTable.of(
+                [
+                    (1, FieldMask.of_keys("colors", "color_identity")),
+                    (1, FieldMask.of_keys("colors", "color_identity", "mana_cost")),
+                ]
+            ),
+        ),
+        (15, FieldMask.of_keys("name")),
+    ]
+)
+
+# pokemon_tcg (card_binder/pokemon_tcg/ingestion_stage.py). Theme decks are
+# built from one set (regulationMark tracks the set too) around one or two
+# energy types, with whole evolution lines, so each of those nearly pairs
+# a deck's cards by itself.
+_POKEMON_MASKS: DropTable[FieldMask] = DropTable.of(
+    [
+        (35, FieldMask()),
+        (30, FieldMask.of_keys("set", "regulationMark")),
+        (15, FieldMask.of_keys("types")),
+        (10, FieldMask.of_keys("evolvesFrom", "evolvesTo")),
+        (10, FieldMask.of_keys("name")),
+    ]
+)
+
+# dominiontabs (card_binder/dominiontabs/ingestion_stage.py). A final deck
+# is drawn from a random ten-card kingdom plus the base cards, so no field
+# names the deck; set is not ingested. description carries the card's
+# identity and is never masked.
+_DOMINION_MASKS: DropTable[FieldMask] = DropTable.of(
+    [
+        (45, FieldMask()),
+        (20, FieldMask.of_keys("name")),
+        (15, FieldMask.of_keys("cost", "potcost", "debtcost")),
+        (20, FieldMask.of_keys("types")),
+    ]
+)
+
 
 def _standard_augmentations(masks: DropTable[FieldMask]) -> tuple[ModSpec, ...]:
     """Key-order shuffle, then the game's weighted masks, then a small
@@ -86,6 +134,9 @@ DEFAULT_AUGMENTATIONS: Mapping[GameId, tuple[ModSpec, ...]] = {
     GameId.GWENT: _standard_augmentations(_GWENT_MASKS),
     GameId.SLAY_THE_SPIRE_2: _standard_augmentations(_STS2_MASKS),
     GameId.FLESH_AND_BLOOD: _standard_augmentations(_FAB_MASKS),
+    GameId.MTG: _standard_augmentations(_MTG_MASKS),
+    GameId.POKEMON: _standard_augmentations(_POKEMON_MASKS),
+    GameId.DOMINION: _standard_augmentations(_DOMINION_MASKS),
 }
 
 

@@ -8,6 +8,8 @@ Bodies are filled in by design-recipe-implement.
 from datetime import datetime, timezone
 from uuid import uuid4
 
+import numpy as np
+
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.seventeenlands.game_data.game_card_columns import (
     GameCardColumns,
@@ -164,6 +166,21 @@ class TestPresentUuids:
         result = game_columns.present_uuids(row, game_columns.deck_columns)
 
         assert result == []
+
+    def test_numpy_nan_and_none_cells_are_treated_as_absent(self) -> None:
+        binder = _binder_with_cards(["Owlbear", "Goblin Morningstar", "Elf"])
+        header = ["deck_Owlbear", "deck_Goblin Morningstar", "deck_Elf"]
+        game_columns = GameCardColumns.from_header(header, binder, GameId.MTG)
+        elf_uuid = game_columns.uuid_for_name("Elf")
+        row = {
+            "deck_Owlbear": np.float64("nan"),
+            "deck_Goblin Morningstar": None,
+            "deck_Elf": np.int64(2),
+        }
+
+        result = game_columns.present_uuids(row, game_columns.deck_columns)
+
+        assert result == [elf_uuid]
 
 
 def test_unmatched_names_only_lists_names_that_never_matched() -> None:

@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from src.encoder_model.precision import Precision
 from src.training.plan import FaultPolicy, HardwareLimits
 from src.training.recording.checkpointer import DirectoryCheckpointer
 from src.training.recording.reports import CheckpointRecord, RoundReport
+from src.training.diet.saturation_tracker import SaturationTracker
 from src.training.trainer import Trainer
 from tests.training.fakes import (
     LIMITS,
@@ -399,7 +401,7 @@ class TestMixedPrecision:
         assert result.final_report is not None
         assert result.final_report.step > 0
         losses = result.final_report.per_dojo_test_loss.values()
-        assert all(torch.isfinite(torch.tensor(loss)) for loss in losses)
+        assert all(math.isfinite(split_loss.loss) for split_loss in losses)
 
     def test_clips_unscaled_gradients(self, tmp_path: Path) -> None:
         # Clipping before unscaling would leave a norm 65536x too small
@@ -507,3 +509,23 @@ class TestMixedPrecision:
 def test_fake_dojo_satisfies_the_protocol() -> None:
     dojo: Dojo = FakeDojo("a")
     assert dojo.name == "a"
+
+
+class TestNormalizedDecisions:
+    def test_the_tracker_sees_normalized_test_loss(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: list[dict[str, float]] = []
+        record_round = SaturationTracker.record_round
+
+        def recording(self, per_dojo_normalized_loss):  # type: ignore[no-untyped-def]
+            seen.append(dict(per_dojo_normalized_loss))
+            return record_round(self, per_dojo_normalized_loss)
+
+        monkeypatch.setattr(SaturationTracker, "record_round", recording)
+        result = _trainer(tmp_path, [FakeDojo("a", baseline=4.0)], max_rounds=1).run()
+
+        assert result.final_report is not None
+        split_loss = result.final_report.per_dojo_test_loss["a"]
+        assert split_loss.baseline_loss == 4.0
+        assert seen == [{"a": split_loss.loss / 4.0}]

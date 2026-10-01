@@ -22,6 +22,7 @@ from src.schema.splits import Split
 from src.schema.type_hints import MultiCardInput, TrainingDatum
 
 _LABEL_VALUES = ["IRONCLAD", "SILENT", "OTHER"]
+_OTHER_LABEL = "SILENT"
 
 
 _BUDGET = BatchBudget(max_cost=1000, cost_of=lambda card: 1)
@@ -52,7 +53,11 @@ class _StubDataConstructor:
         self._label = label
 
     def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
-        return [(self._deck, self._label) for _ in range(len(chunk))]
+        # Alternating with _OTHER_LABEL: one class only has a zero baseline
+        return [
+            (self._deck, self._label if i % 2 == 0 else _OTHER_LABEL)
+            for i in range(len(chunk))
+        ]
 
 
 class _StubPooler:

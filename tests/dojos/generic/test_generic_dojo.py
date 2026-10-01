@@ -1,6 +1,7 @@
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List
+from typing import Any, List, Sequence
 from uuid import UUID, uuid4
 
 import pandas as pd
@@ -18,12 +19,19 @@ from src.dojos.batch import Batch
 from src.dojos.dojo import BatchBudget, Dojo
 from src.dojos.file_managers.file_manager_parquet import FileManagerParquet
 from src.dojos.generic.dojo_config import DojoConfig
+import src.dojos.generic.generic_dojo as generic_dojo_module
 from src.dojos.generic.generic_dojo import GenericDojo
 from src.dojos.generic.single_card_regression.decoder_head import (
     SingleCardRegressionDecoderHead,
 )
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
+from src.dojos.loss.label_stats import LabelStats
+from src.dojos.loss.loss_calibration import (
+    CalibratedLoss,
+    StandardizedRegressionCalibration,
+)
 from src.dojos.loss.mse_loss import MseLoss
+from src.dojos.loss.standardized_label_loss import StandardizedLabelLoss
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
@@ -112,6 +120,7 @@ def _generic_dojo(
         holdout=HoldoutSpec.no_holdout(),
         decoder_head=SingleCardRegressionDecoderHead(4),
         loss_calculator=MseLoss(),
+        calibration=StandardizedRegressionCalibration(),
         config=DojoConfig(
             name=name,
             rng_seed=0,
@@ -186,7 +195,9 @@ class TestSplitReuse:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         splits_dir = tmp_path / "splits"
-        _generic_dojo(tmp_path, [_card("a")], output_directory=splits_dir)
+        # The same cards both times: the reused split files name their uuids
+        cards = [_card("a")]
+        _generic_dojo(tmp_path, cards, output_directory=splits_dir)
 
         calls = {"n": 0}
         real_make_splits = FileManagerParquet.make_splits
@@ -197,7 +208,7 @@ class TestSplitReuse:
 
         monkeypatch.setattr(FileManagerParquet, "make_splits", counting_make_splits)
 
-        second = _generic_dojo(tmp_path, [_card("a")], output_directory=splits_dir)
+        second = _generic_dojo(tmp_path, cards, output_directory=splits_dir)
 
         assert calls["n"] == 0
         assert second.example_count(Split.TRAIN) == 16
@@ -226,7 +237,9 @@ class TestSplitReuse:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         splits_dir = tmp_path / "splits"
-        _generic_dojo(tmp_path, [_card("a")], output_directory=splits_dir)
+        # The same cards both times: the reused split files name their uuids
+        cards = [_card("a")]
+        _generic_dojo(tmp_path, cards, output_directory=splits_dir)
 
         calls = {"n": 0}
         real_make_splits = FileManagerParquet.make_splits
@@ -327,6 +340,8 @@ def test_compute_loss_rejects_a_foreign_batch(tmp_path: Path) -> None:
         dojo.compute_loss([torch.randn(4)], Batch([card, card], [1.0, 2.0]))
 
 
+# One-row sources: too small to calibrate, and calibration is not under test
+@pytest.mark.usefixtures("uncalibrated_generic_dojos")
 class TestVersionCheck:
     def _source(
         self,
@@ -490,3 +505,132 @@ class TestVersionCheck:
         )
 
         assert dojo.name == "source"
+
+
+class _RecordingCalibration:
+    """Keeps the loss, baseline 2.0, and remembers the sample it was given."""
+
+    def __init__(self) -> None:
+        self.sample: list[TrainingDatum] = []
+
+    def calibrate(
+        self, loss: Any, train_sample: Sequence[TrainingDatum]
+    ) -> CalibratedLoss:
+        self.sample = list(train_sample)
+        return CalibratedLoss(loss=loss, baseline_loss=2.0)
+
+
+def _calibrated_dojo(
+    tmp_path: Path, calibration: Any, labels: list[float], cards: list[GenericCard]
+) -> GenericDojo:
+    """A GenericDojo over len(labels) rows (row i: cards[i % n], labels[i])."""
+    binder = CardBinder()
+    for card in cards:
+        binder.create(card)
+    source = tmp_path / "source.parquet"
+    pd.DataFrame(
+        {
+            "nocab_uuid": [
+                str(cards[i % len(cards)].nocab_uuid) for i in range(len(labels))
+            ],
+            "label": labels,
+        }
+    ).to_parquet(source, index=False)
+    return GenericDojo(
+        path_to_training_data=source,
+        data_constructor=_CardPerRowConstructor(),
+        card_lookup=binder,
+        holdout=HoldoutSpec.no_holdout(),
+        decoder_head=SingleCardRegressionDecoderHead(4),
+        loss_calculator=MseLoss(),
+        calibration=calibration,
+        config=DojoConfig(
+            rng_seed=0, strict_version_check=False, output_directory=tmp_path / "s"
+        ),
+    )
+
+
+class TestCalibration:
+    def test_a_regression_dojo_trains_on_train_split_z_scores(
+        self, tmp_path: Path
+    ) -> None:
+        dojo = _dojo(tmp_path, [_card("a")], HoldoutSpec.no_holdout())
+        train_labels = [
+            label
+            for batch in dojo.batches(Split.TRAIN, _BUDGET)
+            for label in batch.labels
+        ]
+
+        assert dojo.label_stats == LabelStats.from_labels(train_labels)
+        assert isinstance(dojo.loss_calculator, StandardizedLabelLoss)
+        batch = next(dojo.batches(Split.TEST, _BUDGET))
+        assert dojo.baseline_loss(batch) == 1.0
+
+    def test_the_calibration_sample_is_the_unmodded_train_split(
+        self, tmp_path: Path
+    ) -> None:
+        calibration = _RecordingCalibration()
+        dojo = _calibrated_dojo(
+            tmp_path, calibration, [float(i) for i in range(50)], [_card("a")]
+        )
+        train_labels = [
+            label
+            for batch in dojo.batches(Split.TRAIN, _BUDGET)
+            for label in batch.labels
+        ]
+        assert [label for _, label in calibration.sample] == train_labels
+        assert dojo.label_stats is None
+        assert dojo.baseline_loss(next(dojo.batches(Split.TEST, _BUDGET))) == 2.0
+
+    def test_a_large_train_split_is_sampled_evenly_up_to_the_cap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(generic_dojo_module, "_CALIBRATION_SAMPLE_CAP", 10)
+        monkeypatch.setattr(generic_dojo_module, "_ROWS_PER_CHUNK", 7)  # crosses
+        calibration = _RecordingCalibration()
+        dojo = _calibrated_dojo(
+            tmp_path, calibration, [float(i) for i in range(100)], [_card("a")]
+        )
+        train_labels = [
+            label
+            for batch in dojo.batches(Split.TRAIN, _BUDGET)
+            for label in batch.labels
+        ]
+
+        # 80 TRAIN rows, cap 10: every 8th row, counted across chunks
+        assert [label for _, label in calibration.sample] == train_labels[::8]
+
+    def test_an_empty_train_sample_is_a_construction_error(
+        self, tmp_path: Path
+    ) -> None:
+        # Every card of a held-out game is VALIDATION-tier: TRAIN sees none
+        holdout = HoldoutSpec(
+            seed=0, tier_ratios=(8, 1, 1), held_out_games=frozenset({GameId.MTG})
+        )
+        with pytest.raises(ValueError, match="no TRAIN example"):
+            _dojo(tmp_path, [_card("held out")], holdout)
+
+    def test_a_constant_regression_label_is_a_construction_error(
+        self, tmp_path: Path
+    ) -> None:
+        with pytest.raises(ValueError, match="zero standard deviation"):
+            _calibrated_dojo(
+                tmp_path,
+                StandardizedRegressionCalibration(),
+                [3.0] * 20,
+                [_card("a")],
+            )
+
+    def test_logs_one_timed_line_per_dojo(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.INFO, logger=generic_dojo_module.__name__):
+            _dojo(tmp_path, [_card("a")], HoldoutSpec.no_holdout())
+        lines = [r.getMessage() for r in caplog.records if "calibrated" in r.message]
+        assert len(lines) == 1
+        assert "TRAIN examples in" in lines[0] and "baseline 1" in lines[0]
+
+    def test_baseline_loss_rejects_a_foreign_batch(self, tmp_path: Path) -> None:
+        dojo = _dojo(tmp_path, [_card("a")], HoldoutSpec.no_holdout())
+        with pytest.raises(TypeError):
+            dojo.baseline_loss(object())  # type: ignore[arg-type]

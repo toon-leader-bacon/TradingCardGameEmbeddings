@@ -12,14 +12,12 @@ deck-input mirror of this same prediction task, reused by reference
 rather than re-declared, per CardCharacterPredictionMetric's own module
 docstring) as label_values.
 
-loss_factory=SoftClassificationLoss is what makes this dojo a soft-
-label consumer of an otherwise-unmodified generic cell:
-CardCharacterPredictionMetric's own rows carry a whole character
-probability distribution per card, not one hard class, so this wrapper
-is the one consumer of SingleCardFixedClassificationDojo's loss_factory
-parameter (see plans/dojo_v2.md and that parameter's own docstring) -
-every other wrapper of that same generic cell (gwent_one's 8) omits it
-and gets FixedClassificationLoss's default behavior, unchanged.
+loss_spec=SOFT_CLASSIFICATION_LOSS_SPEC (SoftClassificationLoss plus its
+soft-target baseline) is what makes this dojo a soft-label consumer of an
+otherwise-unmodified generic cell: CardCharacterPredictionMetric's rows
+carry a whole character probability distribution per card, not one hard
+class. Every other wrapper of that cell keeps the default
+FIXED_CLASSIFICATION_LOSS_SPEC.
 """
 
 from pathlib import Path
@@ -36,7 +34,9 @@ from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.single_card_fixed_classification.dojo import (
     SingleCardFixedClassificationDojo,
 )
-from src.dojos.loss.soft_classification_loss import SoftClassificationLoss
+from src.dojos.generic.single_card_fixed_classification.loss_spec import (
+    SOFT_CLASSIFICATION_LOSS_SPEC,
+)
 from src.schema.holdout import HoldoutSpec
 
 
@@ -64,7 +64,7 @@ class CardCharacterPredictionDojo(SingleCardFixedClassificationDojo):
             data_constructor=CardCharacterPredictionDataConstructor(),
             label_values=CharacterPredictionMetric.LABEL_VALUES,
             card_embedding_size=card_embedding_size,
-            loss_factory=SoftClassificationLoss,
+            loss_spec=SOFT_CLASSIFICATION_LOSS_SPEC,
             config=DojoConfig(
                 name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),

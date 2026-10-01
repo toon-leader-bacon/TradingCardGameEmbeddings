@@ -30,6 +30,9 @@ from src.dojos.sts_gg.card_average_dojos import (
 )
 from src.schema.holdout import HoldoutSpec
 
+# Wiring tests: placeholder parquets, no real TRAIN calibration
+pytestmark = pytest.mark.usefixtures("uncalibrated_generic_dojos")
+
 _CASES = [
     (CardRelicCountDojo, CardRelicCountMetric),
     (CardTotalDamageTakenDojo, CardTotalDamageTakenMetric),

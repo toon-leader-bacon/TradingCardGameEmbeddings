@@ -486,7 +486,7 @@ class CardBinder:
         Idempotent by construction: UNKNOWN_CARD_NAME lookup short-
         circuits on every call after the first, and even the fallback
         creation path uses a deterministic nocab_uuid
-        (_unknown_card_uuid(source_game)) rather than a fresh uuid4 —
+        (unknown_card_uuid(source_game)) rather than a fresh uuid4 —
         so calling this twice for the same source_game, even across
         separate CardBinder instances/processes, always agrees on the
         same card identity.
@@ -512,7 +512,7 @@ class CardBinder:
         # ingested card could legitimately be named "Unknown" too, and
         # a name-based check would silently mistake it for the
         # sentinel.
-        unknown_uuid = self._unknown_card_uuid(source_game)
+        unknown_uuid = self.unknown_card_uuid(source_game)
         existing = self.get_by_uuid(unknown_uuid)
         if existing is not None:
             return existing
@@ -772,14 +772,14 @@ class CardBinder:
         self._uuids_by_name.setdefault(new_name_key, set()).add(card.nocab_uuid)
 
     @staticmethod
-    def _unknown_card_uuid(source_game: GameId) -> UUID:
+    def unknown_card_uuid(source_game: GameId) -> UUID:
         """Compute the deterministic nocab_uuid for one game's Unknown card.
 
-        Private helper — single consumer is ensure_unknown_card().
-        uuid5 (not uuid4): the same source_game must always produce the
-        same uuid, across every process and every call, with no shared
-        state (an alias ledger entry, a database row) required to agree
-        on it.
+        Used by ensure_unknown_card() and by consumers that must skip the
+        sentinel (e.g. contrastive pair sampling). uuid5 (not uuid4): the
+        same source_game must always produce the same uuid, across every
+        process and every call, with no shared state (an alias ledger
+        entry, a database row) required to agree on it.
 
         Inputs:
             source_game: which game's Unknown sentinel uuid to compute.

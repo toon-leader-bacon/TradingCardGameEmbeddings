@@ -43,8 +43,12 @@ DietRule = Proportional | Uniform | Temperature
 class SaturationSpec:
     """When a dojo stops being worth training on.
 
-    epsilon: a round counts as an improvement only if TEST loss drops by
-        more than this below the dojo's best so far.
+    All loss thresholds apply to NORMALIZED TEST loss (loss / the dojo's
+    baseline loss), so they mean the same for every dojo: 0.001 is 0.1% of
+    that dojo's "learned nothing" loss.
+
+    epsilon: a round counts as an improvement only if normalized TEST loss
+        drops by more than this below the dojo's best so far.
     patience_rounds: consecutive non-improving rounds before SATURATED.
     reactivation_delta: a SATURATED dojo re-enters the diet if its TEST
         loss rises more than this above its loss when it saturated.

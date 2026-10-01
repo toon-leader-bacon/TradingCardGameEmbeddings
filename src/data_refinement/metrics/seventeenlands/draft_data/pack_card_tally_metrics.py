@@ -71,6 +71,18 @@ class RankStratifiedTakeRateMetric(PackCardTallyMetric):
     KEY_COLUMNS: ClassVar[tuple[str, ...]] = ("pack_number", "pick_number", "rank")
     DEFAULT_OUTPUT_PATH = _DEFAULT_OUTPUT_DIR / "rank_stratified_take_rate.parquet"
 
+    def _is_eligible_row(self, row: dict) -> bool:
+        """See PackCardTallyMetric._is_eligible_row(). True only when
+        row["rank"] is a non-empty string.
+
+        A rankless row (every Trad/Sealed event, and a few Premier
+        rows) has no stratum to tally into; its NaN rank would also key
+        a fresh tally per row (NaN != NaN), writing one sample_count=1
+        output row per pack option instead of an aggregate.
+        """
+        rank = row["rank"]
+        return isinstance(rank, str) and rank != ""
+
     def _tally_key(self, row: dict, card_uuid: UUID) -> tuple:
         """See PackCardTallyMetric._tally_key(). Key = (card_uuid,
         row["pack_number"], row["pick_number"], row["rank"])."""

@@ -6,10 +6,32 @@ import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.dojos.mods.mod_specs import ShuffleKeysSpec
+from src.data_refinement.metrics.dominiontabs.cost_regression_metric import (
+    CostRegressionMetric,
+)
+from src.data_refinement.metrics.dominiontabs.set_mask_metric import (
+    SetMaskMetric as DominionSetMaskMetric,
+)
+from src.data_refinement.metrics.isotropic.games.kingdom_ending_type_metric import (
+    KingdomEndingTypeMetric,
+)
+from src.data_refinement.metrics.isotropic.summary.deck_card_mask_metric import (
+    WinningDeckMaskedCardMetric,
+)
+from src.data_refinement.metrics.isotropic.summary.full_deck_win_prediction_metric import (  # noqa: E501
+    FullDeckWinPredictionMetric,
+)
+from src.data_refinement.metrics.play_gwent.leader_masked_from_deck_metric import (
+    LeaderMaskedFromDeckMetric,
+)
 from src.data_refinement.metrics.sts_gg.deck_label_metrics import (
     CharacterPredictionMetric,
     WinMetric,
 )
+from src.dojos import isotropic
+from src.dojos.dominiontabs.cost_regression_dojo import CostRegressionDojo
+from src.dojos.dominiontabs.masked_field_dojos import SetMaskDojo
+from src.dojos.play_gwent.deck_card_mask_dojos import LeaderMaskedFromDeckDojo
 from src.dojos.sts_gg import deck_label_dojos
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
@@ -58,11 +80,20 @@ class _RecordingDojoClass:
 _INLINE_METRICS: dict[Any, Any] = {
     deck_label_dojos.WinDojo: WinMetric,
     deck_label_dojos.CharacterDojo: CharacterPredictionMetric,
+    CostRegressionDojo: CostRegressionMetric,
+    SetMaskDojo: DominionSetMaskMetric,
+    LeaderMaskedFromDeckDojo: LeaderMaskedFromDeckMetric,
+    isotropic.FullDeckWinPredictionDojo: FullDeckWinPredictionMetric,
+    isotropic.KingdomEndingTypeDojo: KingdomEndingTypeMetric,
+    isotropic.WinningDeckMaskedCardDojo: WinningDeckMaskedCardMetric,
 }
 
 
-def _metric_class_of(dojo_class: Any) -> Any:
-    return _INLINE_METRICS.get(dojo_class) or dojo_class.METRIC
+def _metric_output_path_of(dojo_class: Any) -> Path:
+    if hasattr(dojo_class, "OUTPUT_PATH"):  # isotropic dojos name the path
+        return dojo_class.OUTPUT_PATH
+    metric = _INLINE_METRICS.get(dojo_class) or dojo_class.METRIC
+    return metric.DEFAULT_OUTPUT_PATH
 
 
 def _context(shelf: CardShelf) -> DojoBuildContext:
@@ -117,7 +148,7 @@ class TestCatalog:
         # a key cannot silently point at a different metric
         recipe = DOJO_CATALOG[key]
         assert isinstance(recipe, (CardDojoRecipe, DeckDojoRecipe))
-        metric_path = _metric_class_of(recipe.dojo_class).DEFAULT_OUTPUT_PATH
+        metric_path = _metric_output_path_of(recipe.dojo_class)
         assert key == f"{metric_path.parent.name}.{metric_path.stem}"
 
 
@@ -198,6 +229,9 @@ class TestContrastiveEntries:
             "contrastive.gwent",
             "contrastive.flesh_and_blood",
             "contrastive.slay_the_spire_2",
+            "contrastive.mtg",
+            "contrastive.pokemon",
+            "contrastive.dominion",
         }
         for key, recipe in contrastive.items():
             assert key == f"contrastive.{recipe.game.value}"

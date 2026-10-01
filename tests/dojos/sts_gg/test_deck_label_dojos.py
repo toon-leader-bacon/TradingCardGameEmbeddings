@@ -39,6 +39,9 @@ from src.dojos.sts_gg.deck_label_dojos import (
 )
 from src.schema.holdout import HoldoutSpec
 
+# Wiring tests: placeholder parquets, no real TRAIN calibration
+pytestmark = pytest.mark.usefixtures("uncalibrated_generic_dojos")
+
 _CASES = [
     (DeckRelicCountDojo, RelicCountMetric),
     (DeckTotalDamageTakenDojo, TotalDamageTakenMetric),

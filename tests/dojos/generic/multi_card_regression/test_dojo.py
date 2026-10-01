@@ -46,7 +46,8 @@ class _StubDataConstructor:
         self._label = label
 
     def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
-        return [(self._deck, self._label) for _ in range(len(chunk))]
+        # Alternating labels: calibration rejects a constant regression label
+        return [(self._deck, self._label + i % 2) for i in range(len(chunk))]
 
 
 class _StubPooler:

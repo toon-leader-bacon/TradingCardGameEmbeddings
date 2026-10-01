@@ -197,6 +197,23 @@ class TestRankStratifiedTakeRateMetric:
             "sample_count",
         }
 
+    def test_rankless_rows_are_not_tallied(self, tmp_path: Path) -> None:
+        binder = _binder_with_cards(["Owlbear", "Goblin Morningstar"])
+        metric = RankStratifiedTakeRateMetric(
+            binder, _HEADER, GameId.MTG, output_path=tmp_path / "out.parquet"
+        )
+
+        # Trad/Sealed CSVs carry rank as NaN; pandas may also hand back None
+        metric.accumulate(_row("Owlbear", 1, 0, rank=float("nan")))  # type: ignore
+        metric.accumulate(_row("Owlbear", 1, 0, rank=None))  # type: ignore
+        metric.accumulate(_row("Owlbear", 1, 0, rank="gold"))
+        metric.finalize()
+
+        df = pd.read_parquet(tmp_path / "out.parquet")
+        assert len(df) == 1
+        assert df.iloc[0]["rank"] == "gold"
+        assert df.iloc[0]["sample_count"] == 1
+
 
 @pytest.mark.parametrize(
     "metric_cls",

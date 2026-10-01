@@ -18,6 +18,9 @@ from src.dojos.seventeenlands.draft_data.pack_card_tally_dojos import (
 )
 from src.schema.holdout import HoldoutSpec
 
+# Wiring tests: placeholder parquets, no real TRAIN calibration
+pytestmark = pytest.mark.usefixtures("uncalibrated_generic_dojos")
+
 _CASES = [
     (CardTakeRateDojo, CardTakeRateMetric),
     (FirstPickRateDojo, FirstPickRateMetric),

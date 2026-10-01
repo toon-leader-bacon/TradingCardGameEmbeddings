@@ -1,3 +1,4 @@
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
@@ -98,7 +99,10 @@ class TestMultiGroupOptionSelectionDojoSplits:
     ) -> None:
         source = tmp_path / "source.parquet"
         _write_source(source, num_rows=100)
-        group = [[_card("A")], []]  # empty pool group - must not break splitting
+        group = [
+            [_card("A"), _card("B")],
+            [],
+        ]  # empty pool group - must not break splitting
         dojo = MultiGroupOptionSelectionDojo(
             path_to_training_data=source,
             data_constructor=_StubDataConstructor(group, 0),
@@ -129,7 +133,7 @@ class TestMultiGroupOptionSelectionDojoScoringHeadAndPooler:
     def test_scoring_head_is_forwarded_to_decoder_head(self, tmp_path: Path) -> None:
         source = tmp_path / "source.parquet"
         _write_source(source, num_rows=10)
-        group = [[_card("A")], []]
+        group = [[_card("A"), _card("B")], []]
         stub_scoring_head = _StubScoringHead()
 
         dojo = MultiGroupOptionSelectionDojo(
@@ -151,7 +155,7 @@ class TestMultiGroupOptionSelectionDojoScoringHeadAndPooler:
     def test_pooler_is_forwarded_to_decoder_head(self, tmp_path: Path) -> None:
         source = tmp_path / "source.parquet"
         _write_source(source, num_rows=10)
-        group = [[_card("A")], []]
+        group = [[_card("A"), _card("B")], []]
         stub_pooler = _StubPooler()
 
         dojo = MultiGroupOptionSelectionDojo(
@@ -175,7 +179,7 @@ class TestMultiGroupOptionSelectionDojoComputeLoss:
     def test_returns_scalar_loss(self, tmp_path: Path) -> None:
         source = tmp_path / "source.parquet"
         _write_source(source, num_rows=10)
-        group = [[_card("A")], []]
+        group = [[_card("A"), _card("B")], []]
         dojo = MultiGroupOptionSelectionDojo(
             path_to_training_data=source,
             data_constructor=_StubDataConstructor(group, 0),
@@ -203,7 +207,7 @@ class TestMultiGroupOptionSelectionDojoComputeLoss:
     def test_raises_on_mismatched_lengths(self, tmp_path: Path) -> None:
         source = tmp_path / "source.parquet"
         _write_source(source, num_rows=10)
-        group = [[_card("A")], []]
+        group = [[_card("A"), _card("B")], []]
         dojo = MultiGroupOptionSelectionDojo(
             path_to_training_data=source,
             data_constructor=_StubDataConstructor(group, 0),
@@ -221,3 +225,27 @@ class TestMultiGroupOptionSelectionDojoComputeLoss:
             dojo.compute_loss(
                 [[[torch.randn(4)], []]], Batch([group] * len([0, 1]), [0, 1])
             )
+
+
+class TestMultiGroupOptionSelectionDojoBaseline:
+    def test_baseline_is_ln_of_the_pack_size_not_the_pool_size(
+        self, tmp_path: Path
+    ) -> None:
+        source = tmp_path / "source.parquet"
+        _write_source(source, num_rows=20)
+        group = [[_card("A"), _card("B"), _card("C")], [_card("D")]]
+        dojo = MultiGroupOptionSelectionDojo(
+            path_to_training_data=source,
+            data_constructor=_StubDataConstructor(group, 1),
+            card_lookup=CardBinder(),
+            holdout=HoldoutSpec.no_holdout(),
+            card_embedding_size=4,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
+        )
+
+        batch = next(dojo.batches(Split.TEST, _BUDGET))
+        assert math.isclose(dojo.baseline_loss(batch), math.log(3))

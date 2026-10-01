@@ -20,9 +20,13 @@ class RoundRow:
     names in declaration order, CsvRunListener writes RoundRows through
     _round_row_cells, and read_rounds_csv parses them back through
     _parse_round_row (its inverse). Adding a column means adding a field
-    here and its parse in _parse_round_row (a missed parse fails loudly on
-    the cell count).
+    here and its parse in _parse_round_row (a missed parse fails loudly:
+    RoundRow is built without that argument).
 
+    test_loss: the dojo's raw mean TEST loss, in its own units.
+    normalized_test_loss: test_loss / the dojo's baseline loss (1.0 =
+        learned nothing); None only when read from a rounds CSV written
+        before this column existed (_LEGACY_ROUNDS_HEADER).
     status: None where the CSV holds "" (a dojo scored but not in the
         phase's diet, e.g. a held-out dojo).
     """
@@ -33,12 +37,17 @@ class RoundRow:
     elapsed_seconds: float
     dojo: str
     test_loss: float
+    normalized_test_loss: float | None
     status: DojoStatus | None
     quarantined: bool
 
 
 # The rounds CSV header is derived from RoundRow; the reader accepts exactly it
 _ROUNDS_HEADER = tuple(field.name for field in fields(RoundRow))
+# Rounds CSVs written before normalized_test_loss existed; still readable
+_LEGACY_ROUNDS_HEADER = tuple(
+    name for name in _ROUNDS_HEADER if name != "normalized_test_loss"
+)
 _CHECKPOINTS_HEADER = ("phase", "round_index", "step", "path", "encoder_path")
 
 
@@ -55,13 +64,16 @@ class RunListener(Protocol):
 
 
 class LoggingRunListener:
-    """Logs each round's per-dojo TEST losses and each checkpoint path."""
+    """Logs each round's per-dojo TEST losses (raw and normalized) and each
+    checkpoint path."""
 
     def on_round_end(self, report: RoundReport) -> None:
-        """Log per-dojo losses. Input: RoundReport. Output: None. Side
-        effects: emits log lines. Exceptions: none."""
+        """Log per-dojo losses, e.g. "color_mask=1.2345 (0.62x baseline)".
+        Input: RoundReport. Output: None. Side effects: emits log lines.
+        Exceptions: none."""
         losses = ", ".join(
-            f"{name}={loss:.4f}" for name, loss in report.per_dojo_test_loss.items()
+            f"{name}={split_loss.loss:.4f} ({split_loss.normalized:.2f}x baseline)"
+            for name, split_loss in report.per_dojo_test_loss.items()
         )
         saturated = sorted(
             name
@@ -147,22 +159,23 @@ def read_rounds_csv(path: Path) -> list[RoundRow]:
     Output: list[RoundRow], in file order.
     Side effects: reads the file.
     Exceptions: FileNotFoundError if path is absent; ValueError if the
-        header is not _ROUNDS_HEADER or a cell does not parse (the message
-        names the line number).
+        header is neither _ROUNDS_HEADER nor _LEGACY_ROUNDS_HEADER (a file
+        from before normalized_test_loss; its rows read with None there) or
+        a cell does not parse (the message names the line number).
 
     Example:
         >>> rows = read_rounds_csv(Path("runs/a/rounds.csv"))
-        >>> rows[0].dojo, rows[0].test_loss
-        ('pick', 1.37)
+        >>> rows[0].dojo, rows[0].test_loss, rows[0].normalized_test_loss
+        ('pick', 1.37, 0.5)
     """
     result: list[RoundRow] = []
     with path.open(newline="") as file:
         reader = csv.reader(file)
         # Validate the header before trusting any column position
-        _require_header(path, next(reader, None), _ROUNDS_HEADER)
+        header = _rounds_header_of(path, next(reader, None))
         # Parse each data row; line 1 is the header
         for line_number, cells in enumerate(reader, start=2):
-            result.append(_parse_round_row(path, line_number, cells))
+            result.append(_parse_round_row(path, line_number, header, cells))
     return result
 
 
@@ -176,11 +189,12 @@ def _round_rows_of(report: RoundReport) -> list[RoundRow]:
             step=report.step,
             elapsed_seconds=report.elapsed_seconds,
             dojo=name,
-            test_loss=loss,
+            test_loss=split_loss.loss,
+            normalized_test_loss=split_loss.normalized,
             status=report.statuses.get(name),
             quarantined=name in report.quarantined,
         )
-        for name, loss in report.per_dojo_test_loss.items()
+        for name, split_loss in report.per_dojo_test_loss.items()
     ]
 
 
@@ -231,28 +245,42 @@ def _require_header(
         )
 
 
-def _parse_round_row(path: Path, line_number: int, cells: Sequence[str]) -> RoundRow:
-    """One data row -> RoundRow; the inverse of _round_row_cells. ""
-    status -> None; "True"/"False" -> quarantined. Raises ValueError
-    naming path and line_number on a wrong cell count, an unparseable
-    number, an unknown status, or a quarantined cell other than
-    "True"/"False"."""
-    if len(cells) != len(_ROUNDS_HEADER):
+def _rounds_header_of(path: Path, found: Sequence[str] | None) -> tuple[str, ...]:
+    """Which rounds-CSV header a file uses: _ROUNDS_HEADER or
+    _LEGACY_ROUNDS_HEADER. Raises ValueError naming path for anything else
+    (None = empty file)."""
+    if found is not None and tuple(found) == _LEGACY_ROUNDS_HEADER:
+        return _LEGACY_ROUNDS_HEADER
+    _require_header(path, found, _ROUNDS_HEADER)
+    return _ROUNDS_HEADER
+
+
+def _parse_round_row(
+    path: Path, line_number: int, header: tuple[str, ...], cells: Sequence[str]
+) -> RoundRow:
+    """One data row -> RoundRow; the inverse of _round_row_cells. Cells are
+    read by header name, so a legacy row (no normalized_test_loss column)
+    reads with normalized_test_loss None. "" status -> None; "True"/"False"
+    -> quarantined. Raises ValueError naming path and line_number on a
+    wrong cell count, an unparseable number, an unknown status, or a
+    quarantined cell other than "True"/"False"."""
+    if len(cells) != len(header):
         raise ValueError(
-            f"{path}:{line_number}: expected {len(_ROUNDS_HEADER)} cells, "
-            f"got {len(cells)}"
+            f"{path}:{line_number}: expected {len(header)} cells, got {len(cells)}"
         )
-    phase, round_index, step, elapsed, dojo, loss, status, quarantined = cells
+    cell = dict(zip(header, cells))
+    normalized = cell.get("normalized_test_loss")
     try:
         return RoundRow(
-            phase=phase,
-            round_index=int(round_index),
-            step=int(step),
-            elapsed_seconds=float(elapsed),
-            dojo=dojo,
-            test_loss=float(loss),
-            status=DojoStatus(status) if status else None,
-            quarantined=_parse_bool_cell(quarantined),
+            phase=cell["phase"],
+            round_index=int(cell["round_index"]),
+            step=int(cell["step"]),
+            elapsed_seconds=float(cell["elapsed_seconds"]),
+            dojo=cell["dojo"],
+            test_loss=float(cell["test_loss"]),
+            normalized_test_loss=None if normalized is None else float(normalized),
+            status=DojoStatus(cell["status"]) if cell["status"] else None,
+            quarantined=_parse_bool_cell(cell["quarantined"]),
         )
     except ValueError as error:
         raise ValueError(f"{path}:{line_number}: {error}") from error

@@ -25,6 +25,9 @@ from src.dojos.seventeenlands.game_data.game_deck_label_dojos import (
 )
 from src.schema.holdout import HoldoutSpec
 
+# Wiring tests: placeholder parquets, no real TRAIN calibration
+pytestmark = pytest.mark.usefixtures("uncalibrated_generic_dojos")
+
 
 def _write_source(path: Path, label_column: str, value) -> None:
     df = pd.DataFrame({"deck_uuid": ["00000000-0000-0000-0000-000000000000"] * 10})

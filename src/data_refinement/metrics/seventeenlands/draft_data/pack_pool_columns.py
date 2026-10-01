@@ -19,8 +19,6 @@ both header-driven and value-driven lookups through the same cache.
 from typing import Iterable
 from uuid import UUID
 
-import pandas as pd
-
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.card_lookup import uuid_for_name_or_front_face
 from src.schema.game_id import GameId
@@ -185,13 +183,14 @@ class DraftCardColumns:
         Example:
             >>> draft_columns.present_uuids(row, draft_columns.pack_columns)
         """
-        # pd.notna() treats a NaN/missing cell as absent regardless of
-        # `bool(float("nan"))` being True in plain Python; the `and`
-        # then still requires an actually-truthy (nonzero) count.
+        # A NaN/missing cell is absent even though `bool(float("nan"))`
+        # is True: NaN is the one value unequal to itself, a far cheaper
+        # test than pd.notna() on this per-row, per-column hot path. The
+        # `and` then still requires an actually-truthy (nonzero) count.
         return [
             card_uuid
             for column_name, card_uuid in columns
-            if pd.notna(row[column_name]) and row[column_name]
+            if (count := row[column_name]) == count and count
         ]
 
     @property

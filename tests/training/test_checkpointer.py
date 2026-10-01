@@ -10,7 +10,7 @@ from src.training.recording.checkpointer import (
     load_checkpoint_holdout,
     load_encoder_weights,
 )
-from src.training.recording.reports import DojoStatus, RoundReport
+from src.training.recording.reports import DojoStatus, RoundReport, SplitLoss
 from tests.training.fakes import FakeDojo, FakeModel, make_phase, make_plan
 
 
@@ -19,7 +19,13 @@ def _save(tmp_path: Path, phase: str = "pre train") -> tuple[Path, FakeModel]:
     dojo = FakeDojo("a")
     optimizer = torch.optim.AdamW(model.parameters())
     report = RoundReport(
-        phase, 2, 8, 1.5, {"a": 0.5}, {"a": DojoStatus.ACTIVE}, frozenset()
+        phase,
+        2,
+        8,
+        1.5,
+        {"a": SplitLoss(0.5, 2.0)},
+        {"a": DojoStatus.ACTIVE},
+        frozenset(),
     )
     plan = make_plan((make_phase(("a",)),))
     checkpointer = DirectoryCheckpointer(tmp_path)
@@ -41,7 +47,10 @@ def test_writes_state_encoder_and_manifest(tmp_path: Path) -> None:
     assert set(state) == {"model", "optimizer", "dojo_heads"}
     assert len(state["dojo_heads"]["a"]) == 2  # weight and bias
     manifest = json.loads((directory / "manifest.json").read_text())
-    assert manifest["round_index"] == 2 and manifest["per_dojo_test_loss"] == {"a": 0.5}
+    assert manifest["round_index"] == 2
+    assert manifest["per_dojo_test_loss"] == {
+        "a": {"loss": 0.5, "baseline_loss": 2.0, "normalized": 0.25}
+    }
 
 
 def test_directory_name_is_filename_safe_and_no_staging_dir_remains(
@@ -71,7 +80,13 @@ def test_a_failed_write_leaves_no_partial_checkpoint(tmp_path: Path) -> None:
 
 def _report(phase: str, round_index: int) -> RoundReport:
     return RoundReport(
-        phase, round_index, round_index, 0.0, {"a": 0.5}, {}, frozenset()
+        phase,
+        round_index,
+        round_index,
+        0.0,
+        {"a": SplitLoss(0.5, 1.0)},
+        {},
+        frozenset(),
     )
 
 

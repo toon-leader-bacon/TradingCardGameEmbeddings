@@ -233,7 +233,8 @@ def preflight_passes(dojos: list[Dojo], config: RunConfig) -> bool:
             passed += 1
             print(
                 f"[ OK ] {check.dojo_name}: train={check.train_count} "
-                f"test={check.test_count} sample loss={check.sample_loss:.4g}"
+                f"test={check.test_count} sample loss={check.sample_loss:.4g} "
+                f"baseline={check.sample_baseline_loss:.4g}"
             )
         else:
             print(f"[FAIL] {check.dojo_name}: {check.error}")
@@ -314,8 +315,11 @@ def print_summary(result: TrainingResult, run_directory: Path) -> None:
     print(f"stopped early: {result.stopped_early_reason or 'no'}")
     if result.final_report is not None:
         print(f"final round {result.final_report.round_index} TEST loss:")
-        for name, loss in sorted(result.final_report.per_dojo_test_loss.items()):
-            print(f"  {name}: {loss:.4g}")
+        for name, split_loss in sorted(result.final_report.per_dojo_test_loss.items()):
+            print(
+                f"  {name}: {split_loss.loss:.4g} "
+                f"({split_loss.normalized:.3f}x baseline)"
+            )
     if result.best_checkpoint is not None:
         print(f"best checkpoint: {result.best_checkpoint.path}")
     print(f"logs: {run_directory / _ROUNDS_CSV_NAME}")

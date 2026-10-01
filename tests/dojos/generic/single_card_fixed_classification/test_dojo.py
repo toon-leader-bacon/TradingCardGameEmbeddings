@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List
+from typing import Any, List
 from uuid import uuid4
 
 import pandas as pd
@@ -14,7 +14,9 @@ from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.single_card_fixed_classification.dojo import (
     SingleCardFixedClassificationDojo,
 )
+from src.dojos.generic.single_card_fixed_classification.loss_spec import LossSpec
 from src.dojos.loss.fixed_classification_loss import FixedClassificationLoss
+from src.dojos.loss.loss_calibration import CalibratedLoss
 from src.dojos.mods.common_mods import MaskTargetKeyMod
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.card import GenericCard, Provenance
@@ -25,6 +27,9 @@ from src.schema.splits import Split
 from src.schema.type_hints import TrainingDatum
 
 _BUDGET = BatchBudget(max_cost=1000, cost_of=lambda card: 1)
+
+
+_OTHER_LABEL = "northern_realms"
 
 
 def _card(name: str, raw_content: dict | None = None) -> GenericCard:
@@ -52,7 +57,11 @@ class _StubDataConstructor:
         self._label = label
 
     def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
-        return [(self._card, self._label) for _ in range(len(chunk))]
+        # Alternating with _OTHER_LABEL: one class only has a zero baseline
+        return [
+            (self._card, self._label if i % 2 == 0 else _OTHER_LABEL)
+            for i in range(len(chunk))
+        ]
 
 
 def _write_source(path: Path, num_rows: int) -> None:
@@ -217,7 +226,7 @@ class TestSingleCardFixedClassificationDojoComputeLoss:
 
 class _StubLoss:
     """Records the label_values it was built with, and always returns a
-    fixed scalar - isolates the loss_factory injection point itself
+    fixed scalar - isolates the loss_spec injection point itself
     from any real loss's actual math."""
 
     def __init__(self, label_values: List[str]) -> None:
@@ -227,7 +236,14 @@ class _StubLoss:
         return torch.tensor(0.0)
 
 
-class TestSingleCardFixedClassificationDojoLossFactory:
+class _UnitBaselineCalibration:
+    """Keeps the loss and reports a baseline of 1.0, whatever the labels."""
+
+    def calibrate(self, loss: Any, train_sample: object) -> CalibratedLoss:
+        return CalibratedLoss(loss=loss, baseline_loss=1.0)
+
+
+class TestSingleCardFixedClassificationDojoLossSpec:
     def test_defaults_to_fixed_classification_loss(self, tmp_path: Path) -> None:
         source = tmp_path / "source.parquet"
         _write_source(source, num_rows=10)
@@ -248,7 +264,7 @@ class TestSingleCardFixedClassificationDojoLossFactory:
 
         assert isinstance(dojo.loss_calculator, FixedClassificationLoss)
 
-    def test_loss_factory_builds_loss_calculator_from_label_values(
+    def test_loss_spec_builds_loss_calculator_from_label_values(
         self, tmp_path: Path
     ) -> None:
         source = tmp_path / "source.parquet"
@@ -261,7 +277,7 @@ class TestSingleCardFixedClassificationDojoLossFactory:
             holdout=HoldoutSpec.no_holdout(),
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
-            loss_factory=_StubLoss,
+            loss_spec=LossSpec(_StubLoss, _UnitBaselineCalibration()),
             config=DojoConfig(
                 rng_seed=0,
                 strict_version_check=False,

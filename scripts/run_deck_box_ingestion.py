@@ -43,6 +43,15 @@ from src.data_refinement.deck_box.fabtcg_decklists.extraction_stage import (
 from src.data_refinement.deck_box.play_gwent.extraction_stage import (
     PlayGwentDeckExtractionStage,
 )
+from src.data_refinement.deck_box.isotropic.extraction_stage import (
+    IsotropicDeckExtractionStage,
+)
+from src.data_refinement.deck_box.pokemon_tcg.extraction_stage import (
+    PokemonTcgDeckExtractionStage,
+)
+from src.data_refinement.deck_box.spire_codex_runs.extraction_stage import (
+    SpireCodexRunsDeckExtractionStage,
+)
 from src.data_refinement.deck_box.sts2runs.extraction_stage import (
     Sts2RunsDeckExtractionStage,
 )
@@ -67,6 +76,18 @@ _STAGES: dict[str, tuple[DeckExtractionStage, Callable[[], Path]]] = {
     "play_gwent": (
         PlayGwentDeckExtractionStage(),
         lambda: PlayGwentDeckExtractionStage.DEFAULT_RAW_PATH,
+    ),
+    "isotropic": (
+        IsotropicDeckExtractionStage(),
+        lambda: IsotropicDeckExtractionStage.DEFAULT_RAW_PATH,
+    ),
+    "pokemon_tcg": (
+        PokemonTcgDeckExtractionStage(),
+        lambda: PokemonTcgDeckExtractionStage.DEFAULT_RAW_PATH,
+    ),
+    "spire_codex_runs": (
+        SpireCodexRunsDeckExtractionStage(),
+        lambda: SpireCodexRunsDeckExtractionStage.DEFAULT_RAW_PATH,
     ),
     "sts2runs": (
         Sts2RunsDeckExtractionStage(),

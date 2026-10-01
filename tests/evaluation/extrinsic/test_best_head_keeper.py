@@ -2,13 +2,16 @@ import pytest
 import torch
 
 from src.evaluation.extrinsic.best_head_keeper import BestHeadKeeper
-from src.training.recording.reports import RoundReport
+from src.training.recording.reports import RoundReport, SplitLoss
 from tests.training.fakes import FakeDojo
 
 
-def _report(round_index: int, losses: dict[str, float]) -> RoundReport:
+def _report(
+    round_index: int, losses: dict[str, float], baseline: float = 1.0
+) -> RoundReport:
+    split_losses = {name: SplitLoss(loss, baseline) for name, loss in losses.items()}
     return RoundReport(
-        "extrinsic", round_index, round_index, 0.0, losses, {}, frozenset()
+        "extrinsic", round_index, round_index, 0.0, split_losses, {}, frozenset()
     )
 
 
@@ -92,3 +95,12 @@ def test_a_head_that_changed_shape_is_refused() -> None:
     a._head = torch.nn.Linear(3, 1)  # type: ignore[attr-defined]
     with pytest.raises(ValueError, match="changed shape"):
         keeper.restore_best_heads()
+
+
+def test_the_best_round_is_judged_on_normalized_loss() -> None:
+    a = FakeDojo("a")
+    keeper = BestHeadKeeper([a])
+    keeper.on_round_end(_report(0, {"a": 1.0}, baseline=2.0))  # 0.5x baseline
+    # Lower raw loss, but a worse fraction of its batch baseline
+    keeper.on_round_end(_report(1, {"a": 0.9}, baseline=1.0))  # 0.9x baseline
+    assert keeper.best_rounds["a"] == 0

@@ -45,7 +45,8 @@ class _StubDataConstructor:
         self._card = card
 
     def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
-        return [(self._card, 1.0) for _ in range(len(chunk))]
+        # Alternating labels: calibration rejects a constant regression label
+        return [(self._card, 1.0 + i % 2) for i in range(len(chunk))]
 
 
 def _write_source(path: Path, num_rows: int) -> None:

@@ -32,7 +32,7 @@ from src.training.recording.reports import (
     RoundReport,
     TrainingResult,
     is_better_round,
-    mean_test_loss_over,
+    mean_normalized_test_loss_over,
 )
 from src.training.recording.run_listener import RunListener
 from src.training.round_evaluation import evaluate_split_losses
@@ -103,7 +103,8 @@ class Trainer:
         Inputs: none (all configuration is in the constructor).
         Output: TrainingResult: the last round's report, the best
             checkpoint of the last phase that wrote one (best = strictly
-            lowest mean TEST loss over the diet dojos scored in both rounds),
+            lowest mean normalized TEST loss over the diet dojos scored in
+            both rounds),
             and why the run stopped early, if it did. best_checkpoint is
             always None when the Trainer has no checkpointer.
         Side effects: updates model and dojo-head weights; writes
@@ -412,7 +413,11 @@ class Trainer:
             max_examples=self._plan.eval_examples_per_dojo,
             precision=self._precision,
         )
-        statuses = phase_run.tracker.record_round(losses)
+        # The tracker judges normalized loss, so epsilon/reactivation_delta
+        # mean the same thing for every dojo
+        statuses = phase_run.tracker.record_round(
+            {name: split_loss.normalized for name, split_loss in losses.items()}
+        )
         return RoundReport(
             phase=phase_run.phase.name,
             round_index=round_index,
@@ -465,7 +470,7 @@ class Trainer:
         names = phase_run.phase.dojo_names
         if best is None:
             # Never checkpoint a round in which no diet dojo was scored
-            if mean_test_loss_over(report, names) == float("inf"):
+            if mean_normalized_test_loss_over(report, names) == float("inf"):
                 return None
         elif not is_better_round(report, best.report, names):
             return best

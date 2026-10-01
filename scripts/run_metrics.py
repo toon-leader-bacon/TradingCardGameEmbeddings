@@ -56,6 +56,7 @@ from src.data_retrieval.seventeenlands.downloader import SeventeenLandsDownloade
 from src.schema.game_id import GameId
 
 # --- sts_gg ---
+from src.data_refinement.metrics.isotropic.deck_box_path import ISOTROPIC_DECK_BOX_PATH
 from src.data_refinement.metrics.sts_gg.ascension_prediction_metric import (
     AscensionPredictionMetric,
 )
@@ -453,10 +454,9 @@ def run_play_gwent(raw_path: Path | None) -> None:
 # --- isotropic ---
 
 _ISOTROPIC_RAW_DIR = Path("data/raw/isotropic")
-# Shared by both isotropic families and warm-started on every run (deck
+# ISOTROPIC_DECK_BOX_PATH is shared by both families and warm-started on every run (deck
 # uuids are content-derived, so re-adding a deck is a no-op) - running
 # one family never drops the other family's decks from the box.
-_ISOTROPIC_DECK_BOX_PATH = Path("data/metrics/isotropic/deck_box.db")
 # Flavor A: one games-YYYYMMDD.json JSONL member per day.
 _ISOTROPIC_SUMMARY_GLOB = "*-summary.tar.bz2"
 # Flavor B: bare "<year>_<YYYYMMDD>.tar.bz2" full-log archives. Deliberately
@@ -484,7 +484,7 @@ def _isotropic_archive_paths(raw_path: Path | None, pattern: str) -> list[Path]:
 
 def _load_isotropic_deck_box() -> DeckBox:
     return DeckBox.load(
-        [_ISOTROPIC_DECK_BOX_PATH] if _ISOTROPIC_DECK_BOX_PATH.exists() else []
+        [ISOTROPIC_DECK_BOX_PATH] if ISOTROPIC_DECK_BOX_PATH.exists() else []
     )
 
 
@@ -512,7 +512,7 @@ def run_isotropic_summary(raw_path: Path | None) -> None:
     print(f"=== isotropic_summary: {', '.join(p.name for p in archive_paths)} ===")
     scan_isotropic_summary_archives(archive_paths, metrics)
     deck_box.save(
-        _ISOTROPIC_DECK_BOX_PATH, GameId.DOMINION, binder.version_for(GameId.DOMINION)
+        ISOTROPIC_DECK_BOX_PATH, GameId.DOMINION, binder.version_for(GameId.DOMINION)
     )
     print(f"wrote {len(metrics)} metric outputs")
 
@@ -544,7 +544,7 @@ def run_isotropic_games(raw_path: Path | None) -> None:
     scan_isotropic_game_log_archives(archive_paths, header_metrics)
     scan_isotropic_game_logs_archives(archive_paths, game_log_metrics)
     deck_box.save(
-        _ISOTROPIC_DECK_BOX_PATH, GameId.DOMINION, binder.version_for(GameId.DOMINION)
+        ISOTROPIC_DECK_BOX_PATH, GameId.DOMINION, binder.version_for(GameId.DOMINION)
     )
     print(f"wrote {len(header_metrics) + len(game_log_metrics)} metric outputs")
 

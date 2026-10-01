@@ -6,7 +6,9 @@ Reuses FixedClassificationDecoderHead's (batch_size, num_classes) logits
 output unchanged - only the target shape and the loss formula differ
 from FixedClassificationLoss. First (and currently only) consumer:
 CardCharacterPredictionDojo (src/dojos/sts_gg/card_character_prediction_dojo.py),
-injected via SingleCardFixedClassificationDojo's loss_factory parameter.
+injected via SingleCardFixedClassificationDojo's loss_spec
+(SOFT_CLASSIFICATION_LOSS_SPEC in
+src/dojos/generic/single_card_fixed_classification/loss_spec.py).
 """
 
 from typing import Dict, List, Sequence

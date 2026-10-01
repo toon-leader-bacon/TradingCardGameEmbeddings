@@ -183,6 +183,31 @@ class ContrastiveDojo:
             positive_cliques=batch.positive_cliques,
         )
 
+    def baseline_loss(self, batch: DojoBatch) -> float:
+        """See Dojo.baseline_loss: the InfoNCE loss of constant logits on
+        this batch's own shape (items, cliques, duplicate identities).
+
+        Per batch, not one constant: the item count per batch follows the
+        trainer's budget and each deck's visible cards, and a batch's
+        duplicate cards shrink its negatives, so no single number fits
+        every batch.
+        Inputs: batch, a ContrastiveBatch this dojo yielded.
+        Output: float > 0.
+        Side effects: none.
+        Exceptions: TypeError if batch isn't a ContrastiveBatch; ValueError
+            from the loss if the batch has no anchor or no negative.
+
+        Example:
+            >>> dojo.baseline_loss(next(dojo.batches(Split.TEST, budget)))
+            1.609...
+        """
+        if not isinstance(batch, ContrastiveBatch):
+            raise TypeError(f"{self.name} needs a ContrastiveBatch")
+        return self._contrastive_loss.constant_logit_loss(
+            identities=batch.identities,
+            positive_cliques=batch.positive_cliques,
+        )
+
     def trainable_parameters(self) -> Iterable[nn.Parameter]:
         """None: the contrastive loss has no learned head."""
         return []

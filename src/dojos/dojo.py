@@ -3,9 +3,11 @@
 Generic (per-example label) and contrastive (deck-pool) dojos differ in
 their batch type and loss, but the trainer needs neither detail: it asks
 for batches under a BatchBudget, runs the encoder on `batch.inputs`, and
-hands the embeddings back to `compute_loss`.
+hands the embeddings back to `compute_loss`. `baseline_loss` puts every
+dojo's loss on one scale for decisions (see src/dojos/README.md).
 """
 
+import math
 from dataclasses import dataclass
 from typing import Callable, Iterable, Iterator, Mapping, Protocol
 
@@ -31,6 +33,29 @@ class BatchBudget:
 
     max_cost: int
     cost_of: Callable[[GenericCard], int]
+
+
+def require_usable_baseline(baseline_loss: float, context: str) -> float:
+    """baseline_loss, checked against Dojo.baseline_loss's contract.
+
+    Normalized loss is loss / baseline_loss, so a baseline must be finite
+    and > 0; a zero baseline (e.g. one class only) leaves it undefined.
+    Inputs: baseline_loss (float), context (str naming its source, for the
+        error message).
+    Output: baseline_loss, unchanged.
+    Side effects: none.
+    Exceptions: ValueError naming context if baseline_loss is not finite
+        or is <= 0.
+
+    Example:
+        >>> require_usable_baseline(0.69, "pick")
+        0.69
+    """
+    if not math.isfinite(baseline_loss) or baseline_loss <= 0.0:
+        raise ValueError(
+            f"{context}: baseline_loss must be finite and > 0, got {baseline_loss!r}"
+        )
+    return baseline_loss
 
 
 class DojoBatch(Protocol):
@@ -69,6 +94,25 @@ class Dojo(Protocol):
         self, embeddings: BatchedModelOutput, batch: DojoBatch
     ) -> torch.Tensor:
         """Scalar per-example MEAN loss for the batch's embeddings."""
+        ...
+
+    def baseline_loss(self, batch: DojoBatch) -> float:
+        """The per-example mean loss an input-ignoring predictor gets on
+        batch: the "learned nothing" reference for normalized loss
+        (loss / baseline; 1.0 = learned nothing, 0 = perfect).
+
+        Depends on the dojo's data only, never on the encoder or head
+        weights. A dojo may return one constant fit to its TRAIN split
+        (generic dojos), or compute it from the batch's own shape
+        (contrastive dojos, whose baseline depends on how many items and
+        cliques a batch holds).
+        Inputs: batch, one this dojo yielded.
+        Output: float, finite and > 0.
+        Side effects: none.
+        Exceptions: TypeError if batch is not this dojo's batch type;
+            ValueError if the batch has no usable baseline (e.g. no
+            negatives at all).
+        """
         ...
 
     def trainable_parameters(self) -> Iterable[nn.Parameter]:

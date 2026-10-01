@@ -13,7 +13,9 @@ so one cell serves every metric family with the same shape.
   train/test/validation (`FileManagerParquet`), reads each split through
   a holdout-filtered `VisibleCardLookup`, applies the `ModPipeline`,
   packs examples to the trainer's `BatchBudget`, and checks the metric
-  file's embedded `CardBinder`/`DeckBox` versions at construction.
+  file's embedded `CardBinder`/`DeckBox` versions at construction. Its
+  last construction step calibrates the cell's loss to the TRAIN split
+  (see "Loss calibration" below).
 - `dojo_config.py` - `DojoConfig`, a frozen value object for the
   configuration half of a cell's constructor: `name` (the dojo's
   `Trainer`-facing identity; set it when two metric files share a stem),
@@ -37,18 +39,19 @@ so one cell serves every metric family with the same shape.
   `BilinearOptionScoringHead` is the only implementation. Deliberately
   low-capacity: a high-capacity scorer could solve the task in its own
   weights and leave the card embeddings under-constrained.
-- One subdirectory per cell, each with `dojo.py` and `decoder_head.py`:
+- One subdirectory per cell, each with `dojo.py` and `decoder_head.py`
+  (`single_card_fixed_classification/` also has `loss_spec.py`):
 
-| Cell | Input | Label | Loss |
-|---|---|---|---|
-| `single_card_regression/` | one card | float | `MseLoss` |
-| `single_card_fixed_classification/` | one card | one of `label_values` | `FixedClassificationLoss` (swappable via `loss_factory`) |
-| `multi_card_regression/` | a deck | float | `MseLoss` |
-| `multi_card_binary_classification/` | a deck | 0/1 | `BceLoss` (one logit) |
-| `multi_card_fixed_classification/` | a deck | one of `label_values` | `FixedClassificationLoss` |
-| `multi_card_option_selection/` | a ragged pack of options | picked option's index | `PickPredictionCrossEntropyLoss` |
-| `multi_group_option_selection/` | `[pack_options, pool]` | picked option's index | `PickPredictionCrossEntropyLoss` |
-| `multi_group_regression/` | `[group_0, group_1]` | float | `MseLoss` |
+| Cell | Input | Label | Loss | Calibration (baseline) |
+|---|---|---|---|---|
+| `single_card_regression/` | one card | float | `MseLoss` | z-scored labels (1.0) |
+| `single_card_fixed_classification/` | one card | one of `label_values` | from its `LossSpec` (default `FixedClassificationLoss`) | from its `LossSpec` (default class-prior entropy) |
+| `multi_card_regression/` | a deck | float | `MseLoss` | z-scored labels (1.0) |
+| `multi_card_binary_classification/` | a deck | 0/1 | `BceLoss` (one logit) | binary entropy of the positive rate |
+| `multi_card_fixed_classification/` | a deck | one of `label_values` | `FixedClassificationLoss` | class-prior entropy |
+| `multi_card_option_selection/` | a ragged pack of options | picked option's index | `PickPredictionCrossEntropyLoss` | mean ln(pack size) |
+| `multi_group_option_selection/` | `[pack_options, pool]` | picked option's index | `PickPredictionCrossEntropyLoss` | mean ln(pack size) |
+| `multi_group_regression/` | `[group_0, group_1]` | float | `MseLoss` | z-scored labels (1.0) |
 
 Multi-card cells pool the deck with an injected `EmbeddingPooler` before
 their MLP. The option-selection cells never pool the options: they
@@ -57,11 +60,35 @@ score each one. Group order is load-bearing for both multi-group cells:
 peeking group 0, so group 0 must never be empty. `multi_group_regression`
 pools both groups with one shared pooler, concatenates them in fixed
 order, and substitutes a learned placeholder vector when group 1 is
-empty. `single_card_fixed_classification`'s `loss_factory` lets a metric
-use `SoftClassificationLoss` (a distribution over `label_values`,
-`CardCharacterPredictionDojo`) or `MaskedVectorRegressionLoss`
-(independent per-position rates, `PickNumberDecayCurveDojo`) with the
-same head.
+empty. `single_card_fixed_classification`'s `loss_spec` (a `LossSpec`:
+a loss factory and its matching calibration, as one value) lets a metric
+use `SOFT_CLASSIFICATION_LOSS_SPEC` (a distribution over `label_values`,
+`CardCharacterPredictionDojo`) or `MASKED_VECTOR_REGRESSION_LOSS_SPEC`
+(independent per-position rates in [0, 1], `PickNumberDecayCurveDojo`;
+not z-scored, since its loss sigmoids the head's output) with the same
+head.
+
+## Loss calibration
+
+Every cell passes `GenericDojo` a `LossCalibration`
+(`../loss/loss_calibration.py`). As its last construction step,
+`GenericDojo` builds an evenly strided, unmodded sample of the TRAIN
+split through the data constructor (every row up to 20,000 TRAIN rows,
+then every k-th row) and hands it to the calibration. The result, one
+`CalibratedLoss`, holds:
+
+- the loss `compute_loss` scores with (`loss_calculator`). Regression
+  cells wrap `MseLoss` in `StandardizedLabelLoss`, so the head predicts
+  (y - mean) / std of the TRAIN labels; batches keep raw labels.
+- the baseline `baseline_loss(batch)` returns for every batch: the loss
+  of the best input-ignoring predictor on the sample (column above).
+- `label_stats` (regression only): the TRAIN `LabelStats`, to map a
+  prediction back to label units (`to_label_units`).
+
+An empty TRAIN sample, a constant regression label (zero std), or a zero
+baseline (e.g. one class only) raises `ValueError` at construction.
+Each dojo logs one INFO line with the sample size, the time taken and
+the baseline (plus label mean and std for regression).
 
 Data constructors:
 

@@ -42,7 +42,9 @@ Top level:
   validated on construction, so a run is described entirely by its plan.
 - [round_evaluation.py](round_evaluation.py): `evaluate_split_losses`, a
   capped, deterministic scoring pass over one split for every dojo, at a
-  given precision. `Trainer` runs it on TEST each round (diet or held-out
+  given precision. Each dojo gets a `SplitLoss`: its example-weighted mean
+  loss and mean `baseline_loss` over the same batches, so
+  `SplitLoss.normalized` (loss / baseline) is comparable across dojos. `Trainer` runs it on TEST each round (diet or held-out
   dojos alike) as the tracker's input, the loop's own signal; evaluation's
   extrinsic runs call it once on VALIDATION after training.
 - [trainable_encoder.py](trainable_encoder.py): the slice of the model the
@@ -63,9 +65,11 @@ Top level:
   mods, or a run config's per-dojo replacement (`mods:`); every mod gets
   its own seed from a stream separate from the dealer's.
 - [preflight.py](preflight.py): `preflight_dojo()` exercises one already-
-  built dojo (one TRAIN batch, `compute_loss` against random embeddings)
-  without an encoder, so a stale split file or a `card_embedding_size`
-  mismatch surfaces before an unattended run reaches it. Run over the
+  built dojo (one TRAIN batch, `compute_loss` against random embeddings,
+  and that batch's `baseline_loss`, which must be finite and > 0)
+  without an encoder, so a stale split file, a `card_embedding_size`
+  mismatch or a degenerate baseline surfaces before an unattended run
+  reaches it. Run over the
   first-run candidates by `scripts/preflight_dojos.py`.
 - [TODO.md](TODO.md): the checklist to a first real training run.
   [Notes.md](Notes.md): the dated findings behind it (hardware, GPU
@@ -99,10 +103,17 @@ Run
          └─ one TEST pass → RoundReport → saturation, diet, checkpoint
 ```
 
-**Saturation:** a dojo whose TEST loss has stopped improving (no gain
-larger than `epsilon` for `patience_rounds` rounds) leaves the diet. It
-re-enters if its loss rises more than `reactivation_delta` above its loss
-when it saturated. That can only happen when other dojos move a shared,
+**Normalized loss:** every decision below uses each dojo's normalized
+TEST loss (loss / its baseline: 1.0 = learned nothing, 0.0 = perfect;
+see `../dojos/README.md`), so no dojo's loss scale outweighs another's.
+Raw losses are still reported beside them.
+
+**Saturation:** a dojo whose normalized TEST loss has stopped improving
+(no gain larger than `epsilon` for `patience_rounds` rounds) leaves the
+diet. It re-enters if its normalized loss rises more than
+`reactivation_delta` above its value when it saturated. Both thresholds
+are therefore fractions of the dojo's baseline (`epsilon: 0.001` is 0.1%
+of it). That can only happen when other dojos move a shared,
 trainable encoder: a saturated dojo's own head is not trained, so a head
 that overfit before saturating stays out instead of flip-flopping.
 
@@ -182,9 +193,12 @@ Points worth knowing:
   `max_consecutive_failures` in a row stops the run cleanly with the last
   good checkpoint. Only plan/dojo mismatches raise, and they do so in the
   constructor, before training starts.
-- A round is "best" only when its mean TEST loss over the diet dojos scored
-  in both it and the previous best is strictly lower, so a round in which a
+- A round is "best" only when its mean normalized TEST loss over the diet
+  dojos scored in both it and the previous best is strictly lower, so a round in which a
   hard dojo failed to evaluate cannot win by omission.
+- Regression dojo heads predict z-scored labels, so a head from a
+  checkpoint written before labels were z-scored predicts raw label units
+  and does not fit a current dojo; start such runs fresh.
 - A checkpoint is a weights snapshot; it does not save tracker or RNG
   state, so a run cannot resume mid-way, and there is no automatic
   rollback to the best checkpoint after divergence.

@@ -51,7 +51,7 @@ class FakeDojo:
     fail: 'train' raises when TRAIN batches are requested, 'test' when
     TEST ones are; nan_loss makes compute_loss return NaN; loss_gain
     multiplies the loss (large values overflow fp16 gradients until the
-    loss scale backs off).
+    loss scale backs off); baseline is what baseline_loss returns.
     """
 
     def __init__(
@@ -66,6 +66,7 @@ class FakeDojo:
         nan_grad: bool = False,
         fail_at_batch: int | None = None,
         loss_gain: float = 1.0,
+        baseline: float = 1.0,
     ) -> None:
         self.name = name
         self.holdout = HoldoutSpec.no_holdout()
@@ -79,6 +80,7 @@ class FakeDojo:
         self._nan_grad = nan_grad
         self._fail_at_batch = fail_at_batch
         self._loss_gain = loss_gain
+        self._baseline = baseline
         self.head_device: torch.device | None = None
 
     def batches(
@@ -102,6 +104,11 @@ class FakeDojo:
             # finite forward value, NaN gradient (sqrt at 0)
             loss = loss + (embeddings.sum() * 0).sqrt()
         return loss * float("nan") if self._nan_loss else loss
+
+    def baseline_loss(self, batch: Any) -> float:
+        """Dojo.baseline_loss: a fixed "learned nothing" loss, so a test's
+        normalized loss equals its raw loss unless it sets baseline."""
+        return self._baseline
 
     def trainable_parameters(self) -> Iterable[nn.Parameter]:
         return self._head.parameters() if self._with_head else []

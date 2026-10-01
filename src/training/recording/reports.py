@@ -5,6 +5,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Mapping
 
+from src.dojos.dojo import require_usable_baseline
+
 
 class DojoStatus(Enum):
     """Whether a dojo is still in the diet (ACTIVE) or has stopped
@@ -15,12 +17,46 @@ class DojoStatus(Enum):
 
 
 @dataclass(frozen=True)
+class SplitLoss:
+    """One dojo's score on one split pass: its raw mean loss and the
+    baseline it is judged against.
+
+    loss: example-weighted mean loss, in the dojo's own units (regression
+        dojos: standardized MSE, since their labels are z-scored).
+    baseline_loss: example-weighted mean of the dojo's baseline_loss over
+        the same batches; finite and > 0.
+    normalized (derived, not stored): loss / baseline_loss; 1.0 = learned
+        nothing, 0.0 = perfect. The number every cross-dojo decision uses
+        (best checkpoint, saturation).
+    """
+
+    loss: float
+    baseline_loss: float
+
+    def __post_init__(self) -> None:
+        """Side effects: none. Exceptions: ValueError if baseline_loss is
+        not finite and > 0 (normalized would be undefined)."""
+        require_usable_baseline(self.baseline_loss, "split loss")
+
+    @property
+    def normalized(self) -> float:
+        """loss / baseline_loss. Side effects: none. Exceptions: none.
+
+        Example:
+            >>> SplitLoss(loss=0.3, baseline_loss=0.6).normalized
+            0.5
+        """
+        return self.loss / self.baseline_loss
+
+
+@dataclass(frozen=True)
 class RoundReport:
     """State at the end of one round.
 
-    per_dojo_test_loss: mean TEST loss of every registered dojo (diet or
-        not, including held-out) that evaluated successfully this round;
-        a dojo whose evaluation failed is omitted, not scored.
+    per_dojo_test_loss: TEST SplitLoss (raw mean loss and baseline, so
+        also normalized loss) of every registered dojo (diet or not,
+        including held-out) that evaluated successfully this round; a dojo
+        whose evaluation failed is omitted, not scored.
     statuses: ACTIVE/SATURATED for the current phase's dojos only.
     elapsed_seconds: monotonic wall-clock seconds from the start of
         Trainer.run() to this round's scoring, for loss-vs-time plots.
@@ -30,7 +66,7 @@ class RoundReport:
     round_index: int
     step: int
     elapsed_seconds: float
-    per_dojo_test_loss: Mapping[str, float]
+    per_dojo_test_loss: Mapping[str, SplitLoss]
     statuses: Mapping[str, DojoStatus]
     quarantined: frozenset[str]
 
@@ -57,21 +93,25 @@ class TrainingResult:
     stopped_early_reason: str | None
 
 
-def mean_test_loss_over(report: RoundReport, dojo_names: tuple[str, ...]) -> float:
+def mean_normalized_test_loss_over(
+    report: RoundReport, dojo_names: tuple[str, ...]
+) -> float:
     """The score used to pick a phase's best checkpoint (lower is better).
 
+    Normalized (loss / baseline), so no dojo's loss scale decides it: 1.0
+    for a dojo means it learned nothing.
     Inputs: report (RoundReport), dojo_names (the phase's diet dojos).
-    Output: unweighted mean of those dojos' per-dojo TEST losses.
+    Output: unweighted mean of those dojos' normalized TEST losses.
     Side effects: none.
     Exceptions: none; named dojos missing from the report are ignored, and
         the score is +inf if none are present (never the best).
 
     Example:
-        >>> mean_test_loss_over(report, ("pick", "deck"))
+        >>> mean_normalized_test_loss_over(report, ("pick", "deck"))
         0.83
     """
     losses = [
-        report.per_dojo_test_loss[name]
+        report.per_dojo_test_loss[name].normalized
         for name in dojo_names
         if name in report.per_dojo_test_loss
     ]
@@ -86,9 +126,10 @@ def is_better_round(
     """Whether candidate beats incumbent, judged on the same dojos.
 
     Inputs: two reports and the phase's diet dojo names.
-    Output: True if candidate's mean TEST loss is strictly lower, taken over
-        only the dojos scored in BOTH reports (so a round where a hard dojo
-        failed to evaluate cannot win by omission); False if they share none.
+    Output: True if candidate's mean normalized TEST loss is strictly lower,
+        taken over only the dojos scored in BOTH reports (so a round where a
+        hard dojo failed to evaluate cannot win by omission); False if they
+        share none.
     Side effects: none. Exceptions: none.
 
     Example:
@@ -102,6 +143,6 @@ def is_better_round(
     )
     if not shared:
         return False
-    return mean_test_loss_over(candidate, shared) < mean_test_loss_over(
-        incumbent, shared
-    )
+    return mean_normalized_test_loss_over(
+        candidate, shared
+    ) < mean_normalized_test_loss_over(incumbent, shared)

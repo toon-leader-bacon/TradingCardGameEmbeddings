@@ -24,6 +24,8 @@ class PoolConditionedPickDataConstructor:
     TrainingInput = MultiGroupInput = [pack_option_cards, pool_cards].
 
     **pack options MUST stay group index 0, pool MUST stay index 1.**
+    (MultiGroupOptionSelectionDojo's baseline also counts options as
+    len(input[0]).)
     src/schema/type_hints.py's input_shape_of() classifies a
     TrainingInput's shape by peeking group 0 only, and raises ValueError
     the instant it finds an empty list there - it never visits index 1

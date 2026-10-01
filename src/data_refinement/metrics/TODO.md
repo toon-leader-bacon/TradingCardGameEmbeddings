@@ -1,5 +1,28 @@
 # TODO (metrics)
 
+- [ ] **Make the 17lands outputs consumable by dojos** (2026-09-30).
+  A partial run exists: game_data for 76 set/format directories; draft and
+  replay only one shakeout file each. See
+  `plans/seventeenlands_metrics_run.md`.
+  - Outputs are written per raw file, at
+    `data/metrics/seventeenlands/<family>/<SET>/<Format>/<stem>.parquet`.
+    But each dojo reads its metric's single DEFAULT_OUTPUT_PATH, which
+    does not exist.
+  - Proposed: a merge step per (family, metric) that writes to
+    DEFAULT_OUTPUT_PATH:
+    - stack the streaming files (deck and pool rows); they share the
+      family deck box;
+    - recombine card averages weighted by `sample_count`, keeping a set
+      column;
+    - subsample tutor_target_pool (151.8M rows).
+  - Alternative: one catalog key per set and format (hundreds of keys).
+- [ ] **Cache `CardBinder.version_for`.** It takes about 3 s and every
+  17lands metric constructor calls it, once per CSV.
+- [ ] **Unwrap or re-download the 19 tar-wrapped 17lands "CSV" files**
+  (AFR, KHM, MID, STX, VOW; listed in `plans/seventeenlands_metrics_run.md`).
+- [ ] **A vectorized 17lands scanner.** Even after the 1.7x speedup,
+  PremierDraft across the three families would take about 50 h.
+
 - **The registered 17lands metric families have never been run.**
   `dominiontabs`, `isotropic_summary` and `isotropic_games` were
   registered in `scripts/run_metrics.py` and run to completion on

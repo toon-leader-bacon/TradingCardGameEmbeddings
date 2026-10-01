@@ -56,6 +56,7 @@ class LeaderMaskedFromDeckDojo(MultiCardFixedClassificationDojo):
             data_constructor=DeckCardMaskDataConstructor(deck_box, "label"),
             label_values=LeaderMaskedFromDeckMetric.LABEL_VALUES,
             card_embedding_size=card_embedding_size,
+            deck_box=deck_box,
             config=DojoConfig(
                 name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),

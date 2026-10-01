@@ -1,4 +1,4 @@
-"""Per-dojo ACTIVE/SATURATED state machine driven by round TEST losses.
+"""Per-dojo ACTIVE/SATURATED state machine driven by round normalized TEST losses.
 
 State pattern: each dojo moves ACTIVE -> SATURATED after `patience_rounds`
 rounds without a > epsilon improvement, and back to ACTIVE if its loss
@@ -43,12 +43,14 @@ class SaturationTracker:
         self._tracks = {name: _DojoTrack() for name in dojo_names}
 
     def record_round(
-        self, per_dojo_test_loss: Mapping[str, float]
+        self, per_dojo_normalized_loss: Mapping[str, float]
     ) -> Mapping[str, DojoStatus]:
-        """Fold one round's TEST losses into the tracker.
+        """Fold one round's normalized TEST losses into the tracker.
 
-        Inputs: per_dojo_test_loss, the tracked dojos' mean
-            TEST loss (extra names, e.g. held-out dojos, are ignored).
+        Inputs: per_dojo_normalized_loss, the tracked dojos' normalized
+            TEST loss (SplitLoss.normalized: loss / baseline, so epsilon and
+            reactivation_delta are fractions of each dojo's "learned
+            nothing" loss); extra names, e.g. held-out dojos, are ignored.
         Output: current status of every tracked dojo.
         Side effects: updates internal per-dojo state.
         Exceptions: none; a tracked dojo with no loss this round (its
@@ -60,10 +62,10 @@ class SaturationTracker:
         result: dict[str, DojoStatus] = {}
         # Update each tracked dojo
         for name, track in self._tracks.items():
-            if name not in per_dojo_test_loss:
+            if name not in per_dojo_normalized_loss:
                 result[name] = track.status
                 continue
-            loss = per_dojo_test_loss[name]
+            loss = per_dojo_normalized_loss[name]
             if track.status is DojoStatus.ACTIVE:
                 self._advance_active(track, loss)
             else:

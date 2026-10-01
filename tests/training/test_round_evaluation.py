@@ -4,6 +4,7 @@ import pytest
 
 from src.encoder_model.precision import Precision
 from src.schema.splits import Split
+from src.training.recording.reports import SplitLoss
 from src.training.round_evaluation import evaluate_split_losses
 from tests.training.fakes import BUDGET, FakeDojo, FakeModel
 
@@ -13,7 +14,7 @@ def _score(
     dojos: list[FakeDojo],
     split: Split = Split.TEST,
     precision: Precision = "fp32",
-) -> dict[str, float]:
+) -> dict[str, SplitLoss]:
     return dict(
         evaluate_split_losses(
             model,  # type: ignore[arg-type]
@@ -30,7 +31,17 @@ def test_scores_every_dojo_by_name() -> None:
     dojos = [FakeDojo("a"), FakeDojo("b")]
     losses = _score(FakeModel(), dojos)
     assert set(losses) == {"a", "b"}
-    assert all(loss >= 0 for loss in losses.values())
+    assert all(split_loss.loss >= 0 for split_loss in losses.values())
+
+
+def test_the_baseline_is_the_example_weighted_mean_of_batch_baselines() -> None:
+    losses = _score(FakeModel(), [FakeDojo("a", baseline=2.5)])
+    assert losses["a"].baseline_loss == 2.5
+    assert losses["a"].normalized == losses["a"].loss / 2.5
+
+
+def test_a_dojo_with_an_unusable_baseline_is_omitted() -> None:
+    assert _score(FakeModel(), [FakeDojo("zero", baseline=0.0)]) == {}
 
 
 def test_a_failing_dojo_is_logged_and_omitted(caplog: pytest.LogCaptureFixture) -> None:
@@ -67,4 +78,4 @@ def test_runs_under_autocast_at_a_lower_precision() -> None:
     # bf16 autocast is supported on CPU; losses must still come back finite
     losses = _score(FakeModel(), [FakeDojo("a")], precision="bf16")
     assert set(losses) == {"a"}
-    assert losses["a"] == losses["a"]  # not NaN
+    assert losses["a"].loss == losses["a"].loss  # not NaN

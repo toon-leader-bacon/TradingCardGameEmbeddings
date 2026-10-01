@@ -41,7 +41,8 @@ class BestHeadKeeper:
         return dict(self._best_rounds)
 
     def on_round_end(self, report: RoundReport) -> None:
-        """Snapshot every dojo whose TEST loss this round is its lowest yet.
+        """Snapshot every dojo whose normalized TEST loss this round is its
+        lowest yet.
 
         Inputs: report. Output: None.
         Side effects: copies the improved heads' parameters.
@@ -49,11 +50,14 @@ class BestHeadKeeper:
             loss, is skipped).
 
         Example:
-            >>> keeper.on_round_end(report)  # report.per_dojo_test_loss["a"] = 0.8
+            >>> keeper.on_round_end(report)  # report.per_dojo_test_loss["a"].normalized = 0.8
             >>> keeper.best_rounds["a"]
             3
         """
-        for name, loss in report.per_dojo_test_loss.items():
+        # Normalized loss, as the Trainer's own decisions use (same ranking
+        # as raw loss for a dojo whose baseline is one constant)
+        for name, split_loss in report.per_dojo_test_loss.items():
+            loss = split_loss.normalized
             dojo = self._dojos.get(name)
             # A NaN would otherwise win: nan >= best is always False
             if dojo is None or not math.isfinite(loss):
