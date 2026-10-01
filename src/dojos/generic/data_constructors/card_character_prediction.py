@@ -6,7 +6,7 @@ from typing import Dict, List
 import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.dojos.generic.data_constructors._row_values import _card_for_uuid
+from src.dojos.generic.data_constructors.row_values import card_for_uuid
 from src.schema.type_hints import TrainingDatum
 
 
@@ -73,7 +73,7 @@ class CardCharacterPredictionDataConstructor:
         # CardAverageDataConstructor.build() - a metric's output may
         # contain the odd unresolvable card id.
         for _, row in chunk.iterrows():
-            card = _card_for_uuid(lookup, row["nocab_uuid"])
+            card = card_for_uuid(lookup, row["nocab_uuid"])
             if card is None:
                 continue
             distribution: Dict[str, float] = dict(

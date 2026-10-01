@@ -7,9 +7,9 @@ import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.dojos.generic.data_constructors._row_values import (
-    _deck_cards_excluding,
-    _parsed_uuid,
+from src.dojos.generic.data_constructors.row_values import (
+    deck_cards_excluding,
+    parsed_uuid,
 )
 from src.schema.type_hints import TrainingDatum
 
@@ -93,11 +93,11 @@ class DeckCardMaskDataConstructor:
         for _, row in chunk.iterrows():
             # An unparseable target masks nothing (defensive; the
             # metric always writes a valid uuid string here)
-            deck_cards = _deck_cards_excluding(
+            deck_cards = deck_cards_excluding(
                 self._deck_box,
                 lookup,
                 row["deck_uuid"],
-                _parsed_uuid(row["target_card_uuid"]),
+                parsed_uuid(row["target_card_uuid"]),
             )
             if not deck_cards:
                 continue

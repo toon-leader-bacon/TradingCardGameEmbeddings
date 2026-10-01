@@ -8,10 +8,10 @@ import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.dojos.generic.data_constructors._row_values import (
-    _card_for_uuid,
-    _deck_cards_excluding,
-    _parsed_uuid,
+from src.dojos.generic.data_constructors.row_values import (
+    card_for_uuid,
+    deck_cards_excluding,
+    parsed_uuid,
 )
 from src.schema.card import GenericCard
 from src.schema.type_hints import MultiGroupInput, TrainingDatum
@@ -65,14 +65,14 @@ class HeldOutDeckCardDataConstructor:
 
         # Each row: candidates first (they carry the label), then context
         for _, row in chunk.iterrows():
-            target_uuid = _parsed_uuid(row["target_card_uuid"])
+            target_uuid = parsed_uuid(row["target_card_uuid"])
             if target_uuid is None:
                 continue
             options = _visible_candidates(lookup, row["candidate_uuids"], target_uuid)
             if options is None:
                 continue
             candidate_cards, target_index = options
-            context = _deck_cards_excluding(
+            context = deck_cards_excluding(
                 self._deck_box, lookup, row["deck_uuid"], target_uuid
             )
             if not context:
@@ -95,7 +95,7 @@ def _visible_candidates(
         the candidates, or no decoy survives.
     Side effects: none. Exceptions: none.
 
-    Deliberately NOT _option_cards_and_pick_index() (_row_values.py),
+    Deliberately NOT option_cards_and_pick_index() (row_values.py),
     which skips the whole row when any option is missing: there the
     label is a position fixed by the raw pack, here the index is
     computed after dropping, so a hidden decoy only shrinks the
@@ -105,10 +105,10 @@ def _visible_candidates(
     cards: list[GenericCard] = []
     target_index: int | None = None
     for raw_uuid in cast(List[str], raw_candidate_uuids):
-        card = _card_for_uuid(lookup, raw_uuid)
+        card = card_for_uuid(lookup, raw_uuid)
         if card is None:
             continue
-        if _parsed_uuid(raw_uuid) == target_uuid:
+        if parsed_uuid(raw_uuid) == target_uuid:
             target_index = len(cards)
         cards.append(card)
 

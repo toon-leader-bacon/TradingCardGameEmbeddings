@@ -7,7 +7,7 @@ from typing import List
 import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.dojos.generic.data_constructors._row_values import _cards_for_uuids
+from src.dojos.generic.data_constructors.row_values import cards_for_uuids
 from src.schema.type_hints import MultiGroupInput, TrainingDatum
 
 
@@ -33,7 +33,7 @@ class AttackerBlockerCombatOutcomeDataConstructor:
     Unlike PackToPickChoiceSetDataConstructor/
     PoolConditionedPickDataConstructor, there's no position-in-a-list
     label here (the label is a plain scalar, not an index), so this
-    reuses _cards_for_uuids() directly for both groups - no new
+    reuses cards_for_uuids() directly for both groups - no new
     "resolve strictly or skip the whole row" helper needed.
     """
 
@@ -61,7 +61,7 @@ class AttackerBlockerCombatOutcomeDataConstructor:
             empty after resolution means every attacker uuid failed to
             resolve, not a valid training example. blocker_cards may be
             empty (a valid, expected row - an unblocked attack) via
-            _cards_for_uuids(), which drops individual unresolvable
+            cards_for_uuids(), which drops individual unresolvable
             blocker uuids rather than skipping the row - an empty
             blocker group is never itself a skip condition here.
             net_kill_delta is cast to float unconditionally (no NaN
@@ -83,10 +83,10 @@ class AttackerBlockerCombatOutcomeDataConstructor:
         # Attacker side must resolve to at least one card; blocker side
         # tolerates being empty - see build()'s own docstring.
         for _, row in chunk.iterrows():
-            attacker_cards = _cards_for_uuids(lookup, row["attacker_uuids"])
+            attacker_cards = cards_for_uuids(lookup, row["attacker_uuids"])
             if not attacker_cards:
                 continue
-            blocker_cards = _cards_for_uuids(lookup, row["blocker_uuids"])
+            blocker_cards = cards_for_uuids(lookup, row["blocker_uuids"])
             group: MultiGroupInput = [attacker_cards, blocker_cards]
             results.append((group, float(row["net_kill_delta"])))
 

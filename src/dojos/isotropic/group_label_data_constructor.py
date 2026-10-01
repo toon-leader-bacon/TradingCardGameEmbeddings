@@ -13,7 +13,7 @@ from typing import Callable, List
 import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.dojos.generic.data_constructors._row_values import _cast_to_float
+from src.dojos.generic.data_constructors.row_values import cast_to_float
 from src.dojos.isotropic.card_groups import CardGroup
 from src.schema.type_hints import MultiGroupInput, TrainingDatum
 
@@ -31,7 +31,7 @@ class GroupLabelDataConstructor:
         group_0: CardGroup,
         group_1: CardGroup,
         label_column: str,
-        label_caster: Callable[[object], float] = _cast_to_float,
+        label_caster: Callable[[object], float] = cast_to_float,
     ) -> None:
         """
         Inputs:

@@ -7,8 +7,8 @@ from typing import List
 import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.dojos.generic.data_constructors._row_values import (
-    _option_cards_and_pick_index,
+from src.dojos.generic.data_constructors.row_values import (
+    option_cards_and_pick_index,
 )
 from src.schema.type_hints import TrainingDatum
 
@@ -44,7 +44,7 @@ class PackToPickChoiceSetDataConstructor:
             chunk: one chunk of rows from PackToPickChoiceSetMetric's
                 output parquet file.
         Output: one (option cards, picked option's index) TrainingDatum
-            per row - see _option_cards_and_pick_index()'s docstring for
+            per row - see option_cards_and_pick_index()'s docstring for
             the exact skip conditions (null/unmatched pick, or any
             option failing to resolve).
         Side effects: none.
@@ -64,7 +64,7 @@ class PackToPickChoiceSetDataConstructor:
         # helper both option-selection DataConstructors use; skip rows
         # that fail.
         for _, row in chunk.iterrows():
-            option_pick = _option_cards_and_pick_index(
+            option_pick = option_cards_and_pick_index(
                 lookup, row["pack_option_uuids"], row["pick_uuid"]
             )
             if option_pick is None:

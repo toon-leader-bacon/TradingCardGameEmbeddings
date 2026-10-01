@@ -19,7 +19,7 @@ from uuid import UUID
 import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.dojos.generic.data_constructors._row_values import _parsed_uuid
+from src.dojos.generic.data_constructors.row_values import parsed_uuid
 from src.dojos.isotropic.card_groups import CardGroup
 from src.schema.card import GenericCard
 from src.schema.type_hints import MultiGroupInput, TrainingDatum, TrainingInput
@@ -122,5 +122,5 @@ def _parsed_picks(raw_picks: object) -> List[UUID]:
     Inputs: raw_picks (a list[str]-like cell). Output: List[UUID].
     Side effects: none. Exceptions: none.
     """
-    parsed = (_parsed_uuid(raw) for raw in cast(List[str], raw_picks))
+    parsed = (parsed_uuid(raw) for raw in cast(List[str], raw_picks))
     return [pick for pick in parsed if pick is not None]

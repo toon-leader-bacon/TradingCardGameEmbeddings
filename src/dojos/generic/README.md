@@ -25,7 +25,7 @@ so one cell serves every metric family with the same shape.
 - `data_constructor.py` - the `DataConstructor` Protocol:
   `build(chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]`.
 - `data_constructors/` - the concrete constructors, one module each
-  (see the table below). `_row_values.py` holds the shared helpers that
+  (see the table below). `row_values.py` holds the shared helpers that
   turn one raw row value into a typed label or card(s).
 - `paired_metric_dojos.py` - base classes for per-metric wrappers that
   only name their paired metric: `CardAverageMetricDojo`,

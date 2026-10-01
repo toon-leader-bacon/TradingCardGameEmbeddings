@@ -19,9 +19,9 @@ import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.dojos.generic.data_constructors._row_values import (
-    _card_for_uuid,
-    _parsed_uuid,
+from src.dojos.generic.data_constructors.row_values import (
+    card_for_uuid,
+    parsed_uuid,
 )
 from src.schema.card import GenericCard
 
@@ -68,7 +68,7 @@ class DeckColumnGroup:
             [<GenericCard Witch>, ...]
         """
         result: List[GenericCard] = []
-        deck_uuid = _parsed_uuid(row[self.column])
+        deck_uuid = parsed_uuid(row[self.column])
         deck = None if deck_uuid is None else self.deck_box.get_by_uuid(deck_uuid)
         if deck is None:
             return result
@@ -100,7 +100,7 @@ class CardColumnGroup:
             >>> CardColumnGroup("card_uuid").cards(row, lookup)
             [<GenericCard Witch>]
         """
-        card = _card_for_uuid(lookup, row[self.column])
+        card = card_for_uuid(lookup, row[self.column])
         return [] if card is None else [card]
 
 
