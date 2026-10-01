@@ -54,15 +54,24 @@ so one cell serves every metric family with the same shape.
 | `multi_card_option_selection/` | a ragged pack of options | picked option's index | `PickPredictionCrossEntropyLoss` | mean ln(pack size) |
 | `multi_group_option_selection/` | `[pack_options, pool]` | picked option's index | `PickPredictionCrossEntropyLoss` | mean ln(pack size) |
 | `multi_group_regression/` | `[group_0, group_1]` | float | `MseLoss` | z-scored labels (1.0) |
+| `multi_group_binary_classification/` | `[group_0, group_1]` | 0/1 | `BceLoss` (one logit) | binary entropy of the positive rate |
 
 Multi-card cells pool the deck with an injected `EmbeddingPooler` before
 their MLP. The option-selection cells never pool the options: they
-score each one. Group order is load-bearing for both multi-group cells:
+score each one. Group order is load-bearing for every multi-group cell:
 `input_shape_of()` (`src/schema/type_hints.py`) classifies an input by
 peeking group 0, so group 0 must never be empty. `multi_group_regression`
 pools both groups with one shared pooler, concatenates them in fixed
 order, and substitutes a learned placeholder vector when group 1 is
-empty. `single_card_fixed_classification`'s `loss_spec` (a `LossSpec`:
+empty; `multi_group_binary_classification` does the same, but its head
+outputs a raw logit. For a symmetric pair task ("did group 0 beat group
+1", both groups decks) that cell's `group_swap_mod.py` holds
+`GroupSwapMod`, a train-only mod that swaps the two groups and flips the
+0/1 label with a probability (default 0.5), so TRAIN sees both orders;
+it raises on an empty group or a non-float label. Asymmetric inputs
+(`[partial deck, kingdom]`) must not use it.
+
+`single_card_fixed_classification`'s `loss_spec` (a `LossSpec`:
 a loss factory and its matching calibration, as one value) lets a metric
 use `SOFT_CLASSIFICATION_LOSS_SPEC` (a distribution over `label_values`,
 `CardCharacterPredictionDojo`) or `MASKED_VECTOR_REGRESSION_LOSS_SPEC`
