@@ -350,6 +350,10 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
         LeaderMaskedFromDeckDojo,
         DeckBox.default_output_path(GameId.GWENT),
     ),
+    # sts_gg lists winning runs only, so its win, card_win_rate,
+    # card_win_rate_at_act2 and killed_by labels are constant and have no
+    # key here (see metrics/sts_gg/deck_label_metrics.py's WINS ONLY note)
+    "sts_gg.ascension_prediction": _recipe_for_sts_deck(sts_decks.DeckAscensionDojo),
     "sts_gg.card_deck_size": _recipe_for_sts_card(sts_cards.CardDeckSizeDojo),
     "sts_gg.card_elites_killed": _recipe_for_sts_card(sts_cards.CardElitesKilledDojo),
     "sts_gg.card_floors_cleared": _recipe_for_sts_card(sts_cards.CardFloorsClearedDojo),
@@ -362,7 +366,7 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
         sts_cards.CardTotalDamageTakenDojo
     ),
     "sts_gg.card_total_turns": _recipe_for_sts_card(sts_cards.CardTotalTurnsDojo),
-    "sts_gg.card_win_rate": _recipe_for_sts_card(sts_cards.CardWinRateDojo),
+    "sts_gg.card_upgrade_rate": _recipe_for_sts_card(sts_cards.CardUpgradeRateDojo),
     "sts_gg.character_prediction": _recipe_for_sts_deck(sts_decks.CharacterDojo),
     "sts_gg.elites_killed": _recipe_for_sts_deck(sts_decks.DeckElitesKilledDojo),
     "sts_gg.floors_cleared": _recipe_for_sts_deck(sts_decks.DeckFloorsClearedDojo),
@@ -378,7 +382,6 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
         sts_decks.DeckTotalDamageTakenDojo
     ),
     "sts_gg.total_turns": _recipe_for_sts_deck(sts_decks.DeckTotalTurnsDojo),
-    "sts_gg.win": _recipe_for_sts_deck(sts_decks.WinDojo),
     "contrastive.gwent": _recipe_for_contrastive(GameId.GWENT),
     "contrastive.flesh_and_blood": _recipe_for_contrastive(GameId.FLESH_AND_BLOOD),
     "contrastive.slay_the_spire_2": _recipe_for_contrastive(GameId.SLAY_THE_SPIRE_2),

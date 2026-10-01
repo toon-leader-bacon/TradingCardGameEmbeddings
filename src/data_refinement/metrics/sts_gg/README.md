@@ -62,6 +62,18 @@ metrics" below for how the two families relate.
 - `BRAINSTORM.md` — candidate metrics not yet built from this raw
   source.
 
+## Wins only
+
+sts.gg's source is its leaderboard, which lists winning runs only:
+all 1,004 rows of `runs.jsonl` have `win: true` and `killedBy: null`
+(checked 2026-10-01). So `WinMetric`, `KilledByMetric`,
+`CardWinRateMetric` and `CardWinRateAtAct2Metric` write a constant
+label here. They are kept (their dojos are reused over
+[`../sts2_runs/`](../sts2_runs/README.md)'s outputs, which come from
+runs with losses), but their sts_gg outputs have no dojo catalog key.
+`KilledByMetric.LABEL_VALUES` is a closed encounter vocabulary taken
+from spire_codex runs, shared with `sts2_runs`.
+
 ## Deck references
 
 sts_gg's raw `"deck"` field only ever lists a run's FINAL deck (each

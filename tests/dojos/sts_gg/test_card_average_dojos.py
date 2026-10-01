@@ -15,6 +15,12 @@ from src.data_refinement.metrics.sts_gg.card_average_metrics import (
     CardTotalTurnsMetric,
     CardWinRateMetric,
 )
+from src.data_refinement.metrics.sts_gg.card_upgrade_rate_metric import (
+    CardUpgradeRateMetric,
+)
+from src.data_refinement.metrics.sts_gg.card_win_rate_at_act2_metric import (
+    CardWinRateAtAct2Metric,
+)
 from src.dojos.generic.data_constructors import CardAverageDataConstructor
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
 from src.dojos.sts_gg.card_average_dojos import (
@@ -26,6 +32,8 @@ from src.dojos.sts_gg.card_average_dojos import (
     CardTotalCombatsDojo,
     CardTotalDamageTakenDojo,
     CardTotalTurnsDojo,
+    CardUpgradeRateDojo,
+    CardWinRateAtAct2Dojo,
     CardWinRateDojo,
 )
 from src.schema.holdout import HoldoutSpec
@@ -43,6 +51,8 @@ _CASES = [
     (CardFloorsClearedDojo, CardFloorsClearedMetric),
     (CardTotalCombatsDojo, CardTotalCombatsMetric),
     (CardWinRateDojo, CardWinRateMetric),
+    (CardUpgradeRateDojo, CardUpgradeRateMetric),
+    (CardWinRateAtAct2Dojo, CardWinRateAtAct2Metric),
 ]
 
 

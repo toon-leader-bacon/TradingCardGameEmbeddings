@@ -217,12 +217,13 @@ a median of ~200 tokens and FaB to ~570.
   3. Much later, as experiments: learned per-dojo weights (uncertainty
      weighting, Kendall et al. 2018) and learning-progress task selection
      (Graves et al. 2017).
-- [ ] **sts_gg.card_win_rate has a constant label.** Every row of
-  `data/metrics/sts_gg/card_win_rate.parquet` is 1.0 (546 cards), so the
-  dojo now refuses to build (a constant regression label cannot be
-  z-scored) and a config naming it fails at build time. Find out why the
-  metric sees only wins (the sts_gg source may only list winning runs) and
-  fix or drop the metric.
+- [x] **sts_gg.card_win_rate has a constant label.** Every row of
+  `data/metrics/sts_gg/card_win_rate.parquet` is 1.0 (546 cards). Cause
+  (2026-10-01): sts.gg's source is its leaderboard, which lists winning
+  runs only (all 1,004 raw runs have `win: true`, `killedBy: null`). So
+  `sts_gg.card_win_rate` and `sts_gg.win` left the catalog (code kept),
+  and the win-based labels come from the `sts2_runs.*` keys instead
+  (spire_codex + sts2runs runs, which include losses).
 - [ ] **Handle outlier regression labels.** z-scoring rescales labels but
   does not tame heavy tails. isotropic.kingdom_game_length has mean 19.8
   turns and std 6.4, but a max of 323 (about 47 std out). Under MSE that

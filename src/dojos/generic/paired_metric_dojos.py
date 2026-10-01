@@ -112,7 +112,8 @@ class DeckLabelMetricDojo(MultiCardRegressionDojo):
 
     Subclasses set METRIC to a DeckLabelMetric-shaped class with
     DEFAULT_OUTPUT_PATH and LABEL_COLUMN; each row's deck is looked up
-    in the given DeckBox.
+    in the given DeckBox, which also verifies the metric file's
+    CardBinder version (GenericDojo's requires_deck_box check).
     """
 
     METRIC: ClassVar[LabelColumnMetric]
@@ -147,6 +148,7 @@ class DeckLabelMetricDojo(MultiCardRegressionDojo):
                 deck_box, self.METRIC.LABEL_COLUMN
             ),
             card_embedding_size=card_embedding_size,
+            deck_box=deck_box,
             config=DojoConfig(
                 name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),

@@ -12,6 +12,11 @@ plans/sts_gg_metrics.md. A run with no actIdx == 1 entry in
 hpPerFloor never reached act 2 and contributes nothing to any card's
 tally - not an error, just no snapshot for that run to fold in.
 
+WINS ONLY: sts.gg lists winning runs only (see deck_label_metrics.py's
+module docstring), so every rate this writes for sts_gg is 1.0. The
+same metric over runs with losses is ../sts2_runs/'s
+CardWinRateAtAct2Metric.
+
 CARD RESOLUTION / COPY COUNTING: identical rule and decision to
 card_upgrade_rate_metric.py's module docstring, independently
 duplicated per plans/sts_gg_metrics.md's Explicitly out of scope
@@ -50,6 +55,7 @@ class CardWinRateAtAct2Metric:
     output exists until finalize() runs.
     """
 
+    LABEL_COLUMN: ClassVar[str] = "win_rate"
     DEFAULT_OUTPUT_PATH: ClassVar[Path] = Path(
         "data/metrics/sts_gg/card_win_rate_at_act2.parquet"
     )
@@ -218,7 +224,7 @@ class CardWinRateAtAct2Metric:
         wins = self._win_count.get(card_uuid, 0)
         return {
             "nocab_uuid": str(card_uuid),
-            "win_rate": wins / total,
+            self.LABEL_COLUMN: wins / total,
             "sample_count": total,
         }
 
