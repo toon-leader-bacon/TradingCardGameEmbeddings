@@ -1,8 +1,10 @@
 import contextlib
+import hashlib
 import random
 from pathlib import Path
 from typing import List
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -26,6 +28,51 @@ def _split_file_postfix(split_index: int) -> str:
     """
     names = {0: "train", 1: "test", 2: "validation"}
     return names.get(split_index, f"split_{split_index}")
+
+
+def _group_split_positions(
+    group_values: pd.Series, salt: str, splits: TTVSplits
+) -> np.ndarray:
+    """Which split each row's group lands in, the same for every row of
+    one group.
+
+    Each distinct group value is hashed with salt to a fraction in
+    [0, 1), and the fraction picks the split by cumulative ratio. The
+    split depends only on (salt, value), never on row order or batch,
+    so a group spread across streamed batches still lands in one split.
+
+    Inputs:
+        group_values: one batch's group column (compared by str()).
+        salt: seeds the hash; the same salt reproduces the assignment.
+        splits: the split ratios.
+    Output: np.ndarray[int], one split position per row (0 = first
+        ratio).
+    Side effects: none. Exceptions: none.
+
+    Example:
+        >>> positions = _group_split_positions(
+        ...     pd.Series(["a", "a", "b"]), "7", TTVSplits.from_unnormalized([8, 1, 1])
+        ... )
+        >>> positions[0] == positions[1]
+        True
+    """
+    distinct_values = pd.unique(group_values)
+    fractions = np.array(
+        [
+            int.from_bytes(
+                hashlib.blake2b(f"{salt}:{value}".encode(), digest_size=8).digest(),
+                "big",
+            )
+            / 2**64
+            for value in distinct_values
+        ]
+    )
+    cumulative = np.cumsum(splits.get_percentages())
+    positions = np.minimum(
+        np.searchsorted(cumulative, fractions, side="right"), splits.num_splits - 1
+    )
+    position_of_value = dict(zip(distinct_values, positions))
+    return np.array([position_of_value[value] for value in group_values], dtype=int)
 
 
 class ParquetChunkReader:
@@ -75,6 +122,7 @@ class FileManagerParquet:
         output_directory: Path,
         output_file_prefix: str = "split_",
         seed: int | None = None,
+        split_group_column: str | None = None,
     ) -> None:
         """
         Inputs:
@@ -82,14 +130,21 @@ class FileManagerParquet:
                 parquet output).
             output_directory: directory the split files are written to.
             output_file_prefix: filename prefix for each split file.
-            seed: RNG seed for shuffling; None means non-deterministic.
+            seed: RNG seed for shuffling and the group-split hash; None
+                means non-deterministic.
+            split_group_column: None splits row by row. A column name
+                splits by that column's value instead: every row
+                sharing a value (e.g. one deck_uuid) lands in the same
+                split, so rows about one deck or kingdom never sit in
+                both TRAIN and TEST.
         Output: none (constructor).
         Side effects: opens path_to_training_data as a pyarrow ParquetFile
             to confirm it's actually readable, and caches its schema on
             self._schema for reuse by _stream_source_into_splits.
         Exceptions:
             FileNotFoundError if path_to_training_data doesn't exist.
-            ValueError if it doesn't have a .parquet suffix, or is empty.
+            ValueError if it doesn't have a .parquet suffix, is empty, or
+            split_group_column is not one of its columns.
             Whatever pyarrow.parquet.ParquetFile raises for a corrupt or
             non-parquet file.
         """
@@ -97,6 +152,10 @@ class FileManagerParquet:
         self.rng = random.Random(seed) if seed is not None else random.Random()
         self.output_directory = output_directory
         self.output_file_prefix = output_file_prefix
+        self._split_group_column = split_group_column
+        # From seed directly, not self.rng, so row-by-row shuffles stay
+        # exactly what they were before group splits existed.
+        self._group_salt = str(seed) if seed is not None else str(random.random())
 
         if not self.path_to_training_data.exists():
             raise FileNotFoundError(
@@ -114,6 +173,14 @@ class FileManagerParquet:
             )
 
         self._schema = pq.ParquetFile(self.path_to_training_data).schema_arrow
+        if (
+            split_group_column is not None
+            and split_group_column not in self._schema.names
+        ):
+            raise ValueError(
+                f"split_group_column {split_group_column!r} is not a column of "
+                f"{self.path_to_training_data} (columns: {self._schema.names})"
+            )
 
     @property
     def schema(self) -> pa.Schema:
@@ -354,12 +421,9 @@ class FileManagerParquet:
                 random_state=self.rng.randint(0, MAX_INT),
             ).reset_index(drop=True)
 
-        for i, (start_index, end_index) in enumerate(
-            splits.get_split_indices(len(batch))
-        ):
-            if start_index == end_index:
+        for i, slice_df in enumerate(self._split_slices(batch, splits)):
+            if slice_df.empty:
                 continue
-            slice_df = batch.iloc[start_index:end_index]
             writers[i].write_table(
                 pa.Table.from_pandas(
                     slice_df,
@@ -367,3 +431,25 @@ class FileManagerParquet:
                     preserve_index=False,
                 )
             )
+
+    def _split_slices(
+        self, batch: pd.DataFrame, splits: TTVSplits
+    ) -> List[pd.DataFrame]:
+        """One batch cut into its per-split rows.
+
+        Inputs: batch (already shuffled if requested), splits.
+        Output: one DataFrame per split, in split order (possibly
+            empty). Row by row: contiguous slices by ratio. With a
+            split group column: each row goes where its group hashes
+            (_group_split_positions).
+        Side effects: none. Exceptions: none.
+        """
+        if self._split_group_column is None:
+            return [
+                batch.iloc[start_index:end_index]
+                for start_index, end_index in splits.get_split_indices(len(batch))
+            ]
+        positions = _group_split_positions(
+            batch[self._split_group_column], self._group_salt, splits
+        )
+        return [batch[positions == i] for i in range(splits.num_splits)]

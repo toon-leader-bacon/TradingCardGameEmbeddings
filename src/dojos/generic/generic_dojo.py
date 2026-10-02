@@ -93,6 +93,8 @@ class GenericDojo:
                 existing files are reused untouched.
               - _check_metric_version's strictness is
                 config.strict_version_check.
+              - config.split_group_column goes to FileManagerParquet
+                unchanged (None splits row by row).
     Output: n/a.
     Side effects: reads a strided sample of the TRAIN split (at most
         _CALIBRATION_SAMPLE_CAP rows, unmodded) through data_constructor
@@ -136,6 +138,7 @@ class GenericDojo:
             output_directory=config.output_directory,
             output_file_prefix=config.output_file_prefix or self.name,
             seed=self.rng.randint(0, MAX_INT),
+            split_group_column=config.split_group_column,
         )
         self._check_metric_version(
             path_to_training_data, card_lookup, deck_box, config.strict_version_check

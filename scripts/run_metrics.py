@@ -631,26 +631,6 @@ def run_hearthstonejson(raw_path: Path | None) -> None:
 # --- play_gwent ---
 
 
-def run_play_gwent(raw_path: Path | None) -> None:
-    effective_raw_path = raw_path or PLAY_GWENT_DEFAULT_RAW_PATH
-    binder = _require_binder(
-        GameId.GWENT,
-        "run 'python3 scripts/run_card_binder_ingestion.py --source gwent_one' first.",
-    )
-    box_path = DeckBox.default_output_path(GameId.GWENT)
-    deck_box = DeckBox.load([box_path] if box_path.exists() else [])  # warm start
-
-    metrics: list[Metric[dict]] = [LeaderMaskedFromDeckMetric(binder, deck_box)]
-
-    print(f"=== play_gwent: {effective_raw_path} ===")
-    scan_guides_jsonl(effective_raw_path, metrics)
-    deck_box.save(box_path, GameId.GWENT, binder.version_for(GameId.GWENT))
-    print(f"wrote {len(metrics)} metric outputs")
-
-
-# --- fabtcg_decklists ---
-
-
 def _require_published_deck_box(game: GameId) -> DeckBox:
     """The published deck box for game, for metrics that only read it.
 
@@ -662,6 +642,26 @@ def _require_published_deck_box(game: GameId) -> DeckBox:
     if not box_path.exists():
         raise SystemExit(f"{box_path} does not exist; run deck box ingestion first.")
     return DeckBox.load([box_path])
+
+
+def run_play_gwent(raw_path: Path | None) -> None:
+    """Leader masked from deck over guides.jsonl. Reads the published
+    Gwent box and never writes or saves it (run deck box ingestion for
+    play_gwent first)."""
+    effective_raw_path = raw_path or PLAY_GWENT_DEFAULT_RAW_PATH
+    binder = _require_binder(
+        GameId.GWENT,
+        "run 'python3 scripts/run_card_binder_ingestion.py --source gwent_one' first.",
+    )
+    deck_box = _require_published_deck_box(GameId.GWENT)
+    metrics: list[Metric[dict]] = [LeaderMaskedFromDeckMetric(binder, deck_box)]
+
+    print(f"=== play_gwent: {effective_raw_path} ===")
+    scan_guides_jsonl(effective_raw_path, metrics)
+    print(f"wrote {len(metrics)} metric outputs")
+
+
+# --- fabtcg_decklists ---
 
 
 def run_fabtcg_decklists(raw_path: Path | None) -> None:
@@ -686,10 +686,9 @@ def run_fabtcg_decklists(raw_path: Path | None) -> None:
 
 
 def run_play_gwent_guides(raw_path: Path | None) -> None:
-    """Card inclusion rates and guide votes over guides.jsonl. Unlike
-    run_play_gwent (whose leader metric writes decks and which saves the
-    published Gwent box), this reads the published box and never writes
-    or saves it."""
+    """Card inclusion rates and guide votes over guides.jsonl. Like
+    run_play_gwent, this reads the published box and never writes or
+    saves it."""
     effective_raw_path = raw_path or PLAY_GWENT_DEFAULT_RAW_PATH
     binder = _require_binder(
         GameId.GWENT,

@@ -8,11 +8,14 @@ Found while writing the isotropic dojos (2026-09-30).
 - [x] **kingdom_game_length has a heavy tail.** Fixed 2026-10-01: solo games
   and games with a resignation are skipped (the under-5-turn labels were
   resignation wins); KingdomGameLengthDojo also clips labels at 50.
-- [ ] **One row per (kingdom, card) leaks across splits.**
+- [x] **One row per (kingdom, card) leaks across splits.**
   winning_deck_membership, winning_deck_count and
   kingdom_ending_pile_prediction write one row per (kingdom, card), so a
-  row-level split puts the same kingdom in both TRAIN and TEST. Emit one
-  row per kingdom with a label vector instead.
+  row-level split puts the same kingdom in both TRAIN and TEST. Fixed
+  2026-10-02 at split time, not by reshaping the metrics: their dojos
+  split by `kingdom_uuid` (`DojoConfig.split_group_column`), and
+  deck_card_set_copy_count's (one row per (deck, card)) by
+  `deck_set_uuid`. The old split files were deleted.
 - [ ] **WinningDeckMaskedCardMetric.LABEL_VALUES is too wide.** It lists
   807 names, but only 162 ever appear as labels. Restrict it to the names
   that occur.

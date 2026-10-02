@@ -102,7 +102,14 @@ _PICK_CASES = [
 def _build(dojo_cls, tmp_path: Path, world=None):
     world = world or group_world()
     source = tmp_path / "isotropic_source.parquet"
-    pd.DataFrame({"x": [_PLACEHOLDER] * 10}).to_parquet(source, index=False)
+    pd.DataFrame(
+        {
+            "x": [_PLACEHOLDER] * 10,
+            # The split-group columns some of these dojos group by.
+            "kingdom_uuid": [f"kingdom{i % 3}" for i in range(10)],
+            "deck_set_uuid": [f"deck{i % 3}" for i in range(10)],
+        }
+    ).to_parquet(source, index=False)
     return dojo_cls(
         world.binder,
         HoldoutSpec.no_holdout(),
@@ -126,6 +133,20 @@ class TestGroupLabelDojos:
         if cell is MultiGroupBinaryClassificationDojo:
             mods = dojo.data_mod_pipeline.mods
             assert any(isinstance(mod, GroupSwapMod) for mod in mods) == symmetric
+
+    def test_per_kingdom_and_per_deck_rows_split_by_group(self) -> None:
+        grouped = {
+            dojo_cls: dojo_cls.SPLIT_GROUP_COLUMN
+            for dojo_cls, *_ in _LABEL_CASES
+            if dojo_cls.SPLIT_GROUP_COLUMN is not None
+        }
+
+        assert grouped == {
+            label_dojos.WinningDeckMembershipDojo: "kingdom_uuid",
+            label_dojos.KingdomEndingPileDojo: "kingdom_uuid",
+            label_dojos.WinningDeckCountDojo: "kingdom_uuid",
+            label_dojos.DeckCardSetCopyCountDojo: "deck_set_uuid",
+        }
 
     def test_deck_pair_winner_reads_the_metrics_columns(self, tmp_path: Path) -> None:
         world = group_world()

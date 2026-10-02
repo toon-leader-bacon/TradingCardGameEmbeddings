@@ -129,5 +129,8 @@ not decks).
   old version then fails the dojos' strict version check. This hit Dominion
   on 2026-09-30, and the metrics had to be re-run.
 
-  Fix: seed the sentinel in `run_card_binder_ingestion.py` instead, so the
-  binder version is final before any metric or deck box is built.
+  Fixed 2026-10-02: `build_or_update_card_binder()` now seeds the sentinel,
+  so the binder version is final before any metric or deck box is built.
+  The binders on disk already carry it for every deck-box game;
+  Hearthstone gets it on its next ingestion (a one-time version change,
+  which invalidates its 8 mask metrics once).

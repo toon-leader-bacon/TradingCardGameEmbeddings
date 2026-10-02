@@ -1,7 +1,7 @@
 """Drives one ingestion run: load, ingest, save.
 
-See src/data_refinement/README.md for this container's scope and
-plans/card_binder_v2.md for the design this implements. Still a plain
+See src/data_refinement/card_binder/README.md for the design this
+implements. Still a plain
 function, not an orchestrator class (matches the "thin runnable
 snippet" pattern src/data_retrieval/README.md's own examples use).
 
@@ -36,8 +36,14 @@ def build_or_update_card_binder(
         2. ingestion_stage.ingest(raw_path, binder) — creates/updates
            cards and registers aliases directly on binder, as a side
            effect, under ingestion_stage.SOURCE_GAME.
-        3. binder.save(binder_path, ingestion_stage.SOURCE_GAME).
-        4. Return the list[UUID] ingest() itself returned, unchanged.
+        3. binder.ensure_unknown_card(ingestion_stage.SOURCE_GAME): seed
+           the game's Unknown sentinel here, so the binder version is
+           final before any deck box or metric is built from it. Deck
+           ingestion seeding it later would change the version and
+           invalidate every metric already built.
+        4. binder.save(binder_path, ingestion_stage.SOURCE_GAME).
+        5. Return the list[UUID] ingest() itself returned, unchanged
+           (the sentinel is never in it).
 
     Inputs:
         raw_path: path to a raw source file (format depends on
@@ -74,6 +80,9 @@ def build_or_update_card_binder(
     # effect against binder — nothing left for this function to loop
     # over or tally.
     changed_uuids = ingestion_stage.ingest(raw_path, binder)
+
+    # Idempotent; only changes the binder the first time for this game.
+    binder.ensure_unknown_card(ingestion_stage.SOURCE_GAME)
 
     # Persist the updated binder back under the stage's own game.
     binder.save(binder_path, ingestion_stage.SOURCE_GAME)

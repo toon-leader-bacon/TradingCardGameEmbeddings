@@ -3,7 +3,7 @@
 - [ ] **Make the 17lands outputs consumable by dojos** (2026-09-30).
   A partial run exists: game_data for 76 set/format directories; draft and
   replay only one shakeout file each. See
-  `plans/seventeenlands_metrics_run.md`.
+  `plans/archive/seventeenlands_metrics_run.md`.
   - Outputs are written per raw file, at
     `data/metrics/seventeenlands/<family>/<SET>/<Format>/<stem>.parquet`.
     But each dojo reads its metric's single DEFAULT_OUTPUT_PATH, which
@@ -18,8 +18,10 @@
   - Alternative: one catalog key per set and format (hundreds of keys).
 - [ ] **Cache `CardBinder.version_for`.** It takes about 3 s and every
   17lands metric constructor calls it, once per CSV.
-- [ ] **Unwrap or re-download the 19 tar-wrapped 17lands "CSV" files**
-  (AFR, KHM, MID, STX, VOW; listed in `plans/seventeenlands_metrics_run.md`).
+- [x] **Unwrap or re-download the 19 tar-wrapped 17lands "CSV" files**
+  (AFR, KHM, MID, STX, VOW; listed in `plans/archive/seventeenlands_metrics_run.md`).
+  Done by the 2026-10-02 re-download: none of the 303 raw CSVs is a tar
+  archive now.
 - [ ] **A vectorized 17lands scanner.** Even after the 1.7x speedup,
   PremierDraft across the three families would take about 50 h.
 
@@ -97,13 +99,13 @@
   off real code; pull it into one base only where key shapes truly
   match.
 
-- [ ] **`run_metrics.py --source play_gwent` (and `--all`) rewrites the
+- [x] **`run_metrics.py --source play_gwent` (and `--all`) rewrites the
   published `data/final/decks/gwent.db`** (found 2026-10-01). `run_play_gwent`
   opens the published box, `LeaderMaskedFromDeckMetric` writes decks into it,
   and the run calls `save()` on it. A re-run makes every metric keyed to
-  that box stale (e.g. `final_decks/held_out_card_gwent.parquet`). Fix: give
-  the leader metric a metric-private box (as isotropic and sts_gg do), or
-  open the published box read-only. Until then, don't run that family.
+  that box stale (e.g. `final_decks/held_out_card_gwent.parquet`). Fixed
+  2026-10-02: the leader metric looks each guide's deck up in the published
+  box and never writes it, and `run_play_gwent` no longer saves the box.
 - [ ] **FaB deck box keys cards by name.** A name printed in several pitches
   maps to one arbitrary printing, so FaB inclusion rates are per name.
 - [ ] **Move `RenamedColumnDataConstructor`** from `dojos/isotropic/` to
@@ -118,8 +120,9 @@
   target, upgrade target, rest-site choice. Needs the deck at each floor
   rebuilt from `cards_gained`/`cards_removed`. Design note in
   `sts2_runs/README.md`.
-- [ ] **held_out_card rows can share a deck across splits.** Dojo splits
+- [x] **held_out_card rows can share a deck across splits.** Dojo splits
   are by row, and Pokemon, FaB and Gwent take several targets per deck,
   so one deck can appear in TRAIN and TEST with different held-out cards
-  (the big boxes take one target per deck and are unaffected). Split by
-  deck uuid instead, or take one target per deck everywhere.
+  (the big boxes take one target per deck and are unaffected). Fixed
+  2026-10-02: every held-out-card dojo splits by `deck_uuid`
+  (`DojoConfig.split_group_column`); the old split files were deleted.

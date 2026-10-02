@@ -16,8 +16,7 @@ documentation only, no methods, no resolution logic. Every field here
 can legitimately be None/left at its default, meaning "caller didn't
 set this" - GenericDojo.__init__ is the ONLY place that decides what a
 None value falls back to (see its own docstring), so that logic never
-has to be duplicated here or in any subclass. See plans/dojo_config.md
-for the full design writeup.
+has to be duplicated here or in any subclass.
 """
 
 from __future__ import annotations
@@ -102,11 +101,19 @@ class DojoConfig:
     # deliberately rebuilding the same dojo's splits more than once to
     # compare configurations), but costs nothing to support.
     rng_seed: int | None = None
+
+    # None (default): rows are split one by one. A column name: rows
+    # are split by that column's value, so every row sharing it (one
+    # deck_uuid, one kingdom_uuid) lands in the same split. Set it on a
+    # dojo whose metric writes several rows per deck or kingdom, or
+    # that deck or kingdom leaks from TRAIN into TEST. Changing it
+    # needs force_resplit (or deleting the old split files).
+    split_group_column: str | None = None
     # endregion
 
     # region Version checking
-    # See plans/card_binder_versioning.md for the full mechanism:
-    # path_to_training_data's embedded CardBinder (and, when relevant,
+    # See src/data_refinement/metrics/version_metadata.py for the
+    # mechanism: path_to_training_data's embedded CardBinder (and, when relevant,
     # DeckBox) version is checked against the live card_lookup/deck_box
     # given to this dojo, before splitting.
 

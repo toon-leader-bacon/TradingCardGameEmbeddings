@@ -17,10 +17,10 @@ Regression (MultiGroupRegressionDojo):
 - DeckCardSetCopyCountDojo: [[card], a deck's distinct card set] -> that
   card's copies in the deck.
 
-KNOWN LEAK: the [[card], kingdom] metrics write one row per (kingdom,
-card), so a row-level split puts one kingdom's other rows in TRAIN while
-one is in TEST (metrics/isotropic/summary/TODO.md). Fixing it needs one
-row per kingdom with a label vector and a per-option cell.
+The [[card], kingdom] metrics write one row per (kingdom, card), and
+DeckCardSetCopyCount one per (deck, card). Those dojos set
+SPLIT_GROUP_COLUMN, so all of one kingdom's (or deck's) rows land in one
+split instead of leaking across TRAIN and TEST.
 """
 
 from abc import abstractmethod
@@ -80,6 +80,9 @@ class IsotropicGroupBinaryDojo(MultiGroupBinaryClassificationDojo):
     OUTPUT_PATH: ClassVar[Path]
     LABEL_COLUMN: ClassVar[str]
     SYMMETRIC_PAIR: ClassVar[bool] = False
+    # Split by this column's value (see DojoConfig.split_group_column);
+    # None splits row by row.
+    SPLIT_GROUP_COLUMN: ClassVar[str | None] = None
 
     def __init__(
         self,
@@ -128,7 +131,10 @@ class IsotropicGroupBinaryDojo(MultiGroupBinaryClassificationDojo):
             mod_pipeline=ModPipeline(swap),
             deck_box=deck_box,
             config=DojoConfig(
-                name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
+                name=name,
+                rng_seed=rng_seed,
+                strict_version_check=strict_version_check,
+                split_group_column=self.SPLIT_GROUP_COLUMN,
             ),
         )
 
@@ -146,6 +152,8 @@ class IsotropicGroupRegressionDojo(MultiGroupRegressionDojo):
 
     OUTPUT_PATH: ClassVar[Path]
     LABEL_COLUMN: ClassVar[str]
+    # As IsotropicGroupBinaryDojo.SPLIT_GROUP_COLUMN.
+    SPLIT_GROUP_COLUMN: ClassVar[str | None] = None
 
     def __init__(
         self,
@@ -178,7 +186,10 @@ class IsotropicGroupRegressionDojo(MultiGroupRegressionDojo):
             card_embedding_size=card_embedding_size,
             deck_box=deck_box,
             config=DojoConfig(
-                name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
+                name=name,
+                rng_seed=rng_seed,
+                strict_version_check=strict_version_check,
+                split_group_column=self.SPLIT_GROUP_COLUMN,
             ),
         )
 
@@ -274,6 +285,7 @@ class WinningDeckMembershipDojo(IsotropicGroupBinaryDojo):
 
     OUTPUT_PATH = WinningDeckMembershipMetric.DEFAULT_OUTPUT_PATH
     LABEL_COLUMN = WinningDeckMembershipMetric.LABEL_COLUMN
+    SPLIT_GROUP_COLUMN = _KINGDOM_UUID_COLUMN
 
     @classmethod
     def card_groups(cls, deck_box: DeckBox) -> tuple[CardGroup, CardGroup]:
@@ -287,6 +299,7 @@ class KingdomEndingPileDojo(IsotropicGroupBinaryDojo):
 
     OUTPUT_PATH = KingdomEndingPilePredictionMetric.DEFAULT_OUTPUT_PATH
     LABEL_COLUMN = "exhausted"
+    SPLIT_GROUP_COLUMN = _KINGDOM_UUID_COLUMN
 
     @classmethod
     def card_groups(cls, deck_box: DeckBox) -> tuple[CardGroup, CardGroup]:
@@ -300,6 +313,7 @@ class WinningDeckCountDojo(IsotropicGroupRegressionDojo):
 
     OUTPUT_PATH = WinningDeckCountMetric.DEFAULT_OUTPUT_PATH
     LABEL_COLUMN = WinningDeckCountMetric.LABEL_COLUMN
+    SPLIT_GROUP_COLUMN = _KINGDOM_UUID_COLUMN
 
     @classmethod
     def card_groups(cls, deck_box: DeckBox) -> tuple[CardGroup, CardGroup]:
@@ -313,6 +327,7 @@ class DeckCardSetCopyCountDojo(IsotropicGroupRegressionDojo):
 
     OUTPUT_PATH = DeckCardSetCopyCountMetric.DEFAULT_OUTPUT_PATH
     LABEL_COLUMN = "count"
+    SPLIT_GROUP_COLUMN = "deck_set_uuid"
 
     @classmethod
     def card_groups(cls, deck_box: DeckBox) -> tuple[CardGroup, CardGroup]:

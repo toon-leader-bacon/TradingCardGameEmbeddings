@@ -260,3 +260,72 @@ class TestShuffleSplit:
         assert len(train) == 80
         assert len(test) == 10
         assert len(validation) == 10
+
+
+def _write_grouped_source(path: Path, num_groups: int, rows_per_group: int) -> None:
+    df = pd.DataFrame(
+        {
+            "deck_uuid": [
+                f"deck{group}"
+                for group in range(num_groups)
+                for _ in range(rows_per_group)
+            ],
+            "value": range(num_groups * rows_per_group),
+        }
+    )
+    df.to_parquet(path, index=False)
+
+
+class TestGroupSplits:
+    def test_every_group_lands_in_exactly_one_split(self, tmp_path: Path) -> None:
+        source = tmp_path / "source.parquet"
+        _write_grouped_source(source, num_groups=200, rows_per_group=5)
+
+        fm = FileManagerParquet(
+            source, tmp_path / "out", seed=3, split_group_column="deck_uuid"
+        )
+        # Small streaming batches, so one group spans several batches.
+        readers = fm.make_splits(
+            split_ratios=[8, 1, 1], batch_size=16, load_row_group_batch_size=7
+        )
+
+        groups_per_split = [set(_read_all(reader)["deck_uuid"]) for reader in readers]
+        assert groups_per_split[0].isdisjoint(groups_per_split[1])
+        assert groups_per_split[0].isdisjoint(groups_per_split[2])
+        assert groups_per_split[1].isdisjoint(groups_per_split[2])
+        assert sum(len(groups) for groups in groups_per_split) == 200
+
+    def test_no_rows_lost_and_ratios_roughly_kept(self, tmp_path: Path) -> None:
+        source = tmp_path / "source.parquet"
+        _write_grouped_source(source, num_groups=2000, rows_per_group=2)
+
+        fm = FileManagerParquet(
+            source, tmp_path / "out", seed=0, split_group_column="deck_uuid"
+        )
+        readers = fm.make_splits(split_ratios=[8, 1, 1])
+
+        row_counts = [len(_read_all(reader)) for reader in readers]
+        assert sum(row_counts) == 4000
+        assert 2900 < row_counts[0] < 3500
+        assert 250 < row_counts[1] < 550
+        assert 250 < row_counts[2] < 550
+
+    def test_same_seed_gives_same_assignment(self, tmp_path: Path) -> None:
+        source = tmp_path / "source.parquet"
+        _write_grouped_source(source, num_groups=100, rows_per_group=3)
+
+        def train_groups(output_name: str) -> set[str]:
+            fm = FileManagerParquet(
+                source, tmp_path / output_name, seed=11, split_group_column="deck_uuid"
+            )
+            readers = fm.make_splits(split_ratios=[8, 1, 1])
+            return set(_read_all(readers[0])["deck_uuid"])
+
+        assert train_groups("first") == train_groups("second")
+
+    def test_raises_on_unknown_group_column(self, tmp_path: Path) -> None:
+        source = tmp_path / "source.parquet"
+        _write_source(source, num_rows=10)
+
+        with pytest.raises(ValueError, match="split_group_column"):
+            FileManagerParquet(source, tmp_path / "out", split_group_column="nope")

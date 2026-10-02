@@ -29,10 +29,9 @@ outputs, an input-ignoring "pick the most frequent candidate" predictor
 scores 0.14 (Gwent), 0.16 (FaB) and 0.17 (Pokemon) against a chance
 level of 0.125.
 
-With more than one target per deck (Pokemon, FaB, Gwent), one deck can
-appear in TRAIN and TEST rows with different targets, since dojo splits
-are by row. The big boxes take one target per deck, so this doesn't
-happen there.
+Pokemon, FaB and Gwent take more than one target per deck, so their
+dojos split by `deck_uuid` rather than by row: all of a deck's rows land
+in one split, and a deck never shows up in both TRAIN and TEST.
 
 Dojos: `src/dojos/final_decks/held_out_card_dojos.py`, catalog keys
 `final_decks.held_out_card_<game>`.

@@ -8,9 +8,10 @@ card_lookup): see src/data_refinement/deck_box/README.md's "How to
 run" section for the same recipe this script turns into runnable
 subcommands. Every stage also REQUIRES its game's CardBinder to
 already carry the "Unknown" sentinel card (see card_binder/README.md's
-"The Unknown sentinel card" section) before extract() runs — this
-script seeds it (idempotent, cheap to redo) rather than leaving that as
-a separate manual step. Run scripts/run_card_binder_ingestion.py for a
+"The Unknown sentinel card" section) before extract() runs. Card
+binder ingestion seeds it; this script seeds it again (idempotent, a
+no-op on any binder built since that change) only for binders ingested
+before it. Run scripts/run_card_binder_ingestion.py for a
 game before running this script against a source of that game.
 
 Usage (from the project root):
@@ -121,9 +122,9 @@ def run_one(name: str, raw_path: Path | None) -> None:
 
     binder = CardBinder.load([binder_path])
     # Bootstrap precondition every DeckExtractionStage requires — see
-    # module docstring. Idempotent, so always safe to redo; only
-    # actually changes binder_path's content the first time it's seeded
-    # for this game.
+    # module docstring. Card binder ingestion already seeds it, so this
+    # only changes binder_path (and its version) for a binder ingested
+    # before that change.
     binder.ensure_unknown_card(stage.SOURCE_GAME)
     binder.save(binder_path, stage.SOURCE_GAME)
 
