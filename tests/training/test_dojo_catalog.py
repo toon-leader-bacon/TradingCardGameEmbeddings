@@ -71,6 +71,7 @@ from src.training.dojo_catalog import (
     DeckDojoRecipe,
     DojoBuildContext,
     _augmentation_pipeline,
+    _staple_subsampling,
     _with_augmentations,
     build_dojos,
 )
@@ -525,3 +526,35 @@ class TestMetricDojoAugmentations:
         dojo = _stub_dojo("x.y")
         _with_augmentations(dojo, "x.y", GameId.YUGIOH, self._context())
         assert dojo.data_mod_pipeline.mods == []
+
+
+class TestStapleThresholds:
+    def _context(self, thresholds: dict) -> DojoBuildContext:
+        return DojoBuildContext(
+            shelf=_RecordingShelf(),
+            holdout=HoldoutSpec.no_holdout(),
+            card_embedding_size=32,
+            rng_seed=0,
+            staple_thresholds=thresholds,
+        )
+
+    @pytest.mark.parametrize(
+        ("names", "threshold_name"),
+        [
+            (["gwent_one.color_mask"], "gwent_one.color_mask"),
+            (["contrastive.gwent"], "contrastive.dominion"),
+        ],
+    )
+    def test_a_threshold_needs_a_contrastive_dojo_being_built(
+        self, names: list[str], threshold_name: str
+    ) -> None:
+        context = self._context({threshold_name: 0.1})
+        with pytest.raises(ValueError, match="not contrastive dojos being built"):
+            build_dojos(names, context)
+        assert context.shelf.requested_games == []  # type: ignore[attr-defined]
+
+    def test_no_threshold_means_no_subsampling(self) -> None:
+        dealer: Any = object()  # never read without a threshold
+        assert (
+            _staple_subsampling("contrastive.gwent", dealer, self._context({})) is None
+        )

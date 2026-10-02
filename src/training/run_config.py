@@ -114,6 +114,11 @@ class RunConfig:
         game defaults (empty tuple: no augmentation); a metric dojo's own
         task mods stay and run first. Checked here to name run dojos;
         build_dojos checks deck specs against dojo_catalog.DECK_MOD_GROUPS.
+    staple_thresholds: per run dojo, the staple-subsampling t (finite, > 0)
+        of a contrastive dojo (see src/dojos/contrastive/
+        staple_subsampling.py); a dojo not named keeps t = inf (no
+        subsampling). Checked here to name run dojos; build_dojos checks
+        each is contrastive.
     """
 
     run_directory: Path
@@ -123,6 +128,7 @@ class RunConfig:
     plan: TrainingPlan
     limits: HardwareLimits
     mod_overrides: Mapping[str, tuple[ModSpec, ...]] = field(default_factory=dict)
+    staple_thresholds: Mapping[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # No duplicate dojos (the Trainer keys dojos by name and would
@@ -143,6 +149,11 @@ class RunConfig:
         unknown_overrides = sorted(set(self.mod_overrides) - known)
         if unknown_overrides:
             raise ValueError(f"mods names {unknown_overrides}, not in dojos")
+        unknown_thresholds = sorted(set(self.staple_thresholds) - known)
+        if unknown_thresholds:
+            raise ValueError(
+                f"staple_subsampling names {unknown_thresholds}, not in dojos"
+            )
 
 
 def read_config_document(path: Path) -> ConfigDocument:
@@ -199,7 +210,8 @@ def parse_run_config(document: ConfigDocument) -> RunConfig:
     Expected top-level keys: run_directory, device, seed, model, dojos,
     held_out_dojos (optional), holdout, hardware, eval_examples_per_dojo,
     phases, faults (optional), mods (optional: dojo name -> list of mod
-    entries, see _parse_mod_spec). A phase without a "dojos" key trains every
+    entries, see _parse_mod_spec), staple_subsampling (optional: dojo name
+    -> t, see _parse_staple_thresholds). A phase without a "dojos" key trains every
     run dojo that is not held out.
 
     Inputs: document (ConfigDocument).
@@ -245,6 +257,9 @@ def parse_run_config(document: ConfigDocument) -> RunConfig:
     model = _parse_model(top.required_section("model"))
     limits = _build_flat_dataclass(HardwareLimits, top.required_section("hardware"))
     mod_overrides = _parse_mod_overrides(top.optional_section("mods"))
+    staple_thresholds = _parse_staple_thresholds(
+        top.optional_section("staple_subsampling")
+    )
     top.reject_unread_keys()
     result = _construct_at(
         "config",
@@ -256,6 +271,7 @@ def parse_run_config(document: ConfigDocument) -> RunConfig:
             plan=plan,
             limits=limits,
             mod_overrides=mod_overrides,
+            staple_thresholds=staple_thresholds,
         ),
     )
     return result
@@ -567,6 +583,28 @@ def _parse_mod_overrides(section: ConfigSection) -> dict[str, tuple[ModSpec, ...
         result[name] = tuple(
             _parse_mod_spec(entry) for entry in section.required_section_list(name)
         )
+    section.reject_unread_keys()
+    return result
+
+
+def _parse_staple_thresholds(section: ConfigSection) -> dict[str, float]:
+    """The `staple_subsampling:` section: contrastive dojo name -> t, the
+    staple-subsampling threshold (each card kept with probability
+    min(1, sqrt(t / df))). Leave a dojo out for t = inf (no subsampling).
+
+        staple_subsampling:
+          contrastive.dominion: 0.1
+
+    Inputs: section ("staple_subsampling", possibly empty). Output: dict.
+    Side effects: none.
+    Exceptions: ValueError for a value that is not a finite number > 0.
+    """
+    result: dict[str, float] = {}
+    for name in section.keys():
+        threshold = section.required(name, float)
+        if threshold <= 0:
+            raise ValueError(f"{section.location_of(name)} must be > 0")
+        result[name] = threshold
     section.reject_unread_keys()
     return result
 

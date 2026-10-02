@@ -39,6 +39,10 @@ from src.data_refinement.metrics.sts_gg.deck_box_path import STS_GG_DECK_BOX_PAT
 from src.dojos.augmentation_defaults import default_augmentations_for
 from src.dojos.contrastive.dojo import ContrastiveDojo
 from src.dojos.contrastive.pair_constructor import SingleCardPairConstructor
+from src.dojos.contrastive.staple_subsampling import (
+    StapleSubsampling,
+    cached_document_frequency,
+)
 from src.dojos.dojo import Dojo
 from src.dojos.file_managers.deck_box_dealer import DeckBoxDealer
 from src.dojos.final_decks import held_out_card_dojos as final_decks
@@ -66,6 +70,9 @@ from src.schema.holdout import HoldoutSpec
 
 # Contrastive dojos keep their deck split index here (see DeckBoxDealer)
 _CONTRASTIVE_INDEX_DIRECTORY = Path("data/splits/contrastive")
+
+# TRAIN decks a staple-subsampling document frequency is counted over
+_DOCUMENT_FREQUENCY_SAMPLE_DECKS = 20_000
 
 
 class CardDojoConstructor(Protocol):
@@ -164,6 +171,10 @@ class DojoBuildContext:
     augmentation specs replacing that dojo's game defaults (an empty tuple
     means no augmentation); build_dojos rejects a name that is not built,
     and a deck spec on a dojo or group DECK_MOD_GROUPS does not allow.
+    staple_thresholds: per contrastive dojo name, its staple-subsampling t
+    (src/dojos/contrastive/staple_subsampling.py); a dojo not named keeps
+    t = inf (no subsampling). build_dojos rejects a name that is not a
+    contrastive dojo being built.
     """
 
     shelf: CardShelf
@@ -171,6 +182,7 @@ class DojoBuildContext:
     card_embedding_size: int
     rng_seed: int
     mod_overrides: Mapping[str, tuple[ModSpec, ...]] = field(default_factory=dict)
+    staple_thresholds: Mapping[str, float] = field(default_factory=dict)
 
 
 class DojoRecipe(Protocol):
@@ -249,7 +261,9 @@ class ContrastiveDojoRecipe:
         """See DojoRecipe.build. The dealer keeps its split index at
         data/splits/contrastive/<name>.db (seeded by context.rng_seed);
         mods come from context.mod_overrides[name] if present, else the
-        game's defaults, each built with its own seed."""
+        game's defaults, each built with its own seed. A
+        context.staple_thresholds[name] turns on staple subsampling, its
+        document frequency cached beside the split index."""
         binder = context.shelf.card_binder(self.game)
         dealer = DeckBoxDealer(
             context.shelf.deck_box(self.deck_box_path),
@@ -257,9 +271,14 @@ class ContrastiveDojoRecipe:
             _contrastive_index_path(name),
             seed=context.rng_seed,
         )
+        pair_constructor = SingleCardPairConstructor(
+            self.items_per_deck,
+            rng_seed=context.rng_seed,
+            staple_subsampling=_staple_subsampling(name, dealer, context),
+        )
         return ContrastiveDojo(
             dealer,
-            SingleCardPairConstructor(self.items_per_deck, rng_seed=context.rng_seed),
+            pair_constructor,
             binder,
             context.holdout,
             decks_per_sample=self.decks_per_sample,
@@ -272,6 +291,30 @@ def _contrastive_index_path(name: str) -> Path:
     """Where a contrastive dojo's deck split index lives.
     Inputs: name. Output: Path. Side effects: none. Exceptions: none."""
     return _CONTRASTIVE_INDEX_DIRECTORY / f"{name}.db"
+
+
+def _staple_subsampling(
+    name: str, dealer: DeckBoxDealer, context: DojoBuildContext
+) -> StapleSubsampling | None:
+    """name's staple subsampling, or None (t = inf) when the run config
+    names no threshold for it. Its document frequency comes from
+    cached_document_frequency, cached at
+    data/splits/contrastive/<name>.document_frequency.json.
+
+    Inputs: name, dealer (the dojo's), context.
+    Output: StapleSubsampling | None.
+    Side effects: may count and cache the document frequency (reads decks
+        through dealer; writes only the cache file).
+    Exceptions: as cached_document_frequency and StapleSubsampling.
+    """
+    threshold = context.staple_thresholds.get(name)
+    if threshold is None:
+        return None
+    cache_path = _CONTRASTIVE_INDEX_DIRECTORY / f"{name}.document_frequency.json"
+    frequency = cached_document_frequency(
+        dealer, cache_path, _DOCUMENT_FREQUENCY_SAMPLE_DECKS
+    )
+    return StapleSubsampling(threshold, frequency)
 
 
 def _augmentation_pipeline(
@@ -782,6 +825,7 @@ def build_dojos(names: Sequence[str], context: DojoBuildContext) -> list[Dojo]:
     if unknown:
         raise ValueError(f"unknown dojos {unknown}; see DOJO_CATALOG")
     _require_valid_overrides(context.mod_overrides, names)
+    _require_contrastive_thresholds(context.staple_thresholds, names)
 
     # Build each dojo from its recipe (each attaches its own augmentations)
     for name in names:
@@ -802,6 +846,27 @@ def _require_valid_overrides(
         raise ValueError(f"mods override dojos {not_built} that are not being built")
     for name, specs in mod_overrides.items():
         _require_allowed_specs(name, specs)
+
+
+def _require_contrastive_thresholds(
+    staple_thresholds: Mapping[str, float], names: Sequence[str]
+) -> None:
+    """Inputs: staple_thresholds, names (the dojos being built).
+    Output: none. Side effects: none.
+    Exceptions: ValueError if a threshold names a dojo not being built or
+        one that is not contrastive (it would be ignored).
+    """
+    refused = sorted(
+        name
+        for name in staple_thresholds
+        if name not in names
+        or not isinstance(DOJO_CATALOG[name], ContrastiveDojoRecipe)
+    )
+    if refused:
+        raise ValueError(
+            f"staple_subsampling names {refused}, which are not contrastive "
+            "dojos being built"
+        )
 
 
 def _require_allowed_specs(name: str, specs: tuple[ModSpec, ...]) -> None:

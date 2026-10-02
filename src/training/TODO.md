@@ -360,6 +360,19 @@ a median of ~200 tokens and FaB to ~570.
   log sampling frequency from the logits; Yi et al. 2019). Until this
   runs, give Dominion's contrastive dojo a low weight in a mixed diet.
 
+  **Knob built (2026-10-01, T5); the ablation itself has not run yet.**
+  `staple_subsampling: {contrastive.dominion: 0.1}` in a run config sets
+  `t`; a dojo left out keeps `t = inf`. See
+  `src/dojos/contrastive/staple_subsampling.py`. Document frequency comes
+  from 20,000 TRAIN decks, cached under `data/splits/contrastive/`. A deck
+  thinned below `items_per_deck` is skipped. Measured on 3,000 Dominion
+  VALIDATION decks, as the share of 2-card positive pairs with at least
+  one staple (df > 0.5): t = inf 79.8%, 0.3 66.3%, 0.1 53.9%, 0.03 42.5%,
+  0.01 42.2% (98.8% of decks kept). It levels off near 42% because decks
+  hold many staple copies. Suggested arms: inf, 0.1, 0.01.
+  `MultiCardPairConstructor` is not wired up, because its item sampler is
+  still a stub.
+
 ## D. Training driver
 
 - [x] **Write `scripts/run_training.py`** (2026-09-29). YAML config

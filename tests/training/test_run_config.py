@@ -377,6 +377,28 @@ class TestModOverrides:
         with pytest.raises(ValueError, match=message):
             parse_run_config(self._with_mods({"a": [entry]}))
 
+    def test_parses_staple_thresholds(self) -> None:
+        document = _document()
+        document["staple_subsampling"] = {"a": 0.1}
+        assert parse_run_config(document).staple_thresholds == {"a": 0.1}
+        assert parse_run_config(_document()).staple_thresholds == {}
+
+    @pytest.mark.parametrize(
+        ("thresholds", "message"),
+        [
+            ({"z": 0.1}, "not in dojos"),
+            ({"a": 0}, "must be > 0"),
+            ({"a": -1}, "must be > 0"),
+            ({"a": float("inf")}, "finite"),
+            ({"a": "x"}, "number"),
+        ],
+    )
+    def test_bad_staple_thresholds_raise(self, thresholds: Any, message: str) -> None:
+        document = _document()
+        document["staple_subsampling"] = thresholds
+        with pytest.raises(ValueError, match=message):
+            parse_run_config(document)
+
     def test_an_empty_list_means_no_augmentation(self) -> None:
         assert parse_run_config(self._with_mods({"a": []})).mod_overrides == {"a": ()}
 

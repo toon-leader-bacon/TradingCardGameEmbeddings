@@ -178,6 +178,7 @@ def main() -> int:
         card_embedding_size=config.model.embed_dim,
         rng_seed=config.plan.seed,
         mod_overrides=config.mod_overrides,
+        staple_thresholds=config.staple_thresholds,
     )
     dojos = build_dojos(config.dojo_names, context)
     if not preflight_passes(dojos, config):

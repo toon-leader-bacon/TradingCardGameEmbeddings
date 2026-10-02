@@ -149,6 +149,17 @@ row-independent `(output, label) -> loss`.
   pair. This is the research surface. `SingleCardPairConstructor`
   samples single cards (every same-deck card is a positive);
   `MultiCardPairConstructor` samples fixed-size groups of cards.
+- `staple_subsampling.py` - optional staple thinning for
+  `SingleCardPairConstructor`. Before sampling, each card occurrence is
+  kept with probability `min(1, sqrt(t / df))` (word2vec subsampling),
+  where `df` is the card's share of decks (`DocumentFrequency`).
+  `df` is counted once over the first 20,000 TRAIN decks, in the
+  dealer's seeded order. It is cached as JSON under `data/splits/` and
+  keyed by the box's CardBinder version and the sample size. The deck box
+  is only read. A deck thinned below `items_per_deck` is skipped. No
+  subsampling (`t = inf`, the default) is the old path and draws nothing
+  extra from the RNG. A run config's `staple_subsampling:` sets `t` per
+  contrastive dojo.
 - `contrastive_batch.py` - `ContrastiveBatch`: a flat pool of `inputs`
   (every item is both anchor and candidate), per-item card
   `identities` (so exact duplicate cards are excluded from an anchor's
