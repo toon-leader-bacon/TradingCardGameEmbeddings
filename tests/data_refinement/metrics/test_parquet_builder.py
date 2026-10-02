@@ -1,6 +1,8 @@
 from pathlib import Path
 
+import numpy as np
 import pyarrow as pa
+import pytest
 import pyarrow.parquet as pq
 
 from src.data_refinement.metrics.parquet_builder import (
@@ -40,6 +42,42 @@ class TestWriteRow:
         table = pq.read_table(path)
         assert table.num_rows == 7
         assert [row["id"] for row in table.to_pylist()] == [str(i) for i in range(7)]
+
+
+class TestWriteColumns:
+    def test_writes_whole_columns_after_buffered_rows(self, tmp_path: Path) -> None:
+        path = tmp_path / "out.parquet"
+        writer = ParquetBuilder(path, _SCHEMA, batch_size=100)
+
+        writer.write_row({"id": "a", "count": 1})
+        writer.write_columns(
+            {"id": np.array(["b", "c"], object), "count": np.array([2, 3])}
+        )
+        writer.write_row({"id": "d", "count": 4})
+        writer.close()
+
+        assert [row["id"] for row in pq.read_table(path).to_pylist()] == [
+            "a",
+            "b",
+            "c",
+            "d",
+        ]
+
+    def test_zero_rows_write_nothing(self, tmp_path: Path) -> None:
+        path = tmp_path / "out.parquet"
+        writer = ParquetBuilder(path, _SCHEMA, batch_size=100)
+
+        writer.write_columns({"id": [], "count": []})
+        writer.close()
+
+        assert pq.read_table(path).num_rows == 0
+
+    def test_a_missing_column_raises(self, tmp_path: Path) -> None:
+        writer = ParquetBuilder(tmp_path / "out.parquet", _SCHEMA)
+
+        with pytest.raises(KeyError):
+            writer.write_columns({"id": ["a"]})
+        writer.close()
 
 
 class TestClose:

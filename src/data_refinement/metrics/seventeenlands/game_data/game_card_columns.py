@@ -1,10 +1,8 @@
 """Header-derived card-name index for one 17lands game_data CSV.
 
-Built once per metric instance (each metric constructs its own, from
-its own constructor's (card_binder, header, source_game) - see
-game_card_average_metric.py's module docstring for why this is a
-per-metric-cheap, header-sized cost rather than a shared per-scan
-object). Every opening_hand_<name>/drawn_<name>/tutored_<name>/
+Built once per CSV by GameDataChunkParser.from_header()
+(game_data_chunk_parser.py), which regroups its matched columns into
+per-zone count matrices. Every opening_hand_<name>/drawn_<name>/tutored_<name>/
 deck_<name>/sideboard_<name> column is parsed and its <name> suffix
 matched against card_binder with
 card_lookup.uuid_for_name_or_front_face(), the 17lands-wide matching
@@ -45,10 +43,8 @@ class GameCardColumns:
     one game_data CSV, matched to nocab_uuids, plus a cache for any
     other bare name this same scan encounters.
 
-    Single-consumer-per-metric: each metric builds its own instance (via
-    from_header()) at construction time, from the same (card_binder,
-    header, source_game) it was itself constructed with - see
-    game_card_average_metric.py's __init__.
+    Single consumer: GameDataChunkParser.from_header() builds one per
+    CSV.
     """
 
     def __init__(self, card_binder: CardBinder, source_game: GameId) -> None:
@@ -248,46 +244,6 @@ class GameCardColumns:
         )
         self._cache[name] = card_uuid
         return card_uuid
-
-    def present_uuids(self, row: dict, columns: list[tuple[str, UUID]]) -> list[UUID]:
-        """Every matched card from `columns` whose count is > 0 on this
-        row.
-
-        Shared by every metric in this container - called with any of
-        opening_hand_columns/drawn_columns/tutored_columns/
-        deck_columns/sideboard_columns (or any same-shaped list), so
-        the "which columns are actually present on this row" filtering
-        logic exists exactly once. Every game_data column here is a
-        per-game copy COUNT, not a per-copy list entry (deck_<name>
-        sums to 40, opening_hand_<name> to 7) - this method samples on
-        presence (count > 0) exactly once per qualifying card, never
-        once per copy - see plans/game_data_metrics.md's "Data facts"
-        section for why this differs from sts_gg's per-copy tallying.
-
-        Inputs:
-            row: one game_data CSV row, dict-like (column name -> cell
-                value) - see ../scanner.py's module docstring for where
-                this comes from.
-            columns: one of the *_columns properties (or any
-                same-shaped list) to filter against row.
-        Output: every card_uuid from columns whose row[column_name] is
-            truthy (nonzero) - order matches columns' own order.
-        Side effects: none.
-        Exceptions: raises KeyError if a column in columns is missing
-            from row.
-
-        Example:
-            >>> game_columns.present_uuids(row, game_columns.deck_columns)
-        """
-        # A NaN/missing cell is absent even though `bool(float("nan"))`
-        # is True: NaN is the one value unequal to itself, a far cheaper
-        # test than pd.notna() on this per-row, per-column hot path. The
-        # `and` then still requires an actually-truthy (nonzero) count.
-        return [
-            card_uuid
-            for column_name, card_uuid in columns
-            if (count := row[column_name]) == count and count
-        ]
 
     @property
     def unmatched_names(self) -> list[str]:

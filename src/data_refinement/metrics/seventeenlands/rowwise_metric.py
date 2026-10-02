@@ -4,8 +4,10 @@ row metric (Metric[dict]) run inside a family that scans chunks
 
 Transitional: a family wraps its row metrics in this only while it has
 any, and each family's wrapping is deleted once its last row metric is
-ported. Shared by all three 17lands families; each supplies its own
-frame_of to get a pandas DataFrame out of its chunk type.
+ported. game_data, the first family ported, no longer uses it;
+replay_data is planned to wrap its row metrics here first (plan slice
+4). Each family supplies its own frame_of to get a pandas DataFrame out
+of its chunk type.
 
 Per-row failure isolation lives here, as under the old row scanner: a
 row that raises is skipped for that metric only, and the rest of the
@@ -44,8 +46,8 @@ class RowwiseMetric(Generic[ChunkT]):
 
         Inputs:
             inner: the row metric to drive.
-            frame_of: gets a chunk's rows as a DataFrame (e.g.
-                game_data_chunk.source_frame_of).
+            frame_of: gets a chunk's rows as a DataFrame; the family
+                that wraps row metrics supplies it for its chunk type.
         Output: none (constructor). Side effects: none. Exceptions: none.
         """
         self._inner = inner
@@ -58,11 +60,10 @@ class RowwiseMetric(Generic[ChunkT]):
         Side effects: inner.accumulate(row) once per row; a row that
             raises is skipped (see module docstring).
         Exceptions: RowFailures, after the whole chunk, if any row
-            raised; whatever frame_of raises (e.g. ValueError for a
-            chunk parsed without a source frame).
+            raised; whatever frame_of raises.
 
         Example:
-            >>> RowwiseMetric(WinMetric(...), source_frame_of).accumulate(chunk)
+            >>> RowwiseMetric(WinMetric(...), frame_of).accumulate(chunk)
         """
         # Same dicts the old pandas row scanner produced
         rows = self._frame_of(chunk).to_dict(orient="records")
@@ -91,7 +92,7 @@ class RowwiseMetric(Generic[ChunkT]):
         Side effects: inner.finalize()'s. Exceptions: inner.finalize()'s.
 
         Example:
-            >>> RowwiseMetric(inner, source_frame_of).finalize()
+            >>> RowwiseMetric(inner, frame_of).finalize()
         """
         return self._inner.finalize()
 

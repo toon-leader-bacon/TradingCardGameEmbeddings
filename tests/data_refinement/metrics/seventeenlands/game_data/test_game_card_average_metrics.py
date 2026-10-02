@@ -14,7 +14,6 @@ from src.data_refinement.metrics.seventeenlands.game_data.game_card_average_metr
     WinRateWhenInDeckMetric,
 )
 from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
-    GameDataChunk,
     GameZone,
     ZoneCounts,
 )
@@ -24,6 +23,7 @@ from tests.data_refinement.metrics.seventeenlands.game_data._chunk_fixtures impo
     OWLBEAR,
     VERSION,
     binder_with_cards,
+    chunk_with_zones,
     row,
     scan_into_frame,
     uuid_for,
@@ -157,7 +157,7 @@ def test_two_columns_naming_one_card_both_count(tmp_path: Path) -> None:
         counts=np.array([[1, 1], [1, 0]], np.int16),
     )
 
-    metric.accumulate(_chunk_with_deck(deck, won=[True, False]))
+    metric.accumulate(chunk_with_zones({GameZone.DECK: deck}, won=[True, False]))
     df = pd.read_parquet(metric.finalize()).set_index("nocab_uuid")
 
     # The row implementation counted each matching column once per game
@@ -171,23 +171,6 @@ def test_a_chunk_with_a_different_column_layout_is_rejected(tmp_path: Path) -> N
     first = ZoneCounts((uuid_for(binder, OWLBEAR),), np.array([[1]], np.int16))
     second = ZoneCounts((uuid_for(binder, MORNINGSTAR),), np.array([[1]], np.int16))
 
-    metric.accumulate(_chunk_with_deck(first, won=[True]))
+    metric.accumulate(chunk_with_zones({GameZone.DECK: first}, won=[True]))
     with pytest.raises(ValueError, match="differ from the first chunk"):
-        metric.accumulate(_chunk_with_deck(second, won=[True]))
-
-
-def _chunk_with_deck(deck: ZoneCounts, won: list[bool]) -> GameDataChunk:
-    rows = len(won)
-    zones = {
-        zone: ZoneCounts((), np.zeros((rows, 0), np.int16))
-        for zone in GameZone
-        if zone is not GameZone.DECK
-    }
-    zones[GameZone.DECK] = deck
-    return GameDataChunk(
-        zones=zones,
-        won=np.array(won, np.bool_),
-        on_play=np.zeros(rows, np.bool_),
-        num_turns=np.full(rows, 8, np.int32),
-        source_frame=None,
-    )
+        metric.accumulate(chunk_with_zones({GameZone.DECK: second}, won=[True]))

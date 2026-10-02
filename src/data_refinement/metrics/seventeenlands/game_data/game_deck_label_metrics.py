@@ -14,9 +14,14 @@ on_play_win_rate_sensitivity_by_deck_metric.py's own module docstring).
 from pathlib import Path
 from typing import ClassVar
 
+import numpy as np
+import numpy.typing as npt
 import pyarrow as pa
 
 from src.data_refinement.metrics.generic.masked_field_metric import OTHER_LABEL
+from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+    GameDataChunk,
+)
 from src.data_refinement.metrics.seventeenlands.game_data.game_deck_label_metric import (
     GameDeckLabelMetric,
 )
@@ -32,9 +37,9 @@ class DeckWinPredictionMetric(GameDeckLabelMetric):
     LABEL_TYPE: ClassVar[pa.DataType] = pa.bool_()
     DEFAULT_OUTPUT_PATH = _DEFAULT_OUTPUT_DIR / "deck_win_prediction.parquet"
 
-    def _label_for_row(self, row: dict) -> bool:
-        """See GameDeckLabelMetric._label_for_row(). row["won"]."""
-        return row["won"]
+    def _labels(self, chunk: GameDataChunk) -> npt.NDArray[np.bool_]:
+        """See GameDeckLabelMetric._labels(). chunk.won."""
+        return chunk.won
 
 
 class DeckGameLengthPredictionMetric(GameDeckLabelMetric):
@@ -45,9 +50,9 @@ class DeckGameLengthPredictionMetric(GameDeckLabelMetric):
     LABEL_TYPE: ClassVar[pa.DataType] = pa.int64()
     DEFAULT_OUTPUT_PATH = _DEFAULT_OUTPUT_DIR / "deck_game_length_prediction.parquet"
 
-    def _label_for_row(self, row: dict) -> int:
-        """See GameDeckLabelMetric._label_for_row(). row["num_turns"]."""
-        return row["num_turns"]
+    def _labels(self, chunk: GameDataChunk) -> npt.NDArray[np.int64]:
+        """See GameDeckLabelMetric._labels(). chunk.num_turns as int64."""
+        return chunk.num_turns.astype(np.int64)
 
 
 class DeckRankTierPredictionMetric(GameDeckLabelMetric):
@@ -57,10 +62,9 @@ class DeckRankTierPredictionMetric(GameDeckLabelMetric):
     LABEL_VALUES, per game_data/BRAINSTORM.md's confirmed tier
     vocabulary: bronze, silver, gold, platinum, diamond, mythic.
     OTHER_LABEL (masked_field_metric.OTHER_LABEL, shared sentinel) is
-    included as a safety net for a tier value not in this vocabulary,
-    the same convention sts_gg/deck_label_metrics.py's
-    CharacterPredictionMetric already established - not because one has
-    been observed.
+    the label for any rank outside that vocabulary - in practice the
+    empty rank of every unranked (Trad, Sealed) event, which the row
+    implementation read as a null and also wrote as OTHER_LABEL.
     """
 
     LABEL_COLUMN: ClassVar[str] = "rank"
@@ -76,10 +80,8 @@ class DeckRankTierPredictionMetric(GameDeckLabelMetric):
         OTHER_LABEL,
     )
 
-    def _label_for_row(self, row: dict) -> str:
-        """See GameDeckLabelMetric._label_for_row(). row["rank"] if it
-        is a member of self.LABEL_VALUES, else OTHER_LABEL."""
-        rank = row["rank"]
-        if rank not in self.LABEL_VALUES:
-            return OTHER_LABEL
-        return rank
+    def _labels(self, chunk: GameDataChunk) -> npt.NDArray[np.object_]:
+        """See GameDeckLabelMetric._labels(). chunk.rank where it is a
+        member of self.LABEL_VALUES, else OTHER_LABEL."""
+        known = np.isin(chunk.rank, self.LABEL_VALUES)
+        return np.where(known, chunk.rank, OTHER_LABEL)

@@ -14,9 +14,12 @@ may override two optional steps:
   (default: the plain average; GameLengthAssociationMetric subtracts
   its baseline).
 
-Tallies are kept per matched column, not per card, and are grouped by
-card uuid only in finalize(). Two header columns naming one card
-therefore still count twice, exactly as the row implementation did.
+Tallies (value sum, count) are kept per matched column in a
+CardColumnTallies (card_column_tallies.py) and grouped by card uuid
+only in finalize(). Two header columns naming one card therefore still
+count twice, exactly as the row implementation did. The count is kept
+as a float64 alongside the sum (exact for any realistic game count) and
+written as an int.
 
 VERSION METADATA, NOT A BINDER: the driver computes the CardBinder
 version once per family run and passes it in; card matching lives in
@@ -26,12 +29,14 @@ GameDataChunkParser, so this class never needs the binder or the header.
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import ClassVar
-from uuid import UUID
 
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
 
+from src.data_refinement.metrics.seventeenlands.game_data.card_column_tallies import (
+    CardColumnTallies,
+)
 from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
     GameZone,
@@ -68,10 +73,8 @@ class GameCardAverageMetric(ABC):
         """
         self._version_metadata = version_metadata
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
-        # Per-column tallies, sized by the first chunk (see _tally)
-        self._card_uuids: tuple[UUID, ...] | None = None
-        self._value_sum: npt.NDArray[np.float64] | None = None
-        self._count: npt.NDArray[np.int64] | None = None
+        # Per-column (value_sum, count), sized by the first chunk
+        self._tallies = CardColumnTallies(type(self).__name__, 2, np.float64)
 
     def accumulate(self, chunk: GameDataChunk) -> None:
         """Tally every present (row, column) of this ZONE toward its
@@ -91,11 +94,8 @@ class GameCardAverageMetric(ABC):
         """
         zone = chunk.zones[self.ZONE]
 
-        # Validate: same column layout as every earlier chunk
-        self._check_columns(zone.card_uuids)
-
         # Tally this chunk in one pass over its present matrix
-        self._tally(zone.present(), self._values(chunk))
+        self._tallies.add(zone.card_uuids, self._increments(zone.present(), chunk))
 
         # Optional subclass bookkeeping not gated on any card
         self._extra_accumulate(chunk)
@@ -120,12 +120,14 @@ class GameCardAverageMetric(ABC):
         result: list[dict] = []
 
         # One output row per card with at least one sample
-        for card_uuid, (value_sum, count) in self._sum_tallies_per_card().items():
+        for card_uuid, (value_sum, count) in self._tallies.per_card().items():
+            if int(count) == 0:
+                continue
             result.append(
                 {
                     "nocab_uuid": str(card_uuid),
-                    self.LABEL_COLUMN: self._label(value_sum, count),
-                    "sample_count": count,
+                    self.LABEL_COLUMN: self._label(float(value_sum), int(count)),
+                    "sample_count": int(count),
                 }
             )
 
@@ -162,72 +164,30 @@ class GameCardAverageMetric(ABC):
         """
         return value_sum / count
 
-    def _check_columns(self, card_uuids: tuple[UUID, ...]) -> None:
-        """Record the first chunk's column layout; raise if a later
-        chunk's differs.
+    def _increments(
+        self, present: npt.NDArray[np.bool_], chunk: GameDataChunk
+    ) -> npt.NDArray[np.float64]:
+        """One chunk's per-column (value_sum, count) increments.
 
-        Inputs: card_uuids (this chunk's ZONE columns). Output: none.
-        Side effects: sets self._card_uuids and zero tallies on the
-            first call.
-        Exceptions: ValueError on a layout mismatch.
+        Inputs: present (rows x columns, this ZONE), chunk.
+        Output: shape (2, columns): present^T @ _values(chunk), and
+            present summed over rows.
+        Side effects: none.
+        Exceptions: ValueError if _values()' length differs from the
+            chunk's row count.
         """
-        if self._card_uuids is None:
-            self._card_uuids = card_uuids
-            self._value_sum = np.zeros(len(card_uuids), dtype=np.float64)
-            self._count = np.zeros(len(card_uuids), dtype=np.int64)
-            return
-        if card_uuids != self._card_uuids:
-            raise ValueError(
-                f"{type(self).__name__}: chunk's {self.ZONE.name} columns differ "
-                "from the first chunk's (chunks from two CSVs?)"
-            )
-
-    def _tally(
-        self, present: npt.NDArray[np.bool_], values: npt.NDArray[np.float64]
-    ) -> None:
-        """Add one chunk to the per-column tallies.
-
-        Inputs: present (rows x columns), values (rows,).
-        Output: none.
-        Side effects: value_sum += present^T @ values;
-            count += present summed over rows.
-        Exceptions: ValueError if values' length differs from present's
-            row count.
-        """
+        values = self._values(chunk)
         if values.shape[0] != present.shape[0]:
             raise ValueError(
                 f"{type(self).__name__}: {values.shape[0]} values for "
                 f"{present.shape[0]} rows"
             )
-        assert self._value_sum is not None and self._count is not None
-        self._value_sum += present.T.astype(np.float64) @ values
-        self._count += present.sum(axis=0, dtype=np.int64)
-
-    def _sum_tallies_per_card(self) -> dict[UUID, tuple[float, int]]:
-        """Per-column tallies summed per card uuid, for cards with
-        count >= 1, in first-column order.
-
-        Inputs: none. Output: dict card_uuid -> (value_sum, count);
-            empty if no chunk ever arrived.
-        Side effects: none. Exceptions: none.
-        """
-        result: dict[UUID, tuple[float, int]] = {}
-        if self._card_uuids is None:
-            return result
-        assert self._value_sum is not None and self._count is not None
-
-        # Columns naming the same card add up, as in the row implementation
-        for card_uuid, value_sum, count in zip(
-            self._card_uuids, self._value_sum, self._count
-        ):
-            if count == 0:
-                continue
-            previous_sum, previous_count = result.get(card_uuid, (0.0, 0))
-            result[card_uuid] = (
-                previous_sum + float(value_sum),
-                previous_count + int(count),
-            )
-        return result
+        return np.stack(
+            [
+                present.T.astype(np.float64) @ values,
+                present.sum(axis=0, dtype=np.float64),
+            ]
+        )
 
     def _build_output_frame(self, rows: list[dict]) -> pd.DataFrame:
         """rows as a DataFrame with the full output schema, even when

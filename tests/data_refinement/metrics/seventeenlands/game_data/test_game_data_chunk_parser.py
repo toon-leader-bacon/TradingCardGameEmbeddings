@@ -32,20 +32,22 @@ def test_a_header_without_the_scalar_columns_is_rejected() -> None:
         parser_for(binder, header=[c for c in HEADER if c != "num_turns"])
 
 
-def test_needed_columns_skips_unmatched_and_unused_columns() -> None:
+def test_needed_columns_skips_unmatched_columns() -> None:
     parser = parser_for(binder_with_cards([OWLBEAR, MORNINGSTAR]))
 
     needed = parser.needed_columns()
 
-    assert "rank" not in needed
     assert "deck_Unmatched Card" not in needed
-    assert {"won", "on_play", "num_turns", f"deck_{OWLBEAR}"} <= set(needed)
-
-
-def test_needed_columns_is_every_column_when_keeping_a_source_frame() -> None:
-    parser = parser_for(binder_with_cards([OWLBEAR]), keep_source_frame=True)
-
-    assert parser.needed_columns() == HEADER
+    assert {
+        "draft_id",
+        "match_number",
+        "game_number",
+        "won",
+        "on_play",
+        "num_turns",
+        "rank",
+        f"deck_{OWLBEAR}",
+    } <= set(needed)
 
 
 def test_column_types_reads_card_counts_as_int16_and_scalars_typed() -> None:
@@ -54,6 +56,8 @@ def test_column_types_reads_card_counts_as_int16_and_scalars_typed() -> None:
     assert types[f"deck_{OWLBEAR}"] == pa.int16()
     assert types["won"] == pa.bool_()
     assert types["num_turns"] == pa.int32()
+    assert types["rank"] == pa.string()
+    assert types["match_number"] == pa.int64()
 
 
 def test_parse_builds_one_count_matrix_per_zone(tmp_path: Path) -> None:
@@ -74,7 +78,6 @@ def test_parse_builds_one_count_matrix_per_zone(tmp_path: Path) -> None:
     assert chunk.won.tolist() == [True, False]
     assert chunk.num_turns.tolist() == [8, 11]
     assert chunk.zones[GameZone.SIDEBOARD].card_uuids == (uuid_for(binder, OWLBEAR),)
-    assert chunk.source_frame is None
 
 
 def test_a_zone_with_no_matched_columns_is_empty(tmp_path: Path) -> None:
@@ -123,12 +126,45 @@ def test_zone_columns_match_the_row_implementations_matching(tmp_path: Path) -> 
     )
 
 
-def test_source_frame_is_kept_when_asked(tmp_path: Path) -> None:
+def test_parse_reads_the_game_keys_and_rank(tmp_path: Path) -> None:
     binder = binder_with_cards([OWLBEAR])
-    csv_path = write_csv(tmp_path / "g.csv", [row(won=True, owlbear_deck=2)])
+    csv_path = write_csv(
+        tmp_path / "g.csv",
+        [
+            row(won=True, draft_id="d1", match_number=2, game_number=3),
+            row(won=True, rank="mythic"),
+        ],
+    )
 
-    chunk = parse_one(csv_path, parser_for(binder, keep_source_frame=True))
+    chunk = parse_one(csv_path, parser_for(binder))
 
-    assert chunk.source_frame is not None
-    assert chunk.source_frame.loc[0, "rank"] == "gold"
-    assert chunk.source_frame.loc[0, f"deck_{OWLBEAR}"] == 2
+    assert chunk.keys.draft_id.tolist() == ["d1", "draft1"]
+    assert chunk.keys.match_number.tolist() == [2, 1]
+    assert chunk.keys.game_number.tolist() == [3, 1]
+    assert chunk.rank.tolist() == ["gold", "mythic"]
+
+
+def test_an_empty_rank_reads_as_an_empty_string(tmp_path: Path) -> None:
+    # Trad and Sealed events leave every rank cell empty
+    csv_path = write_csv(tmp_path / "g.csv", [row(won=True, rank="")] * 2)
+
+    chunk = parse_one(csv_path, parser_for(binder_with_cards([OWLBEAR])))
+
+    assert chunk.rank.tolist() == ["", ""]
+
+
+def test_parse_identifies_each_rows_deck(tmp_path: Path) -> None:
+    binder = binder_with_cards([OWLBEAR, MORNINGSTAR])
+    csv_path = write_csv(
+        tmp_path / "g.csv",
+        [
+            row(won=True, owlbear_deck=2),
+            row(won=True, morningstar_deck=1),
+            row(won=True, owlbear_deck=4, game_number=2),
+        ],
+    )
+
+    chunk = parse_one(csv_path, parser_for(binder))
+
+    assert chunk.decks.row_deck.tolist() == [0, 1, 0]
+    assert chunk.decks.decks[0].card_nocab_uuids == [uuid_for(binder, OWLBEAR)]

@@ -10,18 +10,18 @@ scan. It feeds each chunk's rows to the inner metric one dict at a time.
 A failing row is skipped; once the chunk is done, one `RowFailures`
 error reports how many rows failed, chained to the first row's
 exception. The scanner logs and counts that error once per chunk. A
-family uses the adapter only while it still has row metrics.
+family uses the adapter only while it still has row metrics; no family
+does today (game_data is fully vectorized, draft_data and replay_data
+still scan rows).
 
 ## Containers
 
 - **`draft_data/`** - six `Metric[dict]` metrics over per-pick draft
   CSVs (`data/raw/17lands/draft_data/<Set>.<EventType>.csv`). See
   [`draft_data/README.md`](draft_data/README.md).
-- **`game_data/`** - eleven metrics over per-game CSVs
-  (`data/raw/17lands/game_data/<Set>.<EventType>.csv`), scanned in typed
-  numpy chunks (`GameDataChunk`). Four are vectorized
-  `Metric[GameDataChunk]`s; seven are still `Metric[dict]` row metrics
-  run through `RowwiseMetric`. See
+- **`game_data/`** - eleven vectorized `Metric[GameDataChunk]` metrics
+  over per-game CSVs (`data/raw/17lands/game_data/<Set>.<EventType>.csv`),
+  scanned in typed numpy chunks (`GameDataChunk`). See
   [`game_data/README.md`](game_data/README.md).
 - **`replay_data/`** - nine `Metric[dict]` metrics over per-game replay
   CSVs (`data/raw/17lands/replay_data/<Set>.<EventType>.csv`). See

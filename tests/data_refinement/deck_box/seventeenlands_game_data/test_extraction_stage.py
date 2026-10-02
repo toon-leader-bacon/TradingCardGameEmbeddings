@@ -138,7 +138,7 @@ class TestExtract:
         # deck_<name> is a COUNT, not a presence flag — a row value of 3
         # must contribute exactly 3 copies of that card's uuid, never
         # just 1 (contrast metrics/seventeenlands/game_data's own
-        # presence-sampling GameCardColumns.present_uuids(), which this
+        # presence-sampling game_data ZoneCounts.present(), which this
         # stage must not resemble).
         binder = _mtg_card_binder(["Mountain"])
         box = DeckBox()

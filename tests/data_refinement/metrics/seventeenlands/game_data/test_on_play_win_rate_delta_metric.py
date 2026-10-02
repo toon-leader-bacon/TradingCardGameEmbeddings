@@ -1,121 +1,117 @@
-"""Skeleton-stage test stubs for on_play_win_rate_delta_metric.py's
-OnPlayWinRateDeltaMetric. Bodies are filled in by
-design-recipe-implement.
-"""
+"""Tests for on_play_win_rate_delta_metric.py's OnPlayWinRateDeltaMetric,
+driven through scan_game_csv as a real run drives it."""
 
-from datetime import datetime, timezone
 from pathlib import Path
-from uuid import uuid4
 
+import numpy as np
 import pandas as pd
 
-from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+    GameZone,
+    ZoneCounts,
+)
 from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_rate_delta_metric import (
     OnPlayWinRateDeltaMetric,
 )
-from src.schema.card import GenericCard, Provenance
-from src.schema.data_source import DataSource
-from src.schema.game_id import GameId
+from tests.data_refinement.metrics.seventeenlands.game_data._chunk_fixtures import (
+    MORNINGSTAR,
+    OWLBEAR,
+    VERSION,
+    binder_with_cards,
+    chunk_with_zones,
+    row,
+    scan_into_frame,
+    uuid_for,
+)
 
 
-def _make_card(name: str) -> GenericCard:
-    return GenericCard(
-        nocab_uuid=uuid4(),
-        source_game=GameId.MTG,
-        name=name,
-        raw_content={},
-        provenance=Provenance(
-            data_source=DataSource.SCRYFALL,
-            source_id=name,
-            fetched_at=datetime.now(timezone.utc),
-        ),
-    )
-
-
-def _binder_with_cards(names: list[str]) -> CardBinder:
-    binder = CardBinder()
-    for name in names:
-        binder.create(_make_card(name))
-    return binder
-
-
-_HEADER = ["on_play", "won", "deck_Owlbear", "deck_Goblin Morningstar"]
-
-
-def _row(on_play: bool, won: bool, owlbear_deck: int = 0) -> dict:
-    return {
-        "on_play": on_play,
-        "won": won,
-        "deck_Owlbear": owlbear_deck,
-        "deck_Goblin Morningstar": 0,
-    }
-
-
-def _uuid_for(binder: CardBinder, name: str) -> object:
-    cards = binder.get_by_name(GameId.MTG, name)
-    assert len(cards) == 1
-    return cards[0].nocab_uuid
+def _metric(tmp_path: Path, name: str = "out.parquet") -> OnPlayWinRateDeltaMetric:
+    return OnPlayWinRateDeltaMetric(VERSION, output_path=tmp_path / name)
 
 
 def test_computes_on_play_rate_minus_on_draw_rate_per_card(tmp_path: Path) -> None:
-    binder = _binder_with_cards(["Owlbear"])
-    metric = OnPlayWinRateDeltaMetric(
-        binder, _HEADER, GameId.MTG, output_path=tmp_path / "out.parquet"
-    )
+    binder = binder_with_cards([OWLBEAR])
+    rows = [
+        # On play: 2 wins / 2 games = 1.0. On draw: 0 wins / 1 game = 0.0.
+        row(on_play=True, won=True, owlbear_deck=4),
+        row(on_play=True, won=True, owlbear_deck=4),
+        row(on_play=False, won=False, owlbear_deck=4),
+    ]
 
-    # On play: 2 wins / 2 games = 1.0. On draw: 0 wins / 1 game = 0.0.
-    metric.accumulate(_row(on_play=True, won=True, owlbear_deck=4))
-    metric.accumulate(_row(on_play=True, won=True, owlbear_deck=4))
-    metric.accumulate(_row(on_play=False, won=False, owlbear_deck=4))
-    metric.finalize()
+    df = scan_into_frame(tmp_path, binder, rows, _metric(tmp_path))
 
-    df = pd.read_parquet(tmp_path / "out.parquet").set_index("nocab_uuid")
-    owlbear_uuid = str(_uuid_for(binder, "Owlbear"))
-    assert df.loc[owlbear_uuid, "on_play_win_rate_delta"] == 1.0
+    assert df.loc[str(uuid_for(binder, OWLBEAR)), "on_play_win_rate_delta"] == 1.0
 
 
 def test_delta_is_none_when_card_never_seen_on_one_side(tmp_path: Path) -> None:
-    binder = _binder_with_cards(["Owlbear"])
-    metric = OnPlayWinRateDeltaMetric(
-        binder, _HEADER, GameId.MTG, output_path=tmp_path / "out.parquet"
+    binder = binder_with_cards([OWLBEAR])
+
+    df = scan_into_frame(
+        tmp_path,
+        binder,
+        [row(on_play=True, won=True, owlbear_deck=4)],
+        _metric(tmp_path),
     )
 
-    # Only ever seen on the play, never on the draw.
-    metric.accumulate(_row(on_play=True, won=True, owlbear_deck=4))
-    metric.finalize()
-
-    df = pd.read_parquet(tmp_path / "out.parquet").set_index("nocab_uuid")
-    owlbear_uuid = str(_uuid_for(binder, "Owlbear"))
-    # A pandas parquet round trip represents a written None as NaN in a
-    # float64 column, not Python None - pd.isna() is the correct check.
-    assert pd.isna(df.loc[owlbear_uuid, "on_play_win_rate_delta"])
+    # A written None reads back as NaN in a float64 column
+    assert pd.isna(df.loc[str(uuid_for(binder, OWLBEAR)), "on_play_win_rate_delta"])
 
 
 def test_sample_count_sums_both_sides(tmp_path: Path) -> None:
-    binder = _binder_with_cards(["Owlbear"])
-    metric = OnPlayWinRateDeltaMetric(
-        binder, _HEADER, GameId.MTG, output_path=tmp_path / "out.parquet"
-    )
+    binder = binder_with_cards([OWLBEAR])
+    rows = [
+        row(on_play=True, won=True, owlbear_deck=4),
+        row(on_play=True, won=False, owlbear_deck=4),
+        row(on_play=False, won=True, owlbear_deck=4),
+    ]
 
-    metric.accumulate(_row(on_play=True, won=True, owlbear_deck=4))
-    metric.accumulate(_row(on_play=True, won=False, owlbear_deck=4))
-    metric.accumulate(_row(on_play=False, won=True, owlbear_deck=4))
-    metric.finalize()
+    df = scan_into_frame(tmp_path, binder, rows, _metric(tmp_path))
 
-    df = pd.read_parquet(tmp_path / "out.parquet").set_index("nocab_uuid")
-    owlbear_uuid = str(_uuid_for(binder, "Owlbear"))
-    assert df.loc[owlbear_uuid, "sample_count"] == 3
+    assert df.loc[str(uuid_for(binder, OWLBEAR)), "sample_count"] == 3
 
 
 def test_only_deck_present_cards_are_tallied(tmp_path: Path) -> None:
-    binder = _binder_with_cards(["Owlbear", "Goblin Morningstar"])
-    metric = OnPlayWinRateDeltaMetric(
-        binder, _HEADER, GameId.MTG, output_path=tmp_path / "out.parquet"
+    binder = binder_with_cards([OWLBEAR, MORNINGSTAR])
+
+    df = scan_into_frame(
+        tmp_path,
+        binder,
+        [row(on_play=True, won=True, owlbear_deck=4)],
+        _metric(tmp_path),
     )
 
-    metric.accumulate(_row(on_play=True, won=True, owlbear_deck=4))
-    metric.finalize()
+    assert str(uuid_for(binder, MORNINGSTAR)) not in df.index
 
-    df = pd.read_parquet(tmp_path / "out.parquet")
-    morningstar_uuid = str(_uuid_for(binder, "Goblin Morningstar"))
-    assert morningstar_uuid not in set(df["nocab_uuid"])
+
+def test_many_small_chunks_tally_like_one(tmp_path: Path) -> None:
+    binder = binder_with_cards([OWLBEAR, MORNINGSTAR])
+    rows = [
+        row(won=i % 3 == 0, on_play=i % 2 == 0, owlbear_deck=i % 2, morningstar_deck=1)
+        for i in range(60)
+    ]
+
+    one = scan_into_frame(tmp_path, binder, rows, _metric(tmp_path, "one.parquet"))
+    many = scan_into_frame(
+        tmp_path, binder, rows, _metric(tmp_path, "many.parquet"), block_size=256
+    )
+
+    pd.testing.assert_frame_equal(one.sort_index(), many.sort_index())
+
+
+def test_two_columns_naming_one_card_both_count(tmp_path: Path) -> None:
+    card = uuid_for(binder_with_cards([OWLBEAR]), OWLBEAR)
+    deck = ZoneCounts((card, card), np.array([[1, 1]], np.int16))
+    metric = _metric(tmp_path)
+
+    metric.accumulate(chunk_with_zones({GameZone.DECK: deck}, won=[True]))
+
+    df = pd.read_parquet(metric.finalize()).set_index("nocab_uuid")
+    assert df.loc[str(card), "sample_count"] == 2
+
+
+def test_no_rows_writes_an_empty_file(tmp_path: Path) -> None:
+    df = scan_into_frame(
+        tmp_path, binder_with_cards([OWLBEAR]), [], _metric(tmp_path), index=None
+    )
+
+    assert len(df) == 0

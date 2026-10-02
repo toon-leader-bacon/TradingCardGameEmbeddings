@@ -9,8 +9,9 @@ run on MSH.PremierDraft.csv, ~40M rows - src/training/TODO.md section C).
 """
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, Sequence
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
@@ -80,6 +81,35 @@ class ParquetBuilder:
         self._buffered_rows += 1
         if self._buffered_rows >= self._batch_size:
             self._flush()
+
+    def write_columns(self, columns: Mapping[str, Sequence[Any] | np.ndarray]) -> None:
+        """Write many rows at once, given as equal-length columns: for a
+        caller that already holds a whole batch (e.g. one 17lands
+        chunk). Rows already buffered by write_row() are written first,
+        so output order is call order.
+
+        Inputs:
+            columns: keyed by every column name in this writer's schema;
+                each value one entry per row (a list or numpy array).
+        Output: none.
+        Side effects: flushes the write_row() buffer, then writes
+            columns as its own row group(s) (nothing for zero rows).
+        Exceptions: KeyError if a schema column is missing; whatever
+            pyarrow raises if a column's values don't fit its type or
+            the lengths differ.
+
+        Example:
+            >>> writer.write_columns({"draft_id": ids, "won": won})
+        """
+        self._flush()
+
+        # Validate inputs, then build one table in schema order
+        table = pa.Table.from_pydict(
+            {field.name: columns[field.name] for field in self._schema},
+            schema=self._schema,
+        )
+        if table.num_rows:
+            self._writer.write_table(table)
 
     def close(self) -> None:
         """Flush any buffered rows and close the underlying writer.

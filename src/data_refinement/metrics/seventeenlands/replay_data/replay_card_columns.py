@@ -295,8 +295,8 @@ class ReplayCardColumns:
         """Every matched card from `columns` whose count is > 0 on this
         row.
 
-        Same contract as GameCardColumns.present_uuids() - shared by
-        every deck_columns/sideboard_columns consumer in this
+        Presence, not copies (as game_data's ZoneCounts.present()) -
+        shared by every deck_columns/sideboard_columns consumer in this
         container, since both remain per-row copy COUNTS (deck_<name>
         sums to 40), not per-copy list entries.
 

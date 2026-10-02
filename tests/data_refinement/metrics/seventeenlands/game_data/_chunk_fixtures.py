@@ -4,16 +4,24 @@ the driver does."""
 
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Mapping
 from uuid import UUID, uuid4
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.csv as pa_csv
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.metric import Metric
+from src.data_refinement.metrics.seventeenlands.game_data.chunk_decks import (
+    build_chunk_decks,
+)
 from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
+    GameKeys,
+    GameZone,
+    ZoneCounts,
 )
 from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk_parser import (
     GameDataChunkParser,
@@ -28,6 +36,9 @@ OWLBEAR = "Owlbear"
 MORNINGSTAR = "Goblin Morningstar"
 
 HEADER = [
+    "draft_id",
+    "match_number",
+    "game_number",
     "won",
     "on_play",
     "num_turns",
@@ -80,19 +91,30 @@ def row(
     owlbear_deck: int = 0,
     owlbear_opening_hand: int = 0,
     owlbear_drawn: int = 0,
+    owlbear_tutored: int = 0,
+    owlbear_sideboard: int = 0,
     morningstar_deck: int = 0,
+    rank: str = "gold",
+    draft_id: str = "draft1",
+    match_number: int = 1,
+    game_number: int = 1,
 ) -> dict:
     """One game_data row over HEADER; unlisted counts are 0."""
     result: dict = {column: 0 for column in HEADER}
     result.update(
         {
+            "draft_id": draft_id,
+            "match_number": match_number,
+            "game_number": game_number,
             "won": won,
             "on_play": on_play,
             "num_turns": num_turns,
-            "rank": "gold",
+            "rank": rank,
             f"opening_hand_{OWLBEAR}": owlbear_opening_hand,
             f"drawn_{OWLBEAR}": owlbear_drawn,
+            f"tutored_{OWLBEAR}": owlbear_tutored,
             f"deck_{OWLBEAR}": owlbear_deck,
+            f"sideboard_{OWLBEAR}": owlbear_sideboard,
             f"deck_{MORNINGSTAR}": morningstar_deck,
         }
     )
@@ -106,13 +128,9 @@ def write_csv(path: Path, rows: list[dict], header: list[str] = HEADER) -> Path:
     return path
 
 
-def parser_for(
-    binder: CardBinder, header: list[str] = HEADER, keep_source_frame: bool = False
-) -> GameDataChunkParser:
+def parser_for(binder: CardBinder, header: list[str] = HEADER) -> GameDataChunkParser:
     """A parser built the way the driver builds one."""
-    return GameDataChunkParser.from_header(
-        header, binder, GameId.MTG, keep_source_frame
-    )
+    return GameDataChunkParser.from_header(header, binder, GameId.MTG)
 
 
 def read_batches(csv_path: Path, parser: GameDataChunkParser) -> list[pa.RecordBatch]:
@@ -134,15 +152,45 @@ def parse_one(csv_path: Path, parser: GameDataChunkParser) -> GameDataChunk:
     return parser.parse(batches[0])
 
 
+def chunk_with_zones(
+    zones: Mapping[GameZone, ZoneCounts],
+    won: list[bool],
+    on_play: list[bool] | None = None,
+) -> GameDataChunk:
+    """A chunk built directly from zones (zones not given are empty),
+    with default scalars and its decks identified as the parser would."""
+    rows = len(won)
+    all_zones = {
+        zone: zones.get(zone, ZoneCounts((), np.zeros((rows, 0), np.int16)))
+        for zone in GameZone
+    }
+    keys = GameKeys(
+        draft_id=np.array([f"draft{i}" for i in range(rows)], object),
+        match_number=np.ones(rows, np.int64),
+        game_number=np.ones(rows, np.int64),
+    )
+    return GameDataChunk(
+        zones=all_zones,
+        won=np.array(won, np.bool_),
+        on_play=np.array(on_play if on_play is not None else [True] * rows, np.bool_),
+        num_turns=np.full(rows, 8, np.int32),
+        keys=keys,
+        rank=np.full(rows, "", object),
+        decks=build_chunk_decks(all_zones[GameZone.DECK], keys, GameId.MTG),
+    )
+
+
 def scan_into_frame(
     tmp_path: Path,
     binder: CardBinder,
     rows: list[dict],
     metric: Metric[GameDataChunk],
     block_size: int = 1 << 20,
+    index: str | None = "nocab_uuid",
 ) -> pd.DataFrame:
-    """Write rows, scan them through metric, and return its output
-    indexed by nocab_uuid."""
+    """Write rows, scan them through metric, and return its output,
+    indexed by index (None: unindexed)."""
     csv_path = write_csv(tmp_path / "games.csv", rows)
     scan_game_csv(csv_path, [metric], parser_for(binder), block_size=block_size)
-    return pd.read_parquet(metric.finalize()).set_index("nocab_uuid")
+    frame = pd.read_parquet(metric.finalize())
+    return frame if index is None else frame.set_index(index)

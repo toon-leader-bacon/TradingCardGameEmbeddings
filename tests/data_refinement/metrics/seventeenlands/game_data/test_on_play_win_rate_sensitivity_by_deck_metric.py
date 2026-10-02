@@ -1,133 +1,114 @@
-"""Skeleton-stage test stubs for
-on_play_win_rate_sensitivity_by_deck_metric.py's
-OnPlayWinRateSensitivityByDeckMetric. Bodies are filled in by
-design-recipe-implement.
-"""
+"""Tests for on_play_win_rate_sensitivity_by_deck_metric.py's
+OnPlayWinRateSensitivityByDeckMetric, driven through scan_game_csv as a
+real run drives it."""
 
-from datetime import datetime, timezone
 from pathlib import Path
-from uuid import uuid4
 
 import pandas as pd
 
-from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.metrics.deck_ids import deck_uuid_from_cards
 from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_rate_sensitivity_by_deck_metric import (  # noqa: E501
     OnPlayWinRateSensitivityByDeckMetric,
 )
-from src.schema.card import GenericCard, Provenance
-from src.schema.data_source import DataSource
+from src.data_refinement.metrics.seventeenlands.game_data.scanner import scan_game_csv
 from src.schema.game_id import GameId
+from tests.data_refinement.metrics.seventeenlands.game_data._chunk_fixtures import (
+    MORNINGSTAR,
+    OWLBEAR,
+    VERSION,
+    binder_with_cards,
+    parser_for,
+    row,
+    uuid_for,
+    write_csv,
+)
+
+_BINDER = binder_with_cards([OWLBEAR, MORNINGSTAR])
 
 
-def _make_card(name: str) -> GenericCard:
-    return GenericCard(
-        nocab_uuid=uuid4(),
-        source_game=GameId.MTG,
-        name=name,
-        raw_content={},
-        provenance=Provenance(
-            data_source=DataSource.SCRYFALL,
-            source_id=name,
-            fetched_at=datetime.now(timezone.utc),
-        ),
+def _scan(
+    tmp_path: Path, rows: list[dict], deck_box: DeckBox, block_size: int = 1 << 20
+) -> pd.DataFrame:
+    """Scan rows through the metric; its output indexed by deck_uuid."""
+    metric = OnPlayWinRateSensitivityByDeckMetric(
+        VERSION, deck_box, output_path=tmp_path / "out.parquet"
     )
-
-
-def _binder_with_cards(names: list[str]) -> CardBinder:
-    binder = CardBinder()
-    for name in names:
-        binder.create(_make_card(name))
-    return binder
-
-
-_HEADER = [
-    "draft_id",
-    "match_number",
-    "game_number",
-    "on_play",
-    "won",
-    "deck_Owlbear",
-]
-
-
-def _row(
-    on_play: bool,
-    won: bool,
-    owlbear_deck: int = 4,
-    match_number: int = 0,
-    game_number: int = 0,
-) -> dict:
-    return {
-        "draft_id": "draft1",
-        "match_number": match_number,
-        "game_number": game_number,
-        "on_play": on_play,
-        "won": won,
-        "deck_Owlbear": owlbear_deck,
-    }
+    csv_path = write_csv(tmp_path / "games.csv", rows)
+    scan_game_csv(csv_path, [metric], parser_for(_BINDER), block_size=block_size)
+    return pd.read_parquet(metric.finalize()).set_index("deck_uuid")
 
 
 def test_computes_on_play_rate_minus_on_draw_rate_per_deck(tmp_path: Path) -> None:
-    binder = _binder_with_cards(["Owlbear"])
-    metric = OnPlayWinRateSensitivityByDeckMetric(
-        binder, _HEADER, GameId.MTG, DeckBox(), output_path=tmp_path / "out.parquet"
+    # Same deck in both games - on play: 1/1; on draw: 0/1
+    df = _scan(
+        tmp_path,
+        [
+            row(on_play=True, won=True, owlbear_deck=4, game_number=1),
+            row(on_play=False, won=False, owlbear_deck=4, game_number=2),
+        ],
+        DeckBox(),
     )
 
-    # Same deck (deck_Owlbear=4) across every game - on play: 1/1; on
-    # draw: 0/1.
-    metric.accumulate(_row(on_play=True, won=True, game_number=0))
-    metric.accumulate(_row(on_play=False, won=False, game_number=1))
-    metric.finalize()
-
-    df = pd.read_parquet(tmp_path / "out.parquet")
-    assert len(df) == 1
-    assert df.iloc[0]["on_play_win_rate_sensitivity"] == 1.0
+    deck_uuid = str(deck_uuid_from_cards([uuid_for(_BINDER, OWLBEAR)]))
+    assert list(df.index) == [deck_uuid]
+    assert df.loc[deck_uuid, "on_play_win_rate_sensitivity"] == 1.0
 
 
 def test_sensitivity_is_none_when_deck_never_seen_on_one_side(
     tmp_path: Path,
 ) -> None:
-    binder = _binder_with_cards(["Owlbear"])
-    metric = OnPlayWinRateSensitivityByDeckMetric(
-        binder, _HEADER, GameId.MTG, DeckBox(), output_path=tmp_path / "out.parquet"
-    )
+    df = _scan(tmp_path, [row(on_play=True, won=True, owlbear_deck=4)], DeckBox())
 
-    metric.accumulate(_row(on_play=True, won=True))
-    metric.finalize()
-
-    df = pd.read_parquet(tmp_path / "out.parquet")
-    # A pandas parquet round trip represents a written None as NaN in a
-    # float64 column, not Python None - pd.isna() is the correct check.
+    # A written None reads back as NaN in a float64 column
     assert pd.isna(df.iloc[0]["on_play_win_rate_sensitivity"])
 
 
 def test_identical_decks_across_games_dedupe_in_the_shared_deck_box(
     tmp_path: Path,
 ) -> None:
-    binder = _binder_with_cards(["Owlbear"])
     deck_box = DeckBox()
-    metric = OnPlayWinRateSensitivityByDeckMetric(
-        binder, _HEADER, GameId.MTG, deck_box, output_path=tmp_path / "out.parquet"
-    )
 
-    metric.accumulate(_row(on_play=True, won=True, game_number=0))
-    metric.accumulate(_row(on_play=False, won=False, game_number=1))
-    metric.finalize()
+    _scan(
+        tmp_path,
+        [
+            row(on_play=True, won=True, owlbear_deck=4, game_number=1),
+            row(on_play=False, won=False, owlbear_deck=4, game_number=2),
+        ],
+        deck_box,
+    )
 
     assert len(list(deck_box.all_uuids(GameId.MTG))) == 1
 
 
 def test_sample_count_sums_both_sides(tmp_path: Path) -> None:
-    binder = _binder_with_cards(["Owlbear"])
-    metric = OnPlayWinRateSensitivityByDeckMetric(
-        binder, _HEADER, GameId.MTG, DeckBox(), output_path=tmp_path / "out.parquet"
+    df = _scan(
+        tmp_path,
+        [
+            row(on_play=True, won=True, owlbear_deck=4),
+            row(on_play=True, won=False, owlbear_deck=4),
+            row(on_play=False, won=True, owlbear_deck=4),
+        ],
+        DeckBox(),
     )
 
-    metric.accumulate(_row(on_play=True, won=True, game_number=0))
-    metric.accumulate(_row(on_play=True, won=False, game_number=1))
-    metric.accumulate(_row(on_play=False, won=True, game_number=2))
-    metric.finalize()
-
-    df = pd.read_parquet(tmp_path / "out.parquet")
     assert df.iloc[0]["sample_count"] == 3
+
+
+def test_a_deck_spanning_chunks_tallies_like_one_chunk(tmp_path: Path) -> None:
+    rows = [
+        row(
+            won=i % 3 == 0,
+            on_play=i % 2 == 0,
+            owlbear_deck=1,
+            morningstar_deck=i % 2,
+            game_number=i,
+        )
+        for i in range(60)
+    ]
+
+    one = _scan(tmp_path, rows, DeckBox())
+    many = _scan(tmp_path, rows, DeckBox(), block_size=256)
+
+    assert len(one) == 2
+    pd.testing.assert_frame_equal(one.sort_index(), many.sort_index())

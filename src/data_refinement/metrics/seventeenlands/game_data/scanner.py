@@ -10,11 +10,9 @@ DeckBox in its own constructor (the driver saves that box afterwards).
 
 Failure isolation is per (metric, chunk): one metric raising on a chunk
 is logged and skips that chunk for that metric only; every other metric
-still gets it. Row metrics wrapped in RowwiseMetric keep their finer,
-per-row isolation inside the adapter. A metric that raises partway
-through accumulate() can be left with that chunk half-tallied, so a
-logged accumulate() failure means that metric's output for this CSV
-must not be trusted (the row scanner had the same caveat per row).
+still gets it. A metric that raises partway through accumulate() can be
+left with that chunk half-tallied, so a logged accumulate() failure
+means that metric's output for this CSV must not be trusted.
 """
 
 import logging
@@ -69,8 +67,7 @@ def scan_game_csv(
         not one metric's: they stop the whole family run.
 
     Example:
-        >>> parser = GameDataChunkParser.from_header(header, binder,
-        ...                                          GameId.MTG, False)
+        >>> parser = GameDataChunkParser.from_header(header, binder, GameId.MTG)
         >>> scan_game_csv(path, metrics, parser)
     """
     # Read only what the parser needs, with card counts as small ints
