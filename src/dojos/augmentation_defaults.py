@@ -6,8 +6,10 @@ card-binder ingestion stage (named per section below), so a key renamed
 there must be renamed here. The preflight tally report
 (scripts/run_training.py) flags a mask that stops matching.
 
-A game's default applies to every contrastive dojo over that game's cards;
-a run config can replace it per dojo (`mods:`). Masking the deck-defining
+A game's default applies to every dojo over that game's cards (contrastive
+and metric dojos alike; a metric dojo runs it after its own task mods, see
+src/training/dojo_catalog.py); a run config can replace it per dojo
+(`mods:`). Masking the deck-defining
 field (the one field that nearly identifies which deck a card came from)
 keeps same-deck contrastive positives from being solved by that field
 alone. A game with no entry gets no augmentation.

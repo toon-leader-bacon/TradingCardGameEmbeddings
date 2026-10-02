@@ -5,7 +5,31 @@ from typing import Any
 import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.dojos.mods.mod_specs import ShuffleKeysSpec
+from src.dojos.generic.generic_dojo import GenericDojo
+from src.dojos.generic.multi_card_binary_classification.dojo import (
+    MultiCardBinaryClassificationDojo,
+)
+from src.dojos.generic.multi_card_fixed_classification.dojo import (
+    MultiCardFixedClassificationDojo,
+)
+from src.dojos.generic.multi_card_option_selection.dojo import (
+    MultiCardOptionSelectionDojo,
+)
+from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
+from src.dojos.generic.multi_group_binary_classification.dojo import (
+    MultiGroupBinaryClassificationDojo,
+)
+from src.dojos.generic.multi_group_option_selection.dojo import (
+    MultiGroupOptionSelectionDojo,
+)
+from src.dojos.generic.multi_group_regression.dojo import MultiGroupRegressionDojo
+from src.dojos.mods.common_mods import MaskTargetKeyMod
+from src.dojos.mods.mod_pipeline import ModPipeline
+from src.dojos.mods.mod_specs import (
+    CardDropoutSpec,
+    DuplicateCollapseSpec,
+    ShuffleKeysSpec,
+)
 from src.data_refinement.metrics.dominiontabs.cost_regression_metric import (
     CostRegressionMetric,
 )
@@ -39,6 +63,7 @@ from src.dojos.sts_gg import deck_label_dojos
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
 from src.training.dojo_catalog import (
+    DECK_MOD_GROUPS,
     DOJO_CATALOG,
     CardDojoRecipe,
     CardShelf,
@@ -46,8 +71,9 @@ from src.training.dojo_catalog import (
     DeckDojoRecipe,
     DojoBuildContext,
     _augmentation_pipeline,
+    _staple_subsampling,
+    _with_augmentations,
     build_dojos,
-    takes_augmentations,
 )
 
 
@@ -68,15 +94,24 @@ class _RecordingShelf(CardShelf):
         return f"box:{path.name}"
 
 
+def _stub_dojo(name: str, mods: list | None = None) -> GenericDojo:
+    """A GenericDojo shell (no data) with a name and a task mod pipeline."""
+    dojo = GenericDojo.__new__(GenericDojo)
+    dojo.name = name
+    dojo.data_mod_pipeline = ModPipeline(mods or [])
+    return dojo
+
+
 class _RecordingDojoClass:
-    """Stands in for a dojo class; records the arguments it was built with."""
+    """Stands in for a dojo class; records the arguments it was built with
+    and returns a stub GenericDojo named by its name argument."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         self.calls.append((args, kwargs))
-        return kwargs["name"]
+        return _stub_dojo(kwargs["name"])
 
 
 # Dojos that name their metric in their constructor instead of a METRIC ClassVar
@@ -219,7 +254,7 @@ class TestBuildDojos:
 
         dojos = build_dojos(["test.two", "test.one"], _context(_RecordingShelf()))
 
-        assert dojos == ["test.two", "test.one"]
+        assert [dojo.name for dojo in dojos] == ["test.two", "test.one"]
 
     def test_empty_names_build_nothing(self) -> None:
         assert build_dojos([], _context(_RecordingShelf())) == []
@@ -285,9 +320,12 @@ class TestContrastiveEntries:
         for key, recipe in contrastive.items():
             assert key == f"contrastive.{recipe.game.value}"
 
-    def test_only_contrastive_dojos_take_augmentations(self) -> None:
-        assert takes_augmentations("contrastive.gwent")
-        assert not takes_augmentations("gwent_one.color_mask")
+    def test_every_metric_dojo_is_a_generic_dojo(self) -> None:
+        # _with_augmentations appends to a GenericDojo's pipeline
+        for name, recipe in DOJO_CATALOG.items():
+            if not isinstance(recipe, ContrastiveDojoRecipe):
+                dojo_class = getattr(recipe, "dojo_class")
+                assert issubclass(dojo_class, GenericDojo), name
 
 
 class TestModOverrideValidation:
@@ -300,11 +338,18 @@ class TestModOverrideValidation:
             mod_overrides=overrides,
         )
 
-    def test_an_override_for_a_metric_dojo_is_rejected(self) -> None:
-        context = self._context({"gwent_one.color_mask": ()})
-        with pytest.raises(ValueError, match="take no augmentation"):
-            build_dojos(["gwent_one.color_mask"], context)
-        assert context.shelf.requested_games == []  # type: ignore[attr-defined]
+    def test_a_metric_dojo_takes_card_field_overrides(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        recipe = CardDojoRecipe(GameId.GWENT, _RecordingDojoClass())
+        monkeypatch.setitem(DOJO_CATALOG, "test.one", recipe)  # type: ignore[arg-type]
+        context = self._context({"test.one": (ShuffleKeysSpec(),)})
+
+        (dojo,) = build_dojos(["test.one"], context)
+
+        assert isinstance(dojo, GenericDojo)
+        names = [type(mod).__name__ for mod in dojo.data_mod_pipeline.mods]
+        assert names == ["ShuffleKeysMod"]
 
     def test_an_override_for_a_dojo_not_built_is_rejected(self) -> None:
         context = self._context({"contrastive.gwent": ()})
@@ -356,3 +401,160 @@ class TestAugmentationPipeline:
         assert draws != first_draws("contrastive.gwent", 1)
         # never the same stream as the pair constructor (seeded by rng_seed)
         assert random.Random(0).random() not in draws
+
+
+class TestDeckModOptIn:
+    def _context(self, overrides: dict) -> DojoBuildContext:
+        return DojoBuildContext(
+            shelf=_RecordingShelf(),
+            holdout=HoldoutSpec.no_holdout(),
+            card_embedding_size=32,
+            rng_seed=0,
+            mod_overrides=overrides,
+        )
+
+    def test_every_listed_dojo_is_in_the_catalog(self) -> None:
+        assert set(DECK_MOD_GROUPS) <= set(DOJO_CATALOG)
+
+    def test_no_options_group_is_ever_thinnable(self) -> None:
+        for name, groups in DECK_MOD_GROUPS.items():
+            dojo_class = getattr(DOJO_CATALOG[name], "dojo_class", None)
+            assert dojo_class is not None, name
+            assert not issubclass(dojo_class, MultiCardOptionSelectionDojo), name
+            if issubclass(dojo_class, MultiGroupOptionSelectionDojo):
+                assert 0 not in groups, name
+
+    def test_every_entry_fits_its_dojos_input_shape(self) -> None:
+        multi_card = (
+            MultiCardBinaryClassificationDojo,
+            MultiCardFixedClassificationDojo,
+            MultiCardRegressionDojo,
+        )
+        multi_group = (
+            MultiGroupBinaryClassificationDojo,
+            MultiGroupOptionSelectionDojo,
+            MultiGroupRegressionDojo,
+        )
+        for name, groups in DECK_MOD_GROUPS.items():
+            dojo_class = getattr(DOJO_CATALOG[name], "dojo_class")
+            if issubclass(dojo_class, multi_card):
+                assert groups == frozenset({0}), name
+            else:
+                assert issubclass(dojo_class, multi_group), name
+                assert groups and groups <= frozenset({0, 1}), name  # two groups
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "sts2_runs.card_deck_size",
+            "sts2_runs.total_cards_picked",
+            "sts_gg.total_cards_picked",
+            "isotropic.deck_card_set_copy_count",
+            "isotropic.winning_deck_count",
+            "final_decks.held_out_card_gwent",
+            "isotropic.kingdom_opening_buy_prediction",
+        ],
+    )
+    def test_count_and_answer_set_dojos_are_never_listed(self, name: str) -> None:
+        assert name in DOJO_CATALOG and name not in DECK_MOD_GROUPS
+
+    def test_a_deck_spec_is_rejected_for_an_unlisted_dojo(self) -> None:
+        context = self._context({"contrastive.gwent": (CardDropoutSpec(0.1),)})
+        with pytest.raises(ValueError, match="takes no deck mods"):
+            build_dojos(["contrastive.gwent"], context)
+
+    def test_a_group_the_dojo_does_not_allow_is_rejected(self) -> None:
+        name = "isotropic.mid_game_next_buy"
+        context = self._context({name: (CardDropoutSpec(0.1, groups=(0, 1)),)})
+        with pytest.raises(ValueError, match=r"may thin groups \[1\] only"):
+            build_dojos([name], context)
+        assert context.shelf.requested_games == []  # type: ignore[attr-defined]
+
+
+class TestMetricDojoAugmentations:
+    def _context(self, overrides: dict | None = None) -> DojoBuildContext:
+        return DojoBuildContext(
+            shelf=_RecordingShelf(),
+            holdout=HoldoutSpec.no_holdout(),
+            card_embedding_size=32,
+            rng_seed=0,
+            mod_overrides=overrides or {},
+        )
+
+    def test_a_metric_dojo_gets_its_games_defaults_after_its_task_mods(
+        self,
+    ) -> None:
+        task_mod = MaskTargetKeyMod("rarity", train_only=False)
+        dojo = _stub_dojo("scryfall.rarity_mask", [task_mod])
+
+        _with_augmentations(dojo, "scryfall.rarity_mask", GameId.MTG, self._context())
+
+        mods = dojo.data_mod_pipeline.mods
+        assert mods[0] is task_mod and not mods[0].train_only
+        assert [type(mod).__name__ for mod in mods[1:]] == [
+            "ShuffleKeysMod",
+            "WeightedFieldMaskMod",
+            "RandomKeyMaskMod",
+        ]
+        assert all(mod.train_only for mod in mods[1:])
+
+    def test_an_override_replaces_the_defaults_after_the_task_mods(self) -> None:
+        task_mod = MaskTargetKeyMod("rarity", train_only=False)
+        dojo = _stub_dojo("sts2_runs.win", [task_mod])
+        specs = (CardDropoutSpec(0.1), DuplicateCollapseSpec())
+        context = self._context({"sts2_runs.win": specs})
+
+        _with_augmentations(dojo, "sts2_runs.win", GameId.SLAY_THE_SPIRE_2, context)
+
+        mods = dojo.data_mod_pipeline.mods
+        assert mods[0] is task_mod
+        assert [type(mod).__name__ for mod in mods[1:]] == [
+            "CardDropoutMod",
+            "DuplicateCollapseMod",
+        ]
+
+    def test_an_empty_override_keeps_only_the_task_mods(self) -> None:
+        task_mod = MaskTargetKeyMod("rarity", train_only=False)
+        dojo = _stub_dojo("scryfall.rarity_mask", [task_mod])
+        context = self._context({"scryfall.rarity_mask": ()})
+
+        _with_augmentations(dojo, "scryfall.rarity_mask", GameId.MTG, context)
+
+        assert dojo.data_mod_pipeline.mods == [task_mod]
+
+    def test_a_game_without_defaults_adds_nothing(self) -> None:
+        dojo = _stub_dojo("x.y")
+        _with_augmentations(dojo, "x.y", GameId.YUGIOH, self._context())
+        assert dojo.data_mod_pipeline.mods == []
+
+
+class TestStapleThresholds:
+    def _context(self, thresholds: dict) -> DojoBuildContext:
+        return DojoBuildContext(
+            shelf=_RecordingShelf(),
+            holdout=HoldoutSpec.no_holdout(),
+            card_embedding_size=32,
+            rng_seed=0,
+            staple_thresholds=thresholds,
+        )
+
+    @pytest.mark.parametrize(
+        ("names", "threshold_name"),
+        [
+            (["gwent_one.color_mask"], "gwent_one.color_mask"),
+            (["contrastive.gwent"], "contrastive.dominion"),
+        ],
+    )
+    def test_a_threshold_needs_a_contrastive_dojo_being_built(
+        self, names: list[str], threshold_name: str
+    ) -> None:
+        context = self._context({threshold_name: 0.1})
+        with pytest.raises(ValueError, match="not contrastive dojos being built"):
+            build_dojos(names, context)
+        assert context.shelf.requested_games == []  # type: ignore[attr-defined]
+
+    def test_no_threshold_means_no_subsampling(self) -> None:
+        dealer: Any = object()  # never read without a threshold
+        assert (
+            _staple_subsampling("contrastive.gwent", dealer, self._context({})) is None
+        )

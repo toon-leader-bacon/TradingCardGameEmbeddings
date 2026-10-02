@@ -20,6 +20,7 @@ from uuid import UUID
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.dojos.contrastive.contrastive_batch import ContrastiveBatch
+from src.dojos.contrastive.staple_subsampling import StapleSubsampling
 from src.schema.card import GenericCard, GenericDeck
 
 _logger = logging.getLogger(__name__)
@@ -116,13 +117,26 @@ class SingleCardPairConstructor:
     *count* per deck, never full combinatorial enumeration of a deck's
     possible subsets (see plan)."""
 
-    def __init__(self, items_per_deck: int, rng_seed: int | None = None) -> None:
+    def __init__(
+        self,
+        items_per_deck: int,
+        rng_seed: int | None = None,
+        staple_subsampling: StapleSubsampling | None = None,
+    ) -> None:
         """
         Inputs:
             items_per_deck: how many single-card items to sample from
                 each deck that has at least this many known cards.
             rng_seed: seed for item sampling. None means
                 non-deterministic.
+            staple_subsampling: when given, each deck's known cards are
+                first thinned (each occurrence kept with probability
+                min(1, sqrt(t / df)), see staple_subsampling.py), and a
+                deck left with fewer than items_per_deck cards is skipped
+                like a deck with too few known cards: falling back to the
+                unthinned deck would put staple pairs back exactly where
+                staples dominate. None (the default, t = inf) samples
+                as before and draws nothing extra from the RNG.
         Output: none (constructor).
         Side effects: none.
         Exceptions: ValueError if items_per_deck <= 0.
@@ -131,6 +145,7 @@ class SingleCardPairConstructor:
             raise ValueError("items_per_deck must be positive")
         self._items_per_deck = items_per_deck
         self._rng = random.Random(rng_seed)
+        self._staple_subsampling = staple_subsampling
 
     @property
     def cards_per_deck(self) -> int:
@@ -145,9 +160,12 @@ class SingleCardPairConstructor:
 
         Inputs: see ContrastivePairConstructor.build().
         Output: a ContrastiveBatch of single-card items. If every given
-            deck is skipped (too few known cards), items/identities/
-            positive_cliques are all empty.
-        Side effects: emits one logging.warning() per skipped deck.
+            deck is skipped (too few known cards, or too few left after
+            staple subsampling), items/identities/positive_cliques are
+            all empty.
+        Side effects: emits one logging.warning() per deck skipped for
+            too few known cards, and one logging.debug() per deck skipped
+            only after staple subsampling (common for a tiny t).
         Exceptions: RuntimeError if card_lookup stops resolving a uuid
             it had just resolved moments earlier in this same call (an
             environment invariant violation, not expected/dirty-data
@@ -178,8 +196,16 @@ class SingleCardPairConstructor:
                     self._items_per_deck,
                 )
                 continue
+            candidates = self._thinned(known_uuids)
+            if len(candidates) < self._items_per_deck:
+                _logger.debug(
+                    "Skipping deck %s: %d card(s) left after staple subsampling",
+                    deck.nocab_uuid,
+                    len(candidates),
+                )
+                continue
 
-            sampled_uuids = self._rng.sample(known_uuids, self._items_per_deck)
+            sampled_uuids = self._rng.sample(candidates, self._items_per_deck)
             start_index = len(items)
             for card_uuid in sampled_uuids:
                 items.append(_card_for_known_uuid(card_uuid, card_lookup))
@@ -189,6 +215,19 @@ class SingleCardPairConstructor:
         return ContrastiveBatch(
             inputs=items, identities=identities, positive_cliques=positive_cliques
         )
+
+    def _thinned(self, known_uuids: list[UUID]) -> list[UUID]:
+        """known_uuids after staple subsampling, or known_uuids itself when
+        there is none (no RNG draw).
+
+        Private helper - single caller is build().
+        Inputs: known_uuids. Output: list[UUID].
+        Side effects: advances self._rng when subsampling.
+        Exceptions: none.
+        """
+        if self._staple_subsampling is None:
+            return known_uuids
+        return self._staple_subsampling.kept(known_uuids, self._rng)
 
 
 class MultiCardPairConstructor:
