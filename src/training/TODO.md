@@ -254,13 +254,6 @@ a median of ~200 tokens and FaB to ~570.
   dojo's stats into the run directory (manifest or `validation.json`) and
   read them back for evaluation, so predictions convert to label units
   reliably.
-- [ ] **Let label dojos take the per-game card-field augmentations (D1).**
-  `takes_augmentations` (`dojo_catalog.py`) limits `mods:` overrides and
-  `augmentation_defaults.py` to contrastive dojos. Extending it to the
-  generic cells needs a rule so an augmentation never interferes with a
-  dojo's own task mask (e.g. masking the field a masking dojo predicts is
-  fine; unmasking or re-ordering past it is not). Build on whatever opt-in
-  plumbing the Oct 1 deck-level mods (D2) added.
 - [ ] **Two-level diet sampling: game, then dojo.** Today the diet
   sampler (`src/training/diet/diet_sampler.py`) picks one dojo per step
   with probability proportional to its TRAIN count^alpha. alpha = 0 means
