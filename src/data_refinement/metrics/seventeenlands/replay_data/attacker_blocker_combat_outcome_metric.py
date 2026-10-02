@@ -1,5 +1,5 @@
-"""AttackerBlockerCombatOutcomeMetric - plans/replay_data_metrics.md's
-"Attacker Group vs. Blocker Group -> Combat Outcome": for every
+"""AttackerBlockerCombatOutcomeMetric - BRAINSTORM.md's "Attacker
+Group vs. Blocker Group -> Combat Outcome": for every
 half-turn that had at least one attacker, group 1 = that half-turn's
 creatures_attacked, group 2 = creatures_blocking, label = a signed
 net-kill-count delta.
@@ -15,8 +15,7 @@ over pool members.
 No deck_box - this metric's identity is (draft_id, match_number,
 game_number, actor, turn), never a deck_uuid.
 
-SIGN CONVENTION SETTLED (plans/replay_data_metrics.md's "Open
-questions" #2): net_kill_delta is attacker-favorable-positive -
+SIGN CONVENTION SETTLED: net_kill_delta is attacker-favorable-positive -
 len(the DEFENDING side's creatures_killed_combat this half-turn) minus
 len(the ATTACKING side's - actor's own - creatures_killed_combat this
 half-turn). A positive value means the attacker traded up (killed more

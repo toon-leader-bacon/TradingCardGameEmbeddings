@@ -54,12 +54,18 @@ larger amount of configuration surface - judged not worth it.
 ## Files
 
 - `metric.py` - `Metric[RawRowT]`, the accumulator-family Protocol.
+- `isolated_call.py` - `call_isolated(logger, subject, step, call)`,
+  which runs one metric step and logs (never raises) a failure as an
+  ERROR line starting `METRIC FAILURE`, so one metric's bug never stops
+  a scan. It is used by the 17lands game_data chunk scanner; the older
+  scanners still carry their own copies of this logic.
 - `version_metadata.py` - writes/reads the `CardBinder` (and, where
   needed, `DeckBox`) version a metric's parquet output was built from,
   as parquet schema metadata; dojos check it at construction.
 - `parquet_builder.py` - `ParquetBuilder`, buffers per-row writes into
   bounded row groups so a metric over a tens-of-millions-row source
-  keeps flat memory.
+  keeps flat memory. `write_columns()` writes a whole batch of rows at
+  once (e.g. one 17lands chunk), after any rows already buffered.
 - `deck_ids.py` - content-addressed deck-id hashing shared across
   `Metric[RawRowT]`-family containers (see its own module docstring);
   not used by the `CorpusScanMetric` family, which has no deck concept.

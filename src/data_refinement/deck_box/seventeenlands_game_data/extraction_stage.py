@@ -529,9 +529,9 @@ class SeventeenLandsGameDataDeckExtractionStage:
 
         Private helper — single consumer is _extract_row(). THIS IS
         WHERE THE "FULL DECK LIST" HAPPENS: unlike
-        GameCardColumns.present_uuids() (which samples presence once
-        per qualifying card for that sibling container's per-card
-        metrics), this method appends card_uuid once per unit of
+        the game_data metrics' ZoneCounts.present() (which samples
+        presence once per qualifying card for that sibling container's
+        per-card metrics), this method appends card_uuid once per unit of
         row[column_name]'s own count — see module docstring's opening
         RAW SHAPE section.
 

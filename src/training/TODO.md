@@ -127,7 +127,7 @@ a median of ~200 tokens and FaB to ~570.
     cards content-changed (exactly the 42 leader cards), confirming the
     fix and nothing else moved. `decks/gwent.jsonl` and Gwent
     metrics/splits stay valid;
-  - [x] converted (details in `plans/card_content_conversion.md`):
+  - [x] converted (details in `plans/archive/card_content_conversion.md`):
     FaB (median tokens 657 to 70), Pokemon (349 to 142), STS2 (342 to 69),
     Gwent (131 to 89), Scryfall/MTG (2,352 to ~150). All under 384 tokens
     at p99 or better;
@@ -457,7 +457,7 @@ a median of ~200 tokens and FaB to ~570.
   15 steps, heads on `cuda:0`, loss fell every round, no quarantines.
 - [x] **GPU run** (2026-09-30): `gwent_contrastive.yaml` trained end to end
   and was evaluated; findings, fixes and open items in
-  `plans/first_train_shakeout.md`. Frozen ModernBERT, head-only phase; inspect loss curves
+  `plans/archive/first_train_shakeout.md`. Frozen ModernBERT, head-only phase; inspect loss curves
   and saturation behavior. First candidate (decided 2026-09-30):
   `configs/training/gwent_contrastive.yaml`, one single-card contrastive
   dojo with Gwent's default augmentations; `--check` passes on real data

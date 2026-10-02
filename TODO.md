@@ -6,8 +6,7 @@
   drives its associated metric generator directly against the raw data
   at split time, instead of always going through an intermediate
   per-metric output file (parquet/JSONL) written by a separate scan
-  step. A possible future alternative, not a planned change (raised in
-  plans/deck_outcome_dojo.md).
+  step. A possible future alternative, not a planned change.
 - [x] Move 17lands data retrieval onto the shared `Downloader` base
   class (2026-09-29). `SeventeenLandsDownloader` now subclasses
   `Downloader`; `_run_phase_1()` is a thin no-arg wrapper around

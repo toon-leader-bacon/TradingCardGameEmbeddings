@@ -3,9 +3,7 @@ predicted by IDENTITY (which leader), not by a field of the leader.
 
 See src/data_refinement/metrics/generic/deck_card_mask_metric.py for the
 shared accumulate()/finalize() sequence this fixes SOURCE_GAME/
-LABEL_VALUES/deck-registration/target-selection/labeling for, and
-plans/deck_card_masking.md for the full design (this class's own
-section) - in particular:
+LABEL_VALUES/deck lookup/target-selection/labeling for. Design notes:
 
   - why the label is the leader's own name rather than e.g. its
     faction (faction is near-trivially recoverable from the rest of a
@@ -20,6 +18,8 @@ section) - in particular:
     information once a deck is stored, so this metric never treats an
     already-stored deck as its source of truth for "which card is the
     leader."
+  - the published box is read only: each row's deck is looked up by
+    the uuid its extraction stage minted (see _deck_uuid_for_row()).
 """
 
 import logging
@@ -54,41 +54,29 @@ class LeaderMaskedFromDeckMetric(DeckCardMaskMetric):
         "data/metrics/play_gwent/leader_masked_from_deck.parquet"
     )
 
-    def __init__(
-        self,
-        card_lookup: CardLookup,
-        deck_box: DeckBox,
-        output_path: Path | None = None,
-    ) -> None:
-        """See DeckCardMaskMetric.__init__ - identical contract, plus
-        owning one PlayGwentDeckExtractionStage instance this class
-        delegates every row's deck registration to (see
-        _deck_uuid_for_row())."""
-        super().__init__(card_lookup, deck_box, output_path)
-        self._extraction_stage = PlayGwentDeckExtractionStage()
+    def _deck_uuid_for_row(self, row: dict, deck_box: DeckBox) -> UUID | None:
+        """The published deck uuid for row's guide; writes nothing.
 
-    def _deck_uuid_for_row(self, row: dict, deck_box: DeckBox) -> UUID:
-        """Delegate row's deck registration to PlayGwentDeckExtractionStage.
+        The deck already sits in the published Gwent box
+        (data/final/decks/gwent.db), under the uuid
+        PlayGwentDeckExtractionStage minted from the guide id, so this
+        metric never writes decks and the box is never re-saved by a
+        metric run (a re-save would make every metric keyed to the box
+        stale).
 
         Inputs:
             row: one raw play_gwent guide object, carrying at least
-                "id" (int) and "deck"."srcCardTemplates" (list[int]) -
-                see PlayGwentDeckExtractionStage.extract_one()'s own
-                docstring for the exact shape.
-            deck_box: same box passed to __init__.
-        Output: this row's deck uuid (deck_uuid_for_guide(row["id"])),
-            regardless of whether extract_one() itself found something
-            new to write.
-        Side effects: whatever
-            self._extraction_stage.extract_one(row, deck_box,
-            self._card_lookup) does - creates or updates exactly one
-            deck on deck_box.
-        Exceptions: whatever extract_one() raises (see its own
-            docstring - e.g. missing "id"/"deck"."srcCardTemplates",
-            or an unseeded Unknown sentinel card).
+                "id" (int).
+            deck_box: the published Gwent box passed to __init__.
+        Output: deck_uuid_for_guide(row["id"]) if deck_box holds that
+            deck, else None (row skipped: a guide newer than the box).
+        Side effects: none.
+        Exceptions: KeyError if row has no "id".
         """
-        self._extraction_stage.extract_one(row, deck_box, self._card_lookup)
-        return PlayGwentDeckExtractionStage.deck_uuid_for_guide(row["id"])
+        deck_uuid = PlayGwentDeckExtractionStage.deck_uuid_for_guide(row["id"])
+        if deck_box.get_by_uuid(deck_uuid) is None:
+            return None
+        return deck_uuid
 
     def _target_card_uuid_for_row(
         self, row: dict, card_lookup: CardLookup

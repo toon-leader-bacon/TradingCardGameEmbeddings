@@ -5,8 +5,7 @@ See src/data_retrieval/README.md for this container's scope: fetch and
 land raw files on disk, no parsing or filtering (that's
 data_refinement's job) — this class's only transformation is isolating
 and pretty-printing the one HTML fragment a deck page already embeds
-its decklist in, not reshaping its contents. See
-plans/fabtcg_decklists.md for this feature's confirmed-live scope.
+its decklist in, not reshaping its contents.
 
 Distinct from cardvault_fabtcg (existing source, a different fabtcg.com
 subdomain, pulls a static card CSV) — no overlap.
@@ -35,8 +34,7 @@ expected to be run and re-run as separate steps against a live site):
        extracts+prettifies its
        "<section class="decklist-list-view block hidden">" fragment
        (the same fragment for every deck page; contains the deck's
-       Hero/Weapon/Equipment and Pitch 1/2/3 groups — see
-       plans/fabtcg_decklists.md), saving it to
+       Hero/Weapon/Equipment and Pitch 1/2/3 groups), saving it to
        decklists/<slug>.html. Resumability here is "does this deck's
        output file already exist" rather than a shared-JSONL
        manifest — see this module's docstring further down for why

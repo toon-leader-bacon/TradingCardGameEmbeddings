@@ -23,9 +23,9 @@ class CardCharacterPredictionDataConstructor:
     Returns the RAW distribution as read off the row, unencoded against
     any vocabulary - matches every other DataConstructor's convention
     here (a metric's label_values-based encoding belongs to the
-    consuming loss, not this class - see plans/dojo_v2.md's "Fixed-
-    classification label encoding lives in the generic dojo, not the
-    DataConstructor" note, which this class follows even though its
+    consuming loss, not this class: fixed-classification label
+    encoding lives in the generic dojo, not the DataConstructor. This
+    class follows that even though its
     consuming loss is SoftClassificationLoss rather than
     FixedClassificationLoss). In particular, this class does NOT fold
     an out-of-vocabulary character to OTHER_LABEL - see

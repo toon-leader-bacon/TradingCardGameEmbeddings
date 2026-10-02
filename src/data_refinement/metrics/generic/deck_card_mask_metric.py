@@ -4,8 +4,8 @@ field of one card (see masked_field_metric.py for that sibling
 pattern) and not a random card (the "which card" decision is real
 domain logic a subclass owns, e.g. "the leader").
 
-See plans/deck_card_masking.md for the full design, in particular why
-this is raw-row-driven (Metric[dict]-shaped, mirroring
+See metrics/play_gwent/README.md for the full design, in particular
+why this is raw-row-driven (Metric[dict]-shaped, mirroring
 ../sts_gg/deck_label_metric.py::DeckLabelMetric) rather than driven by
 iterating an already-populated DeckBox: GenericDeck/DeckBox are
 deliberately game-agnostic (a plain card_nocab_uuids multiset, no
@@ -268,10 +268,10 @@ class DeckCardMaskMetric(ABC):
         Only ever called (via accumulate()) after
         _target_card_uuid_for_row() has returned a non-None uuid and
         card_lookup has looked up the matching GenericCard for it.
-        Label semantics are deliberately per-metric - see
-        plans/deck_card_masking.md's "Label semantics" section for why
-        this class does not standardize a MASKED_FIELD-path convention
-        the way MaskedFieldMetric does.
+        Label semantics are deliberately per-metric (see
+        metrics/play_gwent/README.md), so this class does not
+        standardize a MASKED_FIELD-path convention the way
+        MaskedFieldMetric does.
 
         Inputs:
             card: the target card _target_card_uuid_for_row() picked.

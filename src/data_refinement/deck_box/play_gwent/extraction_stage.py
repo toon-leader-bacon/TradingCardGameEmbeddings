@@ -112,8 +112,7 @@ class PlayGwentDeckExtractionStage:
     deck_uuid_for_guide() are also called directly by
     src/data_refinement/metrics/play_gwent/'s deck-masking metrics, so
     every raw guide row becomes a deck the same way regardless of
-    caller — see those two methods' own docstrings and
-    plans/deck_card_masking.md.
+    caller — see those two methods' own docstrings.
     """
 
     SOURCE_GAME: ClassVar[GameId] = GameId.GWENT
@@ -189,11 +188,10 @@ class PlayGwentDeckExtractionStage:
 
         Public per-row entry point — extract() itself is just this
         method called in a loop over every line of raw_path. Also
-        called directly by src/data_refinement/metrics/play_gwent/'s
-        deck-masking metrics, which need this exact same "one raw
-        guide -> its deck exists in box" side effect on every raw row
-        they see (see plans/deck_card_masking.md) without duplicating
-        this class's card-resolution/uuid-minting logic. THIS METHOD
+        the per-row entry point other callers can reuse without
+        duplicating this class's card-resolution/uuid-minting logic
+        (play_gwent's metrics look decks up via deck_uuid_for_guide()
+        instead, reading the published box only). THIS METHOD
         IS WHERE IDEMPOTENCY HAPPENS: deck_uuid is a pure function of
         guide["id"] (see module docstring's IDEMPOTENT RE-RUNS
         section, and deck_uuid_for_guide()), so re-processing the same
@@ -356,8 +354,7 @@ class PlayGwentDeckExtractionStage:
         src/data_refinement/metrics/play_gwent/'s deck-masking metrics,
         which need this exact id (independent of whether extract_one()
         found this guide's deck already up to date and returned None)
-        for every raw row they process — see
-        plans/deck_card_masking.md. uuid5 (not uuid4): the same
+        for every raw row they process. uuid5 (not uuid4): the same
         guide_id must always produce the same uuid, across every call,
         so a re-seen guide updates rather than duplicates (see module
         docstring's IDEMPOTENT RE-RUNS section).

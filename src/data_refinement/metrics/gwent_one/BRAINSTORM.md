@@ -76,7 +76,7 @@ text:
 
 ### Single-card (12)
 
-BUILT (see plans/masking_metrics.md and
+BUILT (see README.md and
 src/data_refinement/metrics/gwent_one/*_mask_metric.py): items 1-6,
 10, and 11 below are now masking metrics (FactionMaskMetric,
 ProvisionMaskMetric, PowerMaskMetric, ColorMaskMetric,

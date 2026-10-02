@@ -27,8 +27,11 @@ reads decks straight from a `DeckBox` instead.
 Card holdout: each dojo is built with a `CardLookup` and a `HoldoutSpec`
 (`src/schema/holdout.py`) and reads cards through one `VisibleCardLookup`
 per split, so a TRAIN example never contains a TEST- or VALIDATION-tier
-card (TEST sees TRAIN+TEST; VALIDATION sees all). Row splits (8/1/1 by
-row, or by deck for contrastive) layer under it.
+card (TEST sees TRAIN+TEST; VALIDATION sees all). Row splits (8/1/1)
+layer under it. They are by row, by deck for contrastive, or by
+`DojoConfig.split_group_column` for a metric with several rows per deck
+or kingdom (the held-out-card dojos and four isotropic dojos), so those
+rows never straddle TRAIN and TEST.
 
 ## Files
 

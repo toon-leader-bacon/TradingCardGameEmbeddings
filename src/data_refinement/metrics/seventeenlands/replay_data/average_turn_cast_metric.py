@@ -1,5 +1,5 @@
-"""AverageTurnCastMetric - plans/replay_data_metrics.md's "Average Turn
-Cast": for a card, the average turn number it's cast on, across every
+"""AverageTurnCastMetric - BRAINSTORM.md's "Average Turn Cast": for a
+card, the average turn number it's cast on, across every
 game it's cast in at all.
 
 Standalone - NOT a ReplayTurnEventRateMetric. Its per-occurrence value

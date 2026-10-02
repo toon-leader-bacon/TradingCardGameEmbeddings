@@ -15,7 +15,7 @@ LABEL_COLUMN) - extra id columns DeckLabelDataConstructor.build() never
 reads (it only reads deck_uuid and the configured label column), so
 sts_gg's DeckLabelDataConstructor (built for (run_id, deck_uuid,
 LABEL_COLUMN)) is reused unchanged: shape-compatible, not
-class-compatible (see plans/seventeen_lands_dojos.md).
+class-compatible.
 
 CELL MAPPING: DeckWinPredictionMetric (bool) -> MultiCardBinaryClassificationDojo
 (default label_caster=float handles True/False -> 1.0/0.0 fine, same as

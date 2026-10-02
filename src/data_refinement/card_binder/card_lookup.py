@@ -12,17 +12,15 @@ object is ever constructed. Any consumer that only needs to read
 or evaluation/ potentially later) should type against CardLookup, not
 CardBinder, even when a real CardBinder is what gets passed in.
 
-A CardIngestionStage (see ingestion.py) does NOT use this type — per
-plans/card_binder_v2.md, a stage needs both read and write access, and
-is typed to accept a full CardBinder directly rather than a narrower
-read/write-only Protocol (a deliberate, accepted choice — see that
-plan's "Open risks").
+A CardIngestionStage (see ingestion.py) does NOT use this type: a
+stage needs both read and write access, and is typed to accept a full
+CardBinder directly rather than a narrower read/write-only Protocol (a
+deliberate, accepted choice).
 
 Deliberately does NOT provide runtime enforcement (a determined caller
 holding a CardLookup-typed reference that's actually a CardBinder
-could still call .create() by casting) — see plans/training_pipeline.md
-for why a heavier wrapper object was considered and rejected as
-unnecessary for this project's scale.
+could still call .create() by casting). A heavier wrapper object was
+considered and rejected as unnecessary for this project's scale.
 """
 
 import re

@@ -1,6 +1,6 @@
 """Drives a shared, per-row read pass over one 17lands draft_data CSV
-across multiple Metric[dict] instances at once - see
-plans/draft_data_metrics.md's scan_draft_csv component.
+across multiple Metric[dict] instances at once (see
+draft_data/README.md).
 
 Mirrors sts_gg/scanner.py's scan_runs_jsonl() contract exactly,
 applied to a chunked CSV read instead of a JSONL line read: chunking
@@ -13,9 +13,8 @@ DraftCardColumns (pack_pool_columns.py) internally, from the
 (card_binder, header, source_game) it was itself constructed with -
 this function never touches DraftCardColumns or card_binder at all, it
 only ever drives already-constructed Metric[dict] instances over rows.
-See plans/draft_data_metrics.md's "Open questions" #4 for where each
-metric's own DraftCardColumns.unmatched_names is expected to be
-read/logged (not this module's concern either).
+Reading or logging each metric's own DraftCardColumns.unmatched_names is
+the caller's job, not this module's.
 """
 
 import logging

@@ -1,8 +1,7 @@
 """Content-addressed id schemes shared across every metrics/<source>
 container.
 
-See plans/sts_gg_metrics.md's "New shared components" section for the
-design this implements: a metric whose training input is a whole deck
+The design this implements (see metrics/README.md): a metric whose training input is a whole deck
 mints this module's deck_uuid_from_cards() rather than embedding the
 deck's full card list in its own output row, and writes the deck once
 (via DeckBox.create_if_absent()) into a private, metrics-only DeckBox

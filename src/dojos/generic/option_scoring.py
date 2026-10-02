@@ -1,6 +1,6 @@
 """Shared per-option scoring strategy for the multi_card_option_selection
-and multi_group_option_selection generic dojo cells (plans/
-seventeen_lands_dojos.md).
+and multi_group_option_selection generic dojo cells (see
+src/dojos/generic/README.md).
 
 Both cells convert a ragged set of pack-option card embeddings into one
 logit per option (see PickPredictionCrossEntropyLoss, src/dojos/loss/

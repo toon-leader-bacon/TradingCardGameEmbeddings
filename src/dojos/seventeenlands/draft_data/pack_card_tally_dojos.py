@@ -14,8 +14,7 @@ fabricate.
 CardAverageDataConstructor, NOT A NEW CONSTRUCTOR: none of these three
 metrics subclass CardAverageMetric, but PackCardTallyMetric.finalize()
 writes the exact same row shape CardAverageDataConstructor already
-consumes (nocab_uuid: str, take_rate: float, sample_count: int) - see
-plans/seventeen_lands_dojos.md's "Generic cells reviewed" note on why
+consumes (nocab_uuid: str, take_rate: float, sample_count: int), so
 that constructor is reused by row shape, not by metric class hierarchy.
 
 RankStratifiedTakeRateMetric's EXTRA KEY COLUMNS (pack_number,
@@ -24,14 +23,12 @@ ever reads nocab_uuid and the configured label column, so this wrapper
 predicts an unconditioned take rate per card from
 RankStratifiedTakeRateMetric's output, the same way it would from
 CardTakeRateMetric's - a richer dojo that also embeds those stratifying
-columns as input context is future work, not this wrapper's scope (see
-plans/seventeen_lands_dojos.md).
+columns as input context is future work, not this wrapper's scope.
 
 SCOPE: PickNumberDecayCurveMetric (a fourth PackCardTallyMetric
 subclass) is NOT wrapped here - its output is a per-card vector
 (take_rate_by_pick_number), not a scalar, so it doesn't fit this
-generic cell. See plans/seventeen_lands_dojos.md's "Not easily
-supported" section.
+generic cell; pick_number_decay_curve_dojo.py wraps it instead.
 """
 
 from pathlib import Path

@@ -1,6 +1,6 @@
 """Drives a shared, per-row read pass over one 17lands replay_data CSV
-across multiple Metric[dict] instances at once - see
-plans/replay_data_metrics.md's scan_replay_csv component.
+across multiple Metric[dict] instances at once (see
+replay_data/README.md).
 
 Structural copy of draft_data/scanner.py's scan_draft_csv()/
 game_data/scanner.py's scan_game_csv(): chunking here is purely an

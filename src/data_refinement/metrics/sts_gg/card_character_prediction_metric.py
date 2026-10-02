@@ -139,8 +139,7 @@ class CardCharacterPredictionMetric:
             character actually observed for that card, probabilities
             summing to 1.0 for that card - and sample_count: int, that
             card's total tally, written once per card rather than once
-            per (card, character) row as before - see
-            plans/card_character_prediction_metric_output_shape.md).
+            per (card, character) row as before).
         Exceptions: whatever pyarrow.parquet.write_table raises.
 
         Example:

@@ -22,9 +22,8 @@ deck_label_metrics.py - a distinct enough override to warrant it.
 BUCKET COUNT IS DERIVED, NOT HARDCODED: the vector length for every
 output row is max(pick_number) + 1 across every key this instance ever
 tallied - never a hardcoded pack size (14 for MSH.PremierDraft, but
-BRAINSTORM.md explicitly flags this as varying by set/event_type) -
-see plans/draft_data_metrics.md's "Data facts" section (the same
-lesson BRAINSTORM.md draws for Wheel Rate's table_size, applied here
+BRAINSTORM.md explicitly flags this as varying by set/event_type)
+(the same lesson BRAINSTORM.md draws for Wheel Rate's table_size, applied here
 even though this container doesn't build Wheel Rate).
 """
 

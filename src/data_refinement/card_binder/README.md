@@ -90,12 +90,15 @@ dropping that reference entirely. Its `nocab_uuid` is deterministic
 `uuid4`), so every caller across every process agrees on the same
 sentinel identity without needing to share state; the lookup checks
 that uuid directly (`get_by_uuid`), never by name, so a real card that
-happens to also be named "Unknown" is never mistaken for it. Seeding
-is a deliberate, explicit bootstrap step — nothing in this container
-calls it automatically, and a `DeckExtractionStage` is expected to
-require it be called ahead of time rather than create the sentinel
-itself (see `deck_box/README.md`'s `sts_gg/` entry for the concrete
-consumer).
+happens to also be named "Unknown" is never mistaken for it.
+`build_or_update_card_binder()` (`build.py`) seeds it on every
+ingestion run, so a game's binder version is final before any deck box
+or metric is built from it. If the first deck ingestion seeded it
+instead, the version would change and every metric already built for
+that game would fail its version check (this hit Dominion on
+2026-09-30). A `DeckExtractionStage` never creates the sentinel itself.
+`run_deck_box_ingestion.py` still calls `ensure_unknown_card` (a no-op
+on any binder built since) for binders ingested before this change.
 
 ## Why there's an `AliasLedger`, not just one `source_id` field
 

@@ -1,6 +1,6 @@
 """Reusable collision-resolution policies for CardIngestionStage implementations.
 
-See plans/card_binder_v2.md — each CardIngestionStage decides for
+See card_binder/README.md. Each CardIngestionStage decides for
 itself, per raw row, whether it has found a duplicate of an
 already-stored card and, if so, which of these policies (or a custom
 one of its own) to apply. CardBinder itself has no opinion on any of
@@ -13,8 +13,8 @@ candidate's. These functions decide CONTENT only (raw_content,
 provenance, name) — never identity. candidate.nocab_uuid is freshly
 minted by whichever stage produced it and is not yet known to be
 canonical; returning it as-is (e.g. `return candidate`) would silently
-let a card's nocab_uuid change on a later run, which
-plans/card_binder_v2.md requires never happens once a uuid is minted.
+let a card's nocab_uuid change on a later run, and a minted uuid
+must never change.
 """
 
 import json

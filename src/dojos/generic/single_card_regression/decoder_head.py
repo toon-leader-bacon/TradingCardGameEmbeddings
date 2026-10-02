@@ -3,8 +3,8 @@
 Single card in (SingleCardEmbedding), single scalar out per card - the
 same architecture as v1's AveragePickNumberDecoderHead (see
 src/dojos/seventeenlands/draft_game_metrics/average_pick_number/decoder_head.py),
-now shared by every metric SingleCardRegressionDojo serves (see
-plans/dojo_v2.md) rather than owned by one metric-specific dojo.
+now shared by every metric SingleCardRegressionDojo serves rather than
+owned by one metric-specific dojo.
 """
 
 import torch

@@ -34,8 +34,8 @@ class DeckCardMaskDataConstructor:
     Returns the RAW label string as read off the row, unencoded against
     any vocabulary - matches MaskedFieldDataConstructor's convention (a
     metric's LABEL_VALUES-based encoding is FixedClassificationLoss's
-    job, not this class's - see plans/dojo_v2.md's "Fixed-classification
-    label encoding lives in the generic dojo, not the DataConstructor").
+    job, not this class's: fixed-classification label encoding lives
+    in the generic dojo, not the DataConstructor).
     """
 
     def __init__(self, deck_box: DeckBox, label_column: str) -> None:

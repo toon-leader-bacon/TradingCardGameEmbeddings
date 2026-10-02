@@ -1,6 +1,6 @@
 """One DataConstructor (see data_constructor.py) per metric FAMILY - the
 Template Method bases under src/data_refinement/metrics/. One module per
-class (see plans/dojo_v2.md's directory layout), grouped here rather than
+class (see src/dojos/generic/README.md), grouped here rather than
 under any single generic/*/ dojo shape package: a DataConstructor maps to
 a metric family, not to a (input shape, task shape) dojo cell, and several
 of these are consumed by more than one shape package (DeckLabelDataConstructor)

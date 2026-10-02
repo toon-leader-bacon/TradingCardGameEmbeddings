@@ -18,6 +18,7 @@ from src.dojos.generic.multi_group_option_selection.dojo import (
 from src.dojos.generic.paired_metric_dojos import HeldOutDeckCardMetricDojo
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
+from src.schema.splits import Split
 
 # Wiring tests: placeholder parquets, no real TRAIN calibration
 pytestmark = pytest.mark.usefixtures("uncalibrated_generic_dojos")
@@ -31,10 +32,14 @@ _WRAPPERS = [
 ]
 
 
-def _write_source(path: Path, metadata: MetricVersionMetadata) -> None:
+def _write_source(
+    path: Path, metadata: MetricVersionMetadata, deck_count: int = 1
+) -> None:
     df = pd.DataFrame(
         {
-            "deck_uuid": ["00000000-0000-0000-0000-000000000000"] * 10,
+            "deck_uuid": [
+                f"00000000-0000-0000-0000-{i % deck_count:012d}" for i in range(10)
+            ],
             "target_card_uuid": ["00000000-0000-0000-0000-000000000001"] * 10,
             "candidate_uuids": [["00000000-0000-0000-0000-000000000001"]] * 10,
         }
@@ -69,6 +74,41 @@ class TestHeldOutCardDojos:
         assert isinstance(dojo, MultiGroupOptionSelectionDojo)
         assert isinstance(dojo.data_constructor, HeldOutDeckCardDataConstructor)
         assert dojo.data_constructor._deck_box is deck_box
+
+    def test_a_decks_rows_never_straddle_splits(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Split files go under the relative data/splits: keep them in tmp_path.
+        monkeypatch.chdir(tmp_path)
+        card_binder = CardBinder()
+        version = card_binder.version_for(GameId.GWENT)
+        box_path = tmp_path / "gwent.db"
+        DeckBox().save(box_path, GameId.GWENT, version)
+        source = tmp_path / "held_out_card_gwent.parquet"
+        _write_source(
+            source,
+            MetricVersionMetadata(GameId.GWENT, version, requires_deck_box=True),
+            deck_count=4,
+        )
+
+        dojo = GwentHeldOutCardDojo(
+            card_binder,
+            HoldoutSpec.no_holdout(),
+            DeckBox.load([box_path]),
+            card_embedding_size=4,
+            path_to_training_data=source,
+            rng_seed=0,
+        )
+
+        decks_per_split = [
+            {
+                deck
+                for chunk in dojo.file_manager.reader_for(split)
+                for deck in chunk["deck_uuid"]
+            }
+            for split in Split
+        ]
+        assert sum(len(decks) for decks in decks_per_split) == 4
 
     def test_there_is_one_wrapper_per_published_box(self) -> None:
         assert len(_WRAPPERS) == 6

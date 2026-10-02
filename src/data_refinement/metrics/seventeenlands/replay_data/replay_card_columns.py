@@ -1,7 +1,7 @@
 """Header-derived card index for one 17lands replay_data CSV.
 
 The one genuinely new columns-index shape in this seventeenlands
-family (see plans/replay_data_metrics.md's Component overview):
+family (see replay_data/README.md):
 replay_data exposes cards through TWO independent mechanisms, not one.
 
 1. Name-suffixed header columns - deck_<name>/sideboard_<name> ONLY
@@ -18,8 +18,7 @@ replay_data exposes cards through TWO independent mechanisms, not one.
    cache keyed by the Arena id string itself via
    uuid_for_arena_id()/arena_uuids().
 
-DTYPE TRAP (see plans/replay_data_metrics.md's "What this session
-re-verified" section for the full verification): a per-turn Arena-ID
+DTYPE TRAP (verified against the real replay CSVs): a per-turn Arena-ID
 column where every populated cell in a pandas.read_csv chunk happens
 to hold exactly one id (no "|" ever needed) is inferred as float64,
 not string - e.g. row["user_turn_1_creatures_cast"] can arrive as the
@@ -295,8 +294,8 @@ class ReplayCardColumns:
         """Every matched card from `columns` whose count is > 0 on this
         row.
 
-        Same contract as GameCardColumns.present_uuids() - shared by
-        every deck_columns/sideboard_columns consumer in this
+        Presence, not copies (as game_data's ZoneCounts.present()) -
+        shared by every deck_columns/sideboard_columns consumer in this
         container, since both remain per-row copy COUNTS (deck_<name>
         sums to 40), not per-copy list entries.
 

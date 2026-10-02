@@ -93,7 +93,9 @@ class TestBuildOrUpdateCardBinder:
         )
         assert reloaded.nocab_uuid == original.nocab_uuid
 
-    def test_empty_row_list_produces_empty_binder(self, tmp_path: Path) -> None:
+    def test_empty_row_list_produces_binder_with_only_the_sentinel(
+        self, tmp_path: Path
+    ) -> None:
         binder_path = tmp_path / "mtg.jsonl"
         stage = _FakeIngestionStage([])
 
@@ -101,6 +103,26 @@ class TestBuildOrUpdateCardBinder:
 
         assert changed == []
         assert binder_path.exists()
+        loaded = CardBinder.load([binder_path])
+        assert list(loaded.all_uuids(GameId.MTG)) == [
+            CardBinder.unknown_card_uuid(GameId.MTG)
+        ]
+
+    def test_seeds_the_unknown_sentinel_so_deck_ingestion_keeps_the_version(
+        self, tmp_path: Path
+    ) -> None:
+        binder_path = tmp_path / "mtg.jsonl"
+        stage = _FakeIngestionStage([("Bolt", "src-1", {"a": 1})])
+
+        changed = build_or_update_card_binder(Path("unused"), stage, binder_path)
+
+        loaded = CardBinder.load([binder_path])
+        sentinel_uuid = CardBinder.unknown_card_uuid(GameId.MTG)
+        assert loaded.get_by_uuid(sentinel_uuid) is not None
+        assert sentinel_uuid not in changed
+        version_before_deck_ingestion = loaded.version_for(GameId.MTG)
+        loaded.ensure_unknown_card(GameId.MTG)
+        assert loaded.version_for(GameId.MTG) == version_before_deck_ingestion
 
     def test_uses_ingestion_stage_source_game_not_a_parameter(
         self, tmp_path: Path

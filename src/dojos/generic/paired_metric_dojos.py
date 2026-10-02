@@ -382,7 +382,9 @@ class HeldOutDeckCardMetricDojo(MultiGroupOptionSelectionDojo):
 
     Subclasses set METRIC to a HeldOutDeckCardMetric subclass. Rows
     point into the game's published DeckBox, which is also handed to
-    the cell so its metric version check can verify the box.
+    the cell so its metric version check can verify the box. Splits are
+    by deck_uuid, so a deck's held-out rows never straddle TRAIN and
+    TEST.
     """
 
     METRIC: ClassVar[OutputPathMetric]
@@ -418,6 +420,11 @@ class HeldOutDeckCardMetricDojo(MultiGroupOptionSelectionDojo):
             card_embedding_size=card_embedding_size,
             deck_box=deck_box,
             config=DojoConfig(
-                name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
+                name=name,
+                rng_seed=rng_seed,
+                strict_version_check=strict_version_check,
+                # Several held-out targets per deck on the small boxes:
+                # keep each deck in one split.
+                split_group_column="deck_uuid",
             ),
         )

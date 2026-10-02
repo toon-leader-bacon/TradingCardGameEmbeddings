@@ -1,5 +1,5 @@
 """Cross-entropy loss for the single/multi-card-fixed-classification
-generic dojo cells (plans/dojo_v2.md).
+generic dojo cells (see src/dojos/generic/README.md).
 
 Unlike PickPredictionCrossEntropyLoss (src/dojos/loss/
 pick_prediction_cross_entropy_loss.py), decoder_output here is NOT
@@ -28,9 +28,8 @@ from src.dojos.loss.nocab_loss import NocabLoss, device_of
 class FixedClassificationLoss(NocabLoss[List[torch.Tensor], List[str]]):
     """Cross-entropy over a closed, per-metric label vocabulary.
 
-    label_values is the metric's full OBSERVED vocabulary (see
-    plans/dojo_v2.md's "label_values ... full observed vocabulary" -
-    e.g. it already includes OTHER_LABEL as one of its own elements for
+    label_values is the metric's full OBSERVED vocabulary (e.g. it
+    already includes OTHER_LABEL as one of its own elements for
     a metric that falls back to it, rather than this class adding it).
     Encodes each raw string label to label_values.index(label)
     internally - a label outside label_values is the caller's bug (an

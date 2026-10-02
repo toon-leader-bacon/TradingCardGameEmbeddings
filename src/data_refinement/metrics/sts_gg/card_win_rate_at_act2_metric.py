@@ -7,8 +7,7 @@ distinct floor-per-actIdx patterns, e.g. act 2 starting at floor 18 in
 most runs but floor 17 in others, almost certainly from Neow
 bonuses/skipped floors). "Deck at start of act 2" is therefore computed
 per-run from hpPerFloor's actIdx field (the minimum floor with
-actIdx == 1), never a hardcoded floor cutoff - see
-plans/sts_gg_metrics.md. A run with no actIdx == 1 entry in
+actIdx == 1), never a hardcoded floor cutoff. A run with no actIdx == 1 entry in
 hpPerFloor never reached act 2 and contributes nothing to any card's
 tally - not an error, just no snapshot for that run to fold in.
 
@@ -19,8 +18,8 @@ CardWinRateAtAct2Metric.
 
 CARD RESOLUTION / COPY COUNTING: identical rule and decision to
 card_upgrade_rate_metric.py's module docstring, independently
-duplicated per plans/sts_gg_metrics.md's Explicitly out of scope
-section rather than shared.
+duplicated rather than shared (deduplication is deferred to one later
+cross-cutting pass).
 """
 
 import logging
@@ -73,7 +72,7 @@ class CardWinRateAtAct2Metric:
                 cards ingested (this class never writes to it).
             deck_box: accepted only for constructor-shape consistency
                 with this container's multi-card metrics (e.g.
-                AscensionPredictionMetric) - see plans/sts_gg_metrics.md.
+                AscensionPredictionMetric; see sts_gg/README.md).
                 This metric's output is per-card, not per-deck, so it
                 never reads from or writes into deck_box.
             output_path: overrides DEFAULT_OUTPUT_PATH when given.

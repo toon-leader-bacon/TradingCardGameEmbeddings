@@ -1,5 +1,5 @@
 """Concrete ReplayTurnEventRateMetric subclasses - see
-plans/replay_data_metrics.md's Component overview.
+replay_data/README.md.
 """
 
 from pathlib import Path

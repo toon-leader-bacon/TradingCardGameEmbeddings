@@ -10,8 +10,8 @@ import pyarrow.parquet as pq
 
 from src.evaluation.card_row import CardRow
 
-# The metric-parquet convention these labels read (plans/evaluation.md has
-# an open question on giving it a shared home)
+# The metric-parquet convention these labels read (it has no shared
+# home yet; one is an open question)
 _UUID_COLUMN = "nocab_uuid"
 _LABEL_COLUMN = "label"
 

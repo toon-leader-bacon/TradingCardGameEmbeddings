@@ -1,5 +1,5 @@
 """Binary cross-entropy loss for the multi-card-binary-classification
-generic dojo cell (plans/dojo_v2.md).
+generic dojo cell (see src/dojos/generic/README.md).
 
 Same shape as MseLoss (src/dojos/loss/mse_loss.py) - one raw scalar
 per training example in, one ground-truth float per example - but the

@@ -23,17 +23,14 @@ So every metric reads its masking target directly off the raw row's
 own fields (e.g. a guide's `leaderId`), never by re-deriving it from
 an already-stored deck.
 
-As a side effect of every row (whether or not that row also yields a
-training example), the row's deck is ensured to exist in the
-`DeckBox` passed to the metric's constructor — by delegating to
-`../../deck_box/play_gwent/extraction_stage.py`'s
-`PlayGwentDeckExtractionStage.extract_one()`/`deck_uuid_for_guide()`
-(both public, reused by both the published-deck-box builder and every
-metric here), never by re-implementing card resolution or uuid-minting
-in the metric itself. The `DeckBox` passed in may be empty (cold
-start) or the already-loaded published `data/final/decks/gwent.jsonl`
-box (warm start) — either is safe, since `extract_one()`'s writes are
-idempotent by `deck_uuid_for_guide()`'s deterministic id scheme.
+Every metric here reads the published Gwent box
+(`data/final/decks/gwent.db`) and never writes or saves it. A row's
+deck is looked up by `deck_uuid_for_guide(row["id"])` from
+`../../deck_box/play_gwent/extraction_stage.py`, the same uuid deck
+ingestion minted, and a guide the box lacks is skipped. Until
+2026-10-02 the leader metric wrote decks through `extract_one()` and
+its run re-saved the published box, which made every metric keyed to
+the box stale.
 
 **Output schema** (one row per raw guide with a target found):
 `deck_uuid: str`, `target_card_uuid: str`, `label: str`. Deliberately
@@ -49,8 +46,8 @@ shared shape prematurely.
 
 A subclass fixes:
 
-- `_deck_uuid_for_row(row, deck_box) -> UUID` — ensures `row`'s deck
-  exists in `deck_box` (side effect) and returns its uuid.
+- `_deck_uuid_for_row(row, deck_box) -> UUID | None` — `row`'s deck
+  uuid (here: looked up in the published box, `None` if absent).
 - `_target_card_uuid_for_row(row, card_lookup) -> UUID | None` — the
   game-aware selection, read directly off `row`. `None` means "no
   valid target for this row" — a real, expected outcome, not an error.
@@ -70,13 +67,13 @@ not a field of the character).
 - `SOURCE_GAME = GameId.GWENT`
 - `LABEL_VALUES = leader_labels.LEADER_NAMES` (42 frozen leader names)
 - `DEFAULT_OUTPUT_PATH = Path("data/metrics/play_gwent/leader_masked_from_deck.parquet")`
-- `_deck_uuid_for_row`: delegates to
-  `PlayGwentDeckExtractionStage.extract_one()`/`deck_uuid_for_guide()`.
+- `_deck_uuid_for_row`: `PlayGwentDeckExtractionStage.deck_uuid_for_guide()`,
+  if the published box holds that deck.
 - `_target_card_uuid_for_row`: reads `row["leaderId"]` directly and
   looks it up via `card_lookup.get_by_alias(GameId.GWENT, DataSource.GWENT_ONE, str(leader_id))`
   — the same alias namespace `PlayGwentDeckExtractionStage`'s own card
   resolution uses. A missing/unresolvable `leaderId` is a data-quality
-  edge case (logged, row skipped — its deck is still registered).
+  edge case (logged, row skipped).
 - `_label_for_card`: the leader card's `raw_content["name"]`, falling
   back to `masked_field_metric.OTHER_LABEL` for a name outside
   `LEADER_NAMES` (an expected failure mode as new leaders are added
@@ -85,10 +82,8 @@ not a field of the character).
 ## Guide metrics over the published box (read-only)
 
 Three newer metrics (2026-10-01) read each guide's deck from the
-published box (`data/final/decks/gwent.db`) and never write any deck box,
-unlike `LeaderMaskedFromDeckMetric`, which writes its decks through
-`extract_one()` (and whose run saves the published box; see "How to
-run"). `published_guide_decks.py`'s `PublishedGuideDecks` parses a raw
+published box (`data/final/decks/gwent.db`) and never write any deck
+box, like `LeaderMaskedFromDeckMetric`. `published_guide_decks.py`'s `PublishedGuideDecks` parses a raw
 guide row into a typed `GuideDeck`: the deck is
 `deck_uuid_for_guide(row["id"])` in the published box, and its faction is
 the leader card's binder faction (looked up through `leaderId`, the
@@ -146,28 +141,15 @@ for what to do if a future expansion adds leaders.
 
 ## How to run
 
-```python
-from pathlib import Path
+Ingest the play_gwent deck box first
+(`scripts/run_deck_box_ingestion.py --source play_gwent`), then:
 
-from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.deck_box.deck_box import DeckBox
-from src.data_refinement.metrics.play_gwent.leader_masked_from_deck_metric import (
-    LeaderMaskedFromDeckMetric,
-)
-from src.data_refinement.metrics.play_gwent.scanner import scan_guides_jsonl
-from src.schema.game_id import GameId
-
-card_binder = CardBinder.load([Path("data/final/cards/gwent.jsonl")])
-deck_box = DeckBox.load([Path("data/final/decks/gwent.jsonl")])  # warm start
-metrics = [LeaderMaskedFromDeckMetric(card_binder, deck_box)]
-
-scan_guides_jsonl(Path("data/raw/play_gwent/guides.jsonl"), metrics)
-deck_box.save(
-    Path("data/final/decks/gwent.jsonl"),
-    GameId.GWENT,
-    card_binder.version_for(GameId.GWENT),
-)
 ```
+PYTHONPATH=. python3 scripts/run_metrics.py --source play_gwent         # leader mask
+PYTHONPATH=. python3 scripts/run_metrics.py --source play_gwent_guides  # the other three
+```
+
+Neither run writes the deck box.
 
 ## Out of scope (deferred)
 
@@ -178,10 +160,3 @@ deck_box.save(
   strings) and its own design pass. `DeckCardMaskMetric` as built
   supports exactly one target card per row; do not stretch it to
   lists.
-- **Downstream Dojo consumer**: no `Dojo` reads any `play_gwent` deck
-  metric yet. A future `DataConstructor` would resolve `deck_uuid` via
-  `DeckBox`, `target_card_uuid` via `CardBinder`/`CardLookup`, mask
-  that whole card out of the deck's card list before building model
-  input, and read `label` against the originating metric's
-  `LABEL_VALUES` for decoder head sizing (same shared contract as
-  `../gwent_one/README.md`'s equivalent note for `MaskedFieldMetric`).

@@ -22,9 +22,7 @@ separate steps against a live, paginated, mutating site:
        page and appends its extracted JSON payload to guides.jsonl.
 
 Subclasses src/data_retrieval/downloader.py's Downloader — see that
-module for what phase_1()/phase_2() mean in general and
-plans/downloader_base_class.md for the standardization this class was
-migrated under.
+module for what phase_1()/phase_2() mean in general.
 """
 
 import html

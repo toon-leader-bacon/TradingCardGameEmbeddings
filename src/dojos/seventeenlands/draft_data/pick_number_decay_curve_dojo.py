@@ -9,7 +9,7 @@ mutually-exclusive class. It still reuses
 SingleCardFixedClassificationDojo mechanically though - single card in,
 MAX_BUCKET_COUNT raw logits out is exactly FixedClassificationDecoderHead's
 shape - by injecting two new collaborators via that cell's existing
-extension seams (see plans/seventeen_lands_dojos.md):
+extension seams:
     - data_constructor=PickNumberDecayCurveDataConstructor, which reads
       the metric's two parallel list columns into a sparse
       bucket_index -> take_rate dict, masking out any bucket with fewer

@@ -2,8 +2,8 @@
 Metric instances at once, so metrics sharing this raw source don't
 each re-read the file.
 
-See plans/sts_gg_metrics.md's scan_runs_jsonl section for the
-failure-isolation contract this implements - deliberately looser than
+The failure-isolation contract this implements is deliberately looser
+than
 legacy/sts_gg/deck_outcome_metric.py's own scan_runs_jsonl (which
 drives exactly one metric and lets a failure propagate): one metric's
 bug must not silently stop a different, still-healthy metric in the
@@ -11,7 +11,7 @@ same list from seeing the rest of the file.
 
 DECK BOX IS NOT THIS FILE'S CONCERN: a metric MAY take a DeckBox in
 its own constructor and write into it during accumulate() (see
-plans/sts_gg_metrics.md and ascension_prediction_metric.py) - this
+sts_gg/README.md and ascension_prediction_metric.py) - this
 function only ever calls accumulate()/finalize() on already-
 constructed Metric[dict] instances, so it has no involvement in
 constructing, injecting, or saving that box. See scan_runs_jsonl()'s

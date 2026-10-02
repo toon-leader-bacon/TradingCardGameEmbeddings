@@ -1,5 +1,5 @@
-"""TurnsToGameEndAfterCastMetric - plans/replay_data_metrics.md's
-"Turns-To-Game-End After Cast": row["num_turns"] minus the turn a card
+"""TurnsToGameEndAfterCastMetric - BRAINSTORM.md's "Turns-To-Game-End
+After Cast": row["num_turns"] minus the turn a card
 was FIRST cast, for a card matched out of creatures_cast/
 non_creatures_cast (either actor - not deck-conditioned).
 
@@ -8,8 +8,7 @@ delta, not a hit/miss ratio) and not AverageTurnCastMetric-shaped
 either (it needs the FIRST occurrence only, plus a second row-level
 value, num_turns, that AverageTurnCastMetric never reads).
 
-OPEN QUESTION SETTLED (plans/replay_data_metrics.md's "Open
-questions" #1): verified directly against
+OPEN QUESTION SETTLED: verified directly against
 data/raw/17lands/replay_data/MSH.PremierDraft.csv (a 25-row sample,
 cross-referencing num_turns against the last turn number with any
 populated per-turn action column - lands_played/creatures_cast/

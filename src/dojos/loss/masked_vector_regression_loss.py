@@ -9,8 +9,8 @@ normalizes with softmax because its num_classes positions compete for
 one shared probability mass, this loss squashes each position
 independently with sigmoid, because these positions don't compete -
 each is its own P(event | context), unrelated to the others (first
-consumer: PickNumberDecayCurveDojo's take_rate_by_pick_number, see
-plans/seventeen_lands_dojos.md). Also unlike SoftClassificationLoss, a
+consumer: PickNumberDecayCurveDojo's take_rate_by_pick_number). Also
+unlike SoftClassificationLoss, a
 label's ABSENT key means "no valid observation for this position, skip
 it entirely" - not "probability 0" - since here 0 is a real,
 meaningfully different value from "unknown."

@@ -1,8 +1,8 @@
 """Translates gwent.one raw HTML page dumps into stored cards.
 
 See src/data_refinement/card_binder/ingestion.py for the shared
-CardIngestionStage interface this implements, and plans/card_binder_v2.md
-for the design this implements. This class is handed a live CardBinder
+CardIngestionStage interface this implements, and
+src/data_refinement/card_binder/README.md for the design. This class is handed a live CardBinder
 and owns its own duplicate-detection and collision-resolution directly
 against it — see src/data_refinement/card_binder/scryfall/ingestion_stage.py
 for the reference shape this follows.

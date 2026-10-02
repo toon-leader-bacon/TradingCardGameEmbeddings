@@ -17,7 +17,7 @@ them end to end (see How to run).
 plots any rounds CSVs on their own (`--curve label=path`, repeatable):
 an extrinsic run that stopped partway, or a training run's own
 `rounds.csv`. Remaining design questions are in
-[`plans/evaluation.md`](../../plans/evaluation.md).
+[`plans/archive/evaluation.md`](../../plans/archive/evaluation.md).
 
 ## Files
 

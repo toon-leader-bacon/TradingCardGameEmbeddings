@@ -12,8 +12,7 @@ NULLABLE LABEL: a deck never seen on one side of on_play writes None
 for its sensitivity (round-trips as NaN through the parquet float64
 column) - DeckLabelDataConstructor.build() now skips a NaN label the
 same way it skips an unresolvable deck_uuid (see
-src/dojos/generic/data_constructors.py and
-plans/seventeen_lands_dojos.md's "Bugfix made while wiring this" note).
+src/dojos/generic/data_constructors/).
 """
 
 from pathlib import Path

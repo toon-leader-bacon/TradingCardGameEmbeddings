@@ -7,242 +7,225 @@ each CSV's `opening_hand_<name>`/`drawn_<name>`/`tutored_<name>`/
 `deck_<name>`/`sideboard_<name>` column suffixes against a `CardBinder`
 already populated for `GameId.MTG` (see
 [`../../../card_binder/README.md`](../../../card_binder/README.md)).
-Every metric here satisfies the shared `Metric[dict]` Protocol
-([`../../metric.py`](../../metric.py)).
+
+The scan is chunked and typed. `scan_game_csv` streams a CSV in pyarrow
+record batches. `GameDataChunkParser` turns each batch into one
+`GameDataChunk` (numpy arrays, plus each row's deck identified once),
+and every metric's `accumulate()` receives that chunk. All eleven
+metrics are vectorized `Metric[GameDataChunk]`s: none loops over rows in
+Python.
 
 ## Files
 
-- `game_card_columns.py` — `GameCardColumns`: built once per metric
-  instance from that metric's own `(card_binder, header, source_game)`.
-  Parses every `opening_hand_<name>`/`drawn_<name>`/`tutored_<name>`/
-  `deck_<name>`/`sideboard_<name>` header column and matches its
-  `<name>` suffix against `card_binder` (see "Card-name matching"
-  below), exposing the results as `opening_hand_columns`/
-  `drawn_columns`/`tutored_columns`/`deck_columns`/`sideboard_columns`
-  (`list[tuple[str, UUID]]`) plus `uuid_for_name(name)` and
-  `present_uuids(row, columns)`. Every column here is a per-game copy
-  **count** (`deck_<name>` sums to 40, `opening_hand_<name>` to 7), not
-  a per-copy list entry — `present_uuids()` samples on presence
-  (count > 0) exactly once per qualifying card, never once per copy.
-- `scanner.py` — `scan_game_csv(raw_csv_path, metrics, chunk_size)`
-  drives every metric in a list over one chunked read pass of a
-  game_data CSV, handing each metric one row at a time and isolating
-  one metric's `accumulate()`/`finalize()` failure (logged, not raised)
-  from every other metric in the list. Never touches `GameCardColumns`
-  or `DeckBox` itself — each metric already built its own
-  `GameCardColumns` before reaching this function, and a deck-input
-  metric already received its `DeckBox` directly.
+### Chunk, parser, scanner
+
+- `game_data_chunk.py` — the chunk's data types:
+  - `GameZone`: the five card-column families, valued by header prefix.
+  - `ZoneCounts`: one zone's card uuids (one per matched header column,
+    possibly repeating) and an int16 `(rows, columns)` count matrix.
+    `present()` is `counts > 0`; `present_for(card_uuids)` lines the zone
+    up against any card list (a card's presence under any of its
+    columns; never present if the zone has no column for it).
+  - `GameKeys`: each row's `(draft_id, match_number, game_number)`.
+  - `ChunkDecks`: every distinct deck in the chunk (one `GenericDeck`
+    per deck id, in order of first row) and `row_deck`, each row's index
+    into them; `row_deck_uuids()` gives each row's id as a str. It
+    rejects two decks with one id, or a row naming no deck.
+  - `GameDataChunk`: every zone's `ZoneCounts`, typed `won`/`on_play`/
+    `num_turns`, `keys`, `rank` (str; `""` for unranked Trad and Sealed
+    events) and `decks`. It checks at construction that every zone is
+    present and every per-row field has the same row count.
+- `chunk_decks.py` — `build_chunk_decks(deck_zone, keys, source_game)`
+  and `store_chunk_decks(decks, deck_box)`. A row's deck is one card
+  uuid per present `deck_<name>` column, in header order. Rows are
+  grouped by present-column pattern; each pattern is hashed once with
+  `deck_ids.deck_uuid_from_cards()`. Patterns with the same id (two
+  columns naming one card) share the earliest row's deck. A deck is
+  named after its first row's game (`game_data <draft_id>/<match>/<game>
+  deck`). `store_chunk_decks` calls `create_if_absent` once per deck;
+  each deck-input metric calls it itself, so a deck recurs (a cheap
+  lookup) once per such metric, and each metric's deck writes stay
+  inside its own failure isolation.
+- `game_data_chunk_parser.py` — `GameDataChunkParser.from_header(header,
+  card_binder, source_game)`, the only place that knows the CSV's
+  column names. Card matching is `GameCardColumns.from_header()`'s.
+  `needed_columns()` and `column_types()` tell the scanner what to read:
+  the matched card columns as int16, and the seven scalars (`won`,
+  `on_play`, `num_turns`, `draft_id`, `match_number`, `game_number`,
+  `rank`). `parse(batch)` builds a `GameDataChunk`: a null count cell
+  becomes 0, a null scalar raises `ValueError` naming the column and
+  row, and an empty string cell reads as `""`. A header missing a scalar
+  fails the whole CSV.
+- `game_card_columns.py` — `GameCardColumns`, built once per CSV by the
+  parser. It matches every card column's `<name>` suffix against
+  `card_binder` (see "Card-name matching" below) into
+  `opening_hand_columns`/`drawn_columns`/`tutored_columns`/
+  `deck_columns`/`sideboard_columns` (`list[tuple[str, UUID]]`), plus
+  `uuid_for_name(name)` and `unmatched_names`.
+- `scanner.py` — `scan_game_csv(raw_csv_path, metrics, parser,
+  block_size)` streams the CSV with `pyarrow.csv.open_csv`, reading only
+  `parser.needed_columns()`. It parses each batch once and hands the
+  chunk to every metric, then finalizes them all. It never touches the
+  `CardBinder` or a `DeckBox`.
+  - Failures are isolated per (metric, chunk) through `call_isolated`
+    ([`../../isolated_call.py`](../../isolated_call.py)). Each failure
+    logs an ERROR line starting `METRIC FAILURE` that names the metric,
+    the CSV and the chunk, with its traceback. The scan ends with one
+    `METRIC FAILURE summary` line per failing metric.
+  - A metric that fails partway through `accumulate()` may be left
+    half-tallied, so its output for that CSV must not be trusted.
+
+### Shared tallies
+
+- `card_column_tallies.py` — `CardColumnTallies(owner, tally_count,
+  dtype)`: `tally_count` int64 or float64 tallies per matched column of
+  one zone. The first chunk fixes the column layout; a later chunk with
+  a different layout raises `ValueError`. `per_card()` sums the columns
+  per card uuid, so two columns naming one card both count.
+- `on_play_win_counts.py` — `OnPlayWinCounts(play_games, play_wins,
+  draw_games, draw_wins)`. `row_masks(won, on_play)` gives the four
+  per-row masks, `from_tallies()` reads them back, and
+  `win_rate_delta()` is `P(won | on_play) - P(won | on_draw)`, or `None`
+  when either side has no games.
+
+### Per-card metrics (accumulation)
+
+Each takes `(version_metadata, output_path=None)` and writes
+`nocab_uuid`, its label and `sample_count` for every card seen.
+
 - `game_card_average_metric.py` — `GameCardAverageMetric` (Template
-  Method, abstract, accumulation): shared per-card running
-  `(value_sum, total_count)` average, driven off whichever
-  `GameCardColumns` column set a subclass calls "present" on a row. A
-  subclass fixes `LABEL_COLUMN`/`DEFAULT_OUTPUT_PATH` and implements
-  `_present_card_uuids()`/`_value_for_row()`; an optional
-  `_extra_accumulate(row)` hook (no-op by default) lets a subclass add
-  extra per-row bookkeeping without overriding `accumulate()` itself.
-- `game_card_average_metrics.py` — three concrete
-  `GameCardAverageMetric` subclasses: `WinRateWhenInDeckMetric`
-  (`P(won | card in deck_<name>)`), `OpeningHandWinRateMetric`
-  (`P(won | card in opening_hand_<name>)`), `DrawnWinRateMetric`
-  (`P(won | card in drawn_<name>)` — a card seen at any point in the
-  game, opening hand or not).
-- `game_length_association_metric.py` — `GameLengthAssociationMetric`,
-  a fourth `GameCardAverageMetric` subclass kept in its own file since
-  it needs a format-wide baseline the base class doesn't track: it
-  overrides `_extra_accumulate()` to update a running
-  `(_global_turn_sum, _global_game_count)` unconditionally on every
-  row, then overrides `finalize()` to write each card's own average
-  `num_turns` minus that global baseline, instead of the base class's
-  plain average.
-- `on_play_win_rate_delta_metric.py` — `OnPlayWinRateDeltaMetric`
-  (standalone accumulation): per card, `P(won | in deck, on_play) -
-  P(won | in deck, on_draw)`. Not a `GameCardAverageMetric` subclass —
-  its tally is two-dimensional per card (keyed by `(card_uuid,
-  on_play)`), not that base's single running sum/count. Nullable
-  output: a side never seen for a card writes `None` for that card's
-  delta rather than guessing.
-- `tutor_target_rate_metric.py` — `TutorTargetRateMetric` (standalone
-  accumulation): per card, `P(tutored | in deck)` — among games where a
-  card was in the deck, how often a tutor effect actually fetched it.
-  `sample_count` is required output, not optional, since most cards'
-  true rate is near zero.
+  Method, abstract): a per-card average of one per-game value over every
+  game the card was present in, in the subclass's `ZONE`. Per chunk it
+  adds `(value_sum, count)` per column to a float64 `CardColumnTallies`.
+  A CSV with no rows writes a zero-row file with the full schema.
+  Subclasses fix `LABEL_COLUMN`, `DEFAULT_OUTPUT_PATH` and `ZONE`,
+  implement `_values(chunk)`, and may override
+  `_extra_accumulate(chunk)` (no-op by default) and
+  `_label(value_sum, count)` (default: the average).
+- `game_card_average_metrics.py` — `GameCardWinRateMetric` (abstract;
+  `_values` is `won` as 1.0/0.0) and its three concretes:
+  `WinRateWhenInDeckMetric`, `OpeningHandWinRateMetric` and
+  `DrawnWinRateMetric` (`P(won | card in deck_/opening_hand_/drawn_)`).
+- `game_length_association_metric.py` — `GameLengthAssociationMetric`:
+  a card's average `num_turns` when in the deck, minus the format-wide
+  average (kept by `_extra_accumulate()`, subtracted by `_label()`).
+- `on_play_win_rate_delta_metric.py` — `OnPlayWinRateDeltaMetric`: per
+  card in the deck, `OnPlayWinCounts.win_rate_delta()`. Keeps the four
+  counts per deck column in an int64 `CardColumnTallies`. A card never
+  seen on one side writes a `None` delta.
+- `tutor_target_rate_metric.py` — `TutorTargetRateMetric`: per card,
+  `P(tutored | in deck)`. Per deck column it counts games in the deck
+  and games also tutored (the card present under any `tutored_` column,
+  via `present_for`). `sample_count` matters here: most cards' true
+  rate is near zero.
+
+These three standalone metrics build their output from row dicts, so
+a CSV with no rows writes a column-less file.
+
+### Deck-input metrics
+
+Each takes `(version_metadata, deck_box, output_path=None)`, stores every
+chunk's decks with `store_chunk_decks` (a deck already in the box keeps
+its stored entry), and stamps its output `requires_deck_box=True`.
+
 - `game_deck_label_metric.py` — `GameDeckLabelMetric` (Template Method,
-  abstract, streaming): one game's constructed deck (`deck_<name>`,
-  referenced by `deck_uuid`, never embedded) paired with a single
-  scalar label already present on that row. A subclass fixes
-  `LABEL_COLUMN`/`LABEL_TYPE`/`DEFAULT_OUTPUT_PATH` and implements
-  `_label_for_row()`; every other step (deck identification, hashing
-  via `deck_uuid_from_cards()`, writing into a shared `DeckBox`, output
-  row write) is shared. `deck_box` is a required constructor parameter
-  here — unlike `sts_gg/card_average_metric.py`'s `CardAverageMetric`,
-  a metric with no use for a deck box in this container simply doesn't
-  declare the parameter at all (see every class above, none of which
-  take `deck_box`).
-- `game_deck_label_metrics.py` — three concrete `GameDeckLabelMetric`
-  subclasses: `DeckWinPredictionMetric` (`won`, `pa.bool_()`),
-  `DeckGameLengthPredictionMetric` (`num_turns`, `pa.int64()`),
-  `DeckRankTierPredictionMetric` (`rank`, `pa.string()` — known tier
-  vocabulary `bronze`/`silver`/`gold`/`platinum`/`diamond`/`mythic` plus
-  `OTHER_LABEL` as a safety net for an unseen value).
+  abstract, streaming): one output row per game, `draft_id`,
+  `match_number`, `game_number`, `deck_uuid` and one label, written per
+  chunk with `ParquetBuilder.write_columns()`. Subclasses fix
+  `LABEL_COLUMN`/`LABEL_TYPE`/`DEFAULT_OUTPUT_PATH` and implement
+  `_labels(chunk)`.
+- `game_deck_label_metrics.py` — its three concretes:
+  `DeckWinPredictionMetric` (`won`, `pa.bool_()`),
+  `DeckGameLengthPredictionMetric` (`num_turns`, `pa.int64()`) and
+  `DeckRankTierPredictionMetric` (`rank`, `pa.string()`: `bronze`/
+  `silver`/`gold`/`platinum`/`diamond`/`mythic`, and `OTHER_LABEL` for
+  anything else, including the empty rank of unranked events).
 - `on_play_win_rate_sensitivity_by_deck_metric.py` —
-  `OnPlayWinRateSensitivityByDeckMetric`: the deck-level mirror of
-  `OnPlayWinRateDeltaMetric`, aggregated per `deck_uuid` instead of per
-  card. Accumulation, not streaming (the label needs cross-row
-  aggregation across every game sharing an identical deck), so it does
-  **not** subclass `GameDeckLabelMetric` — it duplicates that class's
-  deck-identification-and-hashing steps directly instead of sharing
-  them across the streaming/accumulation split (the same call
-  `draft_data`'s `pack_to_pick_choice_set_metric.py`/
-  `pool_conditioned_pick_metric.py` already made for a similar pair).
-  Same nullable-output convention as `OnPlayWinRateDeltaMetric`.
+  `OnPlayWinRateSensitivityByDeckMetric` (accumulation): per deck,
+  `OnPlayWinCounts.win_rate_delta()` over every game played with it.
+  Per chunk it counts each deck's four tallies with `np.bincount` over
+  `row_deck` and adds them to a running per-`deck_uuid` total.
+
+### Pool metric
+
 - `tutor_target_pool_metric.py` — `TutorTargetPoolMetric` (streaming,
-  fan-out): given one game's full draft pool (`deck_<name>` ∪
-  `sideboard_<name>`), writes one output row per pool card labelling
-  whether it appears in `tutored_<name>` that game — the first metric
-  in this codebase where one `accumulate()` call writes zero or more
-  output rows rather than exactly one. Not a deck-input metric: its
-  identity is the per-game triple plus a `pool_card_uuid`, never a
-  `deck_uuid` — the pool here (deck ∪ sideboard) is a different card
-  multiset than any `GenericDeck` this container mints elsewhere, so it
-  never calls `deck_uuid_from_cards()` and takes no `deck_box`.
+  fan-out): one output row per (game, distinct card in `deck_` ∪
+  `sideboard_`), labelled with whether it was tutored that game. Per
+  chunk it lines the three zones up over one card axis and writes every
+  pool cell at once. Its identity is the per-game triple plus a
+  `pool_card_uuid`, never a deck id (the pool is a different multiset
+  from the deck), so it takes no `deck_box`.
+
 - `BRAINSTORM.md` — candidate metrics from this raw source not yet
-  built (this container currently implements the eleven ideas on its
-  "Human Review Short List"; other candidates from its longer lists
-  remain future work).
+  built (this container implements the eleven ideas on its "Human
+  Review Short List").
 
 ## Card-name matching
 
 `card_lookup.uuid_for_name_or_front_face()` (`src/data_refinement/card_binder/card_lookup.py`) matches a bare card name: a unique exact
 `get_by_name()` match, else a unique split/MDFC front-face match (17lands'
 column names use only a card's front face; Scryfall names it `"A // B"`),
-else unmatched. Ambiguity is never guessed at. `GameCardColumns` applies it to every card column suffix.
-
-`uuid_for_name()` caches every lookup (hit or miss) so the same name is
-never queried against `card_binder` twice; `unmatched_names` exposes
-every name this instance's cache has no uuid for, for a caller to log.
-Unlike `draft_data`, `game_data` has no per-row cell value analogous to
-`pick` — every name `GameCardColumns` ever looks up comes from a header
-column suffix, matched once at construction time; an unmatched column
-is simply absent from all five `*_columns` lists.
+else unmatched. Ambiguity is never guessed at. `GameCardColumns` applies
+it to every card column suffix, once per CSV; an unmatched column is
+simply absent from every zone.
 
 ## Card-binder and deck-box access shape
 
-Every metric's constructor takes `(card_binder, header, source_game,
-output_path=None)` directly (plus a required `deck_box` for the four
-deck-input metrics — `game_deck_label_metrics.py`'s three concretes and
-`OnPlayWinRateSensitivityByDeckMetric`) and builds its own private
-`GameCardColumns` internally via `GameCardColumns.from_header()`. Each
-metric re-parsing the same CSV header independently is a header-sized
-cost (thousands of columns for `game_data`), not a row-sized one, so
-paying it once per metric is negligible next to the scan itself. A
-driver scanning multiple metrics over the same CSV reads the header
-once itself and passes the same `header` object to every metric's
-constructor; a driver wanting decks deduped across several deck-input
-metrics passes the *same* `DeckBox` instance to each of their
-constructors and saves it itself once scanning finishes — no shared
-`GameCardColumns`/`DeckBox` instance is ever built or injected by
-`scanner.py` itself.
+No metric sees the binder or the header. Card matching lives in
+`GameDataChunkParser`, which the driver builds once per CSV, and every
+metric is built from the run's `MetricVersionMetadata` (the binder
+version, hashed once per run).
 
-The per-game identifier this container settles on, since no single raw
-column is a unique key: the composite `(draft_id: str, match_number:
-int, game_number: int)`, read directly off each row as three separate
-output columns — mirroring `draft_data`'s own `draft_id`/`pack_number`/
-`pick_number` convention rather than one joined string.
+The driver (`scripts/run_metrics.py`) owns everything shared:
+- it reads each CSV's header once and builds its parser;
+- it passes one metrics-private `DeckBox` to every deck-input metric,
+  so identical decks dedupe, and saves it after the last CSV.
+
+A game's identifier is the composite `(draft_id: str, match_number:
+int, game_number: int)`, written as three output columns: no single raw
+column is a unique key.
 
 ## How it works
 
-`GameCardAverageMetric` and its three `game_card_average_metrics.py`
-subclasses share one `accumulate()` sequence: tally every card this
-subclass's column set has present on a row toward a running
-`(value_sum, total_count)`, then call the optional `_extra_accumulate()`
-hook. `finalize()` writes one row per card seen at least once
-(`nocab_uuid`, `LABEL_COLUMN`, `sample_count`).
-`GameLengthAssociationMetric` reuses that same `accumulate()` unchanged
-but overrides `_extra_accumulate()`/`finalize()` to subtract a
-format-wide baseline from each card's own average — the same kind of
-documented Template Method exception
-[`../draft_data/pick_number_decay_curve_metric.py`](../draft_data/pick_number_decay_curve_metric.py)'s
-`PickNumberDecayCurveMetric` already established.
+```mermaid
+flowchart LR
+    csv[game_data CSV] -->|record batches| scanner[scan_game_csv]
+    parser[GameDataChunkParser] -->|parse once| chunk[GameDataChunk<br/>zones, scalars, keys, rank, decks]
+    scanner --> parser
+    chunk --> card[per-card metrics<br/>CardColumnTallies]
+    chunk --> deck[deck-input metrics]
+    chunk --> pool[TutorTargetPoolMetric]
+    deck -->|store_chunk_decks| box[(family DeckBox)]
+```
 
-`GameDeckLabelMetric` and its three `game_deck_label_metrics.py`
-subclasses are streaming instead — one row already carries a complete
-example (the deck's cards plus a scalar label), so `accumulate()`
-buffers it into an open [`ParquetBuilder`](../../parquet_builder.py)
-and `finalize()` only closes that builder, mirroring
-[`../../sts_gg/deck_label_metric.py`](../../sts_gg/deck_label_metric.py)'s
-shape. `OnPlayWinRateDeltaMetric`/`TutorTargetRateMetric` are standalone
-accumulation metrics with their own two-dimensional or ratio-shaped
-tallies; `OnPlayWinRateSensitivityByDeckMetric` is `OnPlayWinRateDeltaMetric`'s
-accumulation-shaped deck-level mirror; `TutorTargetPoolMetric` is
-streaming but fans a single input row out to zero or more output rows
-(one per pool card), calling `write_row()` once per fanned-out row
-rather than the one-row-per-call shape every other streaming metric in
-this codebase uses.
+Per chunk, every metric works on whole arrays: per-column tallies are
+matrix products or column sums over a zone's `present()` matrix, per-deck
+tallies are `np.bincount` over `row_deck`, and streaming metrics write
+the chunk's rows in one `write_columns()` call.
+
+On `KTK.TradDraft.csv` (151 MB, 56k games, 20,931 distinct decks) the
+whole family runs in 24 s, 11 s of it scanning. A parity check against
+existing outputs is `scripts/compare_metric_outputs.py` (below).
 
 ## How to run
 
-```python
-from pathlib import Path
+From the project root (ROCm venv):
 
-import pandas as pd
+```
+PYTHONPATH=. python scripts/run_metrics.py --source seventeenlands_game_data \
+    --raw-path data/raw/17lands/game_data/KTK.TradDraft.csv
+```
 
-from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.deck_box.deck_box import DeckBox
-from src.data_refinement.metrics.seventeenlands.game_data.game_card_average_metrics import (
-    DrawnWinRateMetric,
-    OpeningHandWinRateMetric,
-    WinRateWhenInDeckMetric,
-)
-from src.data_refinement.metrics.seventeenlands.game_data.game_length_association_metric import (
-    GameLengthAssociationMetric,
-)
-from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_rate_delta_metric import (
-    OnPlayWinRateDeltaMetric,
-)
-from src.data_refinement.metrics.seventeenlands.game_data.tutor_target_rate_metric import (
-    TutorTargetRateMetric,
-)
-from src.data_refinement.metrics.seventeenlands.game_data.game_deck_label_metrics import (
-    DeckGameLengthPredictionMetric,
-    DeckRankTierPredictionMetric,
-    DeckWinPredictionMetric,
-)
-from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_rate_sensitivity_by_deck_metric import (
-    OnPlayWinRateSensitivityByDeckMetric,
-)
-from src.data_refinement.metrics.seventeenlands.game_data.tutor_target_pool_metric import (
-    TutorTargetPoolMetric,
-)
-from src.data_refinement.metrics.seventeenlands.game_data.scanner import (
-    scan_game_csv,
-)
-from src.schema.game_id import GameId
+Each metric writes `data/metrics/seventeenlands/game_data/<SET>/<Format>/<name>.parquet`.
+The family deck box is `data/metrics/seventeenlands/game_data/deck_box.db`.
 
-binder = CardBinder.load([Path("data/final/cards/mtg.jsonl")])
-raw_csv_path = Path("data/raw/17lands/game_data/MSH.PremierDraft.csv")
-header = pd.read_csv(raw_csv_path, nrows=0).columns
-deck_box = DeckBox()  # metrics-private - never the published deck box,
-# shared across every deck-input metric below so identical decks dedupe
+Parity check: write the outputs to a scratch root with `--output-root`,
+then diff them against the existing outputs:
 
-metrics = [
-    WinRateWhenInDeckMetric(binder, header, GameId.MTG),
-    OpeningHandWinRateMetric(binder, header, GameId.MTG),
-    DrawnWinRateMetric(binder, header, GameId.MTG),
-    GameLengthAssociationMetric(binder, header, GameId.MTG),
-    OnPlayWinRateDeltaMetric(binder, header, GameId.MTG),
-    TutorTargetRateMetric(binder, header, GameId.MTG),
-    DeckWinPredictionMetric(binder, header, GameId.MTG, deck_box),
-    DeckGameLengthPredictionMetric(binder, header, GameId.MTG, deck_box),
-    DeckRankTierPredictionMetric(binder, header, GameId.MTG, deck_box),
-    OnPlayWinRateSensitivityByDeckMetric(binder, header, GameId.MTG, deck_box),
-    TutorTargetPoolMetric(binder, header, GameId.MTG),
-]
-scan_game_csv(raw_csv_path, metrics)
-# each metric's DEFAULT_OUTPUT_PATH now exists
-
-deck_box.save(
-    Path("data/metrics/seventeenlands/game_data/deck_box.db"),
-    GameId.MTG,
-    binder.version_for(GameId.MTG),
-)
+```
+PYTHONPATH=. python scripts/run_metrics.py --source seventeenlands_game_data \
+    --raw-path data/raw/17lands/game_data/KTK.TradDraft.csv --output-root scratch/parity
+PYTHONPATH=. python scripts/compare_metric_outputs.py \
+    --reference data/metrics/seventeenlands/game_data/KTK/TradDraft \
+    --candidate scratch/parity/seventeenlands/game_data/KTK/TradDraft
 ```

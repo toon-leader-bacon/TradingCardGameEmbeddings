@@ -1,7 +1,7 @@
 """Strategy: a batch's item embeddings -> one scalar contrastive loss.
 
-See plans/contrastive_dojo.md's "ContrastiveLoss (swappable)" section.
-A new Protocol, sibling to but distinct from NocabLoss
+See src/dojos/README.md's contrastive section. A new Protocol, sibling
+to but distinct from NocabLoss
 (src/dojos/loss/nocab_loss.py) - it cannot satisfy NocabLoss.calculate
 (decoder_output, labels)'s row-independent shape, since InfoNCE/SupCon
 need every item's embedding in the batch jointly. Out of scope for this

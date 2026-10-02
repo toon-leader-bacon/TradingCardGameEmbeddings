@@ -3,8 +3,8 @@
 Subclasses DeckLabelMetric (deck_label_metric.py) - a Template Method
 base every metrics/sts_gg/deck_label_metrics.py class also subclasses.
 This class predates that base (it was hand-written first, while the
-DeckBox-reference architecture was still being worked out - see
-plans/sts_gg_metrics.md's history) and has been folded onto it since,
+DeckBox-reference architecture was still being worked out) and has
+been folded onto it since,
 rather than kept as an independent copy of the same sequence.
 """
 

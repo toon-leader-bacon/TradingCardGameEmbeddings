@@ -8,6 +8,9 @@ import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.deck_box.play_gwent.extraction_stage import (
+    PlayGwentDeckExtractionStage,
+)
 from src.data_refinement.metrics.generic.masked_field_metric import OTHER_LABEL
 from src.data_refinement.metrics.play_gwent.leader_labels import LEADER_NAMES
 from src.data_refinement.metrics.play_gwent.leader_masked_from_deck_metric import (
@@ -64,15 +67,26 @@ def _guide_row(
     return row
 
 
+def _published_box(binder: CardBinder, rows: list[dict]) -> DeckBox:
+    """A box holding each row's deck, as play_gwent deck ingestion
+    would publish it."""
+    box = DeckBox()
+    stage = PlayGwentDeckExtractionStage()
+    for row in rows:
+        stage.extract_one(row, box, binder)
+    return box
+
+
 class TestAccumulateWithValidTarget:
-    def test_writes_row_and_registers_deck(self, tmp_path: Path) -> None:
+    def test_writes_row_for_published_deck(self, tmp_path: Path) -> None:
         leader_name = LEADER_NAMES[0]
         binder = _card_binder({1: leader_name, 2: "Some Unit"})
-        box = DeckBox()
+        row = _guide_row(407697, leader_id=1, other_card_ids=[2, 2])
+        box = _published_box(binder, [row])
         output_path = tmp_path / "leader_mask.parquet"
         metric = LeaderMaskedFromDeckMetric(binder, box, output_path=output_path)
 
-        metric.accumulate(_guide_row(407697, leader_id=1, other_card_ids=[2, 2]))
+        metric.accumulate(row)
         metric.finalize()
 
         df = pd.read_parquet(output_path)
@@ -96,12 +110,13 @@ class TestLabelFallback:
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         binder = _card_binder({1: "Not A Real Leader", 2: "Some Unit"})
-        box = DeckBox()
+        row = _guide_row(1, leader_id=1, other_card_ids=[2])
+        box = _published_box(binder, [row])
         output_path = tmp_path / "leader_mask.parquet"
         metric = LeaderMaskedFromDeckMetric(binder, box, output_path=output_path)
 
         with caplog.at_level(logging.ERROR):
-            metric.accumulate(_guide_row(1, leader_id=1, other_card_ids=[2]))
+            metric.accumulate(row)
         metric.finalize()
 
         df = pd.read_parquet(output_path)
@@ -111,33 +126,34 @@ class TestLabelFallback:
 
 
 class TestMissingOrUnresolvableLeader:
-    def test_missing_leader_id_skips_row_but_still_registers_deck(
+    def test_missing_leader_id_skips_row(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         binder = _card_binder({2: "Some Unit"})
-        box = DeckBox()
+        row = _guide_row(1, leader_id=None, other_card_ids=[2])
+        box = _published_box(binder, [row])
         output_path = tmp_path / "leader_mask.parquet"
         metric = LeaderMaskedFromDeckMetric(binder, box, output_path=output_path)
 
         with caplog.at_level(logging.ERROR):
-            metric.accumulate(_guide_row(1, leader_id=None, other_card_ids=[2]))
+            metric.accumulate(row)
         metric.finalize()
 
         df = pd.read_parquet(output_path)
         assert len(df) == 0
-        assert len(list(box.all_decks(GameId.GWENT))) == 1
         assert "missing leaderId" in caplog.text
 
     def test_unresolvable_leader_id_skips_row(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         binder = _card_binder({2: "Some Unit"})
-        box = DeckBox()
+        row = _guide_row(1, leader_id=999999, other_card_ids=[2])
+        box = _published_box(binder, [row])
         output_path = tmp_path / "leader_mask.parquet"
         metric = LeaderMaskedFromDeckMetric(binder, box, output_path=output_path)
 
         with caplog.at_level(logging.ERROR):
-            metric.accumulate(_guide_row(1, leader_id=999999, other_card_ids=[2]))
+            metric.accumulate(row)
         metric.finalize()
 
         df = pd.read_parquet(output_path)
@@ -145,23 +161,37 @@ class TestMissingOrUnresolvableLeader:
         assert "did not resolve to a known card" in caplog.text
 
 
-class TestDeckBoxIdempotency:
-    def test_repeated_accumulate_does_not_duplicate_deck(self, tmp_path: Path) -> None:
+class TestPublishedBoxIsReadOnly:
+    def test_accumulate_never_writes_the_box(self, tmp_path: Path) -> None:
         leader_name = LEADER_NAMES[0]
         binder = _card_binder({1: leader_name, 2: "Some Unit"})
-        box = DeckBox()
+        row = _guide_row(407697, leader_id=1, other_card_ids=[2])
+        box = _published_box(binder, [row])
+        version_before = box.version_for(GameId.GWENT)
         output_path = tmp_path / "leader_mask.parquet"
         metric = LeaderMaskedFromDeckMetric(binder, box, output_path=output_path)
-        row = _guide_row(407697, leader_id=1, other_card_ids=[2])
 
         metric.accumulate(row)
         metric.accumulate(row)
         metric.finalize()
 
-        assert len(list(box.all_decks(GameId.GWENT))) == 1
+        assert box.version_for(GameId.GWENT) == version_before
         df = pd.read_parquet(output_path)
         assert len(df) == 2  # one output row per accumulate() call, same deck_uuid
         assert df.iloc[0]["deck_uuid"] == df.iloc[1]["deck_uuid"]
+
+    def test_guide_missing_from_the_box_is_skipped(self, tmp_path: Path) -> None:
+        leader_name = LEADER_NAMES[0]
+        binder = _card_binder({1: leader_name, 2: "Some Unit"})
+        box = DeckBox()
+        output_path = tmp_path / "leader_mask.parquet"
+        metric = LeaderMaskedFromDeckMetric(binder, box, output_path=output_path)
+
+        metric.accumulate(_guide_row(407697, leader_id=1, other_card_ids=[2]))
+        metric.finalize()
+
+        assert len(pd.read_parquet(output_path)) == 0
+        assert list(box.all_decks(GameId.GWENT)) == []
 
 
 def test_default_output_path() -> None:

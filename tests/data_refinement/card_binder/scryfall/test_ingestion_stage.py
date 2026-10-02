@@ -460,7 +460,7 @@ class TestAliasRegistration:
     ) -> None:
         # Aliases must be re-registered even when content doesn't
         # change — a losing/no-op row's identifier must never become
-        # a dead end (plans/card_binder_v2.md's "Open risks"). arena_id is
+        # a dead end. arena_id is
         # dropped from raw_content as noise, so the two rows have identical
         # content and the second takes the no-op branch.
         binder = CardBinder()
