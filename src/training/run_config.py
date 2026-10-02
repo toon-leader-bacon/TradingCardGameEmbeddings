@@ -110,11 +110,10 @@ class RunConfig:
         duplicates. Diet dojos and held-out dojos are both drawn from it.
     plan: the TrainingPlan (phases, holdout, held-out dojos, seed).
     limits: HardwareLimits (batch cost ceiling, precision).
-    mod_overrides: per run dojo, augmentation specs: for a contrastive
-        dojo they replace its game defaults (empty tuple: no augmentation);
-        for a dojo in dojo_catalog.DECK_MOD_GROUPS they are deck specs
-        appended after its own task mods. Checked here to name run dojos;
-        build_dojos checks each also takes them.
+    mod_overrides: per run dojo, augmentation specs replacing that dojo's
+        game defaults (empty tuple: no augmentation); a metric dojo's own
+        task mods stay and run first. Checked here to name run dojos;
+        build_dojos checks deck specs against dojo_catalog.DECK_MOD_GROUPS.
     """
 
     run_directory: Path
@@ -551,8 +550,9 @@ def _parse_model(section: ConfigSection) -> ModelSpec:
 def _parse_mod_overrides(section: ConfigSection) -> dict[str, tuple[ModSpec, ...]]:
     """The `mods:` section: dojo name -> its augmentation specs.
 
-    RunConfig checks each name is a run dojo; build_dojos checks it takes
-    augmentations. An empty list means "no augmentation" for that dojo.
+    RunConfig checks each name is a run dojo; build_dojos checks any deck
+    spec against DECK_MOD_GROUPS. The list replaces the dojo's game
+    defaults; an empty list means "no augmentation" for that dojo.
     (A dojo name contains a ".", so --set cannot address it; edit the
     file instead.)
 

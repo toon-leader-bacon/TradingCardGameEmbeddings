@@ -260,9 +260,10 @@ class GenericDojo:
     def append_mods(self, mods: Sequence[Mod]) -> None:
         """Run mods after this dojo's own mods, from the next batch on.
 
-        For opt-in augmentations a run config attaches (the catalog's deck
-        mods): the dojo's own task mods (e.g. a train_only=False mask)
-        stay in place and run first. Call before the first batch.
+        For the augmentations the catalog attaches (the game's default
+        card-field mods, or a run config's `mods:`): the dojo's own task
+        mods (e.g. a train_only=False mask) stay in place and run first.
+        Call before the first batch.
 
         Inputs: mods (Sequence[Mod]). Output: none.
         Side effects: replaces data_mod_pipeline with a new ModPipeline of

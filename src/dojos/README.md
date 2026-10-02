@@ -99,7 +99,8 @@ row, or by deck for contrastive) layer under it.
   (`src/training/dojo_catalog.py`) lists the dojos that take them and which
   groups; an option-selection dojo's options group is never listed (its
   label indexes it). A run config's `mods:` attaches them, after the dojo's
-  own task mods (`GenericDojo.append_mods`).
+  own task mods (`GenericDojo.append_mods`); `mods:` replaces the dojo's
+  default augmentations, so list those too to keep them.
   `MASK_TOKEN` (`mod.py`) is the one mask string every masking mod writes,
   and `ModTally` lives there too (`Mod.tally` is None for mods that keep
   none). `mod_specs.py` holds `ModSpec`s: frozen, shareable recipes, one
@@ -185,8 +186,13 @@ Augmentation defaults: `augmentation_defaults.py` (at the top of
 each mainly masks the field that nearly identifies a card's deck (Gwent
 `faction`, STS2 `color`), so same-deck positives cannot be matched on that
 field alone. A `ModSpec` is a frozen recipe; each dojo builds its own mods
-from it, with its own seed and tally. Today only the contrastive dojos
-take these defaults (`src/training/dojo_catalog.py`).
+from it, with its own seed and tally. Every catalog dojo takes its game's
+defaults (`src/training/dojo_catalog.py`): a contrastive dojo as its whole
+pipeline, a metric dojo after its own task mods (`GenericDojo.append_mods`),
+so a task's mask (`train_only=False`) stays first and in order. Card-field
+mods only remove information and never move a card, so a mask stays masked
+and an option-selection dojo keeps its groups and option order. A run
+config's `mods:` replaces a dojo's defaults (an empty list turns them off).
 
 Not built yet: multi-positive SupCon, a pooling `ContrastiveLoss`
 Decorator, and mixed contrastive + label-based training in one step.

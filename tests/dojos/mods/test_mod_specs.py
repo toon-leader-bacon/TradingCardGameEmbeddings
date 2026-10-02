@@ -1,3 +1,6 @@
+from datetime import datetime, timezone
+from uuid import uuid4
+
 import pytest
 
 from src.dojos.augmentation_defaults import (
@@ -15,6 +18,8 @@ from src.dojos.mods.deck_mods import (
     CardSubsampleMod,
     DuplicateCollapseMod,
 )
+from src.dojos.mods.common_mods import MaskTargetKeyMod
+from src.dojos.mods.mod import MASK_TOKEN
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.dojos.mods.mod_specs import (
     CardDropoutSpec,
@@ -25,6 +30,8 @@ from src.dojos.mods.mod_specs import (
     ShuffleKeysSpec,
     WeightedFieldMaskSpec,
 )
+from src.schema.card import GenericCard, Provenance
+from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 from src.utils.drop_table import DropTable
 
@@ -129,3 +136,59 @@ class TestDeckSpecs:
     def test_validates_at_construction(self, make_spec) -> None:
         with pytest.raises(ValueError):
             make_spec()
+
+
+def _rich_card() -> GenericCard:
+    """A card carrying most keys the default mask tables name."""
+    raw = {
+        "name": "Card",
+        "rarity": "rare",
+        "faction": "monsters",
+        "color": "red",
+        "set": "abc",
+        "types": ["Action"],
+        "cost": 3,
+        "typebox": "Ninja Action",
+        "category": "Beast",
+    }
+    return GenericCard(
+        nocab_uuid=uuid4(),
+        source_game=GameId.GWENT,
+        name="Card",
+        raw_content=raw,
+        provenance=Provenance(
+            DataSource.GWENT_ONE, "id", datetime(2026, 1, 1, tzinfo=timezone.utc)
+        ),
+    )
+
+
+class TestDefaultsKeepTheTask:
+    """Default augmentations appended after a task's own mods (as the
+    catalog does for metric dojos) must not undo or reorder the task."""
+
+    @pytest.mark.parametrize("game", sorted(DEFAULT_AUGMENTATIONS, key=str))
+    def test_a_masked_target_stays_masked(self, game: GameId) -> None:
+        mask = MaskTargetKeyMod("rarity", train_only=False)
+        augmentations = [
+            spec.build(rng_seed=seed)
+            for seed, spec in enumerate(default_augmentations_for(game))
+        ]
+        pipeline = ModPipeline([mask, *augmentations])
+        for _ in range(200):
+            card, label = pipeline.apply_single((_rich_card(), "rare"))
+            assert card.raw_content["rarity"] == MASK_TOKEN and label == "rare"
+
+    @pytest.mark.parametrize("game", sorted(DEFAULT_AUGMENTATIONS, key=str))
+    def test_groups_and_option_order_are_kept(self, game: GameId) -> None:
+        options = [_rich_card() for _ in range(4)]
+        deck = [_rich_card() for _ in range(6)]
+        pipeline = ModPipeline(
+            [spec.build(rng_seed=0) for spec in default_augmentations_for(game)]
+        )
+        for _ in range(50):
+            (new_options, new_deck), label = pipeline.apply_single(([options, deck], 2))
+            assert label == 2
+            assert [c.nocab_uuid for c in new_options] == [
+                c.nocab_uuid for c in options
+            ]
+            assert [c.nocab_uuid for c in new_deck] == [c.nocab_uuid for c in deck]

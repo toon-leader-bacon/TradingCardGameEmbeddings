@@ -14,13 +14,15 @@ A recipe may point an existing dojo class at another metric's output
 (metric_output): the sts2_runs keys reuse the sts_gg wrappers over
 data/metrics/sts2_runs/, whose files share the sts_gg label columns.
 
-Contrastive dojos read a game's final deck box directly (no metric) and
-take augmentation mods: the game's defaults
-(src/dojos/augmentation_defaults.py) unless the run config overrides that
-dojo's mods by name. Metric dojos build their own task mods and take no
-default augmentations; the multi-card ones listed in DECK_MOD_GROUPS also
-take opt-in deck mods (src/dojos/mods/deck_mods.py) from the run config,
-appended after their own task mods.
+Contrastive dojos read a game's final deck box directly (no metric).
+
+Every dojo takes train-only augmentation mods: its game's defaults
+(src/dojos/augmentation_defaults.py) unless the run config's `mods:` names
+that dojo, which replaces them (an empty list turns augmentation off). A
+metric dojo keeps its own task mods (e.g. a train_only=False mask) first
+and in order; its augmentations run after them. Deck mods
+(src/dojos/mods/deck_mods.py) are never a default: only the dojos in
+DECK_MOD_GROUPS take them, and only when `mods:` lists them.
 """
 
 import random
@@ -53,7 +55,6 @@ from src.dojos.spire_codex import card_mask_dojos as sts2_masks
 from src.dojos import isotropic
 from src.dojos.sts_gg import card_average_dojos as sts_cards
 from src.dojos.generic.generic_dojo import GenericDojo
-from src.dojos.mods.mod import Mod
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.dojos.mods.mod_specs import DeckModSpec, ModSpec
 from src.dojos.play_gwent import card_inclusion_dojos as gwent_inclusion
@@ -80,7 +81,7 @@ class CardDojoConstructor(Protocol):
         path_to_training_data: Path | None = None,
         name: str | None = None,
         rng_seed: int | None = None,
-    ) -> Dojo: ...
+    ) -> GenericDojo: ...
 
 
 class DeckDojoConstructor(Protocol):
@@ -98,7 +99,7 @@ class DeckDojoConstructor(Protocol):
         path_to_training_data: Path | None = None,
         name: str | None = None,
         rng_seed: int | None = None,
-    ) -> Dojo: ...
+    ) -> GenericDojo: ...
 
 
 class CardShelf:
@@ -160,11 +161,9 @@ class DojoBuildContext:
     requires every dojo to share it). card_embedding_size: the model's
     embed_dim. rng_seed: seeds each dojo's split shuffling, so a first
     split build is reproducible. mod_overrides: per dojo name,
-    augmentation specs replacing a contrastive dojo's game defaults (an
-    empty tuple means no augmentation), or deck specs appended to a
-    DECK_MOD_GROUPS dojo's own mods; build_dojos rejects a name that is
-    not built or takes no augmentations, and a deck spec naming a group
-    the dojo does not allow.
+    augmentation specs replacing that dojo's game defaults (an empty tuple
+    means no augmentation); build_dojos rejects a name that is not built,
+    and a deck spec on a dojo or group DECK_MOD_GROUPS does not allow.
     """
 
     shelf: CardShelf
@@ -195,8 +194,8 @@ class CardDojoRecipe:
     metric_output: Path | None = None
 
     def build(self, name: str, context: DojoBuildContext) -> Dojo:
-        """See DojoRecipe.build."""
-        return self.dojo_class(
+        """See DojoRecipe.build; augmentations as _with_augmentations."""
+        dojo = self.dojo_class(
             context.shelf.card_binder(self.game),
             context.holdout,
             context.card_embedding_size,
@@ -204,6 +203,7 @@ class CardDojoRecipe:
             name=name,
             rng_seed=context.rng_seed,
         )
+        return _with_augmentations(dojo, name, self.game, context)
 
 
 @dataclass(frozen=True)
@@ -217,8 +217,8 @@ class DeckDojoRecipe:
     metric_output: Path | None = None
 
     def build(self, name: str, context: DojoBuildContext) -> Dojo:
-        """See DojoRecipe.build."""
-        return self.dojo_class(
+        """See DojoRecipe.build; augmentations as _with_augmentations."""
+        dojo = self.dojo_class(
             context.shelf.card_binder(self.game),
             context.holdout,
             context.shelf.deck_box(self.deck_box_path),
@@ -227,6 +227,7 @@ class DeckDojoRecipe:
             name=name,
             rng_seed=context.rng_seed,
         )
+        return _with_augmentations(dojo, name, self.game, context)
 
 
 @dataclass(frozen=True)
@@ -276,28 +277,35 @@ def _contrastive_index_path(name: str) -> Path:
 def _augmentation_pipeline(
     name: str, game: GameId, context: DojoBuildContext
 ) -> ModPipeline:
-    """The dojo's mods: context.mod_overrides[name] if present, else
-    game's defaults. Each mod's seed is drawn from a stream seeded by
+    """The dojo's augmentations: context.mod_overrides[name] if present,
+    else game's defaults. Each mod's seed is drawn from a stream seeded by
     (rng_seed, name, "mods"), so mods neither share a random stream with
-    each other nor with the dealer and pair constructor (seeded by
-    rng_seed itself), and each dojo's mods differ.
+    each other nor with the dojo's own sampling (seeded by rng_seed
+    itself), and each dojo's mods differ.
 
     Inputs: name, game, context. Output: ModPipeline.
     Side effects: none. Exceptions: as a ModSpec's build.
     """
     specs = context.mod_overrides.get(name, default_augmentations_for(game))
-    return ModPipeline(_seeded_mods(name, specs, context.rng_seed))
+    seeds = random.Random(f"{context.rng_seed}:{name}:mods")
+    return ModPipeline([spec.build(seeds.randrange(2**32)) for spec in specs])
 
 
-def _seeded_mods(name: str, specs: Sequence[ModSpec], rng_seed: int) -> list[Mod]:
-    """One mod per spec, in order, each seeded from a stream seeded by
-    (rng_seed, name, "mods") - see _augmentation_pipeline.
+def _with_augmentations(
+    dojo: GenericDojo, name: str, game: GameId, context: DojoBuildContext
+) -> GenericDojo:
+    """dojo with its augmentations (_augmentation_pipeline) appended after
+    its own task mods, which stay first and in order.
 
-    Inputs: name, specs, rng_seed. Output: list[Mod].
-    Side effects: none. Exceptions: as a ModSpec's build.
+    Inputs: dojo (a just-built metric dojo, no batch yet), name, game,
+        context. Output: dojo itself.
+    Side effects: dojo.append_mods when there is anything to append.
+    Exceptions: as a ModSpec's build.
     """
-    seeds = random.Random(f"{rng_seed}:{name}:mods")
-    return [spec.build(seeds.randrange(2**32)) for spec in specs]
+    mods = _augmentation_pipeline(name, game, context).mods
+    if mods:
+        dojo.append_mods(mods)
+    return dojo
 
 
 def _recipe_for_contrastive(game: GameId) -> ContrastiveDojoRecipe:
@@ -747,23 +755,6 @@ DECK_MOD_GROUPS: Mapping[str, frozenset[int]] = {
 }
 
 
-def takes_augmentations(name: str) -> bool:
-    """Whether the catalog dojo named name accepts a `mods:` override: a
-    contrastive dojo (any specs, replacing its defaults) or a dojo in
-    DECK_MOD_GROUPS (deck specs only, appended after its own mods).
-    build_dojos uses this to reject a `mods:` override for any other dojo.
-
-    Inputs: name (a DOJO_CATALOG key). Output: bool.
-    Side effects: none. Exceptions: KeyError for an unknown name.
-
-    Example:
-        >>> takes_augmentations("contrastive.gwent")
-        True
-    """
-    is_contrastive = isinstance(DOJO_CATALOG[name], ContrastiveDojoRecipe)
-    return is_contrastive or name in DECK_MOD_GROUPS
-
-
 def build_dojos(names: Sequence[str], context: DojoBuildContext) -> list[Dojo]:
     """Build every named catalog dojo, in order.
 
@@ -773,10 +764,11 @@ def build_dojos(names: Sequence[str], context: DojoBuildContext) -> list[Dojo]:
     Side effects: loads card data through context.shelf; a dojo whose
         split files do not exist yet writes them (seeded by
         context.rng_seed).
-    Exceptions: ValueError naming every unknown key, or any
-        context.mod_overrides name that is not in names or takes no
-        augmentations, raised before any dojo is built (so a typo does
-        not cost a binder load); whatever a recipe's build raises.
+    Exceptions: ValueError naming every unknown key, any
+        context.mod_overrides name that is not in names, or a deck spec
+        DECK_MOD_GROUPS does not allow, raised before any dojo is built
+        (so a typo does not cost a binder load); whatever a recipe's
+        build raises.
 
     Example:
         >>> context = DojoBuildContext(CardShelf(), holdout, 256, rng_seed=0)
@@ -791,29 +783,10 @@ def build_dojos(names: Sequence[str], context: DojoBuildContext) -> list[Dojo]:
         raise ValueError(f"unknown dojos {unknown}; see DOJO_CATALOG")
     _require_valid_overrides(context.mod_overrides, names)
 
-    # Build each dojo from its recipe, then attach any opt-in deck mods
+    # Build each dojo from its recipe (each attaches its own augmentations)
     for name in names:
-        dojo = DOJO_CATALOG[name].build(name, context)
-        if name in DECK_MOD_GROUPS and name in context.mod_overrides:
-            _append_deck_mods(dojo, name, context)
-        result.append(dojo)
+        result.append(DOJO_CATALOG[name].build(name, context))
     return result
-
-
-def _append_deck_mods(dojo: Dojo, name: str, context: DojoBuildContext) -> None:
-    """Append context.mod_overrides[name]'s deck mods after dojo's own
-    mods, seeded as a contrastive dojo's mods are (_seeded_mods).
-
-    Inputs: dojo (just built, no batch yet), name (in DECK_MOD_GROUPS and
-        context.mod_overrides), context. Output: none.
-    Side effects: dojo.append_mods.
-    Exceptions: TypeError if dojo is not a GenericDojo (a catalog bug:
-        DECK_MOD_GROUPS lists only metric dojos).
-    """
-    if not isinstance(dojo, GenericDojo):
-        raise TypeError(f"{name} is in DECK_MOD_GROUPS but is not a GenericDojo")
-    specs = context.mod_overrides[name]
-    dojo.append_mods(_seeded_mods(name, specs, context.rng_seed))
 
 
 def _require_valid_overrides(
@@ -821,35 +794,30 @@ def _require_valid_overrides(
 ) -> None:
     """Inputs: mod_overrides, names (the dojos being built). Output: none.
     Side effects: none.
-    Exceptions: ValueError if an override names a dojo not being built, or
-        one that takes no augmentations (its override would be ignored).
+    Exceptions: ValueError if an override names a dojo not being built
+        (it would be ignored), or as _require_allowed_specs.
     """
     not_built = sorted(set(mod_overrides) - set(names))
     if not_built:
         raise ValueError(f"mods override dojos {not_built} that are not being built")
-    fixed = sorted(name for name in mod_overrides if not takes_augmentations(name))
-    if fixed:
-        raise ValueError(f"dojos {fixed} take no augmentation mods")
     for name, specs in mod_overrides.items():
         _require_allowed_specs(name, specs)
 
 
 def _require_allowed_specs(name: str, specs: tuple[ModSpec, ...]) -> None:
-    """Inputs: name (a dojo that takes augmentations), specs (its
-        override). Output: none.
+    """Card-field specs suit every dojo; a deck spec needs a dojo in
+    DECK_MOD_GROUPS and only the groups listed there.
+
+    Inputs: name (a catalog dojo), specs (its override). Output: none.
     Side effects: none.
     Exceptions: ValueError for a deck spec on a dojo not in
-        DECK_MOD_GROUPS or naming a group it does not allow, or a
-        card-field spec on a metric dojo (they take deck mods only).
+        DECK_MOD_GROUPS, or naming a group it does not allow.
     """
-    takes_deck_mods = name in DECK_MOD_GROUPS
     for spec in specs:
-        spec_name = type(spec).__name__
         if not isinstance(spec, DeckModSpec):
-            if takes_deck_mods:
-                raise ValueError(f"{name} takes deck mods only, not {spec_name}")
             continue
-        if not takes_deck_mods:
+        spec_name = type(spec).__name__
+        if name not in DECK_MOD_GROUPS:
             raise ValueError(
                 f"{name} takes no deck mods ({spec_name}); see DECK_MOD_GROUPS"
             )
