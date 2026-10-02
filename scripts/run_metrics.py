@@ -261,6 +261,13 @@ from src.data_refinement.metrics.play_gwent.leader_deck_counts import (
 from src.data_refinement.metrics.play_gwent.leader_masked_from_deck_metric import (
     LeaderMaskedFromDeckMetric,
 )
+from src.data_refinement.metrics.play_gwent.card_inclusion_metrics import (
+    CardInclusionRateMetric as GwentCardInclusionRateMetric,
+    FactionConditionedInclusionMetric,
+)
+from src.data_refinement.metrics.play_gwent.guide_votes_metric import (
+    GuideVotesMetric,
+)
 from src.data_refinement.metrics.play_gwent.scanner import scan_guides_jsonl
 
 # --- seventeenlands/draft_data ---
@@ -678,6 +685,28 @@ def run_fabtcg_decklists(raw_path: Path | None) -> None:
     print(f"wrote {len(metrics)} metric outputs")
 
 
+def run_play_gwent_guides(raw_path: Path | None) -> None:
+    """Card inclusion rates and guide votes over guides.jsonl. Unlike
+    run_play_gwent (whose leader metric writes decks and which saves the
+    published Gwent box), this reads the published box and never writes
+    or saves it."""
+    effective_raw_path = raw_path or PLAY_GWENT_DEFAULT_RAW_PATH
+    binder = _require_binder(
+        GameId.GWENT,
+        "run 'python3 scripts/run_card_binder_ingestion.py --source gwent_one' first.",
+    )
+    deck_box = _require_published_deck_box(GameId.GWENT)
+    metrics: list[Metric[dict]] = [
+        GwentCardInclusionRateMetric(binder, deck_box),
+        FactionConditionedInclusionMetric(binder, deck_box),
+        GuideVotesMetric(binder, deck_box),
+    ]
+
+    print(f"=== play_gwent_guides: {effective_raw_path} ===")
+    scan_guides_jsonl(effective_raw_path, metrics)
+    print(f"wrote {len(metrics)} metric outputs")
+
+
 # --- isotropic ---
 
 _ISOTROPIC_RAW_DIR = Path("data/raw/isotropic")
@@ -992,6 +1021,7 @@ _FAMILIES: dict[str, Callable[[Path | None], None]] = {
     "dominiontabs": run_dominiontabs,
     "play_gwent": run_play_gwent,
     "fabtcg_decklists": run_fabtcg_decklists,
+    "play_gwent_guides": run_play_gwent_guides,
     "scryfall": run_scryfall,
     "pokemon_tcg": run_pokemon_tcg,
     "cardvault_fabtcg": run_cardvault_fabtcg,

@@ -84,7 +84,9 @@ implementation yet). Implemented today:
   consumer. See [`gwent_one/README.md`](gwent_one/README.md).
 - **`play_gwent/`** - `LeaderMaskedFromDeckMetric`, this project's
   first `DeckCardMaskMetric` consumer, driven directly off
-  playgwent.com's community deck guides. See
+  playgwent.com's community deck guides. Also two card inclusion-rate
+  metrics and guide vote prediction, which read the published Gwent deck
+  box read-only. See
   [`play_gwent/README.md`](play_gwent/README.md).
 - **`fabtcg_decklists/`** - hero masked from deck (a third
   `DeckCardMaskMetric` consumer) and two card inclusion-rate metrics

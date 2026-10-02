@@ -52,7 +52,9 @@ from src.dojos import isotropic
 from src.dojos.sts_gg import card_average_dojos as sts_cards
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.dojos.mods.mod_specs import ModSpec
+from src.dojos.play_gwent import card_inclusion_dojos as gwent_inclusion
 from src.dojos.play_gwent.deck_card_mask_dojos import LeaderMaskedFromDeckDojo
+from src.dojos.play_gwent.deck_label_dojos import GuideVotesDojo
 from src.dojos.sts_gg import deck_label_dojos as sts_decks
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
@@ -681,6 +683,14 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     "fabtcg_decklists.hero_conditioned_inclusion": CardDojoRecipe(
         GameId.FLESH_AND_BLOOD, fabtcg_inclusion.HeroConditionedInclusionDojo
     ),
+    # play_gwent guide metrics read the published Gwent box, never write it
+    "play_gwent.card_inclusion_rate": CardDojoRecipe(
+        GameId.GWENT, gwent_inclusion.CardInclusionRateDojo
+    ),
+    "play_gwent.faction_conditioned_inclusion": CardDojoRecipe(
+        GameId.GWENT, gwent_inclusion.FactionConditionedInclusionDojo
+    ),
+    "play_gwent.guide_votes": _recipe_for_final_deck_box(GameId.GWENT, GuideVotesDojo),
     "contrastive.gwent": _recipe_for_contrastive(GameId.GWENT),
     "contrastive.flesh_and_blood": _recipe_for_contrastive(GameId.FLESH_AND_BLOOD),
     "contrastive.slay_the_spire_2": _recipe_for_contrastive(GameId.SLAY_THE_SPIRE_2),
