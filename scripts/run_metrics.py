@@ -241,12 +241,32 @@ from src.data_refinement.metrics.isotropic.games.scanner import (
     scan_isotropic_game_logs_archives,
 )
 
+# --- fabtcg_decklists ---
+from src.data_refinement.metrics.fabtcg_decklists.card_inclusion_metrics import (
+    CardInclusionRateMetric as FabCardInclusionRateMetric,
+    HeroConditionedInclusionMetric,
+)
+from src.data_refinement.metrics.fabtcg_decklists.hero_masked_from_deck_metric import (
+    HeroMaskedFromDeckMetric,
+)
+from src.data_refinement.metrics.fabtcg_decklists.scanner import (
+    DEFAULT_RAW_PATH as FABTCG_DECKLISTS_DEFAULT_RAW_PATH,
+    scan_decklist_files,
+)
+
 # --- play_gwent ---
 from src.data_refinement.metrics.play_gwent.leader_deck_counts import (
     DEFAULT_RAW_PATH as PLAY_GWENT_DEFAULT_RAW_PATH,
 )
 from src.data_refinement.metrics.play_gwent.leader_masked_from_deck_metric import (
     LeaderMaskedFromDeckMetric,
+)
+from src.data_refinement.metrics.play_gwent.card_inclusion_metrics import (
+    CardInclusionRateMetric as GwentCardInclusionRateMetric,
+    FactionConditionedInclusionMetric,
+)
+from src.data_refinement.metrics.play_gwent.guide_votes_metric import (
+    GuideVotesMetric,
 )
 from src.data_refinement.metrics.play_gwent.scanner import scan_guides_jsonl
 
@@ -628,6 +648,65 @@ def run_play_gwent(raw_path: Path | None) -> None:
     print(f"wrote {len(metrics)} metric outputs")
 
 
+# --- fabtcg_decklists ---
+
+
+def _require_published_deck_box(game: GameId) -> DeckBox:
+    """The published deck box for game, for metrics that only read it.
+
+    Inputs: game. Output: DeckBox (single-path load: callers must not
+        write through it, and never save() it).
+    Side effects: opens the box file. Exceptions: SystemExit if missing.
+    """
+    box_path = DeckBox.default_output_path(game)
+    if not box_path.exists():
+        raise SystemExit(f"{box_path} does not exist; run deck box ingestion first.")
+    return DeckBox.load([box_path])
+
+
+def run_fabtcg_decklists(raw_path: Path | None) -> None:
+    """Hero mask and card inclusion rates over the raw decklist files.
+    Reads the published FaB deck box and never writes or saves it."""
+    effective_raw_path = raw_path or FABTCG_DECKLISTS_DEFAULT_RAW_PATH
+    binder = _require_binder(
+        GameId.FLESH_AND_BLOOD,
+        "run 'python3 scripts/run_card_binder_ingestion.py --source "
+        "cardvault_fabtcg' first.",
+    )
+    deck_box = _require_published_deck_box(GameId.FLESH_AND_BLOOD)
+    metrics: list[Metric[dict]] = [
+        HeroMaskedFromDeckMetric(binder, deck_box),
+        FabCardInclusionRateMetric(binder, deck_box),
+        HeroConditionedInclusionMetric(binder, deck_box),
+    ]
+
+    print(f"=== fabtcg_decklists: {effective_raw_path} ===")
+    scan_decklist_files(effective_raw_path, metrics)
+    print(f"wrote {len(metrics)} metric outputs")
+
+
+def run_play_gwent_guides(raw_path: Path | None) -> None:
+    """Card inclusion rates and guide votes over guides.jsonl. Unlike
+    run_play_gwent (whose leader metric writes decks and which saves the
+    published Gwent box), this reads the published box and never writes
+    or saves it."""
+    effective_raw_path = raw_path or PLAY_GWENT_DEFAULT_RAW_PATH
+    binder = _require_binder(
+        GameId.GWENT,
+        "run 'python3 scripts/run_card_binder_ingestion.py --source gwent_one' first.",
+    )
+    deck_box = _require_published_deck_box(GameId.GWENT)
+    metrics: list[Metric[dict]] = [
+        GwentCardInclusionRateMetric(binder, deck_box),
+        FactionConditionedInclusionMetric(binder, deck_box),
+        GuideVotesMetric(binder, deck_box),
+    ]
+
+    print(f"=== play_gwent_guides: {effective_raw_path} ===")
+    scan_guides_jsonl(effective_raw_path, metrics)
+    print(f"wrote {len(metrics)} metric outputs")
+
+
 # --- isotropic ---
 
 _ISOTROPIC_RAW_DIR = Path("data/raw/isotropic")
@@ -941,6 +1020,8 @@ _FAMILIES: dict[str, Callable[[Path | None], None]] = {
     "gwent_one": run_gwent_one,
     "dominiontabs": run_dominiontabs,
     "play_gwent": run_play_gwent,
+    "fabtcg_decklists": run_fabtcg_decklists,
+    "play_gwent_guides": run_play_gwent_guides,
     "scryfall": run_scryfall,
     "pokemon_tcg": run_pokemon_tcg,
     "cardvault_fabtcg": run_cardvault_fabtcg,

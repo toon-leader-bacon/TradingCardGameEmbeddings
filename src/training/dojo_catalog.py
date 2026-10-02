@@ -42,6 +42,8 @@ from src.dojos.dominiontabs.cost_regression_dojo import CostRegressionDojo
 from src.dojos.dominiontabs.masked_field_dojos import SetMaskDojo, TypeMaskDojo
 from src.dojos.gwent_one import masked_field_dojos as gwent_one
 from src.dojos.cardvault_fabtcg import card_mask_dojos as fabtcg_masks
+from src.dojos.fabtcg_decklists import card_inclusion_dojos as fabtcg_inclusion
+from src.dojos.fabtcg_decklists import deck_card_mask_dojos as fabtcg_decks
 from src.dojos.hearthstonejson import card_mask_dojos as hearthstone_masks
 from src.dojos.pokemon_tcg import card_mask_dojos as pokemon_masks
 from src.dojos.scryfall import card_mask_dojos as scryfall_masks
@@ -50,7 +52,9 @@ from src.dojos import isotropic
 from src.dojos.sts_gg import card_average_dojos as sts_cards
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.dojos.mods.mod_specs import ModSpec
+from src.dojos.play_gwent import card_inclusion_dojos as gwent_inclusion
 from src.dojos.play_gwent.deck_card_mask_dojos import LeaderMaskedFromDeckDojo
+from src.dojos.play_gwent.deck_label_dojos import GuideVotesDojo
 from src.dojos.sts_gg import deck_label_dojos as sts_decks
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
@@ -669,6 +673,24 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     "sts2_runs.win": _recipe_for_sts2_runs_deck(
         sts_decks.WinDojo, sts2_decks.WinMetric.DEFAULT_OUTPUT_PATH
     ),
+    # fabtcg_decklists rows point into the published FaB deck box
+    "fabtcg_decklists.hero_masked_from_deck": _recipe_for_final_deck_box(
+        GameId.FLESH_AND_BLOOD, fabtcg_decks.HeroMaskedFromDeckDojo
+    ),
+    "fabtcg_decklists.card_inclusion_rate": CardDojoRecipe(
+        GameId.FLESH_AND_BLOOD, fabtcg_inclusion.CardInclusionRateDojo
+    ),
+    "fabtcg_decklists.hero_conditioned_inclusion": CardDojoRecipe(
+        GameId.FLESH_AND_BLOOD, fabtcg_inclusion.HeroConditionedInclusionDojo
+    ),
+    # play_gwent guide metrics read the published Gwent box, never write it
+    "play_gwent.card_inclusion_rate": CardDojoRecipe(
+        GameId.GWENT, gwent_inclusion.CardInclusionRateDojo
+    ),
+    "play_gwent.faction_conditioned_inclusion": CardDojoRecipe(
+        GameId.GWENT, gwent_inclusion.FactionConditionedInclusionDojo
+    ),
+    "play_gwent.guide_votes": _recipe_for_final_deck_box(GameId.GWENT, GuideVotesDojo),
     "contrastive.gwent": _recipe_for_contrastive(GameId.GWENT),
     "contrastive.flesh_and_blood": _recipe_for_contrastive(GameId.FLESH_AND_BLOOD),
     "contrastive.slay_the_spire_2": _recipe_for_contrastive(GameId.SLAY_THE_SPIRE_2),

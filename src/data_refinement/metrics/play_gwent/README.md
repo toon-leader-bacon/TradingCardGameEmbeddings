@@ -82,6 +82,36 @@ not a field of the character).
   `LEADER_NAMES` (an expected failure mode as new leaders are added
   upstream — see `leader_labels.py`'s FRESHNESS caveat — not a bug).
 
+## Guide metrics over the published box (read-only)
+
+Three newer metrics (2026-10-01) read each guide's deck from the
+published box (`data/final/decks/gwent.db`) and never write any deck box,
+unlike `LeaderMaskedFromDeckMetric`, which writes its decks through
+`extract_one()` (and whose run saves the published box; see "How to
+run"). `published_guide_decks.py`'s `PublishedGuideDecks` parses a raw
+guide row into a typed `GuideDeck`: the deck is
+`deck_uuid_for_guide(row["id"])` in the published box, and its faction is
+the leader card's binder faction (looked up through `leaderId`, the
+binder's spelling: `monster`, `northern_realms`). A card is legal for a
+faction if it is neutral, of that faction, or a dual-faction
+(`faction-duo`) syndicate card naming it (`legal_factions`).
+
+| Metric | Input -> label | Rows (2026-10-01) |
+|---|---|---|
+| `CardInclusionRateMetric` (`card_inclusion_rate.parquet`) | card -> P(card in deck \| card legal for the deck's faction); leaders excluded, cards legal for fewer than 20 decks dropped | 1,218 |
+| `FactionConditionedInclusionMetric` (`faction_conditioned_inclusion.parquet`) | card -> P(card in deck \| faction) per faction, as two parallel lists (`inclusion_rate_by_faction`, `legal_deck_count_by_faction`; count 0 = illegal, masked) | 1,218 |
+| `GuideVotesMetric` (`guide_votes.parquet`) | guide deck -> sign(v) * ln(1 + \|v\|) of its net votes (v from -120 to 1,594; 5,268 guides negative, so plain log(1 + v) is undefined). Rows point into the published box | 60,197 |
+
+The two inclusion metrics share a `FactionInclusionTally`
+(`faction_inclusion_tally.py`) and a Template Method base in
+`card_inclusion_metrics.py`, the Gwent twins of
+`../fabtcg_decklists/`'s hero-conditioned metrics. Biases: guides span
+2019-2026 and every balance patch (24k are flagged invalid today, kept);
+votes also reflect the write-up, the author's reach and the guide's age.
+
+Run them with `scripts/run_metrics.py --source play_gwent_guides` (about
+2 minutes; writes only these three files).
+
 ## `scanner.py`
 
 `scan_guides_jsonl(raw_path, metrics)` drives every `Metric[dict]` in
