@@ -4,8 +4,8 @@ on_play_win_rate_delta_metric.py's OnPlayWinRateDeltaMetric - per deck,
 P(won | on_play) - P(won | on_draw), aggregated across every game
 sharing an identical deck.
 
-A vectorized Metric[GameDataChunk] (plans/seventeenlands_chunk_scan.md,
-slice 2). Per chunk it stores the chunk's distinct decks in the shared
+A vectorized Metric[GameDataChunk] (see game_data/README.md).
+Per chunk it stores the chunk's distinct decks in the shared
 DeckBox (store_chunk_decks()), counts each distinct deck's four
 OnPlayWinCounts tallies over its rows in one pass, and adds them to a
 running per-deck_uuid total.

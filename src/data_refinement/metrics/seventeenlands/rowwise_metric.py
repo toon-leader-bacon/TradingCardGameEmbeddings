@@ -1,6 +1,6 @@
 """RowwiseMetric - an Adapter (PATTERNS.md) that lets a not-yet-ported
 row metric (Metric[dict]) run inside a family that scans chunks
-(plans/seventeenlands_chunk_scan.md).
+(see game_data/README.md).
 
 Transitional: a family wraps its row metrics in this only while it has
 any, and each family's wrapping is deleted once its last row metric is

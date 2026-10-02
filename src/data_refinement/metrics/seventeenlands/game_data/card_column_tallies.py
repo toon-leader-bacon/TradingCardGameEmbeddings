@@ -1,6 +1,6 @@
 """CardColumnTallies - numeric tallies kept per matched header column of
 one zone across a CSV's chunks, then summed per card uuid
-(plans/seventeenlands_chunk_scan.md).
+(see game_data/README.md).
 
 Shared by every vectorized per-card game_data metric:
 GameCardAverageMetric (float tallies: a value sum and a count),

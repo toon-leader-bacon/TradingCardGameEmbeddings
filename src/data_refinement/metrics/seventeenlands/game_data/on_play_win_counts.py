@@ -1,6 +1,6 @@
 """OnPlayWinCounts - one subject's games and wins split by on_play, and
 the on-play/on-draw win rate delta they give
-(plans/seventeenlands_chunk_scan.md, slice 2).
+(see game_data/README.md).
 
 Shared by OnPlayWinRateDeltaMetric (the subject is a card in the deck)
 and OnPlayWinRateSensitivityByDeckMetric (the subject is a whole deck):

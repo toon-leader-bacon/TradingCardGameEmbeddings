@@ -3,16 +3,15 @@ Tutor Targets Given Deck": given one game's full draft pool
 (deck_<name> union sideboard_<name>), label each pool card with whether
 it appears in tutored_<name> that game.
 
-A vectorized Metric[GameDataChunk] (plans/seventeenlands_chunk_scan.md,
-slice 2). Per chunk it lines the deck, sideboard and tutored zones up
+A vectorized Metric[GameDataChunk] (see game_data/README.md).
+Per chunk it lines the deck, sideboard and tutored zones up
 over one card axis (the distinct cards of deck_ and sideboard_ columns,
 via ZoneCounts.present_for()), so the chunk's pool is one (rows, cards)
 bool matrix; every true cell is one output row, written in one call.
 
 FAN-OUT STREAMING: one game writes one row per distinct pool card
-(zero rows for an empty pool), not one row per game. See
-plans/game_data_metrics.md's Component overview #10 and open question
-#2 for this shape's own rationale.
+(zero rows for an empty pool), not one row per game. The alternative,
+one parallel-list row per game, was considered and not taken.
 
 NOT A DECK: this metric's identity unit is the per-game
 (draft_id, match_number, game_number) triple plus a pool_card_uuid -

@@ -1,6 +1,6 @@
 """GameDataChunk - one typed, numpy-backed block of 17lands game_data
 rows, the unit every game_data metric's accumulate() receives (see
-plans/seventeenlands_chunk_scan.md).
+game_data/README.md).
 
 A chunk is parsed once per record batch by GameDataChunkParser
 (game_data_chunk_parser.py) and read by every metric, so no metric ever

@@ -3,8 +3,8 @@
 on_play=True) - P(won | card in deck, on_play=False) - a tempo/curve-
 sensitivity proxy.
 
-A vectorized Metric[GameDataChunk] (plans/seventeenlands_chunk_scan.md,
-slice 2). Standalone - does NOT subclass GameCardAverageMetric: that
+A vectorized Metric[GameDataChunk] (see game_data/README.md).
+Standalone - does NOT subclass GameCardAverageMetric: that
 base keeps one running (value_sum, count) per card, while this metric
 keeps four counts per card (games and wins on each side of on_play,
 OnPlayWinCounts). Its per-column counts live in a CardColumnTallies,

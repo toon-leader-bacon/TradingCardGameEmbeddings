@@ -1,8 +1,7 @@
 """Concrete GameDeckLabelMetric (game_deck_label_metric.py) subclasses:
 three of round 1's five multi-card metrics from
 src/data_refinement/metrics/seventeenlands/game_data/BRAINSTORM.md's
-"Human Review Short List" - see plans/game_data_metrics.md's Component
-overview #8.
+"Human Review Short List" (see game_data/README.md).
 
 OnPlayWinRateSensitivityByDeckMetric (this list's fourth deck-input
 sibling) does NOT subclass GameDeckLabelMetric - it's accumulation, not

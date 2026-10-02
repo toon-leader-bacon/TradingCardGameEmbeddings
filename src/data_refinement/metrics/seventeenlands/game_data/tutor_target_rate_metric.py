@@ -3,8 +3,8 @@ Target Rate": P(card in tutored_<name> | card in deck_<name>) - among
 games where a card was in the deck, how often did a tutor effect
 actually fetch it that game.
 
-A vectorized Metric[GameDataChunk] (plans/seventeenlands_chunk_scan.md,
-slice 2). Per deck column it counts (games in deck, games in deck and
+A vectorized Metric[GameDataChunk] (see game_data/README.md).
+Per deck column it counts (games in deck, games in deck and
 tutored) in a CardColumnTallies; "tutored" is the deck column's card
 present under any tutored_<name> column, via ZoneCounts.present_for().
 

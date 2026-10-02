@@ -1,6 +1,6 @@
 """Template Method base for accumulation metrics that tally, per card
 present (count > 0) in one game_data zone, the running average of one
-per-game scalar (plans/seventeenlands_chunk_scan.md, slice 1).
+per-game scalar (see game_data/README.md).
 
 Satisfies Metric[GameDataChunk]: accumulate() takes a whole chunk and
 tallies it with array operations, never a per-row Python loop. The base

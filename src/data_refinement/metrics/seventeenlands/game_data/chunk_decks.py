@@ -1,5 +1,5 @@
 """build_chunk_decks - identifies every row's constructed deck once per
-chunk (plans/seventeenlands_chunk_scan.md, slice 2), for
+chunk (see game_data/README.md), for
 GameDataChunkParser.
 
 A row's deck is its present deck_<name> columns (count > 0), one card

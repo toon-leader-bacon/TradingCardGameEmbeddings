@@ -1,6 +1,6 @@
 """Parity check: compares candidate metric outputs against reference
-outputs, file by file (plans/seventeenlands_chunk_scan.md, "Parity
-rule").
+outputs, file by file (the parity rule for porting a metric; see
+src/data_refinement/metrics/seventeenlands/game_data/README.md).
 
 Typical use, for one 17lands CSV:
 

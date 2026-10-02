@@ -1,11 +1,10 @@
 """Template Method base for streaming metrics whose training input is
 one game's constructed deck (deck_<name>, referenced by deck_uuid,
 never embedded - mirroring sts_gg/deck_label_metric.py's own DeckBox
-convention) paired with a single scalar label from that same game - see
-plans/game_data_metrics.md's Component overview #7.
+convention) paired with a single scalar label from that same game.
 
-A vectorized Metric[GameDataChunk] (plans/seventeenlands_chunk_scan.md,
-slice 2). Each chunk already carries every row's deck (ChunkDecks,
+A vectorized Metric[GameDataChunk] (see game_data/README.md).
+Each chunk already carries every row's deck (ChunkDecks,
 identified once by the parser), so accumulate() stores the chunk's
 distinct decks in the shared DeckBox and writes one output row per game
 for the whole chunk at once.

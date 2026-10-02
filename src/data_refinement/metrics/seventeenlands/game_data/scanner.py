@@ -1,5 +1,5 @@
 """Drives one streaming read pass over a 17lands game_data CSV across
-every Metric[GameDataChunk] at once (plans/seventeenlands_chunk_scan.md).
+every Metric[GameDataChunk] at once (see game_data/README.md).
 
 The file is streamed with pyarrow.csv.open_csv in record batches. Each
 batch is parsed exactly once, by the GameDataChunkParser the driver
