@@ -96,3 +96,17 @@
   seventeenlands families now exist, so the shared shape can be read
   off real code; pull it into one base only where key shapes truly
   match.
+
+- [ ] **`run_metrics.py --source play_gwent` (and `--all`) rewrites the
+  published `data/final/decks/gwent.db`** (found 2026-10-01). `run_play_gwent`
+  opens the published box, `LeaderMaskedFromDeckMetric` writes decks into it,
+  and the run calls `save()` on it. A re-run makes every metric keyed to
+  that box stale (e.g. `final_decks/held_out_card_gwent.parquet`). Fix: give
+  the leader metric a metric-private box (as isotropic and sts_gg do), or
+  open the published box read-only. Until then, don't run that family.
+- [ ] **FaB deck box keys cards by name.** A name printed in several pitches
+  maps to one arbitrary printing, so FaB inclusion rates are per name.
+- [ ] **Move `RenamedColumnDataConstructor`** from `dojos/isotropic/` to
+  `dojos/generic/data_constructors/`: it now has three users.
+- [ ] **Deduplicate FaB class/typebox parsing** between
+  `metrics/cardvault_fabtcg/` and `metrics/fabtcg_decklists/`.
