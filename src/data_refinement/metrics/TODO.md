@@ -110,3 +110,16 @@
   `dojos/generic/data_constructors/`: it now has three users.
 - [ ] **Deduplicate FaB class/typebox parsing** between
   `metrics/cardvault_fabtcg/` and `metrics/fabtcg_decklists/`.
+- [ ] **StS2 per-floor metrics (B2).** The spire_codex + sts2runs run
+  records carry per-floor `card_choices`, shop purchases, removals,
+  upgrades and rest-site choices, none used yet. Top candidates: card
+  reward pick given the deck so far (`[offered, partial deck]`, the same
+  shape as 17lands' pool_conditioned_pick), shop purchase, removal
+  target, upgrade target, rest-site choice. Needs the deck at each floor
+  rebuilt from `cards_gained`/`cards_removed`. Design note in
+  `sts2_runs/README.md`.
+- [ ] **held_out_card rows can share a deck across splits.** Dojo splits
+  are by row, and Pokemon, FaB and Gwent take several targets per deck,
+  so one deck can appear in TRAIN and TEST with different held-out cards
+  (the big boxes take one target per deck and are unaffected). Split by
+  deck uuid instead, or take one target per deck everywhere.
