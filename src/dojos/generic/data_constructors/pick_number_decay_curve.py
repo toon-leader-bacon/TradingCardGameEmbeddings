@@ -7,7 +7,7 @@ from typing import Dict, List, cast
 import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.dojos.generic.data_constructors._row_values import _card_for_uuid
+from src.dojos.generic.data_constructors.row_values import card_for_uuid
 from src.schema.type_hints import TrainingDatum
 
 
@@ -99,7 +99,7 @@ class PickNumberDecayCurveDataConstructor:
         # Resolve each row's card and its per-bucket label dict
         # independently; skip rows that fail either.
         for _, row in chunk.iterrows():
-            card = _card_for_uuid(lookup, row["nocab_uuid"])
+            card = card_for_uuid(lookup, row["nocab_uuid"])
             if card is None:
                 continue
             label = self._label_for_row(

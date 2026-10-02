@@ -200,25 +200,88 @@ a median of ~200 tokens and FaB to ~570.
   `STS_GG_DECK_BOX_PATH` (`data/metrics/sts_gg/deck_box.db`), but only an
   older `deck_box.jsonl` is on disk; run `scripts/run_metrics.py --source
   sts_gg`.
-- [ ] **Find a reasonable way to normalize loss across dojos.** Dojo
-  losses are on unrelated scales: cross-entropy sits near ln(classes),
-  InfoNCE near ln(batch items), and MSE is in the target's raw units
-  (preflight sample losses: gwent masks ~1-3, contrastive ~6, STS
-  card-average regressions up to ~7e4). Three places this matters today:
-  - the best-checkpoint rule averages TEST loss over the diet dojos, so
-    the largest-scale dojo decides which checkpoint wins;
-  - `SaturationSpec.epsilon` / `reactivation_delta` are absolute, so one
-    value means "no progress" for one dojo and "huge progress" for another;
-  - the shared encoder's (and future shared head's) gradient share per
-    dojo. Per-step clipping caps the size but not the imbalance.
-  Candidates, not mutually exclusive: standardize regression targets from
-  TRAIN-split statistics (a data-side fix for MSE only); report and compare
-  loss relative to a trivial baseline per dojo (mean predictor for MSE,
-  label prior for CE, ln(N) for InfoNCE, so 1.0 = chance everywhere) for
-  best-checkpoint and saturation decisions; learned per-dojo weights
-  (uncertainty weighting, GradNorm) for the training signal itself. Until
-  this lands, don't mix regression dojos with classification/contrastive
-  ones in one phase.
+- [ ] **Normalize loss across dojos.** Dojo losses sit on unrelated
+  scales: cross-entropy near ln(classes), InfoNCE near ln(batch items),
+  MSE in the target's raw units (STS card-average regressions up to ~7e4).
+  Plan agreed 2026-09-30, in three steps:
+  1. **Done.** Regression labels are z-scored from TRAIN-split statistics;
+     every dojo reports a baseline (`Dojo.baseline_loss`) and its
+     normalized loss (loss / baseline, 1.0 = learned nothing) beside the
+     raw loss, in `RoundReport`, the rounds CSV, the log line and
+     `validation.json`; best-checkpoint selection and saturation use
+     normalized loss (`epsilon`/`reactivation_delta` are now fractions of
+     the baseline; the existing configs' 0.001 / 0.05 still read sensibly).
+     The gradient itself is not rescaled: a dojo's raw loss still sets its
+     share of the shared encoder's update.
+  2. Two-level diet sampling, below.
+  3. Much later, as experiments: learned per-dojo weights (uncertainty
+     weighting, Kendall et al. 2018) and learning-progress task selection
+     (Graves et al. 2017).
+- [x] **sts_gg.card_win_rate has a constant label.** Every row of
+  `data/metrics/sts_gg/card_win_rate.parquet` is 1.0 (546 cards). Cause
+  (2026-10-01): sts.gg's source is its leaderboard, which lists winning
+  runs only (all 1,004 raw runs have `win: true`, `killedBy: null`). So
+  `sts_gg.card_win_rate` and `sts_gg.win` left the catalog (code kept),
+  and the win-based labels come from the `sts2_runs.*` keys instead
+  (spire_codex + sts2runs runs, which include losses).
+- [ ] **Handle outlier regression labels.** z-scoring rescales labels but
+  does not tame heavy tails. isotropic.kingdom_game_length has mean 19.8
+  turns and std 6.4, but a max of 323 (about 47 std out). Under MSE that
+  one example adds about 2,200 to its batch loss and dominates the
+  gradient. Options, per dojo, in increasing effort:
+  - clip labels to a percentile range when the metric is built (e.g.
+    p0.5-p99.5) and record the bounds;
+  - Huber / smooth-L1 loss in the regression cells: squared error near
+    zero, linear beyond a threshold (in std units after z-scoring);
+  - transform heavy-tailed labels first, e.g. log(turns) or log(1 +
+    count).
+
+  Check every regression metric's label histogram before picking; the
+  isotropic C1 report also flags mid_game_next_turn_action_count (max 112).
+  Done for those two (2026-10-01): kingdom_game_length's metric now skips
+  solo/resigned games (the sub-5-turn labels) and its dojo clips at 50;
+  NextTurnActionCountDojo clips at 30 (IsotropicDeckRegressionDojo's
+  LABEL_CAP). Other regression dojos are unchecked.
+  Still unclipped (2026-10-01): the new `sts2_runs` deck labels, e.g.
+  total_cards_skipped (max 209) and elites_killed (max 28). A Huber loss
+  in the three regression cells would cover every dojo at once instead of
+  per-metric caps.
+- [ ] **Save each dojo's `LabelStats` with the run.** The TRAIN mean/std
+  that z-score a regression dojo's labels are recomputed at every dojo
+  construction and only appear in the construction log line. That is
+  reproducible while the split files stay put, but a rebuilt split would
+  silently pair a checkpoint's head with different stats. Write each
+  dojo's stats into the run directory (manifest or `validation.json`) and
+  read them back for evaluation, so predictions convert to label units
+  reliably.
+- [ ] **Let label dojos take the per-game card-field augmentations (D1).**
+  `takes_augmentations` (`dojo_catalog.py`) limits `mods:` overrides and
+  `augmentation_defaults.py` to contrastive dojos. Extending it to the
+  generic cells needs a rule so an augmentation never interferes with a
+  dojo's own task mask (e.g. masking the field a masking dojo predicts is
+  fine; unmasking or re-ordering past it is not). Build on whatever opt-in
+  plumbing the Oct 1 deck-level mods (D2) added.
+- [ ] **Two-level diet sampling: game, then dojo.** Today the diet
+  sampler (`src/training/diet/diet_sampler.py`) picks one dojo per step
+  with probability proportional to its TRAIN count^alpha. alpha = 0 means
+  uniform over dojos; alpha = 1 means proportional. Two imbalances follow:
+  - A game with many dojos gets proportionally more steps than a game
+    with one (e.g. 20+ isotropic/dominiontabs dojos against Pokemon's
+    single contrastive dojo).
+  - With alpha > 0, huge dojos crowd out small ones (contrastive.mtg has
+    3.85M train decks, a Dominion card-rate dojo about 130 cards).
+
+  Fix: first sample a game (uniform, or temperature over the game's total
+  data), then a dojo within that game (temperature over dojo size). This
+  is the multilingual-model recipe applied twice, with games standing in
+  for languages. See Arivazhagan et al. 2019, "Massively Multilingual
+  Neural Machine Translation in the Wild", and Conneau et al. 2020,
+  XLM-R, alpha = 0.3.
+
+  Needs a game per dojo (the catalog recipes know it) and a new
+  DietRule, e.g. `{rule: per_game, game_alpha: 0.0, dojo_alpha: 0.3}`.
+  Saturated and quarantined dojos drop out within their game; a game
+  with no active dojos drops out.
 - [ ] **Decide the first-run dojo set.** Ready today: Gwent masks, STS
   metrics. Contrastive on FaB / Gwent / STS2 needs no metric. Add MSH draft
   and KTK game dojos after the split fixes below.
@@ -277,6 +340,30 @@ a median of ~200 tokens and FaB to ~570.
   seconds instead of a quarantined round. `scripts/preflight_dojos.py`
   runs it over the gwent_one and sts_gg first-run candidates; not yet
   run against real data (no `data/` in this cloud session).
+- [ ] **Experiment: subsample common cards in contrastive pairs.**
+  `SingleCardPairConstructor` (`src/dojos/contrastive/pair_constructor.py`)
+  samples from a deck's full card multiset, so base cards (basic lands,
+  Copper/Estate/Province) fill many positive pairs. They are low-signal
+  but not worthless, so the default stays unchanged. Measured 2026-09-30
+  on 3,000 decks per game:
+  - Dominion: cards in >50% of decks fill 57% of slots, so only ~19% of
+    2-card positive pairs have no such card.
+  - MTG (17lands): basic lands fill ~20% of slots.
+  - Gwent, Flesh and Blood, Slay the Spire 2 and Pokemon: negligible.
+
+  Proposed fix, as an ablation: keep each card with probability
+  `min(1, sqrt(t / n))`, where `n` is the card's share of that game's
+  decks (document frequency, computed from the deck box). This is
+  word2vec's frequent-word subsampling (Mikolov et al. 2013), which
+  item2vec (Barkan & Koenigstein 2016) applied to unordered item sets.
+  One knob replaces a per-game list of "basic" cards:
+  - `t = inf`: no change (the baseline).
+  - a moderate `t`: common cards are sampled less.
+  - a tiny `t`: common cards are nearly always skipped.
+
+  Optional extra arm: logQ correction of in-batch negatives (subtract the
+  log sampling frequency from the logits; Yi et al. 2019). Until this
+  runs, give Dominion's contrastive dojo a low weight in a mixed diet.
 
 ## D. Training driver
 

@@ -7,7 +7,7 @@ import pytest
 from src.evaluation.chart_theme import ChartTheme
 from src.evaluation.extrinsic.curve_renderer import CurveRenderer, CurveStyle, XAxis
 from src.evaluation.extrinsic.learning_curves import plot_learning_curves
-from src.training.recording.reports import RoundReport
+from src.training.recording.reports import RoundReport, SplitLoss
 from src.training.recording.run_listener import CsvRunListener, RoundRow
 
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -36,8 +36,15 @@ class _RecordingRenderer(CurveRenderer):
 def _rounds_csv(path: Path, losses_per_round: list[dict[str, float]]) -> Path:
     listener = CsvRunListener(path)
     for index, losses in enumerate(losses_per_round):
+        split_losses = {name: SplitLoss(loss, 1.0) for name, loss in losses.items()}
         report = RoundReport(
-            "extrinsic", index, (index + 1) * 10, float(index), losses, {}, frozenset()
+            "extrinsic",
+            index,
+            (index + 1) * 10,
+            float(index),
+            split_losses,
+            {},
+            frozenset(),
         )
         listener.on_round_end(report)
     return path

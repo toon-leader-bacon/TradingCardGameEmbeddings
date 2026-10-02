@@ -6,10 +6,35 @@ import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.dojos.mods.mod_specs import ShuffleKeysSpec
+from src.data_refinement.metrics.dominiontabs.cost_regression_metric import (
+    CostRegressionMetric,
+)
+from src.data_refinement.metrics.dominiontabs.set_mask_metric import (
+    SetMaskMetric as DominionSetMaskMetric,
+)
+from src.data_refinement.metrics.isotropic.games.kingdom_ending_type_metric import (
+    KingdomEndingTypeMetric,
+)
+from src.data_refinement.metrics.isotropic.summary.deck_card_mask_metric import (
+    WinningDeckMaskedCardMetric,
+)
+from src.data_refinement.metrics.isotropic.summary.full_deck_win_prediction_metric import (  # noqa: E501
+    FullDeckWinPredictionMetric,
+)
+from src.data_refinement.metrics.play_gwent.leader_masked_from_deck_metric import (
+    LeaderMaskedFromDeckMetric,
+)
+from src.data_refinement.metrics.sts2_runs import card_average_metrics as sts2_cards
+from src.data_refinement.metrics.sts2_runs import deck_label_metrics as sts2_decks
 from src.data_refinement.metrics.sts_gg.deck_label_metrics import (
     CharacterPredictionMetric,
+    KilledByMetric,
     WinMetric,
 )
+from src.dojos import isotropic
+from src.dojos.dominiontabs.cost_regression_dojo import CostRegressionDojo
+from src.dojos.dominiontabs.masked_field_dojos import SetMaskDojo
+from src.dojos.play_gwent.deck_card_mask_dojos import LeaderMaskedFromDeckDojo
 from src.dojos.sts_gg import deck_label_dojos
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
@@ -57,12 +82,32 @@ class _RecordingDojoClass:
 # Dojos that name their metric in their constructor instead of a METRIC ClassVar
 _INLINE_METRICS: dict[Any, Any] = {
     deck_label_dojos.WinDojo: WinMetric,
+    deck_label_dojos.KilledByDojo: KilledByMetric,
     deck_label_dojos.CharacterDojo: CharacterPredictionMetric,
+    CostRegressionDojo: CostRegressionMetric,
+    SetMaskDojo: DominionSetMaskMetric,
+    LeaderMaskedFromDeckDojo: LeaderMaskedFromDeckMetric,
+    isotropic.FullDeckWinPredictionDojo: FullDeckWinPredictionMetric,
+    isotropic.KingdomEndingTypeDojo: KingdomEndingTypeMetric,
+    isotropic.WinningDeckMaskedCardDojo: WinningDeckMaskedCardMetric,
 }
 
 
-def _metric_class_of(dojo_class: Any) -> Any:
-    return _INLINE_METRICS.get(dojo_class) or dojo_class.METRIC
+# Every sts2_runs metric class, by the output path a recipe can override with
+_METRICS_BY_OUTPUT: dict[Path, Any] = {
+    cls.DEFAULT_OUTPUT_PATH: cls
+    for module in (sts2_cards, sts2_decks)
+    for cls in vars(module).values()
+    if isinstance(cls, type)
+    and isinstance(getattr(cls, "DEFAULT_OUTPUT_PATH", None), Path)
+}
+
+
+def _metric_output_path_of(dojo_class: Any) -> Path:
+    if hasattr(dojo_class, "OUTPUT_PATH"):  # isotropic dojos name the path
+        return dojo_class.OUTPUT_PATH
+    metric = _INLINE_METRICS.get(dojo_class) or dojo_class.METRIC
+    return metric.DEFAULT_OUTPUT_PATH
 
 
 def _context(shelf: CardShelf) -> DojoBuildContext:
@@ -85,7 +130,7 @@ class TestRecipes:
         assert dojo_class.calls == [
             (
                 ("binder:gwent", context.holdout, 32),
-                {"name": "gwent_one.x", "rng_seed": 7},
+                {"path_to_training_data": None, "name": "gwent_one.x", "rng_seed": 7},
             )
         ]
 
@@ -99,8 +144,21 @@ class TestRecipes:
 
         args, kwargs = dojo_class.calls[0]
         assert args == ("binder:slay_the_spire_2", context.holdout, "box:box.db", 32)
-        assert kwargs == {"name": "sts_gg.win", "rng_seed": 7}
+        assert kwargs == {
+            "path_to_training_data": None,
+            "name": "sts_gg.win",
+            "rng_seed": 7,
+        }
         assert shelf.requested_boxes == [Path("x/box.db")]
+
+    def test_metric_output_replaces_the_dojos_own_metric_file(self) -> None:
+        dojo_class = _RecordingDojoClass()
+        recipe = CardDojoRecipe(GameId.GWENT, dojo_class, Path("m/other.parquet"))
+
+        recipe.build("m.other", _context(_RecordingShelf()))
+
+        _, kwargs = dojo_class.calls[0]
+        assert kwargs["path_to_training_data"] == Path("m/other.parquet")
 
 
 class TestCatalog:
@@ -117,8 +175,30 @@ class TestCatalog:
         # a key cannot silently point at a different metric
         recipe = DOJO_CATALOG[key]
         assert isinstance(recipe, (CardDojoRecipe, DeckDojoRecipe))
-        metric_path = _metric_class_of(recipe.dojo_class).DEFAULT_OUTPUT_PATH
+        metric_path = recipe.metric_output or _metric_output_path_of(recipe.dojo_class)
         assert key == f"{metric_path.parent.name}.{metric_path.stem}"
+
+    @pytest.mark.parametrize(
+        "key",
+        sorted(
+            k
+            for k, r in DOJO_CATALOG.items()
+            if isinstance(r, (CardDojoRecipe, DeckDojoRecipe)) and r.metric_output
+        ),
+    )
+    def test_a_metric_output_override_matches_the_dojos_label_column(
+        self, key: str
+    ) -> None:
+        # A reused wrapper reads its own metric's label column (and
+        # vocabulary) from the overriding file, so they must agree
+        recipe = DOJO_CATALOG[key]
+        assert isinstance(recipe, (CardDojoRecipe, DeckDojoRecipe))
+        own_metric = _INLINE_METRICS.get(recipe.dojo_class) or recipe.dojo_class.METRIC
+        file_metric = _METRICS_BY_OUTPUT[recipe.metric_output]
+        assert file_metric.LABEL_COLUMN == own_metric.LABEL_COLUMN
+        assert getattr(file_metric, "LABEL_VALUES", None) == getattr(
+            own_metric, "LABEL_VALUES", None
+        )
 
 
 class TestBuildDojos:
@@ -198,6 +278,9 @@ class TestContrastiveEntries:
             "contrastive.gwent",
             "contrastive.flesh_and_blood",
             "contrastive.slay_the_spire_2",
+            "contrastive.mtg",
+            "contrastive.pokemon",
+            "contrastive.dominion",
         }
         for key, recipe in contrastive.items():
             assert key == f"contrastive.{recipe.game.value}"

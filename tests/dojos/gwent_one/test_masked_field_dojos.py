@@ -31,6 +31,9 @@ from src.dojos.gwent_one.masked_field_dojos import (
 from src.dojos.mods.common_mods import MaskTargetKeyMod
 from src.schema.holdout import HoldoutSpec
 
+# Wiring tests: placeholder parquets, no real TRAIN calibration
+pytestmark = pytest.mark.usefixtures("uncalibrated_generic_dojos")
+
 _CASES = [
     (FactionMaskDojo, FactionMaskMetric),
     (ColorMaskDojo, ColorMaskMetric),

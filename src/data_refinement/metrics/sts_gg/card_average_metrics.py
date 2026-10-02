@@ -104,7 +104,11 @@ class CardTotalCombatsMetric(CardAverageMetric):
 
 
 class CardWinRateMetric(CardAverageMetric):
-    """Card -> P(win | card in final deck) - see module docstring."""
+    """Card -> P(win | card in final deck) - see module docstring.
+
+    Constant 1.0 on sts_gg, which lists winning runs only (see
+    deck_label_metrics.py's WINS ONLY note); ../sts2_runs/ has the
+    version over runs with losses."""
 
     LABEL_COLUMN = "win_rate"
     DEFAULT_OUTPUT_PATH = Path("data/metrics/sts_gg/card_win_rate.parquet")

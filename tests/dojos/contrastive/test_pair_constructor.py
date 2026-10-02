@@ -81,6 +81,19 @@ class TestBuild:
         sampled_uuids = {identity[0] for identity in batch.identities}
         assert unknown_uuid not in sampled_uuids
 
+    def test_never_samples_the_unknown_sentinel_card(self) -> None:
+        binder = CardBinder()
+        cards = [_card(binder, f"card{i}") for i in range(3)]
+        unknown = binder.ensure_unknown_card(GameId.MTG)
+        deck = _deck(*[c.nocab_uuid for c in cards], *[unknown.nocab_uuid] * 20)
+        constructor = SingleCardPairConstructor(items_per_deck=3, rng_seed=1)
+
+        batch = constructor.build([deck], binder)
+
+        assert {identity[0] for identity in batch.identities} == {
+            c.nocab_uuid for c in cards
+        }
+
     def test_returns_an_empty_batch_when_every_deck_is_skipped(self) -> None:
         binder = CardBinder()
         cards = [_card(binder, f"card{i}") for i in range(1)]

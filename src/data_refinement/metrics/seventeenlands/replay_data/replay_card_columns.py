@@ -313,10 +313,14 @@ class ReplayCardColumns:
         Example:
             >>> replay_columns.present_uuids(row, replay_columns.deck_columns)
         """
+        # A NaN/missing cell is absent even though `bool(float("nan"))`
+        # is True: NaN is the one value unequal to itself, a far cheaper
+        # test than pd.notna() on this per-row, per-column hot path. The
+        # `and` then still requires an actually-truthy (nonzero) count.
         return [
             card_uuid
             for column_name, card_uuid in columns
-            if pd.notna(row[column_name]) and row[column_name]
+            if (count := row[column_name]) == count and count
         ]
 
     @property

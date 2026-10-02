@@ -1,3 +1,4 @@
+import math
 import dataclasses
 import logging
 import tempfile
@@ -344,3 +345,31 @@ class TestMods:
         dojo = self._dojo(original, [])
         assert next(dojo.batches(Split.TRAIN, _BUDGET)) is original
         assert dojo.mod_tallies() == {}
+
+
+class TestBaselineLoss:
+    def test_is_the_losss_constant_logit_loss_for_the_batch(self) -> None:
+        dojo = ContrastiveDojo(
+            dealer=_dealer_with_decks(1),
+            pair_constructor=_ScriptedPairConstructor([]),
+            card_lookup=CardBinder(),
+            holdout=HoldoutSpec.no_holdout(),
+            strict_version_check=False,
+        )
+        batch = ContrastiveBatch(
+            inputs=[_card() for _ in range(6)],
+            identities=[(uuid4(),) for _ in range(6)],
+            positive_cliques=[[0, 1], [2, 3], [4, 5]],
+        )
+        assert dojo.baseline_loss(batch) == pytest.approx(math.log(5))
+
+    def test_rejects_a_foreign_batch(self) -> None:
+        dojo = ContrastiveDojo(
+            dealer=_dealer_with_decks(1),
+            pair_constructor=_ScriptedPairConstructor([]),
+            card_lookup=CardBinder(),
+            holdout=HoldoutSpec.no_holdout(),
+            strict_version_check=False,
+        )
+        with pytest.raises(TypeError):
+            dojo.baseline_loss(object())  # type: ignore[arg-type]

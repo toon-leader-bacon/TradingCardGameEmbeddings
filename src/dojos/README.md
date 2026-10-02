@@ -5,10 +5,20 @@ dojo presents one interface to the trainer, the `Dojo` Protocol
 (`dojo.py`): `batches(split, budget, max_examples)` yields `DojoBatch`es
 (`inputs` for the encoder, `__len__` = example count) whose card cost
 fits the trainer's `BatchBudget`; `compute_loss(embeddings, batch)`
-returns a scalar per-example mean loss; `example_count(split)`,
-`trainable_parameters()` (the dojo's own decoder head, never the
-encoder) and `reset_head()` round it out. A dojo never owns its batch
-size - the budget is the trainer's.
+returns a scalar per-example mean loss; `baseline_loss(batch)` returns
+the loss an input-ignoring predictor gets on that batch, never depending
+on the encoder or head; `example_count(split)`, `trainable_parameters()`
+(the dojo's own decoder head, never the encoder) and `reset_head()`
+round it out. A dojo never owns its batch size - the budget is the
+trainer's.
+
+Normalized loss: dojo losses sit on unrelated scales (nats over a few
+classes, nats over a batch's items, squared label units), so the
+trainer judges each dojo by loss / baseline_loss: 1.0 means the dojo
+learned nothing, 0.0 is perfect. Generic dojos fit one baseline to
+their TRAIN split at construction and z-score regression labels from
+the same TRAIN sample (`generic/README.md`, "Loss calibration"); the
+contrastive dojo computes its baseline per batch, as below.
 
 Most dojos read (input, label) rows from a parquet file one of
 `../data_refinement/metrics/`'s metrics wrote. The contrastive dojo
@@ -37,7 +47,15 @@ row, or by deck for contrastive) layer under it.
   cells use (`MseLoss`, `BceLoss`, `FixedClassificationLoss`,
   `SoftClassificationLoss`, `MaskedVectorRegressionLoss`,
   `PickPredictionCrossEntropyLoss`). A cell builds its own loss; callers
-  never construct one.
+  never construct one. Also the loss calibration that fits a cell's loss
+  to its TRAIN split: `LossCalibration` Strategy and its `CalibratedLoss`
+  result (`loss_calibration.py`, with `StandardizedRegressionCalibration`
+  for the regression cells), `LabelStats` (TRAIN mean and population
+  std, `label_stats.py`), the `StandardizedLabelLoss` Decorator that
+  z-scores a regression loss's labels, and `prior_baseline_calibrations.py`
+  (a Template Method base, one subclass per non-regression loss family,
+  each measuring its baseline: class-prior entropy, binary entropy, soft
+  target entropy, per-position mean MSE, mean ln(option count)).
 - **`mods/`** - `Mod`/`ModPipeline`, input transformations applied
   before batching (`MaskTargetKeyMod`, `ShuffleDeckMod`, `NoOpMod` in
   `common_mods.py`; the card-field augmentations below). A
@@ -80,9 +98,24 @@ row, or by deck for contrastive) layer under it.
   deck samples per split read straight from SQLite.
 - **`contrastive/`** - `ContrastiveDojo`, below.
 - **Per-source wrappers** - `gwent_one/`, `dominiontabs/`, `play_gwent/`,
-  `sts_gg/`, `seventeenlands/{draft_data,game_data,replay_data}/`: one
-  thin generic-cell subclass per metric (see `generic/README.md`'s
-  "Per-metric wrappers"). Every implemented metric has one.
+  `sts_gg/`, `seventeenlands/{draft_data,game_data,replay_data}/`,
+  `isotropic/`, `final_decks/`, `scryfall/`, `pokemon_tcg/`, `cardvault_fabtcg/`,
+  `hearthstonejson/`, `spire_codex/`, `fabtcg_decklists/`: one thin generic-cell subclass per metric (see
+  `generic/README.md`'s "Per-metric wrappers"). Every implemented metric
+  has one, except two isotropic ones: `CopiesBoughtDistributionMetric`
+  (raw samples of the mean `AverageCopiesBoughtDojo` already learns) and
+  `MultiplayerPlacementMetric` (a ranking over 3-4 decks; no cell ranks
+  groups). Its kingdom and partial-deck metrics key rows by
+  `kingdom_uuid`/`partial_deck_uuid`, so `isotropic/` wraps
+  `DeckLabelDataConstructor` in a column-renaming Decorator
+  (`renamed_column_data_constructor.py`). Its two-group and "which
+  card(s)" metrics use `isotropic/`'s own constructors: a `CardGroup`
+  Strategy (`card_groups.py`) reads each group from a row column (a
+  DeckBox group, optionally distinct or with extra cards such as the
+  base supply, or a single card), `GroupLabelDataConstructor` builds
+  `([group_0, group_1], float)` for the multi-group binary/regression
+  cells, and `GroupPickDataConstructor` builds one option-selection
+  datum per picked card.
 
 ## `contrastive/` - InfoNCE over deck co-occurrence
 
@@ -107,7 +140,11 @@ row-independent `(output, label) -> loss`.
   similarity matrix of the whole pool. `MultiCardInfoNCELoss`: the same,
   but a card's own item is excluded from both its positives and
   negatives. Each validates its expected item shape and raises on a
-  mismatch.
+  mismatch. `constant_logit_loss(identities, positive_cliques)` is the
+  loss with every similarity equal, computed from the batch shape alone:
+  each anchor with a positive scores ln(1 + its valid negatives), averaged
+  over anchors (single-card, no duplicates, N items in cliques of k_c:
+  sum k_c ln(N - k_c + 1) / sum k_c).
 - `dojo.py` - `ContrastiveDojo`: wires dealer + pair constructor + card
   lookup into `Dojo`. An example is one source deck, so the budget
   becomes a deck count per batch; a batch with no positive clique of
@@ -117,7 +154,10 @@ row-independent `(output, label) -> loss`.
   item card after the pair constructor builds a batch (identities and
   positive cliques are kept: a modded card is still the same card);
   train-only mods run on TRAIN batches only. `mod_tallies()` exposes the
-  mods' tallies, as every `Dojo` does.
+  mods' tallies, as every `Dojo` does. `baseline_loss(batch)` is the
+  loss's `constant_logit_loss` for that batch: per batch, since the
+  item count follows the trainer's budget and each deck's visible cards,
+  and duplicate cards shrink a batch's negatives.
 
 Augmentation defaults: `augmentation_defaults.py` (at the top of
 `dojos/`) holds each game's default train-only augmentations as
@@ -138,13 +178,13 @@ Decorator, and mixed contrastive + label-based training in one step.
 ```python
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.dojos.dojo import BatchBudget
-from src.dojos.sts_gg.card_average_dojos import CardWinRateDojo
+from src.dojos.sts_gg.card_average_dojos import CardUpgradeRateDojo
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
 
 binder = CardBinder.load([CardBinder.default_output_path(GameId.SLAY_THE_SPIRE_2)])
-dojo = CardWinRateDojo(binder, HoldoutSpec.no_holdout(), card_embedding_size=32)
+dojo = CardUpgradeRateDojo(binder, HoldoutSpec.no_holdout(), card_embedding_size=32)
 for batch in dojo.batches(Split.TRAIN, BatchBudget(32, lambda card: 1)):
     loss = dojo.compute_loss(model(batch.inputs), batch)
 ```

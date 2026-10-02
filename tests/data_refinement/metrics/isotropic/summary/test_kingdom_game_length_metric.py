@@ -21,7 +21,13 @@ def test_writes_winner_turns_for_natural_kingdom(tmp_path: Path) -> None:
     )
 
     metric.accumulate(
-        summary_row(["Witch"], [player_entry("winner", 1, {"Copper": 7}, turns=25)])
+        summary_row(
+            ["Witch"],
+            [
+                player_entry("winner", 1, {"Copper": 7}, turns=25),
+                player_entry("loser", 2, {"Copper": 7}, turns=24),
+            ],
+        )
     )
     metric.finalize()
 
@@ -41,6 +47,40 @@ def test_no_resolvable_winner_writes_nothing(tmp_path: Path) -> None:
 
     df = pd.read_parquet(tmp_path / "out.parquet")
     assert len(df) == 0
+
+
+def test_solo_game_writes_nothing(tmp_path: Path) -> None:
+    binder = binder_from_card_names(["Witch"], tmp_path)
+    metric = KingdomGameLengthMetric(
+        binder, DeckBox(), output_path=tmp_path / "out.parquet"
+    )
+
+    metric.accumulate(
+        summary_row(["Witch"], [player_entry("solo", 1, {"Copper": 7}, turns=25)])
+    )
+    metric.finalize()
+
+    assert len(pd.read_parquet(tmp_path / "out.parquet")) == 0
+
+
+def test_game_with_a_resignation_writes_nothing(tmp_path: Path) -> None:
+    binder = binder_from_card_names(["Witch"], tmp_path)
+    metric = KingdomGameLengthMetric(
+        binder, DeckBox(), output_path=tmp_path / "out.parquet"
+    )
+
+    metric.accumulate(
+        summary_row(
+            ["Witch"],
+            [
+                player_entry("winner", 1, {"Copper": 7}, turns=2),
+                player_entry("quitter", 2, resigned=True),
+            ],
+        )
+    )
+    metric.finalize()
+
+    assert len(pd.read_parquet(tmp_path / "out.parquet")) == 0
 
 
 def test_default_output_path() -> None:

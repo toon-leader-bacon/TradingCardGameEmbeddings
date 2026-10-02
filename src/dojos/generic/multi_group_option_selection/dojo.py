@@ -19,8 +19,10 @@ from src.dojos.generic.pooling import EmbeddingPooler
 from src.dojos.loss.pick_prediction_cross_entropy_loss import (
     PickPredictionCrossEntropyLoss,
 )
+from src.dojos.loss.prior_baseline_calibrations import UniformOptionCalibration
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
+from src.schema.type_hints import TrainingInput
 
 
 class MultiGroupOptionSelectionDojo(GenericDojo):
@@ -53,7 +55,28 @@ class MultiGroupOptionSelectionDojo(GenericDojo):
                 card_embedding_size, scoring_head=scoring_head, pooler=pooler
             ),
             loss_calculator=PickPredictionCrossEntropyLoss(),
+            calibration=UniformOptionCalibration(
+                option_count=_option_count_of_pack_group
+            ),
             mod_pipeline=mod_pipeline,
             deck_box=deck_box,
             config=config,
         )
+
+
+def _option_count_of_pack_group(group_input: TrainingInput) -> int:
+    """How many options a (pack, conditioning group) input offers: the
+    size of group 0, the pack (PoolConditionedPickDataConstructor keeps
+    the pack at index 0 and the pool at index 1).
+
+    Inputs: group_input, a MultiGroupInput [pack_cards, pool_cards].
+    Output: int, len(pack_cards).
+    Side effects: none. Exceptions: TypeError if group_input is not a
+        list of card lists.
+    """
+    if not isinstance(group_input, list) or not group_input:
+        raise TypeError(f"expected [pack_cards, pool_cards], got {type(group_input)}")
+    pack = group_input[0]
+    if not isinstance(pack, list):
+        raise TypeError(f"expected the pack (group 0) to be a list, got {type(pack)}")
+    return len(pack)

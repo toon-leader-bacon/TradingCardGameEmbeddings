@@ -14,11 +14,13 @@ extension seams (see plans/seventeen_lands_dojos.md):
       the metric's two parallel list columns into a sparse
       bucket_index -> take_rate dict, masking out any bucket with fewer
       than min_sample_count samples.
-    - loss_factory=MaskedVectorRegressionLoss, which sigmoids each
-      output position independently and scores it against that sparse
-      dict (masked MSE) instead of FixedClassificationLoss's default
-      softmax cross-entropy - see that class's own module docstring for
-      why softmax would be wrong here.
+    - loss_spec=MASKED_VECTOR_REGRESSION_LOSS_SPEC: MaskedVectorRegressionLoss
+      sigmoids each output position independently and scores it against
+      that sparse dict (masked MSE) instead of FixedClassificationLoss's
+      default softmax cross-entropy (see that class's module docstring for
+      why softmax would be wrong here); its baseline is the masked MSE of
+      each position's TRAIN mean. Labels are not z-scored: the sigmoid
+      keeps predictions in [0, 1].
 label_values=[str(i) for i in range(MAX_BUCKET_COUNT)] is a degenerate
 vocabulary (bucket indices, not real category names) - required by
 SingleCardFixedClassificationDojo's constructor shape, but only its
@@ -37,7 +39,9 @@ from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.single_card_fixed_classification.dojo import (
     SingleCardFixedClassificationDojo,
 )
-from src.dojos.loss.masked_vector_regression_loss import MaskedVectorRegressionLoss
+from src.dojos.generic.single_card_fixed_classification.loss_spec import (
+    MASKED_VECTOR_REGRESSION_LOSS_SPEC,
+)
 from src.schema.holdout import HoldoutSpec
 
 MIN_SAMPLE_COUNT = 10
@@ -72,7 +76,7 @@ class PickNumberDecayCurveDojo(SingleCardFixedClassificationDojo):
                 for bucket in range(PickNumberDecayCurveMetric.MAX_BUCKET_COUNT)
             ],
             card_embedding_size=card_embedding_size,
-            loss_factory=MaskedVectorRegressionLoss,
+            loss_spec=MASKED_VECTOR_REGRESSION_LOSS_SPEC,
             config=DojoConfig(
                 name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),

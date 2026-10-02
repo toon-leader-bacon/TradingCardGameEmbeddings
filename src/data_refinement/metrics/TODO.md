@@ -1,5 +1,28 @@
 # TODO (metrics)
 
+- [ ] **Make the 17lands outputs consumable by dojos** (2026-09-30).
+  A partial run exists: game_data for 76 set/format directories; draft and
+  replay only one shakeout file each. See
+  `plans/seventeenlands_metrics_run.md`.
+  - Outputs are written per raw file, at
+    `data/metrics/seventeenlands/<family>/<SET>/<Format>/<stem>.parquet`.
+    But each dojo reads its metric's single DEFAULT_OUTPUT_PATH, which
+    does not exist.
+  - Proposed: a merge step per (family, metric) that writes to
+    DEFAULT_OUTPUT_PATH:
+    - stack the streaming files (deck and pool rows); they share the
+      family deck box;
+    - recombine card averages weighted by `sample_count`, keeping a set
+      column;
+    - subsample tutor_target_pool (151.8M rows).
+  - Alternative: one catalog key per set and format (hundreds of keys).
+- [ ] **Cache `CardBinder.version_for`.** It takes about 3 s and every
+  17lands metric constructor calls it, once per CSV.
+- [ ] **Unwrap or re-download the 19 tar-wrapped 17lands "CSV" files**
+  (AFR, KHM, MID, STX, VOW; listed in `plans/seventeenlands_metrics_run.md`).
+- [ ] **A vectorized 17lands scanner.** Even after the 1.7x speedup,
+  PremierDraft across the three families would take about 50 h.
+
 - **The registered 17lands metric families have never been run.**
   `dominiontabs`, `isotropic_summary` and `isotropic_games` were
   registered in `scripts/run_metrics.py` and run to completion on
@@ -73,3 +96,30 @@
   seventeenlands families now exist, so the shared shape can be read
   off real code; pull it into one base only where key shapes truly
   match.
+
+- [ ] **`run_metrics.py --source play_gwent` (and `--all`) rewrites the
+  published `data/final/decks/gwent.db`** (found 2026-10-01). `run_play_gwent`
+  opens the published box, `LeaderMaskedFromDeckMetric` writes decks into it,
+  and the run calls `save()` on it. A re-run makes every metric keyed to
+  that box stale (e.g. `final_decks/held_out_card_gwent.parquet`). Fix: give
+  the leader metric a metric-private box (as isotropic and sts_gg do), or
+  open the published box read-only. Until then, don't run that family.
+- [ ] **FaB deck box keys cards by name.** A name printed in several pitches
+  maps to one arbitrary printing, so FaB inclusion rates are per name.
+- [ ] **Move `RenamedColumnDataConstructor`** from `dojos/isotropic/` to
+  `dojos/generic/data_constructors/`: it now has three users.
+- [ ] **Deduplicate FaB class/typebox parsing** between
+  `metrics/cardvault_fabtcg/` and `metrics/fabtcg_decklists/`.
+- [ ] **StS2 per-floor metrics (B2).** The spire_codex + sts2runs run
+  records carry per-floor `card_choices`, shop purchases, removals,
+  upgrades and rest-site choices, none used yet. Top candidates: card
+  reward pick given the deck so far (`[offered, partial deck]`, the same
+  shape as 17lands' pool_conditioned_pick), shop purchase, removal
+  target, upgrade target, rest-site choice. Needs the deck at each floor
+  rebuilt from `cards_gained`/`cards_removed`. Design note in
+  `sts2_runs/README.md`.
+- [ ] **held_out_card rows can share a deck across splits.** Dojo splits
+  are by row, and Pokemon, FaB and Gwent take several targets per deck,
+  so one deck can appear in TRAIN and TEST with different held-out cards
+  (the big boxes take one target per deck and are unaffected). Split by
+  deck uuid instead, or take one target per deck everywhere.

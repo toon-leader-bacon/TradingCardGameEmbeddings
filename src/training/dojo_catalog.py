@@ -10,6 +10,10 @@ class to construct.
 Loading is lazy and shared: a CardShelf loads each game's binder (and each
 deck box) once, only when a named dojo needs it.
 
+A recipe may point an existing dojo class at another metric's output
+(metric_output): the sts2_runs keys reuse the sts_gg wrappers over
+data/metrics/sts2_runs/, whose files share the sts_gg label columns.
+
 Contrastive dojos read a game's final deck box directly (no metric) and
 take augmentation mods: the game's defaults
 (src/dojos/augmentation_defaults.py) unless the run config overrides that
@@ -24,16 +28,33 @@ from typing import Mapping, Protocol, Sequence
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.metrics.isotropic.deck_box_path import ISOTROPIC_DECK_BOX_PATH
+from src.data_refinement.metrics.sts2_runs import card_average_metrics as sts2_cards
+from src.data_refinement.metrics.sts2_runs import deck_label_metrics as sts2_decks
 from src.data_refinement.metrics.sts_gg.deck_box_path import STS_GG_DECK_BOX_PATH
 from src.dojos.augmentation_defaults import default_augmentations_for
 from src.dojos.contrastive.dojo import ContrastiveDojo
 from src.dojos.contrastive.pair_constructor import SingleCardPairConstructor
 from src.dojos.dojo import Dojo
 from src.dojos.file_managers.deck_box_dealer import DeckBoxDealer
+from src.dojos.final_decks import held_out_card_dojos as final_decks
+from src.dojos.dominiontabs.cost_regression_dojo import CostRegressionDojo
+from src.dojos.dominiontabs.masked_field_dojos import SetMaskDojo, TypeMaskDojo
 from src.dojos.gwent_one import masked_field_dojos as gwent_one
+from src.dojos.cardvault_fabtcg import card_mask_dojos as fabtcg_masks
+from src.dojos.fabtcg_decklists import card_inclusion_dojos as fabtcg_inclusion
+from src.dojos.fabtcg_decklists import deck_card_mask_dojos as fabtcg_decks
+from src.dojos.hearthstonejson import card_mask_dojos as hearthstone_masks
+from src.dojos.pokemon_tcg import card_mask_dojos as pokemon_masks
+from src.dojos.scryfall import card_mask_dojos as scryfall_masks
+from src.dojos.spire_codex import card_mask_dojos as sts2_masks
+from src.dojos import isotropic
 from src.dojos.sts_gg import card_average_dojos as sts_cards
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.dojos.mods.mod_specs import ModSpec
+from src.dojos.play_gwent import card_inclusion_dojos as gwent_inclusion
+from src.dojos.play_gwent.deck_card_mask_dojos import LeaderMaskedFromDeckDojo
+from src.dojos.play_gwent.deck_label_dojos import GuideVotesDojo
 from src.dojos.sts_gg import deck_label_dojos as sts_decks
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
@@ -43,8 +64,8 @@ _CONTRASTIVE_INDEX_DIRECTORY = Path("data/splits/contrastive")
 
 
 class CardDojoConstructor(Protocol):
-    """A dojo class built from a CardBinder alone (every gwent_one mask
-    dojo, every sts_gg card-average dojo)."""
+    """A dojo class built from a CardBinder alone (every gwent_one and
+    dominiontabs dojo, every sts_gg and isotropic card-level dojo)."""
 
     def __call__(
         self,
@@ -52,6 +73,7 @@ class CardDojoConstructor(Protocol):
         holdout: HoldoutSpec,
         card_embedding_size: int,
         *,
+        path_to_training_data: Path | None = None,
         name: str | None = None,
         rng_seed: int | None = None,
     ) -> Dojo: ...
@@ -59,7 +81,8 @@ class CardDojoConstructor(Protocol):
 
 class DeckDojoConstructor(Protocol):
     """A dojo class that also needs the DeckBox its metric was built from
-    (every sts_gg deck-label dojo)."""
+    (every sts_gg and isotropic deck-level dojo, play_gwent's leader
+    mask)."""
 
     def __call__(
         self,
@@ -68,6 +91,7 @@ class DeckDojoConstructor(Protocol):
         deck_box: DeckBox,
         card_embedding_size: int,
         *,
+        path_to_training_data: Path | None = None,
         name: str | None = None,
         rng_seed: int | None = None,
     ) -> Dojo: ...
@@ -157,10 +181,12 @@ class DojoRecipe(Protocol):
 
 @dataclass(frozen=True)
 class CardDojoRecipe:
-    """A dojo that needs only its game's CardBinder."""
+    """A dojo that needs only its game's CardBinder. metric_output, when
+    set, replaces the dojo class's own metric file."""
 
     game: GameId
     dojo_class: CardDojoConstructor
+    metric_output: Path | None = None
 
     def build(self, name: str, context: DojoBuildContext) -> Dojo:
         """See DojoRecipe.build."""
@@ -168,6 +194,7 @@ class CardDojoRecipe:
             context.shelf.card_binder(self.game),
             context.holdout,
             context.card_embedding_size,
+            path_to_training_data=self.metric_output,
             name=name,
             rng_seed=context.rng_seed,
         )
@@ -175,11 +202,13 @@ class CardDojoRecipe:
 
 @dataclass(frozen=True)
 class DeckDojoRecipe:
-    """A dojo that needs its game's CardBinder and a DeckBox."""
+    """A dojo that needs its game's CardBinder and a DeckBox. metric_output,
+    when set, replaces the dojo class's own metric file."""
 
     game: GameId
     dojo_class: DeckDojoConstructor
     deck_box_path: Path
+    metric_output: Path | None = None
 
     def build(self, name: str, context: DojoBuildContext) -> Dojo:
         """See DojoRecipe.build."""
@@ -188,6 +217,7 @@ class DeckDojoRecipe:
             context.holdout,
             context.shelf.deck_box(self.deck_box_path),
             context.card_embedding_size,
+            path_to_training_data=self.metric_output,
             name=name,
             rng_seed=context.rng_seed,
         )
@@ -291,6 +321,56 @@ def _recipe_for_sts_deck(dojo_class: DeckDojoConstructor) -> DeckDojoRecipe:
     return DeckDojoRecipe(GameId.SLAY_THE_SPIRE_2, dojo_class, STS_GG_DECK_BOX_PATH)
 
 
+def _recipe_for_final_deck_box(
+    game: GameId, dojo_class: DeckDojoConstructor
+) -> DeckDojoRecipe:
+    """The recipe for a dojo whose metric rows point into game's
+    published deck box, at DeckBox.default_output_path(game).
+
+    Inputs: game, dojo_class. Output: DeckDojoRecipe. Side effects: none.
+    Exceptions: none.
+    """
+    return DeckDojoRecipe(game, dojo_class, DeckBox.default_output_path(game))
+
+
+def _recipe_for_sts2_runs_card(
+    dojo_class: CardDojoConstructor, metric_output: Path
+) -> CardDojoRecipe:
+    """A sts_gg card-average dojo class over an sts2_runs metric file.
+
+    Inputs: dojo_class, metric_output (an sts2_runs metric's
+        DEFAULT_OUTPUT_PATH). Output: CardDojoRecipe.
+    Side effects: none. Exceptions: none.
+    """
+    return CardDojoRecipe(GameId.SLAY_THE_SPIRE_2, dojo_class, metric_output)
+
+
+def _recipe_for_sts2_runs_deck(
+    dojo_class: DeckDojoConstructor, metric_output: Path
+) -> DeckDojoRecipe:
+    """A sts_gg deck-label dojo class over an sts2_runs metric file, whose
+    deck_uuids point into the published StS2 deck box (see
+    metrics/sts2_runs/deck_label_metric.py).
+
+    Inputs: dojo_class, metric_output (an sts2_runs metric's
+        DEFAULT_OUTPUT_PATH). Output: DeckDojoRecipe.
+    Side effects: none. Exceptions: none.
+    """
+    return DeckDojoRecipe(
+        GameId.SLAY_THE_SPIRE_2,
+        dojo_class,
+        DeckBox.default_output_path(GameId.SLAY_THE_SPIRE_2),
+        metric_output,
+    )
+
+
+def _recipe_for_isotropic_deck(dojo_class: DeckDojoConstructor) -> DeckDojoRecipe:
+    """The recipe for an isotropic deck-level dojo class.
+    Inputs: dojo_class. Output: DeckDojoRecipe. Side effects: none.
+    Exceptions: none."""
+    return DeckDojoRecipe(GameId.DOMINION, dojo_class, ISOTROPIC_DECK_BOX_PATH)
+
+
 # Keys are "<metric source>.<metric file stem>"; add a line to onboard a dojo
 DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     "gwent_one.armor_mask": _recipe_for_gwent_one(gwent_one.ArmorMaskDojo),
@@ -301,6 +381,164 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     "gwent_one.rarity_mask": _recipe_for_gwent_one(gwent_one.RarityMaskDojo),
     "gwent_one.set_mask": _recipe_for_gwent_one(gwent_one.SetMaskDojo),
     "gwent_one.type_mask": _recipe_for_gwent_one(gwent_one.TypeMaskDojo),
+    "dominiontabs.cost_regression": CardDojoRecipe(GameId.DOMINION, CostRegressionDojo),
+    "dominiontabs.set_mask": CardDojoRecipe(GameId.DOMINION, SetMaskDojo),
+    "dominiontabs.type_mask": CardDojoRecipe(GameId.DOMINION, TypeMaskDojo),
+    "scryfall.cmc_regression": CardDojoRecipe(
+        GameId.MTG, scryfall_masks.CmcRegressionDojo
+    ),
+    "scryfall.card_type_mask": CardDojoRecipe(
+        GameId.MTG, scryfall_masks.CardTypeMaskDojo
+    ),
+    "scryfall.rarity_mask": CardDojoRecipe(GameId.MTG, scryfall_masks.RarityMaskDojo),
+    "scryfall.colors_mask": CardDojoRecipe(GameId.MTG, scryfall_masks.ColorsMaskDojo),
+    "scryfall.power_regression": CardDojoRecipe(
+        GameId.MTG, scryfall_masks.PowerRegressionDojo
+    ),
+    "scryfall.toughness_regression": CardDojoRecipe(
+        GameId.MTG, scryfall_masks.ToughnessRegressionDojo
+    ),
+    "pokemon_tcg.hp_regression": CardDojoRecipe(
+        GameId.POKEMON, pokemon_masks.HpRegressionDojo
+    ),
+    "pokemon_tcg.types_mask": CardDojoRecipe(
+        GameId.POKEMON, pokemon_masks.TypesMaskDojo
+    ),
+    "pokemon_tcg.stage_mask": CardDojoRecipe(
+        GameId.POKEMON, pokemon_masks.StageMaskDojo
+    ),
+    "pokemon_tcg.retreat_cost_regression": CardDojoRecipe(
+        GameId.POKEMON, pokemon_masks.RetreatCostRegressionDojo
+    ),
+    "pokemon_tcg.weakness_mask": CardDojoRecipe(
+        GameId.POKEMON, pokemon_masks.WeaknessMaskDojo
+    ),
+    "cardvault_fabtcg.pitch_mask": CardDojoRecipe(
+        GameId.FLESH_AND_BLOOD, fabtcg_masks.PitchMaskDojo
+    ),
+    "cardvault_fabtcg.cost_regression": CardDojoRecipe(
+        GameId.FLESH_AND_BLOOD, fabtcg_masks.CostRegressionDojo
+    ),
+    "cardvault_fabtcg.power_regression": CardDojoRecipe(
+        GameId.FLESH_AND_BLOOD, fabtcg_masks.PowerRegressionDojo
+    ),
+    "cardvault_fabtcg.defense_regression": CardDojoRecipe(
+        GameId.FLESH_AND_BLOOD, fabtcg_masks.DefenseRegressionDojo
+    ),
+    "cardvault_fabtcg.class_mask": CardDojoRecipe(
+        GameId.FLESH_AND_BLOOD, fabtcg_masks.ClassMaskDojo
+    ),
+    "cardvault_fabtcg.card_type_mask": CardDojoRecipe(
+        GameId.FLESH_AND_BLOOD, fabtcg_masks.CardTypeMaskDojo
+    ),
+    "spire_codex.cost_mask": CardDojoRecipe(
+        GameId.SLAY_THE_SPIRE_2, sts2_masks.CostMaskDojo
+    ),
+    "spire_codex.card_type_mask": CardDojoRecipe(
+        GameId.SLAY_THE_SPIRE_2, sts2_masks.CardTypeMaskDojo
+    ),
+    "spire_codex.rarity_mask": CardDojoRecipe(
+        GameId.SLAY_THE_SPIRE_2, sts2_masks.RarityMaskDojo
+    ),
+    "spire_codex.color_mask": CardDojoRecipe(
+        GameId.SLAY_THE_SPIRE_2, sts2_masks.ColorMaskDojo
+    ),
+    "hearthstonejson.cost_regression": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.CostRegressionDojo
+    ),
+    "hearthstonejson.attack_regression": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.AttackRegressionDojo
+    ),
+    "hearthstonejson.health_regression": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.HealthRegressionDojo
+    ),
+    "hearthstonejson.class_mask": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.ClassMaskDojo
+    ),
+    "hearthstonejson.rarity_mask": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.RarityMaskDojo
+    ),
+    "hearthstonejson.card_type_mask": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.CardTypeMaskDojo
+    ),
+    "hearthstonejson.races_mask": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.RacesMaskDojo
+    ),
+    "hearthstonejson.spell_school_mask": CardDojoRecipe(
+        GameId.HEARTHSTONE, hearthstone_masks.SpellSchoolMaskDojo
+    ),
+    "isotropic.average_copies_bought": CardDojoRecipe(
+        GameId.DOMINION, isotropic.AverageCopiesBoughtDojo
+    ),
+    "isotropic.opening_buy_rate": CardDojoRecipe(
+        GameId.DOMINION, isotropic.OpeningBuyRateDojo
+    ),
+    "isotropic.pile_exhaustion_rate": CardDojoRecipe(
+        GameId.DOMINION, isotropic.PileExhaustionRateDojo
+    ),
+    "isotropic.turn_count_association": CardDojoRecipe(
+        GameId.DOMINION, isotropic.TurnCountAssociationDojo
+    ),
+    "isotropic.full_deck_win_prediction": _recipe_for_isotropic_deck(
+        isotropic.FullDeckWinPredictionDojo
+    ),
+    "isotropic.kingdom_ending_type": _recipe_for_isotropic_deck(
+        isotropic.KingdomEndingTypeDojo
+    ),
+    "isotropic.kingdom_game_length": _recipe_for_isotropic_deck(
+        isotropic.KingdomGameLengthDojo
+    ),
+    "isotropic.mid_game_next_turn_action_count": _recipe_for_isotropic_deck(
+        isotropic.NextTurnActionCountDojo
+    ),
+    "isotropic.winning_deck_masked_card": _recipe_for_isotropic_deck(
+        isotropic.WinningDeckMaskedCardDojo
+    ),
+    "isotropic.veto_rate": CardDojoRecipe(GameId.DOMINION, isotropic.VetoRateDojo),
+    "isotropic.kingdom_opening_buy_prediction": _recipe_for_isotropic_deck(
+        isotropic.KingdomOpeningBuyDojo
+    ),
+    "isotropic.kingdom_veto_prediction": _recipe_for_isotropic_deck(
+        isotropic.KingdomVetoDojo
+    ),
+    "isotropic.mid_game_next_buy": _recipe_for_isotropic_deck(isotropic.NextBuyDojo),
+    "isotropic.mid_game_next_trashed_card": _recipe_for_isotropic_deck(
+        isotropic.NextTrashedCardDojo
+    ),
+    "isotropic.deck_pair_winner": _recipe_for_isotropic_deck(
+        isotropic.DeckPairWinnerDojo
+    ),
+    "isotropic.mid_game_deck_pair_winner": _recipe_for_isotropic_deck(
+        isotropic.MidGameDeckPairWinnerDojo
+    ),
+    "isotropic.mid_game_win_probability": _recipe_for_isotropic_deck(
+        isotropic.EventualWinDojo
+    ),
+    "isotropic.opening_buy_outcome": _recipe_for_isotropic_deck(
+        isotropic.OpeningBuyOutcomeDojo
+    ),
+    "isotropic.winning_deck_membership": _recipe_for_isotropic_deck(
+        isotropic.WinningDeckMembershipDojo
+    ),
+    "isotropic.kingdom_ending_pile_prediction": _recipe_for_isotropic_deck(
+        isotropic.KingdomEndingPileDojo
+    ),
+    "isotropic.winning_deck_count": _recipe_for_isotropic_deck(
+        isotropic.WinningDeckCountDojo
+    ),
+    "isotropic.deck_card_set_copy_count": _recipe_for_isotropic_deck(
+        isotropic.DeckCardSetCopyCountDojo
+    ),
+    # play_gwent writes its decks into the final gwent deck box
+    "play_gwent.leader_masked_from_deck": DeckDojoRecipe(
+        GameId.GWENT,
+        LeaderMaskedFromDeckDojo,
+        DeckBox.default_output_path(GameId.GWENT),
+    ),
+    # sts_gg lists winning runs only, so its win, card_win_rate,
+    # card_win_rate_at_act2 and killed_by labels are constant and have no
+    # key here (see metrics/sts_gg/deck_label_metrics.py's WINS ONLY note)
+    "sts_gg.ascension_prediction": _recipe_for_sts_deck(sts_decks.DeckAscensionDojo),
     "sts_gg.card_deck_size": _recipe_for_sts_card(sts_cards.CardDeckSizeDojo),
     "sts_gg.card_elites_killed": _recipe_for_sts_card(sts_cards.CardElitesKilledDojo),
     "sts_gg.card_floors_cleared": _recipe_for_sts_card(sts_cards.CardFloorsClearedDojo),
@@ -313,7 +551,7 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
         sts_cards.CardTotalDamageTakenDojo
     ),
     "sts_gg.card_total_turns": _recipe_for_sts_card(sts_cards.CardTotalTurnsDojo),
-    "sts_gg.card_win_rate": _recipe_for_sts_card(sts_cards.CardWinRateDojo),
+    "sts_gg.card_upgrade_rate": _recipe_for_sts_card(sts_cards.CardUpgradeRateDojo),
     "sts_gg.character_prediction": _recipe_for_sts_deck(sts_decks.CharacterDojo),
     "sts_gg.elites_killed": _recipe_for_sts_deck(sts_decks.DeckElitesKilledDojo),
     "sts_gg.floors_cleared": _recipe_for_sts_deck(sts_decks.DeckFloorsClearedDojo),
@@ -329,10 +567,136 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
         sts_decks.DeckTotalDamageTakenDojo
     ),
     "sts_gg.total_turns": _recipe_for_sts_deck(sts_decks.DeckTotalTurnsDojo),
-    "sts_gg.win": _recipe_for_sts_deck(sts_decks.WinDojo),
+    "final_decks.held_out_card_pokemon": _recipe_for_final_deck_box(
+        GameId.POKEMON, final_decks.PokemonHeldOutCardDojo
+    ),
+    "final_decks.held_out_card_flesh_and_blood": _recipe_for_final_deck_box(
+        GameId.FLESH_AND_BLOOD, final_decks.FleshAndBloodHeldOutCardDojo
+    ),
+    "final_decks.held_out_card_gwent": _recipe_for_final_deck_box(
+        GameId.GWENT, final_decks.GwentHeldOutCardDojo
+    ),
+    "final_decks.held_out_card_dominion": _recipe_for_final_deck_box(
+        GameId.DOMINION, final_decks.DominionHeldOutCardDojo
+    ),
+    "final_decks.held_out_card_slay_the_spire_2": _recipe_for_final_deck_box(
+        GameId.SLAY_THE_SPIRE_2, final_decks.SlayTheSpire2HeldOutCardDojo
+    ),
+    "final_decks.held_out_card_mtg": _recipe_for_final_deck_box(
+        GameId.MTG, final_decks.MtgHeldOutCardDojo
+    ),
+    # spire_codex + sts2runs runs, through the sts_gg wrappers (see the
+    # module docstring)
+    "sts2_runs.ascension_prediction": _recipe_for_sts2_runs_deck(
+        sts_decks.DeckAscensionDojo,
+        sts2_decks.AscensionPredictionMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.card_deck_size": _recipe_for_sts2_runs_card(
+        sts_cards.CardDeckSizeDojo, sts2_cards.CardDeckSizeMetric.DEFAULT_OUTPUT_PATH
+    ),
+    "sts2_runs.card_elites_killed": _recipe_for_sts2_runs_card(
+        sts_cards.CardElitesKilledDojo,
+        sts2_cards.CardElitesKilledMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.card_floors_cleared": _recipe_for_sts2_runs_card(
+        sts_cards.CardFloorsClearedDojo,
+        sts2_cards.CardFloorsClearedMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.card_relic_count": _recipe_for_sts2_runs_card(
+        sts_cards.CardRelicCountDojo,
+        sts2_cards.CardRelicCountMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.card_total_cards_picked": _recipe_for_sts2_runs_card(
+        sts_cards.CardTotalCardsPickedDojo,
+        sts2_cards.CardTotalCardsPickedMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.card_total_combats": _recipe_for_sts2_runs_card(
+        sts_cards.CardTotalCombatsDojo,
+        sts2_cards.CardTotalCombatsMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.card_total_damage_taken": _recipe_for_sts2_runs_card(
+        sts_cards.CardTotalDamageTakenDojo,
+        sts2_cards.CardTotalDamageTakenMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.card_total_turns": _recipe_for_sts2_runs_card(
+        sts_cards.CardTotalTurnsDojo,
+        sts2_cards.CardTotalTurnsMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.card_upgrade_rate": _recipe_for_sts2_runs_card(
+        sts_cards.CardUpgradeRateDojo,
+        sts2_cards.CardUpgradeRateMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.card_win_rate": _recipe_for_sts2_runs_card(
+        sts_cards.CardWinRateDojo, sts2_cards.CardWinRateMetric.DEFAULT_OUTPUT_PATH
+    ),
+    "sts2_runs.card_win_rate_at_act2": _recipe_for_sts2_runs_card(
+        sts_cards.CardWinRateAtAct2Dojo,
+        sts2_cards.CardWinRateAtAct2Metric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.character_prediction": _recipe_for_sts2_runs_deck(
+        sts_decks.CharacterDojo,
+        sts2_decks.CharacterPredictionMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.elites_killed": _recipe_for_sts2_runs_deck(
+        sts_decks.DeckElitesKilledDojo,
+        sts2_decks.ElitesKilledMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.floors_cleared": _recipe_for_sts2_runs_deck(
+        sts_decks.DeckFloorsClearedDojo,
+        sts2_decks.FloorsClearedMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.killed_by": _recipe_for_sts2_runs_deck(
+        sts_decks.KilledByDojo, sts2_decks.KilledByMetric.DEFAULT_OUTPUT_PATH
+    ),
+    "sts2_runs.relic_count": _recipe_for_sts2_runs_deck(
+        sts_decks.DeckRelicCountDojo, sts2_decks.RelicCountMetric.DEFAULT_OUTPUT_PATH
+    ),
+    "sts2_runs.total_cards_picked": _recipe_for_sts2_runs_deck(
+        sts_decks.DeckTotalCardsPickedDojo,
+        sts2_decks.TotalCardsPickedMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.total_cards_skipped": _recipe_for_sts2_runs_deck(
+        sts_decks.DeckTotalCardsSkippedDojo,
+        sts2_decks.TotalCardsSkippedMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.total_combats": _recipe_for_sts2_runs_deck(
+        sts_decks.DeckTotalCombatsDojo,
+        sts2_decks.TotalCombatsMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.total_damage_taken": _recipe_for_sts2_runs_deck(
+        sts_decks.DeckTotalDamageTakenDojo,
+        sts2_decks.TotalDamageTakenMetric.DEFAULT_OUTPUT_PATH,
+    ),
+    "sts2_runs.total_turns": _recipe_for_sts2_runs_deck(
+        sts_decks.DeckTotalTurnsDojo, sts2_decks.TotalTurnsMetric.DEFAULT_OUTPUT_PATH
+    ),
+    "sts2_runs.win": _recipe_for_sts2_runs_deck(
+        sts_decks.WinDojo, sts2_decks.WinMetric.DEFAULT_OUTPUT_PATH
+    ),
+    # fabtcg_decklists rows point into the published FaB deck box
+    "fabtcg_decklists.hero_masked_from_deck": _recipe_for_final_deck_box(
+        GameId.FLESH_AND_BLOOD, fabtcg_decks.HeroMaskedFromDeckDojo
+    ),
+    "fabtcg_decklists.card_inclusion_rate": CardDojoRecipe(
+        GameId.FLESH_AND_BLOOD, fabtcg_inclusion.CardInclusionRateDojo
+    ),
+    "fabtcg_decklists.hero_conditioned_inclusion": CardDojoRecipe(
+        GameId.FLESH_AND_BLOOD, fabtcg_inclusion.HeroConditionedInclusionDojo
+    ),
+    # play_gwent guide metrics read the published Gwent box, never write it
+    "play_gwent.card_inclusion_rate": CardDojoRecipe(
+        GameId.GWENT, gwent_inclusion.CardInclusionRateDojo
+    ),
+    "play_gwent.faction_conditioned_inclusion": CardDojoRecipe(
+        GameId.GWENT, gwent_inclusion.FactionConditionedInclusionDojo
+    ),
+    "play_gwent.guide_votes": _recipe_for_final_deck_box(GameId.GWENT, GuideVotesDojo),
     "contrastive.gwent": _recipe_for_contrastive(GameId.GWENT),
     "contrastive.flesh_and_blood": _recipe_for_contrastive(GameId.FLESH_AND_BLOOD),
     "contrastive.slay_the_spire_2": _recipe_for_contrastive(GameId.SLAY_THE_SPIRE_2),
+    "contrastive.mtg": _recipe_for_contrastive(GameId.MTG),
+    "contrastive.pokemon": _recipe_for_contrastive(GameId.POKEMON),
+    "contrastive.dominion": _recipe_for_contrastive(GameId.DOMINION),
 }
 
 

@@ -3,7 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from src.training.recording.reports import CheckpointRecord, DojoStatus, RoundReport
+from src.training.recording.reports import (
+    CheckpointRecord,
+    DojoStatus,
+    RoundReport,
+    SplitLoss,
+)
 from src.training.recording.run_listener import (
     CsvRunListener,
     RoundRow,
@@ -22,13 +27,22 @@ def _report(
         round_index=round_index,
         step=step,
         elapsed_seconds=12.5,
-        per_dojo_test_loss={"color_mask": 0.5, "faction_mask": 1.25},
+        per_dojo_test_loss={
+            "color_mask": SplitLoss(0.5, 2.0),
+            "faction_mask": SplitLoss(1.25, 1.0),
+        },
         statuses={
             "color_mask": DojoStatus.ACTIVE,
             "faction_mask": DojoStatus.SATURATED,
         },
         quarantined=quarantined,
     )
+
+
+# A rounds CSV written before normalized_test_loss existed
+_LEGACY_HEADER = (
+    "phase,round_index,step,elapsed_seconds,dojo,test_loss,status,quarantined"
+)
 
 
 def _rows(path: Path) -> list[dict[str, str]]:
@@ -50,6 +64,7 @@ class TestOnRoundEnd:
         assert color_row["step"] == "5"
         assert color_row["elapsed_seconds"] == "12.5"
         assert color_row["test_loss"] == "0.5"
+        assert color_row["normalized_test_loss"] == "0.25"
         assert color_row["status"] == "active"
         assert color_row["quarantined"] == "False"
 
@@ -71,7 +86,7 @@ class TestOnRoundEnd:
             round_index=0,
             step=0,
             elapsed_seconds=0.0,
-            per_dojo_test_loss={"held_out": 2.0},
+            per_dojo_test_loss={"held_out": SplitLoss(2.0, 1.0)},
             statuses={},
             quarantined=frozenset(),
         )
@@ -189,6 +204,7 @@ class TestReadRoundsCsv:
             elapsed_seconds=12.5,
             dojo="color_mask",
             test_loss=0.5,
+            normalized_test_loss=0.25,
             status=DojoStatus.ACTIVE,
             quarantined=False,
         )
@@ -197,7 +213,9 @@ class TestReadRoundsCsv:
 
     def test_an_empty_status_reads_as_none(self, tmp_path: Path) -> None:
         path = tmp_path / "rounds.csv"
-        report = RoundReport("p", 0, 0, 0.0, {"held_out": 2.0}, {}, frozenset())
+        report = RoundReport(
+            "p", 0, 0, 0.0, {"held_out": SplitLoss(2.0, 1.0)}, {}, frozenset()
+        )
         CsvRunListener(path).on_round_end(report)
         assert read_rounds_csv(path)[0].status is None
 
@@ -221,10 +239,11 @@ class TestReadRoundsCsv:
     @pytest.mark.parametrize(
         "row",
         [
-            "p,0,0,0.0,a,0.5,active",  # too few cells
-            "p,zero,0,0.0,a,0.5,active,False",  # unparseable int
-            "p,0,0,0.0,a,0.5,bogus,False",  # unknown status
-            "p,0,0,0.0,a,0.5,active,maybe",  # bad bool
+            "p,0,0,0.0,a,0.5,0.25,active",  # too few cells
+            "p,zero,0,0.0,a,0.5,0.25,active,False",  # unparseable int
+            "p,0,0,0.0,a,0.5,0.25,bogus,False",  # unknown status
+            "p,0,0,0.0,a,0.5,0.25,active,maybe",  # bad bool
+            "p,0,0,0.0,a,0.5,half,active,False",  # unparseable normalized
         ],
     )
     def test_a_malformed_row_raises_naming_its_line(
@@ -232,8 +251,28 @@ class TestReadRoundsCsv:
     ) -> None:
         path = tmp_path / "rounds.csv"
         header = (
-            "phase,round_index,step,elapsed_seconds,dojo,test_loss,status,quarantined"
+            "phase,round_index,step,elapsed_seconds,dojo,test_loss,"
+            "normalized_test_loss,status,quarantined"
         )
         path.write_text(f"{header}\n{row}\n")
         with pytest.raises(ValueError, match=":2:"):
             read_rounds_csv(path)
+
+    def test_a_legacy_file_without_normalized_loss_still_reads(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "rounds.csv"
+        path.write_text(f"{_LEGACY_HEADER}\np,0,3,1.5,a,0.5,active,False\n")
+
+        (row,) = read_rounds_csv(path)
+
+        assert row.test_loss == 0.5
+        assert row.normalized_test_loss is None
+        assert row.status is DojoStatus.ACTIVE
+
+    def test_appending_to_a_legacy_file_raises(self, tmp_path: Path) -> None:
+        # Reading old files is supported; mixing two formats in one is not
+        path = tmp_path / "rounds.csv"
+        path.write_text(f"{_LEGACY_HEADER}\n")
+        with pytest.raises(ValueError, match="header"):
+            CsvRunListener(path).on_round_end(_report())

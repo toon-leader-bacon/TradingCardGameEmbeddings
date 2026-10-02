@@ -301,8 +301,12 @@ def run_extrinsic_all(
             outcome = run_extrinsic(
                 encoder.model, encoder.label, dojos, budget.extrinsic, hardware, run_dir
             )
+            normalized = {
+                name: round(split_loss.normalized, 4)
+                for name, split_loss in (outcome.validation_losses or {}).items()
+            }
             print(
-                f"      {encoder.label}: validation={dict(outcome.validation_losses or {})}"
+                f"      {encoder.label}: validation (x baseline)={normalized}"
                 f" stopped_early={outcome.stopped_early_reason}"
             )
         else:

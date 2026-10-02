@@ -5,7 +5,7 @@ under any single generic/*/ dojo shape package: a DataConstructor maps to
 a metric family, not to a (input shape, task shape) dojo cell, and several
 of these are consumed by more than one shape package (DeckLabelDataConstructor)
 or share private uuid-resolution helpers with constructors that feed a
-different shape package entirely (see _row_values.py). Every class is
+different shape package entirely (see row_values.py). Every class is
 re-exported here so `from src.dojos.generic.data_constructors import
 XDataConstructor` keeps working unchanged for every existing caller.
 """
@@ -21,7 +21,13 @@ from src.dojos.generic.data_constructors.deck_card_mask import (
     DeckCardMaskDataConstructor,
 )
 from src.dojos.generic.data_constructors.deck_label import DeckLabelDataConstructor
+from src.dojos.generic.data_constructors.held_out_deck_card import (
+    HeldOutDeckCardDataConstructor,
+)
 from src.dojos.generic.data_constructors.masked_field import MaskedFieldDataConstructor
+from src.dojos.generic.data_constructors.masked_field_multi_label import (
+    MaskedFieldMultiLabelDataConstructor,
+)
 from src.dojos.generic.data_constructors.masked_field_regression import (
     MaskedFieldRegressionDataConstructor,
 )
@@ -41,7 +47,9 @@ __all__ = [
     "CardCharacterPredictionDataConstructor",
     "DeckCardMaskDataConstructor",
     "DeckLabelDataConstructor",
+    "HeldOutDeckCardDataConstructor",
     "MaskedFieldDataConstructor",
+    "MaskedFieldMultiLabelDataConstructor",
     "MaskedFieldRegressionDataConstructor",
     "PackToPickChoiceSetDataConstructor",
     "PickNumberDecayCurveDataConstructor",

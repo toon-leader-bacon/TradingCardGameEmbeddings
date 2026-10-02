@@ -17,6 +17,7 @@ from src.dojos.generic.multi_card_fixed_classification.decoder_head import (
 )
 from src.dojos.generic.pooling import EmbeddingPooler
 from src.dojos.loss.fixed_classification_loss import FixedClassificationLoss
+from src.dojos.loss.prior_baseline_calibrations import ClassPriorCalibration
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
 
@@ -53,6 +54,7 @@ class MultiCardFixedClassificationDojo(GenericDojo):
                 card_embedding_size, len(label_values), pooler=pooler
             ),
             loss_calculator=FixedClassificationLoss(label_values),
+            calibration=ClassPriorCalibration(),
             mod_pipeline=mod_pipeline,
             deck_box=deck_box,
             config=config,

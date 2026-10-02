@@ -9,7 +9,7 @@ import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.dojos.generic.data_constructors._row_values import _cast_to_float
+from src.dojos.generic.data_constructors.row_values import cast_to_float
 from src.schema.type_hints import Label, MultiCardInput, TrainingDatum
 
 
@@ -33,7 +33,7 @@ class DeckLabelDataConstructor:
         self,
         deck_box: DeckBox,
         label_column: str,
-        label_caster: Callable[[object], Label] = _cast_to_float,
+        label_caster: Callable[[object], Label] = cast_to_float,
     ) -> None:
         """
         Inputs:
@@ -70,8 +70,8 @@ class DeckLabelDataConstructor:
             chunk: one chunk of rows from a DeckLabelMetric subclass's
                 output parquet file.
         Output: one (List[GenericCard], Label) TrainingDatum per row
-            whose deck_uuid resolves to a deck with at least one
-            resolvable card. The label is passed through
+            whose label is not null (None or NaN) and whose deck_uuid
+            resolves to a deck with at least one resolvable card. The label is passed through
             self._label_caster - see __init__'s label_caster docstring
             for why this isn't a hardcoded float() call. A single card
             within a resolved deck that fails to resolve is dropped
@@ -98,6 +98,11 @@ class DeckLabelDataConstructor:
         # otherwise-resolvable deck.
         for _, row in chunk.iterrows():
             raw_label = row[self._label_column]
+            if raw_label is None:
+                # A null in a string column (e.g. sts_gg's KilledByMetric
+                # on a won run) reads back as None, not NaN; str() would
+                # turn it into the label "None"
+                continue
             if isinstance(raw_label, float) and math.isnan(raw_label):
                 # A metric's own nullable-output convention (e.g.
                 # OnPlayWinRateSensitivityByDeckMetric's None for a deck

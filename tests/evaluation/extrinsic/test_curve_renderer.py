@@ -10,7 +10,15 @@ from src.training.recording.run_listener import RoundRow
 def _rows(losses: list[float]) -> list[RoundRow]:
     return [
         RoundRow(
-            "extrinsic", index, index * 10, float(index), "pick", loss, None, False
+            "extrinsic",
+            index,
+            index * 10,
+            float(index),
+            "pick",
+            loss,
+            loss,
+            None,
+            False,
         )
         for index, loss in enumerate(losses)
     ]
@@ -166,3 +174,50 @@ class TestDrawDojoCurves:
             CurveRenderer().draw_dojo_curves(
                 "pick", {"a": []}, {"a": 0}, "step", tmp_path / "p.png"
             )
+
+
+class TestYAxis:
+    def _drawn_axes(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        curves: dict[str, list[RoundRow]],
+    ) -> dict[str, object]:
+        renderer = CurveRenderer()
+        seen: dict[str, object] = {}
+        original_save = renderer._save
+
+        def spy_save(figure: Figure, path: Path) -> Path:
+            axes = figure.axes[0]
+            seen["ylabel"] = axes.get_ylabel()
+            seen["horizontal_at_one"] = any(
+                list(line.get_ydata()) == [1.0, 1.0] for line in axes.get_lines()
+            )
+            seen["first_line_ys"] = list(axes.get_lines()[-2].get_ydata())
+            return original_save(figure, path)
+
+        monkeypatch.setattr(renderer, "_save", spy_save)
+        slots = {encoder: index for index, encoder in enumerate(curves)}
+        renderer.draw_dojo_curves("pick", curves, slots, "step", tmp_path / "p.png")
+        return seen
+
+    def test_normalized_rows_plot_normalized_loss_with_a_baseline_line(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rows = [
+            RoundRow("e", 0, 10, 0.0, "pick", 4.0, 0.8, None, False),
+            RoundRow("e", 1, 20, 1.0, "pick", 2.0, 0.4, None, False),
+        ]
+        seen = self._drawn_axes(tmp_path, monkeypatch, {"a": rows})
+        assert seen["ylabel"] == "TEST loss / baseline"
+        assert seen["horizontal_at_one"]
+        assert seen["first_line_ys"] == [0.8, 0.4]
+
+    def test_a_legacy_row_falls_back_to_raw_loss(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        legacy = [RoundRow("e", 0, 10, 0.0, "pick", 4.0, None, None, False)]
+        seen = self._drawn_axes(tmp_path, monkeypatch, {"a": legacy})
+        assert seen["ylabel"] == "TEST loss"
+        assert not seen["horizontal_at_one"]
+        assert seen["first_line_ys"] == [4.0]

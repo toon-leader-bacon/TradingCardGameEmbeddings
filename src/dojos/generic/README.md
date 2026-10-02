@@ -13,7 +13,9 @@ so one cell serves every metric family with the same shape.
   train/test/validation (`FileManagerParquet`), reads each split through
   a holdout-filtered `VisibleCardLookup`, applies the `ModPipeline`,
   packs examples to the trainer's `BatchBudget`, and checks the metric
-  file's embedded `CardBinder`/`DeckBox` versions at construction.
+  file's embedded `CardBinder`/`DeckBox` versions at construction. Its
+  last construction step calibrates the cell's loss to the TRAIN split
+  (see "Loss calibration" below).
 - `dojo_config.py` - `DojoConfig`, a frozen value object for the
   configuration half of a cell's constructor: `name` (the dojo's
   `Trainer`-facing identity; set it when two metric files share a stem),
@@ -23,12 +25,15 @@ so one cell serves every metric family with the same shape.
 - `data_constructor.py` - the `DataConstructor` Protocol:
   `build(chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]`.
 - `data_constructors/` - the concrete constructors, one module each
-  (see the table below). `_row_values.py` holds the shared helpers that
+  (see the table below). `row_values.py` holds the shared helpers that
   turn one raw row value into a typed label or card(s).
 - `paired_metric_dojos.py` - base classes for per-metric wrappers that
   only name their paired metric: `CardAverageMetricDojo`,
-  `DeckLabelMetricDojo`, `MaskedFieldMetricDojo` (see "Per-metric
-  wrappers" below).
+  `DeckLabelMetricDojo`, the three masked-field bases
+  `MaskedFieldMetricDojo`, `MaskedFieldRegressionMetricDojo` and
+  `MaskedFieldMultiLabelMetricDojo`, and `HeldOutDeckCardMetricDojo`
+  (passes its deck box on, so the metric version check verifies it)
+  (see "Per-metric wrappers" below).
 - `pooling.py` - `EmbeddingPooler` Strategy (variable-length list of
   card embeddings -> one vector); `MeanEmbeddingPooler` is the only
   implementation.
@@ -37,31 +42,65 @@ so one cell serves every metric family with the same shape.
   `BilinearOptionScoringHead` is the only implementation. Deliberately
   low-capacity: a high-capacity scorer could solve the task in its own
   weights and leave the card embeddings under-constrained.
-- One subdirectory per cell, each with `dojo.py` and `decoder_head.py`:
+- One subdirectory per cell, each with `dojo.py` and `decoder_head.py`
+  (`single_card_fixed_classification/` also has `loss_spec.py`):
 
-| Cell | Input | Label | Loss |
-|---|---|---|---|
-| `single_card_regression/` | one card | float | `MseLoss` |
-| `single_card_fixed_classification/` | one card | one of `label_values` | `FixedClassificationLoss` (swappable via `loss_factory`) |
-| `multi_card_regression/` | a deck | float | `MseLoss` |
-| `multi_card_binary_classification/` | a deck | 0/1 | `BceLoss` (one logit) |
-| `multi_card_fixed_classification/` | a deck | one of `label_values` | `FixedClassificationLoss` |
-| `multi_card_option_selection/` | a ragged pack of options | picked option's index | `PickPredictionCrossEntropyLoss` |
-| `multi_group_option_selection/` | `[pack_options, pool]` | picked option's index | `PickPredictionCrossEntropyLoss` |
-| `multi_group_regression/` | `[group_0, group_1]` | float | `MseLoss` |
+| Cell | Input | Label | Loss | Calibration (baseline) |
+|---|---|---|---|---|
+| `single_card_regression/` | one card | float | `MseLoss` | z-scored labels (1.0) |
+| `single_card_fixed_classification/` | one card | one of `label_values` | from its `LossSpec` (default `FixedClassificationLoss`) | from its `LossSpec` (default class-prior entropy) |
+| `multi_card_regression/` | a deck | float | `MseLoss` | z-scored labels (1.0) |
+| `multi_card_binary_classification/` | a deck | 0/1 | `BceLoss` (one logit) | binary entropy of the positive rate |
+| `multi_card_fixed_classification/` | a deck | one of `label_values` | `FixedClassificationLoss` | class-prior entropy |
+| `multi_card_option_selection/` | a ragged pack of options | picked option's index | `PickPredictionCrossEntropyLoss` | mean ln(pack size) |
+| `multi_group_option_selection/` | `[pack_options, pool]` | picked option's index | `PickPredictionCrossEntropyLoss` | mean ln(pack size) |
+| `multi_group_regression/` | `[group_0, group_1]` | float | `MseLoss` | z-scored labels (1.0) |
+| `multi_group_binary_classification/` | `[group_0, group_1]` | 0/1 | `BceLoss` (one logit) | binary entropy of the positive rate |
 
 Multi-card cells pool the deck with an injected `EmbeddingPooler` before
 their MLP. The option-selection cells never pool the options: they
-score each one. Group order is load-bearing for both multi-group cells:
+score each one. Group order is load-bearing for every multi-group cell:
 `input_shape_of()` (`src/schema/type_hints.py`) classifies an input by
 peeking group 0, so group 0 must never be empty. `multi_group_regression`
 pools both groups with one shared pooler, concatenates them in fixed
 order, and substitutes a learned placeholder vector when group 1 is
-empty. `single_card_fixed_classification`'s `loss_factory` lets a metric
-use `SoftClassificationLoss` (a distribution over `label_values`,
-`CardCharacterPredictionDojo`) or `MaskedVectorRegressionLoss`
-(independent per-position rates, `PickNumberDecayCurveDojo`) with the
-same head.
+empty; `multi_group_binary_classification` does the same, but its head
+outputs a raw logit. For a symmetric pair task ("did group 0 beat group
+1", both groups decks) that cell's `group_swap_mod.py` holds
+`GroupSwapMod`, a train-only mod that swaps the two groups and flips the
+0/1 label with a probability (default 0.5), so TRAIN sees both orders;
+it raises on an empty group or a non-float label. Asymmetric inputs
+(`[partial deck, kingdom]`) must not use it.
+
+`single_card_fixed_classification`'s `loss_spec` (a `LossSpec`:
+a loss factory and its matching calibration, as one value) lets a metric
+use `SOFT_CLASSIFICATION_LOSS_SPEC` (a distribution over `label_values`,
+`CardCharacterPredictionDojo`) or `MASKED_VECTOR_REGRESSION_LOSS_SPEC`
+(independent per-position rates in [0, 1], `PickNumberDecayCurveDojo`;
+not z-scored, since its loss sigmoids the head's output) with the same
+head.
+
+## Loss calibration
+
+Every cell passes `GenericDojo` a `LossCalibration`
+(`../loss/loss_calibration.py`). As its last construction step,
+`GenericDojo` builds an evenly strided, unmodded sample of the TRAIN
+split through the data constructor (every row up to 20,000 TRAIN rows,
+then every k-th row) and hands it to the calibration. The result, one
+`CalibratedLoss`, holds:
+
+- the loss `compute_loss` scores with (`loss_calculator`). Regression
+  cells wrap `MseLoss` in `StandardizedLabelLoss`, so the head predicts
+  (y - mean) / std of the TRAIN labels; batches keep raw labels.
+- the baseline `baseline_loss(batch)` returns for every batch: the loss
+  of the best input-ignoring predictor on the sample (column above).
+- `label_stats` (regression only): the TRAIN `LabelStats`, to map a
+  prediction back to label units (`to_label_units`).
+
+An empty TRAIN sample, a constant regression label (zero std), or a zero
+baseline (e.g. one class only) raises `ValueError` at construction.
+Each dojo logs one INFO line with the sample size, the time taken and
+the baseline (plus label mean and std for regression).
 
 Data constructors:
 
@@ -70,12 +109,14 @@ Data constructors:
 | `CardAverageDataConstructor` | `CardAverageMetric` and 17lands per-card rates | card -> float (`uuid_column` configurable, e.g. `"pool_card_uuid"`) |
 | `MaskedFieldDataConstructor` | `MaskedFieldMetric` | card -> masked field's class |
 | `MaskedFieldRegressionDataConstructor` | `MaskedFieldRegressionMetric` | card -> masked field's number |
+| `MaskedFieldMultiLabelDataConstructor` | `MaskedFieldMultiLabelMetric` | card -> dense `{position: 0.0/1.0}` over `label_values` |
 | `CardCharacterPredictionDataConstructor` | `CardCharacterPredictionMetric` | card -> character distribution |
 | `PickNumberDecayCurveDataConstructor` | `PickNumberDecayCurveMetric` | card -> sparse `{bucket: take_rate}` (buckets under `min_sample_count` masked) |
 | `DeckLabelDataConstructor` | `DeckLabelMetric` and 17lands per-deck labels | deck (from a `DeckBox`) -> label (`label_caster` configurable) |
 | `DeckCardMaskDataConstructor` | `DeckCardMaskMetric` | deck minus one card -> that card |
 | `PackToPickChoiceSetDataConstructor` | `PackToPickChoiceSetMetric` | pack -> picked index (row skipped if any option is unmatched) |
 | `PoolConditionedPickDataConstructor` | `PoolConditionedPickMetric` | `[pack, pool]` -> picked index |
+| `HeldOutDeckCardDataConstructor` | `HeldOutDeckCardMetric` | `[candidates, deck minus every copy of the target]` -> target's index. A hidden target skips the row; a hidden decoy is dropped and the index taken after (no decoy left skips); hidden context cards are dropped (empty context skips) |
 | `AttackerBlockerCombatOutcomeDataConstructor` | `AttackerBlockerCombatOutcomeMetric` | `[attackers, blockers]` -> net kill delta (empty blockers allowed) |
 
 ## Per-metric wrappers
@@ -91,6 +132,24 @@ class CardRelicCountDojo(CardAverageMetricDojo):
     """Card -> predicted average relicCount."""
 
     METRIC = CardRelicCountMetric
+```
+
+The three masked-field bases mask the metric's field on every split
+(`train_only=False`), plus any keys a wrapper lists because they would
+give the answer away: `EXTRA_MASKED_KEYS` (top-level keys, added as
+`"[MASK]"` where absent so every card has the same keys) and
+`EXTRA_MASKED_PATHS` (nested slots such as `("attacks", 0, "cost")`,
+masked only where present). `MaskedFieldMultiLabelMetricDojo` scores its
+`SingleCardFixedClassificationDojo` head with
+`MASKED_VECTOR_REGRESSION_LOSS_SPEC`: one sigmoid per label value, since
+a two-color MTG card is two positives, not one class.
+
+```python
+class TypesMaskDojo(MaskedFieldMultiLabelMetricDojo):
+    """Pokemon, types and attack costs masked -> P(each energy type)."""
+
+    METRIC = TypesMaskMetric
+    EXTRA_MASKED_PATHS = _ATTACK_COST_PATHS
 ```
 
 A wrapper that needs more (a label literal, a custom loss, a non-default

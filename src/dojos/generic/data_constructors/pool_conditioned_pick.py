@@ -7,9 +7,9 @@ from typing import List
 import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.dojos.generic.data_constructors._row_values import (
-    _cards_for_uuids,
-    _option_cards_and_pick_index,
+from src.dojos.generic.data_constructors.row_values import (
+    cards_for_uuids,
+    option_cards_and_pick_index,
 )
 from src.schema.type_hints import MultiGroupInput, TrainingDatum
 
@@ -24,6 +24,8 @@ class PoolConditionedPickDataConstructor:
     TrainingInput = MultiGroupInput = [pack_option_cards, pool_cards].
 
     **pack options MUST stay group index 0, pool MUST stay index 1.**
+    (MultiGroupOptionSelectionDojo's baseline also counts options as
+    len(input[0]).)
     src/schema/type_hints.py's input_shape_of() classifies a
     TrainingInput's shape by peeking group 0 only, and raises ValueError
     the instant it finds an empty list there - it never visits index 1
@@ -54,9 +56,9 @@ class PoolConditionedPickDataConstructor:
             TrainingDatum per row. option_cards/pick_index skip
             conditions are identical to
             PackToPickChoiceSetDataConstructor's (see
-            _option_cards_and_pick_index()'s docstring). pool_cards may
+            option_cards_and_pick_index()'s docstring). pool_cards may
             be empty (a valid, expected row - the first pick of a
-            draft) via _cards_for_uuids(), which drops individual
+            draft) via cards_for_uuids(), which drops individual
             unmatched pool uuids rather than skipping the row - an
             empty pool is never itself a skip condition here.
         Side effects: none.
@@ -76,13 +78,13 @@ class PoolConditionedPickDataConstructor:
         # fail. The pool side is looked up independently and tolerates
         # being empty - see class/build() docstrings.
         for _, row in chunk.iterrows():
-            option_pick = _option_cards_and_pick_index(
+            option_pick = option_cards_and_pick_index(
                 lookup, row["pack_option_uuids"], row["pick_uuid"]
             )
             if option_pick is None:
                 continue
             option_cards, pick_index = option_pick
-            pool_cards = _cards_for_uuids(lookup, row["pool_uuids"])
+            pool_cards = cards_for_uuids(lookup, row["pool_uuids"])
             group: MultiGroupInput = [option_cards, pool_cards]
             results.append((group, pick_index))
 

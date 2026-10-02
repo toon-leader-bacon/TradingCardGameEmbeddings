@@ -27,12 +27,12 @@ class MaskedVectorRegressionLoss(NocabLoss[List[torch.Tensor], List[Dict[int, fl
     """Masked, sigmoid-squashed MSE over a fixed-width output vector.
 
     label_values is accepted only for interface parity with every other
-    loss_factory this project's generic dojo cells inject
-    (Callable[[Sequence[str]], NocabLoss] - see
-    SingleCardFixedClassificationDojo.__init__'s loss_factory
-    docstring) - its actual string contents are never read, only its
-    length. This loss has no real per-position vocabulary, just
-    positional bucket indices - see PickNumberDecayCurveDojo
+    LossSpec.loss_factory (Callable[[Sequence[str]], NocabLoss] - see
+    MASKED_VECTOR_REGRESSION_LOSS_SPEC in
+    src/dojos/generic/single_card_fixed_classification/loss_spec.py) -
+    its actual string contents are never read, only its length. This
+    loss has no real per-position vocabulary, just positional bucket
+    indices - see PickNumberDecayCurveDojo
     (src/dojos/seventeenlands/draft_data/pick_number_decay_curve_dojo.py)
     for where that degenerate [str(i) for i in range(15)] vocabulary
     comes from.

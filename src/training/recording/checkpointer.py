@@ -209,13 +209,21 @@ class DirectoryCheckpointer:
     def _write_manifest(
         self, directory: Path, plan: TrainingPlan, report: RoundReport
     ) -> None:
-        """manifest.json: the report plus repr(plan), for reproducibility."""
+        """manifest.json: the report (each dojo's TEST loss, baseline and
+        normalized loss) plus repr(plan), for reproducibility."""
         manifest = {
             "phase": report.phase,
             "round_index": report.round_index,
             "step": report.step,
             "elapsed_seconds": report.elapsed_seconds,
-            "per_dojo_test_loss": dict(report.per_dojo_test_loss),
+            "per_dojo_test_loss": {
+                name: {
+                    "loss": split_loss.loss,
+                    "baseline_loss": split_loss.baseline_loss,
+                    "normalized": split_loss.normalized,
+                }
+                for name, split_loss in report.per_dojo_test_loss.items()
+            },
             "statuses": {n: s.value for n, s in report.statuses.items()},
             "quarantined": sorted(report.quarantined),
             "plan": repr(plan),

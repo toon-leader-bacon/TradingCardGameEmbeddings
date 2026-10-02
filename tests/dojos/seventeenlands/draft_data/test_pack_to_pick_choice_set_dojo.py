@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 
 import pandas as pd
@@ -14,6 +15,9 @@ from src.dojos.seventeenlands.draft_data.pack_to_pick_choice_set_dojo import (
     PackToPickChoiceSetDojo,
 )
 from src.schema.holdout import HoldoutSpec
+
+# Wiring tests: placeholder parquets, no real TRAIN calibration
+pytestmark = pytest.mark.usefixtures("uncalibrated_generic_dojos")
 
 
 def _write_source(path: Path) -> None:

@@ -16,6 +16,7 @@ from src.dojos.generic.multi_card_regression.decoder_head import (
 )
 from src.dojos.generic.pooling import EmbeddingPooler
 from src.dojos.loss.mse_loss import MseLoss
+from src.dojos.loss.loss_calibration import StandardizedRegressionCalibration
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
 
@@ -49,6 +50,7 @@ class MultiCardRegressionDojo(GenericDojo):
                 card_embedding_size, pooler=pooler
             ),
             loss_calculator=MseLoss(),
+            calibration=StandardizedRegressionCalibration(),
             mod_pipeline=mod_pipeline,
             deck_box=deck_box,
             config=config,

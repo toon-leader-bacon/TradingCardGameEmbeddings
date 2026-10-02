@@ -31,7 +31,7 @@ from src.training.plan import (
     SaturationSpec,
     TrainingPlan,
 )
-from src.training.recording.reports import TrainingResult
+from src.training.recording.reports import SplitLoss, TrainingResult
 from src.training.recording.run_listener import CsvRunListener
 from src.training.round_evaluation import evaluate_split_losses
 from src.training.trainable_encoder import TrainableEncoder
@@ -75,9 +75,9 @@ class ExtrinsicResult:
     rounds_csv: the per-round TEST losses (read with read_rounds_csv);
         None if the file does not exist after the run (no round completed,
         or the listener's writes failed - Trainer logs and skips them).
-    validation_losses: VALIDATION loss per dojo (read-only) of each
-        dojo's head at its best TEST round (not its last: see
-        BestHeadKeeper);
+    validation_losses: VALIDATION SplitLoss per dojo (read-only: raw loss
+        and baseline, so also normalized loss) of each dojo's head at its
+        best TEST round (not its last: see BestHeadKeeper);
         a dojo whose pass failed is omitted. None if the run stopped early
         (weights may be corrupt, or no head finished training) or the
         whole VALIDATION pass failed (logged) - then validation.json is not
@@ -90,7 +90,7 @@ class ExtrinsicResult:
     """
 
     rounds_csv: Path | None
-    validation_losses: Mapping[str, float] | None
+    validation_losses: Mapping[str, SplitLoss] | None
     stopped_early_reason: str | None
     quarantined: frozenset[str]
 
@@ -177,7 +177,7 @@ def run_extrinsic(
 
     # Score each head at its best TEST round unless the run stopped early;
     # from here on a failure is logged, never raised, so the run is kept
-    validation: Mapping[str, float] | None = None
+    validation: Mapping[str, SplitLoss] | None = None
     quarantined = _collect_quarantined(training)
     if training.stopped_early_reason is None:
         budget = BatchBudget(hardware.max_batch_cost, cost_of)
@@ -226,13 +226,13 @@ def _score_best_heads(
     budget: BatchBudget,
     max_examples: int,
     precision: Precision,
-) -> Mapping[str, float] | None:
+) -> Mapping[str, SplitLoss] | None:
     """Restore every head to its best TEST round, then the VALIDATION pass,
     never raising.
 
     Inputs: the keeper that watched the run, the encoder, dojos, the batch
         budget, the per-dojo cap, the forward-pass precision.
-    Output: evaluate_split_losses' dojo -> loss mapping (a failing dojo is
+    Output: evaluate_split_losses' dojo -> SplitLoss mapping (a failing dojo is
         already omitted there), or None if the pass as a whole failed (e.g.
         autocast unsupported on the device) - logged with its traceback.
     Side effects: overwrites head weights with their best snapshots;
@@ -322,18 +322,24 @@ def _collect_quarantined(training: TrainingResult) -> frozenset[str]:
 
 def _write_validation(
     path: Path,
-    losses: Mapping[str, float],
+    losses: Mapping[str, SplitLoss],
     best_rounds: Mapping[str, int],
     quarantined: frozenset[str],
 ) -> None:
     """Inputs: the path, VALIDATION losses, each dojo's best TEST round
     (the head that was scored), the quarantined dojos. Output: None.
-    Side effects: writes {"losses": {dojo: loss}, "best_test_rounds":
-    {dojo: round}, "quarantined": [sorted names]} as indented JSON (losses
-    are finite: evaluate_split_losses omits a dojo with a non-finite loss);
-    on an OSError, logs it and writes nothing more. Exceptions: none."""
+    Side effects: writes {"losses": {dojo: raw loss}, "normalized_losses":
+    {dojo: loss / baseline}, "best_test_rounds": {dojo: round},
+    "quarantined": [sorted names]} as indented JSON (losses are finite:
+    evaluate_split_losses omits a dojo with a non-finite loss; regression
+    dojos' raw losses are in label standard deviations, their labels being
+    z-scored); on an OSError, logs it and writes nothing more.
+    Exceptions: none."""
     payload = {
-        "losses": dict(losses),
+        "losses": {name: split_loss.loss for name, split_loss in losses.items()},
+        "normalized_losses": {
+            name: split_loss.normalized for name, split_loss in losses.items()
+        },
         "best_test_rounds": dict(best_rounds),
         "quarantined": sorted(quarantined),
     }

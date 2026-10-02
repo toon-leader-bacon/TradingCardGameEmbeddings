@@ -35,7 +35,10 @@ sequential metric ideas `../BRAINSTORM.md` flags as Flavor-B-only.
   (`board.supply`), `is_natural_kingdom()` (excludes isotropic's own
   curated/challenge kingdom-generator flags -
   `constraints`/`required`/`prohibited`/`force_big_cards`/
-  `force_equal_start`/`force_banes`), `eligible_player_entries()`
+  `force_equal_start`/`force_banes`), `vetoed_card_names()` (`vetoed`
+  with isotropic's unexplained leading `*` stripped from ~9% of names),
+  `is_played_to_the_end()` (2+ players, nobody resigned),
+  `eligible_player_entries()`
   (excludes resigned players), `deck_card_uuids()` (expand one
   `end.deck` dict into a flat card multiset), and `deck_for_player()`
   (build one player's full `GenericDeck` - the shared helper
@@ -57,8 +60,10 @@ sequential metric ideas `../BRAINSTORM.md` flags as Flavor-B-only.
 ### Single-card metrics
 
 - `veto_rate_metric.py` - `VetoRateMetric` (accumulation):
-  `P(card in vetoed | card in board.supply)`, restricted to natural
-  kingdoms.
+  `P(card vetoed | card offered)`, offered = `board.supply` plus
+  `vetoed` (a vetoed card is never in `board.supply`), over natural
+  kingdoms with vetoing on (a non-empty `vetoed` list: one card per
+  player).
 - `copies_bought_distribution_metric.py` -
   `CopiesBoughtDistributionMetric` (streaming): one raw
   `(card, copies)` sample row per distinct card in every eligible
@@ -82,7 +87,8 @@ sequential metric ideas `../BRAINSTORM.md` flags as Flavor-B-only.
   deck) -> which card(s) got vetoed. Skips rows with no real veto.
 - `kingdom_game_length_metric.py` - `KingdomGameLengthMetric`
   (streaming): the kingdom -> winner turn count, restricted to natural
-  kingdoms with a resolvable winner.
+  kingdoms played to the end (2+ players, nobody resigned) with a
+  resolvable winner.
 - `kingdom_member_label_metric.py` - `KingdomMemberLabelMetric`
   (streaming, abstract): Template Method base for "given the kingdom,
   label each individual kingdom card from the winner's final deck" -

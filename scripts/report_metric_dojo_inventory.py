@@ -3,9 +3,10 @@ class that writes a parquet output, and the dojo(s) that read it.
 
 A dojo is paired with a metric when the dojo class names that metric in
 its own body (every per-metric wrapper reads its paired metric's
-DEFAULT_OUTPUT_PATH/LABEL_COLUMN ClassVars, directly or via METRIC). A
-metric with no dojo gets one row with an empty dojo column. Needs no
-data on disk.
+DEFAULT_OUTPUT_PATH/LABEL_COLUMN ClassVars, directly or via METRIC), or
+when a src/training/dojo_catalog.py recipe points the dojo class at that
+metric's output (metric_output, e.g. the sts2_runs keys). A metric with
+no dojo gets one row with an empty dojo column. Needs no data on disk.
 
 Usage (from the project root):
 
@@ -21,6 +22,7 @@ import inspect
 import io
 import sys
 from dataclasses import dataclass
+from typing import cast
 from pathlib import Path
 
 from src.dojos.generic.generic_dojo import GenericDojo
@@ -71,13 +73,48 @@ def _dojo_classes(metric_classes: list[type]) -> list[_DojoClass]:
                 continue
             referenced = [getattr(module, n, None) for n in _paired_metric_names(node)]
             paired = tuple(m for m in metric_classes if any(m is r for r in referenced))
-            cell = next(
-                base.__name__
-                for base in cls.__mro__[1:]
-                if base.__module__.startswith("src.dojos.generic.")
-                and base.__module__.endswith(".dojo")
-            )
-            dojos.append(_DojoClass(cls.__name__, cell, paired))
+            dojos.append(_DojoClass(cls.__name__, _cell_of(cls), paired))
+    return dojos
+
+
+def _cell_of(dojo_class: type) -> str:
+    """The generic cell (src/dojos/generic/<cell>/dojo.py) dojo_class
+    builds on."""
+    return next(
+        base.__name__
+        for base in dojo_class.__mro__[1:]
+        if base.__module__.startswith("src.dojos.generic.")
+        and base.__module__.endswith(".dojo")
+    )
+
+
+def _catalog_dojo_classes(metric_classes: list[type]) -> list[_DojoClass]:
+    """One entry per dojo_catalog recipe that points a dojo class at
+    another metric's output (metric_output), paired with that metric.
+
+    Inputs: metric_classes (every metric class found).
+    Output: list[_DojoClass].
+    Side effects: imports the training catalog. Exceptions: ImportError.
+    """
+    # Imported here: only this pairing needs the training catalog
+    from src.training.dojo_catalog import (
+        DOJO_CATALOG,
+        CardDojoRecipe,
+        DeckDojoRecipe,
+    )
+
+    dojos: list[_DojoClass] = []
+    for recipe in DOJO_CATALOG.values():
+        if not isinstance(recipe, (CardDojoRecipe, DeckDojoRecipe)):
+            continue
+        if recipe.metric_output is None:
+            continue
+        # Every catalog dojo constructor is a dojo class
+        dojo_class = cast(type, recipe.dojo_class)
+        paired = tuple(
+            m for m in metric_classes if _output_path(m) == recipe.metric_output
+        )
+        dojos.append(_DojoClass(dojo_class.__name__, _cell_of(dojo_class), paired))
     return dojos
 
 
@@ -114,7 +151,7 @@ def inventory_rows() -> list[dict[str, str]]:
     Exceptions: ImportError if a module fails to import.
     """
     metrics = _metric_classes()
-    dojos = _dojo_classes(metrics)
+    dojos = _dojo_classes(metrics) + _catalog_dojo_classes(metrics)
     rows: list[dict[str, str]] = []
     for metric in sorted(metrics, key=lambda m: (str(_output_path(m)), m.__name__)):
         paired: list[_DojoClass | None] = [

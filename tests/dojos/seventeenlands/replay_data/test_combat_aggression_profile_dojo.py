@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 
 import pandas as pd
@@ -10,6 +11,9 @@ from src.dojos.seventeenlands.replay_data.combat_aggression_profile_dojo import 
     CombatAggressionProfileDojo,
 )
 from src.schema.holdout import HoldoutSpec
+
+# Wiring tests: placeholder parquets, no real TRAIN calibration
+pytestmark = pytest.mark.usefixtures("uncalibrated_generic_dojos")
 
 
 def _write_source(path: Path) -> None:

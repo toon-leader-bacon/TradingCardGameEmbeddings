@@ -1,11 +1,13 @@
-"""Thin per-metric wrappers over DeckLabelMetric's int64-labeled
-concrete subclasses (src/data_refinement/metrics/sts_gg/deck_label_metrics.py).
+"""Thin per-metric wrappers over every concrete DeckLabelMetric
+(src/data_refinement/metrics/sts_gg/deck_label_metrics.py and
+ascension_prediction_metric.py).
 
-SCOPE: the 8 int64-labeled DeckLabelMetric subclasses are wrapped as
+SCOPE: the 9 int64-labeled DeckLabelMetric subclasses are wrapped as
 DeckLabelMetricDojo subclasses (../generic/paired_metric_dojos.py) (RelicCountMetric,
 TotalDamageTakenMetric, TotalCardsPickedMetric, TotalCardsSkippedMetric,
 TotalTurnsMetric, ElitesKilledMetric, FloorsClearedMetric,
-TotalCombatsMetric); WinMetric (bool) is wrapped as a
+TotalCombatsMetric, AscensionPredictionMetric - ascension as a
+regression, since its levels are ordered); WinMetric (bool) is wrapped as a
 MultiCardBinaryClassificationDojo subclass (WinDojo); CharacterPrediction-
 Metric (str, closed vocabulary) is wrapped as a
 MultiCardFixedClassificationDojo subclass (CharacterDojo). Same
@@ -14,9 +16,16 @@ defaults to float (fine for WinDojo's bool column, True/False ->
 1.0/0.0) but CharacterDojo passes label_caster=str, since
 FixedClassificationLoss needs the raw string label, not a float (see
 data_constructors.py's DeckLabelDataConstructor docstring). No new
-DataConstructor was needed for any of the three. KilledByMetric is
-skipped entirely - flagged as dead data upstream (deck_label_metrics.py's
-own module docstring).
+DataConstructor was needed for any of the three. KilledByMetric (str,
+closed vocabulary, null on a win) is wrapped like CharacterPrediction-
+Metric (KilledByDojo); DeckLabelDataConstructor skips its null rows.
+
+sts_gg lists winning runs only, so WinDojo and KilledByDojo have no
+signal over sts_gg's own outputs (see deck_label_metrics.py's WINS
+ONLY note) and have no sts_gg catalog key; the sts2_runs catalog keys
+reuse every wrapper here over
+../../data_refinement/metrics/sts2_runs/'s outputs, which share each
+sts_gg metric's LABEL_COLUMN (and LABEL_VALUES).
 
 NAMING: every wrapper below is Deck-prefixed (e.g. DeckRelicCountDojo)
 to avoid colliding with src/dojos/sts_gg/card_average_dojos.py's
@@ -35,10 +44,14 @@ from pathlib import Path
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.metrics.sts_gg.ascension_prediction_metric import (
+    AscensionPredictionMetric,
+)
 from src.data_refinement.metrics.sts_gg.deck_label_metrics import (
     CharacterPredictionMetric,
     ElitesKilledMetric,
     FloorsClearedMetric,
+    KilledByMetric,
     RelicCountMetric,
     TotalCardsPickedMetric,
     TotalCardsSkippedMetric,
@@ -107,6 +120,12 @@ class DeckTotalCombatsDojo(DeckLabelMetricDojo):
     METRIC = TotalCombatsMetric
 
 
+class DeckAscensionDojo(DeckLabelMetricDojo):
+    """Deck -> ascension level (AscensionPredictionMetric)."""
+
+    METRIC = AscensionPredictionMetric
+
+
 class WinDojo(MultiCardBinaryClassificationDojo):
     """Deck -> win (WinMetric)."""
 
@@ -128,6 +147,7 @@ class WinDojo(MultiCardBinaryClassificationDojo):
             or WinMetric.DEFAULT_OUTPUT_PATH,
             data_constructor=DeckLabelDataConstructor(deck_box, WinMetric.LABEL_COLUMN),
             card_embedding_size=card_embedding_size,
+            deck_box=deck_box,
             config=DojoConfig(
                 name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),
@@ -163,6 +183,44 @@ class CharacterDojo(MultiCardFixedClassificationDojo):
             ),
             label_values=CharacterPredictionMetric.LABEL_VALUES,
             card_embedding_size=card_embedding_size,
+            deck_box=deck_box,
+            config=DojoConfig(
+                name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
+        )
+
+
+class KilledByDojo(MultiCardFixedClassificationDojo):
+    """Deck -> the encounter that ended a lost run (KilledByMetric).
+
+    label_values=KilledByMetric.LABEL_VALUES unchanged - it already
+    includes OTHER_LABEL. A won run's null label has no row to learn
+    from (DeckLabelDataConstructor skips it)."""
+
+    def __init__(
+        self,
+        card_binder: CardBinder,
+        holdout: HoldoutSpec,
+        deck_box: DeckBox,
+        card_embedding_size: int,
+        path_to_training_data: Path | None = None,
+        name: str | None = None,
+        rng_seed: int | None = None,
+        strict_version_check: bool = True,
+    ) -> None:
+        super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
+            path_to_training_data=path_to_training_data
+            or KilledByMetric.DEFAULT_OUTPUT_PATH,
+            data_constructor=DeckLabelDataConstructor(
+                deck_box,
+                KilledByMetric.LABEL_COLUMN,
+                label_caster=str,
+            ),
+            label_values=KilledByMetric.LABEL_VALUES,
+            card_embedding_size=card_embedding_size,
+            deck_box=deck_box,
             config=DojoConfig(
                 name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),

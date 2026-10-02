@@ -120,8 +120,12 @@ sharing it only with small data classes or trivial helpers.
     one frozen `Trainer` phase (named `"extrinsic"`) over every given dojo,
     no checkpointer, a `CsvRunListener` writing
     `<output_dir>/extrinsic/<encoder_label>/rounds.csv`, then one
-    VALIDATION pass over the final heads (`validation.json`, skipped if
-    the run stopped early). `ExtrinsicSpec` holds the phase settings and
+    VALIDATION pass over each head restored to its best TEST round
+    (`validation.json`: raw `losses` and `normalized_losses`, i.e. loss /
+    the dojo's baseline; skipped if the run stopped early). Regression
+    dojos' raw losses are in label standard deviations (their labels are
+    z-scored from TRAIN statistics), so they are not comparable with runs
+    from before that change. `ExtrinsicSpec` holds the phase settings and
     seed; `ExtrinsicResult` reports what was written. Everything is
     validated before anything touches disk (label, directory, a trainable
     head per dojo, then `Phase`/`TrainingPlan`/`Trainer` construction);
@@ -129,10 +133,17 @@ sharing it only with small data classes or trivial helpers.
     write is logged, so a finished run is never lost. Reuse the *same*
     dojo objects for every encoder: each run calls `reset_head()` and
     reseeds `random`/`torch`, so every encoder starts from identical heads.
+  - [best_head_keeper.py](extrinsic/best_head_keeper.py): `BestHeadKeeper`,
+    a `RunListener` that snapshots each dojo's head at its lowest
+    normalized TEST loss and restores those snapshots before the
+    VALIDATION pass.
   - [learning_curves.py](extrinsic/learning_curves.py):
     `plot_learning_curves(curves, output_dir, x_axis)`: encoder label ->
-    rounds CSV in, one `<dojo>.png` per dojo out, every encoder's TEST
-    loss against `step` or `elapsed_seconds`. Reads CSVs only through
+    rounds CSV in, one `<dojo>.png` per dojo out, every encoder's
+    normalized TEST loss (with a reference line at 1.0, "learned nothing")
+    against `step` or `elapsed_seconds`; a chart with any row from a
+    rounds CSV older than the `normalized_test_loss` column plots raw TEST
+    loss instead. Reads CSVs only through
     `read_rounds_csv`; reads, groups and names every plot (refusing two
     dojos that would share a file name) before writing any. The order of
     `curves` fixes each encoder's color on every chart; up to eight

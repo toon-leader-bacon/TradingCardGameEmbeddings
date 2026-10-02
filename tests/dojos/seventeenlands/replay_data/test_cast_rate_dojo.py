@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 
 import pandas as pd
@@ -7,6 +8,9 @@ from src.dojos.generic.data_constructors import CardAverageDataConstructor
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
 from src.dojos.seventeenlands.replay_data.cast_rate_dojo import CastRateDojo
 from src.schema.holdout import HoldoutSpec
+
+# Wiring tests: placeholder parquets, no real TRAIN calibration
+pytestmark = pytest.mark.usefixtures("uncalibrated_generic_dojos")
 
 
 def _write_source(path: Path) -> None:

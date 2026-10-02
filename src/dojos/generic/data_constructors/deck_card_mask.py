@@ -2,13 +2,16 @@
 src/data_refinement/metrics/generic/deck_card_mask_metric.py."""
 
 from typing import List
-from uuid import UUID
 
 import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.schema.type_hints import MultiCardInput, TrainingDatum
+from src.dojos.generic.data_constructors.row_values import (
+    deck_cards_excluding,
+    parsed_uuid,
+)
+from src.schema.type_hints import TrainingDatum
 
 
 class DeckCardMaskDataConstructor:
@@ -72,7 +75,7 @@ class DeckCardMaskDataConstructor:
             DeckLabelDataConstructor.build()'s convention). A row is
             skipped outright if its deck_uuid doesn't resolve, or if
             every one of that deck's non-target cards fails to resolve.
-        Side effects: none.
+        Side effects: reads deck_box (one get_by_uuid per row).
         Exceptions: none expected (per-row/per-card failures are
             skipped, not raised - mirrors DeckLabelDataConstructor.build()).
 
@@ -88,65 +91,16 @@ class DeckCardMaskDataConstructor:
         # left at all, same tolerance-of-individual-unresolved-cards
         # convention as DeckLabelDataConstructor.build().
         for _, row in chunk.iterrows():
-            deck_cards = self._deck_cards_excluding_target(
-                lookup, row["deck_uuid"], row["target_card_uuid"]
+            # An unparseable target masks nothing (defensive; the
+            # metric always writes a valid uuid string here)
+            deck_cards = deck_cards_excluding(
+                self._deck_box,
+                lookup,
+                row["deck_uuid"],
+                parsed_uuid(row["target_card_uuid"]),
             )
             if not deck_cards:
                 continue
             results.append((deck_cards, row[self._label_column]))
 
         return results
-
-    def _deck_cards_excluding_target(
-        self, lookup: CardLookup, raw_deck_uuid: object, raw_target_uuid: object
-    ) -> MultiCardInput:
-        """Look up one row's deck, with its target card masked out.
-
-        Private helper - single consumer is build().
-
-        Inputs:
-            lookup: the split's holdout-filtered card lookup.
-            raw_deck_uuid: a row's "deck_uuid" cell, expected to be a
-                str parseable as a UUID.
-            raw_target_uuid: a row's "target_card_uuid" cell, expected
-                to be a str parseable as a UUID - excluded from the
-                deck's card_nocab_uuids BEFORE card resolution, per
-                plans/dojo_v2.md's masking note (filter first, resolve
-                second - no separate masking Mod needed for the
-                multi-card case, unlike MaskTargetKeyMod's single-card
-                approach).
-        Output: the resolved deck's cards minus the target card, as a
-            MultiCardInput - omitting any remaining card_nocab_uuid
-            that doesn't resolve against lookup. Empty (not
-            None) if raw_deck_uuid doesn't parse, self._deck_box has no
-            deck for it, or every remaining card fails to resolve - an
-            empty result is build()'s own signal to skip the row.
-        Side effects: none.
-        Exceptions: none - all failures collapse to an empty list.
-        """
-        try:
-            deck_uuid = UUID(str(raw_deck_uuid))
-        except (TypeError, ValueError):
-            return []
-        deck = self._deck_box.get_by_uuid(deck_uuid)
-        if deck is None:
-            return []
-
-        try:
-            target_uuid: UUID | None = UUID(str(raw_target_uuid))
-        except (TypeError, ValueError):
-            # An unparseable target doesn't invalidate an otherwise-
-            # resolvable deck - it just means nothing gets filtered out
-            # below (defensive; DeckCardMaskMetric's own schema always
-            # writes a valid uuid string here).
-            target_uuid = None
-
-        deck_cards: MultiCardInput = []
-        for card_uuid in deck.card_nocab_uuids:
-            if card_uuid == target_uuid:
-                continue
-            card = lookup.get_by_uuid(card_uuid)
-            if card is None:
-                continue
-            deck_cards.append(card)
-        return deck_cards

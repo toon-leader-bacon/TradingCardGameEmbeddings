@@ -109,3 +109,25 @@ not decks).
   A single-path `DeckBox.load()` writes straight to the on-disk file, so
   an accidental mutating call through a reader's reference is not
   caught by any `save()` step.
+
+- **Abandoned StS2 runs.** Every StS2 deck source keeps them today
+  (sts_gg, sts2runs, spire_codex_runs; the last has a
+  `keep_abandoned` toggle, default on). The project favors quantity, but a
+  quit run's deck is not a finished one and early quits are mostly
+  starter decks. If that ever shows up as noise, filter only runs
+  abandoned before the first boss (map_point_history / acts give the
+  floor reached) rather than all of them.
+- **Contrastive split indexes persist across training runs.**
+  `DeckBoxDealer` writes `data/splits/contrastive/<dojo>.db` on a dojo's
+  first build and reuses it afterwards, so decks added by a later
+  re-ingest are never assigned a split. After re-ingesting a game's deck
+  box, delete that game's index (or pass `force_resplit`).
+- **A game's first deck ingestion invalidates its metrics.**
+  `run_deck_box_ingestion.py` seeds the game's Unknown sentinel card
+  (`ensure_unknown_card`) and saves the binder. The first time that happens
+  for a game, the binder version changes, and every metric built from the
+  old version then fails the dojos' strict version check. This hit Dominion
+  on 2026-09-30, and the metrics had to be re-run.
+
+  Fix: seed the sentinel in `run_card_binder_ingestion.py` instead, so the
+  binder version is final before any metric or deck box is built.

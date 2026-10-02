@@ -10,6 +10,7 @@ import src.evaluation.extrinsic.run_extrinsic as module
 from src.evaluation.extrinsic.run_extrinsic import ExtrinsicSpec, run_extrinsic
 from src.schema.holdout import HoldoutSpec
 from src.training.plan import Proportional
+from src.training.recording.reports import SplitLoss
 from src.training.recording.run_listener import read_rounds_csv
 from tests.training.fakes import LIMITS, FakeDojo, FakeModel, saturation_spec
 
@@ -63,7 +64,7 @@ def test_validation_scores_the_heads_restored_to_their_best_round(
         calls.append("validation")
         head = [p.detach().clone() for p in dojos[0].trainable_parameters()]
         assert all(torch.equal(x, y) for x, y in zip(head, seen_heads[0]))
-        return {dojo.name: 1.0 for dojo in dojos}
+        return {dojo.name: SplitLoss(1.0, 2.0) for dojo in dojos}
 
     monkeypatch.setattr(module.BestHeadKeeper, "restore_best_heads", recording_restore)
     monkeypatch.setattr(module, "evaluate_split_losses", recording_evaluate)
@@ -71,7 +72,7 @@ def test_validation_scores_the_heads_restored_to_their_best_round(
     result = _run(FakeModel(), [FakeDojo("a")], tmp_path)
 
     assert calls == ["restore", "validation"]
-    assert result.validation_losses == {"a": 1.0}
+    assert result.validation_losses == {"a": SplitLoss(1.0, 2.0)}
 
 
 def test_a_run_trains_the_heads_only_and_records_both_passes(tmp_path: Path) -> None:
@@ -90,7 +91,11 @@ def test_a_run_trains_the_heads_only_and_records_both_passes(tmp_path: Path) -> 
     assert result.stopped_early_reason is None and result.quarantined == frozenset()
     assert set(result.validation_losses or {}) == {"a", "b"}
     written = json.loads((run_dir / "validation.json").read_text())
-    assert written["losses"] == dict(result.validation_losses or {})
+    validation = dict(result.validation_losses or {})
+    assert written["losses"] == {name: s.loss for name, s in validation.items()}
+    assert written["normalized_losses"] == {
+        name: s.normalized for name, s in validation.items()
+    }
     assert written["quarantined"] == []
     # The scored head of each dojo is the one from its best TEST round
     best_rows = {

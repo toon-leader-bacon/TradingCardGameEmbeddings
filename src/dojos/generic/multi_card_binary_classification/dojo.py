@@ -16,6 +16,7 @@ from src.dojos.generic.multi_card_binary_classification.decoder_head import (
 )
 from src.dojos.generic.pooling import EmbeddingPooler
 from src.dojos.loss.bce_loss import BceLoss
+from src.dojos.loss.prior_baseline_calibrations import BinaryPriorCalibration
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
 
@@ -49,6 +50,7 @@ class MultiCardBinaryClassificationDojo(GenericDojo):
                 card_embedding_size, pooler=pooler
             ),
             loss_calculator=BceLoss(),
+            calibration=BinaryPriorCalibration(),
             mod_pipeline=mod_pipeline,
             deck_box=deck_box,
             config=config,

@@ -18,8 +18,10 @@ from src.dojos.generic.option_scoring import OptionScoringHead
 from src.dojos.loss.pick_prediction_cross_entropy_loss import (
     PickPredictionCrossEntropyLoss,
 )
+from src.dojos.loss.prior_baseline_calibrations import UniformOptionCalibration
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
+from src.schema.type_hints import TrainingInput
 
 
 class MultiCardOptionSelectionDojo(GenericDojo):
@@ -51,7 +53,21 @@ class MultiCardOptionSelectionDojo(GenericDojo):
                 card_embedding_size, scoring_head=scoring_head
             ),
             loss_calculator=PickPredictionCrossEntropyLoss(),
+            calibration=UniformOptionCalibration(option_count=_option_count_of_pack),
             mod_pipeline=mod_pipeline,
             deck_box=deck_box,
             config=config,
         )
+
+
+def _option_count_of_pack(pack_input: TrainingInput) -> int:
+    """How many options a pack input offers: the input is the pack itself,
+    one option per card (PackToPickChoiceSetDataConstructor).
+
+    Inputs: pack_input, a MultiCardInput (list of option cards).
+    Output: int, len(pack_input).
+    Side effects: none. Exceptions: TypeError if pack_input is not a list.
+    """
+    if not isinstance(pack_input, list):
+        raise TypeError(f"expected a pack (list of cards), got {type(pack_input)}")
+    return len(pack_input)

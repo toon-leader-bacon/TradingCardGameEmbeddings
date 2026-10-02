@@ -16,7 +16,7 @@ from typing import Any, Mapping
 
 import torch
 
-from src.dojos.dojo import BatchBudget, Dojo
+from src.dojos.dojo import BatchBudget, Dojo, require_usable_baseline
 from src.dojos.mods.mod import ModTally
 from src.schema.card import GenericCard
 from src.schema.splits import Split
@@ -37,6 +37,9 @@ class PreflightResult:
         tallies after the one TRAIN batch, keyed as Dojo.mod_tallies.
         Informational: a mod that never fired or failed does not make the
         dojo fail preflight (mods are best effort by design).
+    sample_baseline_loss: dojo.baseline_loss of that same TRAIN batch (the
+        "learned nothing" loss normalized loss divides by); None if any
+        earlier step failed.
     """
 
     dojo_name: str
@@ -45,6 +48,7 @@ class PreflightResult:
     sample_loss: float | None
     error: str | None
     mod_tallies: Mapping[str, ModTally] = field(default_factory=dict)
+    sample_baseline_loss: float | None = None
 
     @property
     def ok(self) -> bool:
@@ -111,6 +115,8 @@ def preflight_dojo(
             )
         if not torch.isfinite(loss):
             raise ValueError(f"compute_loss returned non-finite {loss.item()}")
+        # A degenerate baseline would make normalized loss undefined mid-run
+        baseline = require_usable_baseline(dojo.baseline_loss(batch), dojo.name)
         return PreflightResult(
             dojo.name,
             train_count,
@@ -118,6 +124,7 @@ def preflight_dojo(
             loss.item(),
             None,
             _tally_snapshot(dojo),
+            sample_baseline_loss=baseline,
         )
     except Exception as error:
         return PreflightResult(

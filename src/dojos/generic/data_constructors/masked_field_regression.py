@@ -6,9 +6,9 @@ from typing import List
 import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.dojos.generic.data_constructors._row_values import (
-    _card_for_uuid,
-    _label_as_float,
+from src.dojos.generic.data_constructors.row_values import (
+    card_for_uuid,
+    label_as_float,
 )
 from src.schema.type_hints import TrainingDatum
 
@@ -21,7 +21,7 @@ class MaskedFieldRegressionDataConstructor:
     (nocab_uuid, masked_field, label) row shape, but label is a genuine
     float here rather than a raw classification string, so it needs
     CardAverageDataConstructor's float/NaN parsing
-    (_label_as_float) instead of MaskedFieldDataConstructor's pass-
+    (label_as_float) instead of MaskedFieldDataConstructor's pass-
     through. Kept as its own class rather than unifying with either
     sibling - mirrors the deliberate split between MaskedFieldMetric
     and MaskedFieldRegressionMetric themselves (see that module's
@@ -65,10 +65,10 @@ class MaskedFieldRegressionDataConstructor:
         # that fail either resolution rather than raising, matching
         # every other DataConstructor in this package.
         for _, row in chunk.iterrows():
-            card = _card_for_uuid(lookup, row["nocab_uuid"])
+            card = card_for_uuid(lookup, row["nocab_uuid"])
             if card is None:
                 continue
-            label = _label_as_float(row[self._label_column])
+            label = label_as_float(row[self._label_column])
             if label is None:
                 continue
             results.append((card, label))

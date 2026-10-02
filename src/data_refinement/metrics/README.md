@@ -31,6 +31,9 @@ genuinely shareable across data source containers:
 - `MaskedFieldMetric` - the `CorpusScanMetric`-family base above,
   reading a `CardLookup`'s already-loaded `GenericCard`s. Consumer:
   `gwent_one/`'s eight masking metrics.
+- `HeldOutDeckCardMetric` - `CorpusScanMetric`-shaped, driven from a
+  published `DeckBox`: one card held out of a deck, picked among K + 1
+  candidates. Consumer: `final_decks/`.
 - `DeckCardMaskMetric` - `Metric[dict]`-shaped (not `CorpusScanMetric`
   - it's still driven by a raw per-source row), but delegates all
   row-parsing/card-resolution to an injected per-source
@@ -71,13 +74,24 @@ implementation yet). Implemented today:
 - **`sts_gg/`** - twenty-four `Metric[dict]` accumulator/streaming
   metrics over Slay the Spire 2 run data. See
   [`sts_gg/README.md`](sts_gg/README.md).
+- **`sts2_runs/`** - twenty-three `Metric[Sts2Run]` metrics (sts_gg's
+  deck-label and per-card families, recomputed) over spire_codex's
+  ~1.7M-run export plus sts2runs' dump, which include losses. Its
+  deck-level rows point into the published StS2 deck box. See
+  [`sts2_runs/README.md`](sts2_runs/README.md).
 - **`gwent_one/`** - eight `MaskedFieldMetric` masking metrics over
   gwent.one card data - this project's first `CorpusScanMetric`-family
   consumer. See [`gwent_one/README.md`](gwent_one/README.md).
 - **`play_gwent/`** - `LeaderMaskedFromDeckMetric`, this project's
   first `DeckCardMaskMetric` consumer, driven directly off
-  playgwent.com's community deck guides. See
+  playgwent.com's community deck guides. Also two card inclusion-rate
+  metrics and guide vote prediction, which read the published Gwent deck
+  box read-only. See
   [`play_gwent/README.md`](play_gwent/README.md).
+- **`fabtcg_decklists/`** - hero masked from deck (a third
+  `DeckCardMaskMetric` consumer) and two card inclusion-rate metrics
+  over fabtcg.com tournament decklists, reading the published FaB deck
+  box read-only. See [`fabtcg_decklists/README.md`](fabtcg_decklists/README.md).
 - **`seventeenlands/`** - `Metric[dict]` metrics over 17lands' MTG
   draft/game/replay data exports; `draft_data/`, `game_data/`, and
   `replay_data/` are all implemented today. See
@@ -88,12 +102,21 @@ implementation yet). Implemented today:
   `SetMaskMetric` (a bespoke `CorpusScanMetric` reading raw
   `cards_db.json` directly, not `raw_content`). See
   [`dominiontabs/README.md`](dominiontabs/README.md).
+- **`scryfall/`, `pokemon_tcg/`, `cardvault_fabtcg/`, `spire_codex/`,
+  `hearthstonejson/`** - single-card masking metrics (`MaskedFieldMetric`,
+  `MaskedFieldRegressionMetric`, `MaskedFieldMultiLabelMetric`) over
+  each game's `CardBinder`: 6 MTG, 5 Pokemon, 6 Flesh and Blood, 4 Slay
+  the Spire 2, 8 Hearthstone. See each directory's `README.md`.
 - **`isotropic/summary/`** - thirteen `Metric[dict]` metrics over
   isotropic.org's Wayback-salvaged Dominion gameplay data (real
   played games - kingdoms, vetoes, final decks, outcomes), resolving
   card names against `dominiontabs`' `CardBinder`; this project's
   second `DeckCardMaskMetric` consumer, after `play_gwent/`. See
   [`isotropic/summary/README.md`](isotropic/summary/README.md).
+- **`final_decks/`** - one `HeldOutDeckCardMetric` per published deck
+  box (Pokemon, FaB, Gwent, Dominion, StS2, MTG), reading
+  `data/final/decks/<game>.db` directly. See
+  [`final_decks/README.md`](final_decks/README.md).
 - **`isotropic/games/`** - eleven metrics over isotropic's other raw
   flavor - turn-by-turn game-log HTML files, parsed via BeautifulSoup and
   sharing `isotropic/card_names.py`'s card-name resolution with

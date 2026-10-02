@@ -127,6 +127,50 @@ def is_natural_kingdom(row: dict) -> bool:
     return not any(board.get(flag) for flag in _KINGDOM_CONSTRAINT_FLAGS)
 
 
+def vetoed_card_names(row: dict) -> list[str]:
+    """This row's vetoed card names, with isotropic's "*" marker removed.
+
+    A game with vetoing on carries one vetoed name per player. About 9%
+    are written "*Name" (e.g. "*Militia"); none of those cards are in
+    board.supply either, so they were vetoed all the same. What the
+    marker means is unknown, so it is dropped rather than interpreted.
+
+    Inputs:
+        row: one parsed Flavor A summary row.
+    Output: row["vetoed"] (or [] if absent), each name with one leading
+        "*" removed, order kept.
+    Side effects: none.
+    Exceptions: none.
+
+    Example:
+        >>> vetoed_card_names({"vetoed": ["*Militia", "Moat"]})
+        ['Militia', 'Moat']
+    """
+    return [name.removeprefix("*") for name in row.get("vetoed", [])]
+
+
+def is_played_to_the_end(row: dict) -> bool:
+    """Whether this row is a multiplayer game nobody resigned from.
+
+    A solo game is practice, and a game someone resigned from ended
+    early (about 2% of winners have under 3 turns), so neither one's
+    length says anything about its kingdom.
+
+    Inputs:
+        row: one parsed Flavor A summary row.
+    Output: True if row["players"] has at least 2 entries and every one
+        has an "end" block (no resignations).
+    Side effects: none.
+    Exceptions: none.
+
+    Example:
+        >>> is_played_to_the_end(row)
+        True
+    """
+    players = row["players"]
+    return len(players) >= 2 and all("end" in player for player in players)
+
+
 def eligible_player_entries(row: dict) -> list[dict]:
     """This row's players[] entries that reached a real game end.
 

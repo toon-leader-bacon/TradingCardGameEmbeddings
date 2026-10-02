@@ -9,7 +9,9 @@ from src.data_refinement.metrics.isotropic.summary.row_utils import (
     deck_for_player,
     eligible_player_entries,
     is_natural_kingdom,
+    is_played_to_the_end,
     kingdom_card_names,
+    vetoed_card_names,
     winner_entry,
 )
 from tests.data_refinement.metrics.isotropic.summary._helpers import (
@@ -129,3 +131,23 @@ def test_deck_for_player_same_content_same_uuid(tmp_path: Path) -> None:
     deck_a = deck_for_player(binder, player_entry("a", 1, {"Witch": 1}))
     deck_b = deck_for_player(binder, player_entry("b", 2, {"Witch": 1}))
     assert deck_a.nocab_uuid == deck_b.nocab_uuid
+
+
+def test_vetoed_card_names_strips_star_marker() -> None:
+    row = summary_row(["Moat"], [], vetoed=["*Militia", "Witch"])
+
+    assert vetoed_card_names(row) == ["Militia", "Witch"]
+
+
+def test_vetoed_card_names_empty_without_vetoes() -> None:
+    assert vetoed_card_names(summary_row(["Moat"], [])) == []
+
+
+def test_is_played_to_the_end_needs_two_players_and_no_resignation() -> None:
+    finished = player_entry("a", 1, {"Copper": 7})
+    other = player_entry("b", 2, {"Copper": 7})
+    quitter = player_entry("c", 2, resigned=True)
+
+    assert is_played_to_the_end(summary_row(["Moat"], [finished, other]))
+    assert not is_played_to_the_end(summary_row(["Moat"], [finished]))
+    assert not is_played_to_the_end(summary_row(["Moat"], [finished, quitter]))

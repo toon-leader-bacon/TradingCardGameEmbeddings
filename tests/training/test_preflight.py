@@ -102,6 +102,9 @@ class _ListCardFakeDojo:
     def mod_tallies(self) -> Mapping[str, ModTally]:
         return {}
 
+    def baseline_loss(self, batch: Any) -> float:
+        return 1.0
+
     def reset_head(self) -> None:
         pass
 
@@ -115,7 +118,16 @@ class TestPreflightAgainstAFakeDojo:
         assert result.train_count == 50
         assert result.test_count == 50
         assert result.sample_loss is not None
+        assert result.sample_baseline_loss == 1.0
         assert result.error is None
+
+    def test_an_unusable_baseline_is_reported_not_raised(self) -> None:
+        dojo = _ListCardFakeDojo("degenerate", train_count=50, head_size=2)
+        dojo.baseline_loss = lambda batch: 0.0  # type: ignore[method-assign]
+        result = preflight_dojo(dojo, _BUDGET, card_embedding_size=2)
+        assert not result.ok
+        assert result.sample_baseline_loss is None
+        assert result.error is not None and "baseline_loss" in result.error
 
     def test_zero_train_examples_is_reported_not_raised(self) -> None:
         dojo = _ListCardFakeDojo("empty", train_count=0)

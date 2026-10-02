@@ -16,6 +16,9 @@ from src.dojos.seventeenlands.replay_data.replay_turn_event_rate_dojos import (
 )
 from src.schema.holdout import HoldoutSpec
 
+# Wiring tests: placeholder parquets, no real TRAIN calibration
+pytestmark = pytest.mark.usefixtures("uncalibrated_generic_dojos")
+
 _CASES = [
     (CombatKillInvolvementRateDojo, CombatKillInvolvementRateMetric),
     (CombatDamagePushThroughRateDojo, CombatDamagePushThroughRateMetric),

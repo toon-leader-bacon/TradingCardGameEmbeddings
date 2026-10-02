@@ -292,6 +292,7 @@ collision policy):
 | `spire_codex/` | `SpireCodexCardIngestionStage` | Slay the Spire 2 | spire-codex card `id` |
 | `cardvault_fabtcg/` | `CardVaultFabtcgCardIngestionStage` | Flesh and Blood | cardvault `card_id` (+ `print_id` aliases) |
 | `dominiontabs/` | `DominionTabsCardIngestionStage` | Dominion | dominiontabs `card_tag` |
+| `hearthstonejson/` | `HearthstoneJsonCardIngestionStage` | Hearthstone | content-derived: lean content minus set/rarity, so reprints collapse (+ every `dbfId` as an alias); the binder mirrors one build |
 
 ## How it works
 
@@ -324,7 +325,8 @@ PYTHONPATH=. python3 scripts/run_card_binder_ingestion.py --source scryfall
 
 The script knows each source's default raw path (a single file for
 Scryfall, spire-codex and cardvault; a directory for pokemon_tcg,
-gwent.one and dominiontabs). From Python:
+gwent.one and dominiontabs; for hearthstonejson, the newest
+`<build id>.json` under `data/raw/hearthstonejson/`). From Python:
 
 ```python
 from pathlib import Path

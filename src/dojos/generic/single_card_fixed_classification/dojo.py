@@ -5,7 +5,7 @@ decoder head and loss; everything else is the shared `Dojo` contract.
 """
 
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Sequence
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
@@ -15,8 +15,10 @@ from src.dojos.generic.generic_dojo import GenericDojo
 from src.dojos.generic.single_card_fixed_classification.decoder_head import (
     FixedClassificationDecoderHead,
 )
-from src.dojos.loss.fixed_classification_loss import FixedClassificationLoss
-from src.dojos.loss.nocab_loss import NocabLoss
+from src.dojos.generic.single_card_fixed_classification.loss_spec import (
+    FIXED_CLASSIFICATION_LOSS_SPEC,
+    LossSpec,
+)
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
 
@@ -37,11 +39,10 @@ class SingleCardFixedClassificationDojo(GenericDojo):
         label_values: Sequence[str],
         card_embedding_size: int,
         mod_pipeline: ModPipeline | None = None,
-        loss_factory: Callable[
-            [Sequence[str]], NocabLoss[Any, Any]
-        ] = FixedClassificationLoss,
         deck_box: DeckBox | None = None,
         config: DojoConfig = DojoConfig(),
+        # The loss and its matching calibration, as one value
+        loss_spec: LossSpec = FIXED_CLASSIFICATION_LOSS_SPEC,
     ) -> None:
         label_values = list(label_values)
         self.card_embedding_size = card_embedding_size
@@ -54,7 +55,8 @@ class SingleCardFixedClassificationDojo(GenericDojo):
             decoder_head=FixedClassificationDecoderHead(
                 card_embedding_size, len(label_values)
             ),
-            loss_calculator=loss_factory(label_values),
+            loss_calculator=loss_spec.loss_factory(label_values),
+            calibration=loss_spec.calibration,
             mod_pipeline=mod_pipeline,
             deck_box=deck_box,
             config=config,

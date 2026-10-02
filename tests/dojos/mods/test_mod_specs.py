@@ -55,9 +55,14 @@ class TestSpecs:
 
 class TestDefaults:
     def test_every_game_with_a_contrastive_dojo_has_defaults(self) -> None:
-        assert {GameId.GWENT, GameId.SLAY_THE_SPIRE_2, GameId.FLESH_AND_BLOOD} <= set(
-            DEFAULT_AUGMENTATIONS
-        )
+        assert {
+            GameId.GWENT,
+            GameId.SLAY_THE_SPIRE_2,
+            GameId.FLESH_AND_BLOOD,
+            GameId.MTG,
+            GameId.POKEMON,
+            GameId.DOMINION,
+        } <= set(DEFAULT_AUGMENTATIONS)
 
     def test_gwent_defaults(self) -> None:
         names = [

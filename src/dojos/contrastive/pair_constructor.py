@@ -17,6 +17,7 @@ import random
 from typing import Protocol
 from uuid import UUID
 
+from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.dojos.contrastive.contrastive_batch import ContrastiveBatch
 from src.schema.card import GenericCard, GenericDeck
@@ -25,7 +26,9 @@ _logger = logging.getLogger(__name__)
 
 
 def _known_card_uuids(deck: GenericDeck, card_lookup: CardLookup) -> list[UUID]:
-    """The subset of deck.card_nocab_uuids that card_lookup has an entry for.
+    """The subset of deck.card_nocab_uuids that card_lookup has an entry for,
+    minus the game's Unknown sentinel (a stand-in for cards the binder
+    lacks, not a card to embed).
 
     Shared by every concrete ContrastivePairConstructor in this file.
 
@@ -37,10 +40,11 @@ def _known_card_uuids(deck: GenericDeck, card_lookup: CardLookup) -> list[UUID]:
     Side effects: none.
     Exceptions: none.
     """
+    unknown_uuid = CardBinder.unknown_card_uuid(deck.source_game)
     return [
         card_uuid
         for card_uuid in deck.card_nocab_uuids
-        if card_lookup.get_by_uuid(card_uuid) is not None
+        if card_uuid != unknown_uuid and card_lookup.get_by_uuid(card_uuid) is not None
     ]
 
 

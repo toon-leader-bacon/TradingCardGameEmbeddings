@@ -11,7 +11,7 @@ reference - there is nothing else to reference by.
 
 NULLABLE LABEL: a card never seen on one side of on_play writes None
 for its delta (round-trips as NaN through the parquet float64 column) -
-CardAverageDataConstructor._label_as_float() skips a NaN label the same
+row_values.label_as_float() skips a NaN label the same
 way it skips an unparseable one (see
 src/dojos/generic/data_constructors.py and
 plans/seventeen_lands_dojos.md's "Bugfix made while wiring this" note),

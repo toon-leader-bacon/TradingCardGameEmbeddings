@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 
 import pandas as pd
@@ -14,6 +15,9 @@ from src.dojos.seventeenlands.draft_data.pool_conditioned_pick_dojo import (
     PoolConditionedPickDojo,
 )
 from src.schema.holdout import HoldoutSpec
+
+# Wiring tests: placeholder parquets, no real TRAIN calibration
+pytestmark = pytest.mark.usefixtures("uncalibrated_generic_dojos")
 
 
 def _write_source(path: Path) -> None:

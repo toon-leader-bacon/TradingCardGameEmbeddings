@@ -19,7 +19,9 @@ own DEFAULT_OUTPUT_PATH is namespaced by <expansion>/<format_code> so
 scanning multiple sets never overwrites a previous one's output — the
 metric classes themselves have no cross-file accumulation (each file's
 header names different cards), so "one file, one output" is the actual
-unit of work, not "one family, one output".
+unit of work, not "one family, one output". sts2_runs reads two
+fixed sources (spire_codex's ~1.7M-run pages and sts2runs' dump) in one
+pass; it is the slow one (most of an hour).
 
 Usage (from the project root):
 
@@ -32,8 +34,8 @@ Usage (from the project root):
 
 `--all` runs every family in this process, one after another (same
 reasoning as the other two scripts' `--all` — nothing here is a
-multi-hour crawl). One family's failure is logged and does not stop
-the rest.
+multi-hour crawl, though sts2_runs takes most of an hour). One family's
+failure is logged and does not stop the rest.
 """
 
 import argparse
@@ -56,6 +58,7 @@ from src.data_retrieval.seventeenlands.downloader import SeventeenLandsDownloade
 from src.schema.game_id import GameId
 
 # --- sts_gg ---
+from src.data_refinement.metrics.isotropic.deck_box_path import ISOTROPIC_DECK_BOX_PATH
 from src.data_refinement.metrics.sts_gg.ascension_prediction_metric import (
     AscensionPredictionMetric,
 )
@@ -97,6 +100,28 @@ from src.data_refinement.metrics.sts_gg.deck_label_metrics import (
 from src.data_refinement.metrics.sts_gg.deck_box_path import STS_GG_DECK_BOX_PATH
 from src.data_refinement.metrics.sts_gg.scanner import scan_runs_jsonl
 
+# --- final_decks ---
+from src.data_refinement.metrics.final_decks.held_out_card_metrics import (
+    DominionHeldOutCardMetric,
+    FleshAndBloodHeldOutCardMetric,
+    GwentHeldOutCardMetric,
+    MtgHeldOutCardMetric,
+    PokemonHeldOutCardMetric,
+    SlayTheSpire2HeldOutCardMetric,
+)
+from src.data_refinement.metrics.generic.held_out_deck_card.metric import (
+    HeldOutDeckCardMetric,
+)
+
+# --- sts2_runs ---
+from src.data_refinement.metrics.sts2_runs import card_average_metrics as sts2_cards
+from src.data_refinement.metrics.sts2_runs import deck_label_metrics as sts2_decks
+from src.data_refinement.metrics.sts2_runs.run_record import Sts2Run
+from src.data_refinement.metrics.sts2_runs.scanner import (
+    default_run_sources,
+    scan_sts2_runs,
+)
+
 # --- gwent_one ---
 from src.data_refinement.metrics.gwent_one.armor_mask_metric import ArmorMaskMetric
 from src.data_refinement.metrics.gwent_one.color_mask_metric import ColorMaskMetric
@@ -121,6 +146,17 @@ from src.data_refinement.metrics.dominiontabs.set_mask_metric import (
 from src.data_refinement.metrics.dominiontabs.type_mask_metric import (
     TypeMaskMetric as DominionTypeMaskMetric,
 )
+
+# --- single-card masks: scryfall, pokemon_tcg, cardvault_fabtcg, spire_codex ---
+from src.data_refinement.metrics.cardvault_fabtcg import (
+    card_mask_metrics as fabtcg_masks,
+)
+from src.data_refinement.metrics.hearthstonejson import (
+    card_mask_metrics as hearthstone_masks,
+)
+from src.data_refinement.metrics.pokemon_tcg import card_mask_metrics as pokemon_masks
+from src.data_refinement.metrics.scryfall import card_mask_metrics as scryfall_masks
+from src.data_refinement.metrics.spire_codex import card_mask_metrics as sts2_masks
 
 # --- isotropic/summary ---
 from src.data_refinement.metrics.isotropic.summary.average_copies_bought_metric import (
@@ -205,12 +241,32 @@ from src.data_refinement.metrics.isotropic.games.scanner import (
     scan_isotropic_game_logs_archives,
 )
 
+# --- fabtcg_decklists ---
+from src.data_refinement.metrics.fabtcg_decklists.card_inclusion_metrics import (
+    CardInclusionRateMetric as FabCardInclusionRateMetric,
+    HeroConditionedInclusionMetric,
+)
+from src.data_refinement.metrics.fabtcg_decklists.hero_masked_from_deck_metric import (
+    HeroMaskedFromDeckMetric,
+)
+from src.data_refinement.metrics.fabtcg_decklists.scanner import (
+    DEFAULT_RAW_PATH as FABTCG_DECKLISTS_DEFAULT_RAW_PATH,
+    scan_decklist_files,
+)
+
 # --- play_gwent ---
 from src.data_refinement.metrics.play_gwent.leader_deck_counts import (
     DEFAULT_RAW_PATH as PLAY_GWENT_DEFAULT_RAW_PATH,
 )
 from src.data_refinement.metrics.play_gwent.leader_masked_from_deck_metric import (
     LeaderMaskedFromDeckMetric,
+)
+from src.data_refinement.metrics.play_gwent.card_inclusion_metrics import (
+    CardInclusionRateMetric as GwentCardInclusionRateMetric,
+    FactionConditionedInclusionMetric,
+)
+from src.data_refinement.metrics.play_gwent.guide_votes_metric import (
+    GuideVotesMetric,
 )
 from src.data_refinement.metrics.play_gwent.scanner import scan_guides_jsonl
 
@@ -363,15 +419,69 @@ def run_sts_gg(raw_path: Path | None) -> None:
     print(f"wrote {len(metrics)} metric outputs")
 
 
+# --- sts2_runs ---
+
+
+# Every sts2_runs metric takes (card_binder, output_path=None)
+_STS2_RUNS_METRIC_CLASSES: tuple[
+    type[sts2_decks.DeckLabelMetric] | type[sts2_cards.CardAverageMetric], ...
+] = (
+    sts2_decks.AscensionPredictionMetric,
+    sts2_decks.CharacterPredictionMetric,
+    sts2_decks.WinMetric,
+    sts2_decks.KilledByMetric,
+    sts2_decks.RelicCountMetric,
+    sts2_decks.TotalDamageTakenMetric,
+    sts2_decks.TotalCardsPickedMetric,
+    sts2_decks.TotalCardsSkippedMetric,
+    sts2_decks.TotalTurnsMetric,
+    sts2_decks.ElitesKilledMetric,
+    sts2_decks.FloorsClearedMetric,
+    sts2_decks.TotalCombatsMetric,
+    sts2_cards.CardRelicCountMetric,
+    sts2_cards.CardTotalDamageTakenMetric,
+    sts2_cards.CardDeckSizeMetric,
+    sts2_cards.CardTotalCardsPickedMetric,
+    sts2_cards.CardTotalTurnsMetric,
+    sts2_cards.CardElitesKilledMetric,
+    sts2_cards.CardFloorsClearedMetric,
+    sts2_cards.CardTotalCombatsMetric,
+    sts2_cards.CardWinRateMetric,
+    sts2_cards.CardUpgradeRateMetric,
+    sts2_cards.CardWinRateAtAct2Metric,
+)
+
+
+def run_sts2_runs(raw_path: Path | None) -> None:
+    """Scan spire_codex's run pages and sts2runs' dump (both at their
+    default paths) into data/metrics/sts2_runs/. The deck-level outputs
+    point into the published deck box (data/final/decks/
+    slay_the_spire_2.db); nothing is written to it."""
+    _reject_raw_path("sts2_runs", raw_path)
+    binder = _require_binder(
+        GameId.SLAY_THE_SPIRE_2,
+        "run 'python3 scripts/run_card_binder_ingestion.py --source spire_codex' first.",
+    )
+    metrics: list[Metric[Sts2Run]] = [
+        cls(binder) for cls in _STS2_RUNS_METRIC_CLASSES
+    ]
+
+    print("=== sts2_runs: spire_codex run pages + sts2runs dump ===")
+    tally = scan_sts2_runs(default_run_sources(), binder, metrics)
+    print(tally.as_dict())
+    print(f"wrote {len(metrics)} metric outputs")
+
+
 # --- gwent_one ---
 
 
 def _reject_raw_path(name: str, raw_path: Path | None) -> None:
-    """Exit if --raw-path was given to a family whose metrics scan an
-    already-loaded CardBinder rather than one raw file."""
+    """Exit if --raw-path was given to a family whose metrics read fixed
+    inputs (an already-loaded CardBinder or DeckBox, or sts2_runs' two
+    run sources) rather than one raw file."""
     if raw_path is not None:
         raise SystemExit(
-            f"{name} metrics scan an already-loaded CardBinder, not a raw file "
+            f"{name} metrics read fixed inputs, not one raw file "
             "— --raw-path is not applicable."
         )
 
@@ -430,6 +540,94 @@ def run_dominiontabs(raw_path: Path | None) -> None:
     _scan_corpus_metrics("dominiontabs", metrics)
 
 
+# --- single-card masks: scryfall, pokemon_tcg, cardvault_fabtcg, spire_codex ---
+
+
+def run_scryfall(raw_path: Path | None) -> None:
+    _reject_raw_path("scryfall", raw_path)
+    binder = _require_binder(GameId.MTG, _MTG_BINDER_HINT)
+    metrics: list[CorpusScanMetric] = [
+        scryfall_masks.CmcRegressionMetric(binder),
+        scryfall_masks.CardTypeMaskMetric(binder),
+        scryfall_masks.RarityMaskMetric(binder),
+        scryfall_masks.ColorsMaskMetric(binder),
+        scryfall_masks.PowerRegressionMetric(binder),
+        scryfall_masks.ToughnessRegressionMetric(binder),
+    ]
+    _scan_corpus_metrics("scryfall", metrics)
+
+
+def run_pokemon_tcg(raw_path: Path | None) -> None:
+    _reject_raw_path("pokemon_tcg", raw_path)
+    binder = _require_binder(
+        GameId.POKEMON,
+        "run 'python3 scripts/run_card_binder_ingestion.py --source pokemon_tcg' "
+        "first.",
+    )
+    metrics: list[CorpusScanMetric] = [
+        pokemon_masks.HpRegressionMetric(binder),
+        pokemon_masks.TypesMaskMetric(binder),
+        pokemon_masks.StageMaskMetric(binder),
+        pokemon_masks.RetreatCostRegressionMetric(binder),
+        pokemon_masks.WeaknessMaskMetric(binder),
+    ]
+    _scan_corpus_metrics("pokemon_tcg", metrics)
+
+
+def run_cardvault_fabtcg(raw_path: Path | None) -> None:
+    _reject_raw_path("cardvault_fabtcg", raw_path)
+    binder = _require_binder(
+        GameId.FLESH_AND_BLOOD,
+        "run 'python3 scripts/run_card_binder_ingestion.py --source "
+        "cardvault_fabtcg' first.",
+    )
+    metrics: list[CorpusScanMetric] = [
+        fabtcg_masks.PitchMaskMetric(binder),
+        fabtcg_masks.CostRegressionMetric(binder),
+        fabtcg_masks.PowerRegressionMetric(binder),
+        fabtcg_masks.DefenseRegressionMetric(binder),
+        fabtcg_masks.ClassMaskMetric(binder),
+        fabtcg_masks.CardTypeMaskMetric(binder),
+    ]
+    _scan_corpus_metrics("cardvault_fabtcg", metrics)
+
+
+def run_spire_codex(raw_path: Path | None) -> None:
+    _reject_raw_path("spire_codex", raw_path)
+    binder = _require_binder(
+        GameId.SLAY_THE_SPIRE_2,
+        "run 'python3 scripts/run_card_binder_ingestion.py --source spire_codex' "
+        "first.",
+    )
+    metrics: list[CorpusScanMetric] = [
+        sts2_masks.CostMaskMetric(binder),
+        sts2_masks.CardTypeMaskMetric(binder),
+        sts2_masks.RarityMaskMetric(binder),
+        sts2_masks.ColorMaskMetric(binder),
+    ]
+    _scan_corpus_metrics("spire_codex", metrics)
+
+
+def run_hearthstonejson(raw_path: Path | None) -> None:
+    _reject_raw_path("hearthstonejson", raw_path)
+    binder = _require_binder(
+        GameId.HEARTHSTONE,
+        "run 'python3 scripts/run_card_binder_ingestion.py --source "
+        "hearthstonejson' first.",
+    )
+    metrics: list[CorpusScanMetric] = [
+        hearthstone_masks.CostRegressionMetric(binder),
+        hearthstone_masks.AttackRegressionMetric(binder),
+        hearthstone_masks.HealthRegressionMetric(binder),
+        hearthstone_masks.ClassMaskMetric(binder),
+        hearthstone_masks.RarityMaskMetric(binder),
+        hearthstone_masks.CardTypeMaskMetric(binder),
+        hearthstone_masks.RacesMaskMetric(binder),
+        hearthstone_masks.SpellSchoolMaskMetric(binder),
+    ]
+    _scan_corpus_metrics("hearthstonejson", metrics)
+
+
 # --- play_gwent ---
 
 
@@ -450,13 +648,71 @@ def run_play_gwent(raw_path: Path | None) -> None:
     print(f"wrote {len(metrics)} metric outputs")
 
 
+# --- fabtcg_decklists ---
+
+
+def _require_published_deck_box(game: GameId) -> DeckBox:
+    """The published deck box for game, for metrics that only read it.
+
+    Inputs: game. Output: DeckBox (single-path load: callers must not
+        write through it, and never save() it).
+    Side effects: opens the box file. Exceptions: SystemExit if missing.
+    """
+    box_path = DeckBox.default_output_path(game)
+    if not box_path.exists():
+        raise SystemExit(f"{box_path} does not exist; run deck box ingestion first.")
+    return DeckBox.load([box_path])
+
+
+def run_fabtcg_decklists(raw_path: Path | None) -> None:
+    """Hero mask and card inclusion rates over the raw decklist files.
+    Reads the published FaB deck box and never writes or saves it."""
+    effective_raw_path = raw_path or FABTCG_DECKLISTS_DEFAULT_RAW_PATH
+    binder = _require_binder(
+        GameId.FLESH_AND_BLOOD,
+        "run 'python3 scripts/run_card_binder_ingestion.py --source "
+        "cardvault_fabtcg' first.",
+    )
+    deck_box = _require_published_deck_box(GameId.FLESH_AND_BLOOD)
+    metrics: list[Metric[dict]] = [
+        HeroMaskedFromDeckMetric(binder, deck_box),
+        FabCardInclusionRateMetric(binder, deck_box),
+        HeroConditionedInclusionMetric(binder, deck_box),
+    ]
+
+    print(f"=== fabtcg_decklists: {effective_raw_path} ===")
+    scan_decklist_files(effective_raw_path, metrics)
+    print(f"wrote {len(metrics)} metric outputs")
+
+
+def run_play_gwent_guides(raw_path: Path | None) -> None:
+    """Card inclusion rates and guide votes over guides.jsonl. Unlike
+    run_play_gwent (whose leader metric writes decks and which saves the
+    published Gwent box), this reads the published box and never writes
+    or saves it."""
+    effective_raw_path = raw_path or PLAY_GWENT_DEFAULT_RAW_PATH
+    binder = _require_binder(
+        GameId.GWENT,
+        "run 'python3 scripts/run_card_binder_ingestion.py --source gwent_one' first.",
+    )
+    deck_box = _require_published_deck_box(GameId.GWENT)
+    metrics: list[Metric[dict]] = [
+        GwentCardInclusionRateMetric(binder, deck_box),
+        FactionConditionedInclusionMetric(binder, deck_box),
+        GuideVotesMetric(binder, deck_box),
+    ]
+
+    print(f"=== play_gwent_guides: {effective_raw_path} ===")
+    scan_guides_jsonl(effective_raw_path, metrics)
+    print(f"wrote {len(metrics)} metric outputs")
+
+
 # --- isotropic ---
 
 _ISOTROPIC_RAW_DIR = Path("data/raw/isotropic")
-# Shared by both isotropic families and warm-started on every run (deck
+# ISOTROPIC_DECK_BOX_PATH is shared by both families and warm-started on every run (deck
 # uuids are content-derived, so re-adding a deck is a no-op) - running
 # one family never drops the other family's decks from the box.
-_ISOTROPIC_DECK_BOX_PATH = Path("data/metrics/isotropic/deck_box.db")
 # Flavor A: one games-YYYYMMDD.json JSONL member per day.
 _ISOTROPIC_SUMMARY_GLOB = "*-summary.tar.bz2"
 # Flavor B: bare "<year>_<YYYYMMDD>.tar.bz2" full-log archives. Deliberately
@@ -484,7 +740,7 @@ def _isotropic_archive_paths(raw_path: Path | None, pattern: str) -> list[Path]:
 
 def _load_isotropic_deck_box() -> DeckBox:
     return DeckBox.load(
-        [_ISOTROPIC_DECK_BOX_PATH] if _ISOTROPIC_DECK_BOX_PATH.exists() else []
+        [ISOTROPIC_DECK_BOX_PATH] if ISOTROPIC_DECK_BOX_PATH.exists() else []
     )
 
 
@@ -512,7 +768,7 @@ def run_isotropic_summary(raw_path: Path | None) -> None:
     print(f"=== isotropic_summary: {', '.join(p.name for p in archive_paths)} ===")
     scan_isotropic_summary_archives(archive_paths, metrics)
     deck_box.save(
-        _ISOTROPIC_DECK_BOX_PATH, GameId.DOMINION, binder.version_for(GameId.DOMINION)
+        ISOTROPIC_DECK_BOX_PATH, GameId.DOMINION, binder.version_for(GameId.DOMINION)
     )
     print(f"wrote {len(metrics)} metric outputs")
 
@@ -544,7 +800,7 @@ def run_isotropic_games(raw_path: Path | None) -> None:
     scan_isotropic_game_log_archives(archive_paths, header_metrics)
     scan_isotropic_game_logs_archives(archive_paths, game_log_metrics)
     deck_box.save(
-        _ISOTROPIC_DECK_BOX_PATH, GameId.DOMINION, binder.version_for(GameId.DOMINION)
+        ISOTROPIC_DECK_BOX_PATH, GameId.DOMINION, binder.version_for(GameId.DOMINION)
     )
     print(f"wrote {len(header_metrics) + len(game_log_metrics)} metric outputs")
 
@@ -717,11 +973,60 @@ def run_seventeenlands_replay_data(raw_path: Path | None) -> None:
     )
 
 
+# --- final_decks ---
+
+# Read-only scans of the published deck boxes (data/final/decks/<game>.db),
+# smallest box first. Runnable with --source only, never by --all: they
+# must run after deck-box ingestion (and play_gwent, which writes the
+# Gwent box), and the StS2/MTG scans take long.
+_FINAL_DECKS_METRICS: dict[str, type[HeldOutDeckCardMetric]] = {
+    "final_decks_pokemon": PokemonHeldOutCardMetric,
+    "final_decks_flesh_and_blood": FleshAndBloodHeldOutCardMetric,
+    "final_decks_gwent": GwentHeldOutCardMetric,
+    "final_decks_dominion": DominionHeldOutCardMetric,
+    "final_decks_slay_the_spire_2": SlayTheSpire2HeldOutCardMetric,
+    "final_decks_mtg": MtgHeldOutCardMetric,
+}
+
+
+def run_final_decks(name: str, raw_path: Path | None) -> None:
+    """Scan one published deck box into its held-out card metric.
+
+    Inputs: name (a _FINAL_DECKS_METRICS key), raw_path (must be None).
+    Output: none. Side effects: reads the game's binder and deck box,
+        writes the metric's parquet. Exceptions: SystemExit if raw_path
+        is given or the binder or box is missing; ValueError from scan()
+        on a stale box.
+    """
+    _reject_raw_path(name, raw_path)
+    metric_class = _FINAL_DECKS_METRICS[name]
+    game = metric_class.SOURCE_GAME
+    binder = _require_binder(
+        game, "run 'python3 scripts/run_card_binder_ingestion.py' for it first."
+    )
+    box_path = DeckBox.default_output_path(game)
+    if not box_path.exists():
+        raise SystemExit(f"{box_path} does not exist; run deck box ingestion first.")
+    deck_box = DeckBox.load([box_path])
+
+    print(f"=== {name}: {box_path} ===")
+    output_path = metric_class(binder, deck_box).scan()
+    print(f"wrote {output_path}")
+
+
 _FAMILIES: dict[str, Callable[[Path | None], None]] = {
     "sts_gg": run_sts_gg,
+    "sts2_runs": run_sts2_runs,
     "gwent_one": run_gwent_one,
     "dominiontabs": run_dominiontabs,
     "play_gwent": run_play_gwent,
+    "fabtcg_decklists": run_fabtcg_decklists,
+    "play_gwent_guides": run_play_gwent_guides,
+    "scryfall": run_scryfall,
+    "pokemon_tcg": run_pokemon_tcg,
+    "cardvault_fabtcg": run_cardvault_fabtcg,
+    "spire_codex": run_spire_codex,
+    "hearthstonejson": run_hearthstonejson,
     "isotropic_summary": run_isotropic_summary,
     "isotropic_games": run_isotropic_games,
     "seventeenlands_draft_data": run_seventeenlands_draft_data,
@@ -758,7 +1063,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--source",
-        choices=sorted(_FAMILIES),
+        choices=[*sorted(_FAMILIES), *_FINAL_DECKS_METRICS],
         help="Run just this one metric family.",
     )
     parser.add_argument(
@@ -783,8 +1088,13 @@ def main() -> None:
     if args.list:
         for name in sorted(_FAMILIES):
             print(name)
+        for name in _FINAL_DECKS_METRICS:
+            print(f"{name} (--source only)")
         return
 
+    if args.source in _FINAL_DECKS_METRICS:
+        run_final_decks(args.source, args.raw_path)
+        return
     if args.source:
         _FAMILIES[args.source](args.raw_path)
         return

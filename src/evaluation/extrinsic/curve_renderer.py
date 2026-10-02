@@ -1,6 +1,11 @@
 """CurveRenderer: draws one learning-curve chart - every encoder's TEST
 loss on one dojo - in a CurveStyle.
 
+The y axis is normalized TEST loss (loss / the dojo's baseline), with a
+hairline reference at 1.0 ("learned nothing"), whenever every plotted row
+has it; a chart with any row from a rounds CSV written before that column
+existed falls back to raw TEST loss.
+
 Follows the dataviz skill's line specs: 2px lines, >= 8px end dots with a
 2px surface-colored ring, hairline solid gridlines, recessive axes, a
 legend for two or more encoders (one encoder: the title names it), text in
@@ -30,6 +35,9 @@ _X_VALUES: dict[XAxis, Callable[[RoundRow], float]] = {
     "step": lambda row: float(row.step),
     "elapsed_seconds": lambda row: row.elapsed_seconds,
 }
+
+_NORMALIZED_Y_TITLE = "TEST loss / baseline"
+_RAW_Y_TITLE = "TEST loss"
 
 _X_AXIS_TITLES: dict[XAxis, str] = {
     "step": "Optimizer step",
@@ -122,7 +130,9 @@ class CurveRenderer:
         x_axis: XAxis,
         path: Path,
     ) -> Path:
-        """One chart: each encoder's TEST loss on this dojo against x_axis.
+        """One chart: each encoder's TEST loss on this dojo against x_axis
+        (normalized, with a 1.0 reference line, unless a row lacks it - see
+        the module docstring).
 
         Inputs: dojo (the chart title); curves (encoder label -> that
             encoder's rows for this dojo, in file order; an encoder with no
@@ -144,13 +154,21 @@ class CurveRenderer:
         """
         self._require_slots(curves, encoder_slots)
         drawn = {encoder: rows for encoder, rows in curves.items() if rows}
-        figure, axes = self._blank_chart(_chart_title(dojo, list(drawn)), x_axis)
+        normalized = _all_rows_normalized(drawn)
+        figure, axes = self._blank_chart(
+            _chart_title(dojo, list(drawn)),
+            x_axis,
+            _NORMALIZED_Y_TITLE if normalized else _RAW_Y_TITLE,
+        )
+        if normalized:
+            self._draw_baseline_reference(axes)
 
         # One line per encoder, in its fixed color, ending in a ringed dot
         ends: dict[str, tuple[float, float]] = {}
         for encoder, rows in drawn.items():
             color = self._style.theme.categorical[encoder_slots[encoder]]
-            ends[encoder] = self._draw_curve(axes, rows, x_axis, color, encoder)
+            ys = [_y_value(row, normalized) for row in rows]
+            ends[encoder] = self._draw_curve(axes, rows, ys, x_axis, color, encoder)
 
         # Two or more encoders: a legend always, plus direct end labels when
         # few and well apart. One encoder: the title names it, no legend.
@@ -183,10 +201,12 @@ class CurveRenderer:
         if not any(curves.values()):
             raise ValueError("no encoder has any rows to plot")
 
-    def _blank_chart(self, title: str, x_axis: XAxis) -> tuple[Figure, Axes]:
-        """Inputs: the chart title, x_axis (its axis title). Output: a Figure
-        on the theme's surface and its one Axes: title in text_primary,
-        axis titles in text_secondary ("TEST loss" on y), tick labels in
+    def _blank_chart(
+        self, title: str, x_axis: XAxis, y_title: str
+    ) -> tuple[Figure, Axes]:
+        """Inputs: the chart title, x_axis (its axis title), y_title. Output:
+        a Figure on the theme's surface and its one Axes: title in
+        text_primary, axis titles in text_secondary, tick labels in
         muted, hairline solid y gridlines in gridline, axis spines in axis
         color, top/right spines hidden. Side effects: none. Exceptions:
         none."""
@@ -200,7 +220,7 @@ class CurveRenderer:
         axes.set_facecolor(theme.surface)
         axes.set_title(title, color=theme.text_primary, loc="left")
         axes.set_xlabel(_X_AXIS_TITLES[x_axis], color=theme.text_secondary)
-        axes.set_ylabel("TEST loss", color=theme.text_secondary)
+        axes.set_ylabel(y_title, color=theme.text_secondary)
         axes.tick_params(colors=theme.muted, labelcolor=theme.muted)
         # Recessive frame: hairline solid y gridlines, no top/right spines
         axes.grid(axis="y", color=theme.gridline, linewidth=0.5, linestyle="-")
@@ -212,21 +232,35 @@ class CurveRenderer:
             axes.spines[side].set_linewidth(0.5)
         return figure, axes
 
+    def _draw_baseline_reference(self, axes: Axes) -> None:
+        """Inputs: axes. Output: None. Side effects: draws a hairline dashed
+        horizontal line at y = 1.0 (normalized loss of a dojo that learned
+        nothing) in the axis color, behind the curves and out of the
+        legend. Exceptions: none."""
+        axes.axhline(
+            1.0,
+            color=self._style.theme.axis,
+            linewidth=0.75,
+            linestyle="--",
+            zorder=1,
+        )
+
     def _draw_curve(
         self,
         axes: Axes,
         rows: Sequence[RoundRow],
+        ys: Sequence[float],
         x_axis: XAxis,
         color: str,
         encoder: str,
     ) -> tuple[float, float]:
-        """Inputs: axes, one encoder's rows (non-empty), x_axis, its color,
-        its label (legend entry). Output: the line's last (x, test_loss).
+        """Inputs: axes, one encoder's rows (non-empty), their y values (same
+        order), x_axis, its color, its label (legend entry). Output: the
+        line's last (x, y).
         Side effects: draws the line (style.line_width, round joins/caps)
         and a ringed end dot (style.end_marker_size, surface-colored
         style.end_marker_ring). Exceptions: none."""
         xs = [_X_VALUES[x_axis](row) for row in rows]
-        ys = [row.test_loss for row in rows]
         style = self._style
         axes.plot(
             xs,
@@ -310,3 +344,25 @@ def _chart_title(dojo: str, encoders: list[str]) -> str:
     if not encoders:
         raise ValueError("a chart needs at least one encoder")
     return dojo if len(encoders) > 1 else f"{dojo}: {encoders[0]}"
+
+
+def _all_rows_normalized(curves: Mapping[str, Sequence[RoundRow]]) -> bool:
+    """Whether every row of every curve has a normalized_test_loss.
+
+    Inputs: encoder -> rows. Output: bool (False if any row comes from a
+    rounds CSV written before that column). Side effects: none.
+    Exceptions: none.
+    """
+    return all(
+        row.normalized_test_loss is not None for rows in curves.values() for row in rows
+    )
+
+
+def _y_value(row: RoundRow, normalized: bool) -> float:
+    """row's y value: its normalized TEST loss if normalized, else its raw
+    TEST loss. Inputs: row, normalized (only True when every row has one,
+    see _all_rows_normalized). Output: float. Side effects: none.
+    Exceptions: none."""
+    if normalized and row.normalized_test_loss is not None:
+        return row.normalized_test_loss
+    return row.test_loss

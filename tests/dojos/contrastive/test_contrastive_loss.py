@@ -5,6 +5,7 @@ import pytest
 import torch
 
 from src.dojos.contrastive.contrastive_loss import (
+    MultiCardInfoNCELoss,
     SingleCardInfoNCELoss,
     _anchor_loss,
     _pairwise_cosine_similarity,
@@ -202,3 +203,86 @@ class TestAnchorLoss:
         loss_for_positive_2 = math.log(2.0)
         expected = (loss_for_positive_1 + loss_for_positive_2) / 2
         assert result.item() == pytest.approx(expected, rel=1e-5)
+
+
+def _single_identities(count: int) -> list[tuple]:
+    return [(uuid4(),) for _ in range(count)]
+
+
+def _multi_identities(items: int, cards_per_item: int) -> list[tuple]:
+    return [tuple(uuid4() for _ in range(cards_per_item)) for _ in range(items)]
+
+
+class TestSingleCardConstantLogitLoss:
+    def test_closed_form_for_three_decks_of_two(self) -> None:
+        # Each anchor: 1 positive, 6 - 2 = 4 negatives -> ln(1 + 4)
+        baseline = SingleCardInfoNCELoss().constant_logit_loss(
+            _single_identities(6), [[0, 1], [2, 3], [4, 5]]
+        )
+        assert baseline == pytest.approx(math.log(5))
+
+    def test_equals_calculate_with_identical_embeddings(self) -> None:
+        identities = _single_identities(7)
+        cliques = [[0, 1, 2], [3, 4], [5], [6]]
+        same = torch.ones(4)
+        loss = SingleCardInfoNCELoss().calculate([same] * 7, identities, cliques)
+        baseline = SingleCardInfoNCELoss().constant_logit_loss(identities, cliques)
+        assert loss.item() == pytest.approx(baseline)
+
+    def test_a_duplicate_identity_is_not_counted_as_a_negative(self) -> None:
+        identities = _single_identities(4)
+        identities[3] = identities[0]  # item 3 is the same card as anchor 0
+        cliques = [[0, 1], [2, 3]]
+        same = torch.ones(4)
+        loss = SingleCardInfoNCELoss().calculate([same] * 4, identities, cliques)
+        baseline = SingleCardInfoNCELoss().constant_logit_loss(identities, cliques)
+        assert loss.item() == pytest.approx(baseline)
+        # Anchors 0 and 3 lose a negative each: (2 ln 2 + 2 ln 3) / 4
+        assert baseline == pytest.approx((2 * math.log(2) + 2 * math.log(3)) / 4)
+
+    def test_raises_when_no_item_has_a_positive(self) -> None:
+        with pytest.raises(ValueError, match="positive"):
+            SingleCardInfoNCELoss().constant_logit_loss(
+                _single_identities(2), [[0], [1]]
+            )
+
+    def test_raises_when_no_anchor_has_a_negative(self) -> None:
+        with pytest.raises(ValueError, match="negative"):
+            SingleCardInfoNCELoss().constant_logit_loss(_single_identities(2), [[0, 1]])
+
+
+class TestMultiCardInfoNCELoss:
+    def test_closed_form_for_three_decks_of_two_five_card_items(self) -> None:
+        # Each card: 5 positives, 4 own-item exclusions, 30 - 10 = 20 negatives
+        baseline = MultiCardInfoNCELoss().constant_logit_loss(
+            _multi_identities(6, 5), [[0, 1], [2, 3], [4, 5]]
+        )
+        assert baseline == pytest.approx(math.log(21))
+
+    def test_equals_calculate_with_identical_embeddings(self) -> None:
+        identities = _multi_identities(5, 2)
+        cliques = [[0, 1, 2], [3, 4]]
+        same = torch.ones(4)
+        loss = MultiCardInfoNCELoss().calculate(
+            [[same, same] for _ in range(5)], identities, cliques
+        )
+        baseline = MultiCardInfoNCELoss().constant_logit_loss(identities, cliques)
+        assert loss.item() == pytest.approx(baseline)
+
+    def test_own_item_cards_are_neither_positive_nor_negative(self) -> None:
+        identities = _multi_identities(3, 2)
+        cliques = [[0, 1], [2]]
+        # Card 0 (item 0) is aligned with item 1's cards and orthogonal to
+        # its own sibling, which must not count as a negative
+        a, b = torch.tensor([1.0, 0.0]), torch.tensor([0.0, 1.0])
+        embeddings = [[a, b], [a, a], [b, b]]
+        loss = MultiCardInfoNCELoss(temperature=1.0).calculate(
+            embeddings, identities, cliques
+        )
+        assert torch.isfinite(loss)
+
+    def test_raises_on_a_single_card_shaped_input(self) -> None:
+        with pytest.raises(ValueError, match="multi-card"):
+            MultiCardInfoNCELoss().calculate(
+                [torch.randn(4), torch.randn(4)], _multi_identities(2, 1), [[0, 1]]
+            )

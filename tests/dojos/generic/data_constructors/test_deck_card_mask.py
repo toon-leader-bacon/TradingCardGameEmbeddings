@@ -100,7 +100,7 @@ class TestDeckCardMaskDataConstructorBuild:
     def test_malformed_target_uuid_excludes_nothing_but_keeps_the_row(self) -> None:
         # Unlike a malformed deck_uuid (which drops the row entirely), a
         # malformed target_card_uuid degrades gracefully to "exclude
-        # nothing" - see _deck_cards_excluding_target()'s docstring for
+        # nothing" - see row_values.deck_cards_excluding()'s docstring for
         # why (defensive path; DeckCardMaskMetric's own schema always
         # writes a valid uuid string here in practice).
         card_binder = CardBinder()

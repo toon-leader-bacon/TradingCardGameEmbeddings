@@ -46,7 +46,7 @@ def scan_isotropic_summary_archives(
     Output: none.
     Side effects: reads every archive in archive_paths once, extracting
         each JSONL member into memory one at a time (never all members
-        at once - see _iter_summary_rows()); calls accumulate() on
+        at once - see iter_summary_rows()); calls accumulate() on
         every metric for every row, then finalize() on every metric.
         Logs loudly on any per-metric accumulate()/finalize() failure,
         rather than raising. Prints one tqdm progress bar per archive
@@ -76,7 +76,7 @@ def scan_isotropic_summary_archives(
         ... )
     """
     for archive_path in archive_paths:
-        for row in _iter_summary_rows(archive_path):
+        for row in iter_summary_rows(archive_path):
             for metric in metrics:
                 _accumulate_isolated(metric, row)
 
@@ -84,11 +84,12 @@ def scan_isotropic_summary_archives(
         _finalize_isolated(metric)
 
 
-def _iter_summary_rows(archive_path: Path) -> Iterator[dict]:
+def iter_summary_rows(archive_path: Path) -> Iterator[dict]:
     """Yield every parsed JSON game row across every `games-*.json`
     member of one summary tarball, one day-file at a time.
 
-    Private helper - single consumer is scan_isotropic_summary_archives().
+    Consumers: scan_isotropic_summary_archives() and
+    deck_box/isotropic/extraction_stage.py (final decks).
     Deliberately extracts one member into memory at a time (never the
     whole archive) - the largest single member confirmed in
     BRAINSTORM.md is a day of ~18K rows, small enough to hold, but
