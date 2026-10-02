@@ -7,11 +7,37 @@ each CSV's `opening_hand_<name>`/`drawn_<name>`/`tutored_<name>`/
 `deck_<name>`/`sideboard_<name>` column suffixes against a `CardBinder`
 already populated for `GameId.MTG` (see
 [`../../../card_binder/README.md`](../../../card_binder/README.md)).
-Every metric here satisfies the shared `Metric[dict]` Protocol
-([`../../metric.py`](../../metric.py)).
+
+The scan is chunked and typed. `scan_game_csv` streams a CSV in pyarrow
+record batches. `GameDataChunkParser` turns each batch into one
+`GameDataChunk` (numpy arrays), and every metric's `accumulate()`
+receives that chunk. The card-average metrics are vectorized
+`Metric[GameDataChunk]`s. The other metrics here are still row metrics
+(`Metric[dict]`, one row per call); the driver runs them inside the
+chunk scan through `RowwiseMetric`
+([`../rowwise_metric.py`](../rowwise_metric.py)). Porting them is
+tracked in `plans/seventeenlands_chunk_scan.md`.
 
 ## Files
 
+- `game_data_chunk.py` — `GameZone` (the five card-column families,
+  valued by header prefix), `ZoneCounts` (one zone's card uuids, one
+  per matched header column and possibly repeating, plus an int16
+  `(rows, columns)` count matrix; `present()` is `counts > 0`), and
+  `GameDataChunk` (every zone's `ZoneCounts`, typed `won`/`on_play`/
+  `num_turns` arrays, and an optional pandas `source_frame` for wrapped
+  row metrics). The chunk checks at construction that every zone is
+  present and every field has the same row count. `source_frame_of`
+  returns the frame, and raises if the parser was built without one.
+- `game_data_chunk_parser.py` — `GameDataChunkParser.from_header(header,
+  card_binder, source_game, keep_source_frame)`. It is the only place
+  that knows the CSV's column names. Card matching is
+  `GameCardColumns.from_header()`'s, unchanged. `needed_columns()` and
+  `column_types()` tell the scanner what to read, with card counts read
+  as int16. `parse(batch)` builds a `GameDataChunk`: a null count cell
+  becomes 0, and a null `won`/`on_play`/`num_turns` raises `ValueError`
+  naming the column and row. It keeps the batch as `source_frame` only
+  when `keep_source_frame` is set (the family still has row metrics).
 - `game_card_columns.py` — `GameCardColumns`: built once per metric
   instance from that metric's own `(card_binder, header, source_game)`.
   Parses every `opening_hand_<name>`/`drawn_<name>`/`tutored_<name>`/
@@ -24,36 +50,48 @@ Every metric here satisfies the shared `Metric[dict]` Protocol
   **count** (`deck_<name>` sums to 40, `opening_hand_<name>` to 7), not
   a per-copy list entry — `present_uuids()` samples on presence
   (count > 0) exactly once per qualifying card, never once per copy.
-- `scanner.py` — `scan_game_csv(raw_csv_path, metrics, chunk_size)`
-  drives every metric in a list over one chunked read pass of a
-  game_data CSV, handing each metric one row at a time and isolating
-  one metric's `accumulate()`/`finalize()` failure (logged, not raised)
-  from every other metric in the list. Never touches `GameCardColumns`
-  or `DeckBox` itself — each metric already built its own
-  `GameCardColumns` before reaching this function, and a deck-input
-  metric already received its `DeckBox` directly.
+- `scanner.py` — `scan_game_csv(raw_csv_path, metrics, parser,
+  block_size)` streams the CSV with `pyarrow.csv.open_csv`, reading only
+  `parser.needed_columns()`. It parses each batch once and hands the
+  chunk to every metric, then finalizes them all. It never touches the
+  `CardBinder` or a `DeckBox`.
+  - Failures are isolated per (metric, chunk) through `call_isolated`
+    ([`../../isolated_call.py`](../../isolated_call.py)). Each failure
+    logs an ERROR line starting `METRIC FAILURE` that names the metric,
+    the CSV and the chunk, with its traceback. The scan ends with one
+    `METRIC FAILURE summary` line per failing metric.
+  - A metric that fails partway through `accumulate()` may be left
+    half-tallied, so its output for that CSV must not be trusted.
 - `game_card_average_metric.py` — `GameCardAverageMetric` (Template
-  Method, abstract, accumulation): shared per-card running
-  `(value_sum, total_count)` average, driven off whichever
-  `GameCardColumns` column set a subclass calls "present" on a row. A
-  subclass fixes `LABEL_COLUMN`/`DEFAULT_OUTPUT_PATH` and implements
-  `_present_card_uuids()`/`_value_for_row()`; an optional
-  `_extra_accumulate(row)` hook (no-op by default) lets a subclass add
-  extra per-row bookkeeping without overriding `accumulate()` itself.
-- `game_card_average_metrics.py` — three concrete
-  `GameCardAverageMetric` subclasses: `WinRateWhenInDeckMetric`
-  (`P(won | card in deck_<name>)`), `OpeningHandWinRateMetric`
-  (`P(won | card in opening_hand_<name>)`), `DrawnWinRateMetric`
-  (`P(won | card in drawn_<name>)` — a card seen at any point in the
-  game, opening hand or not).
+  Method, abstract, accumulation, `Metric[GameDataChunk]`). It keeps a
+  per-card average of one per-game value over every game the card was
+  present in, in the subclass's `ZONE`. It is built from
+  `(version_metadata, output_path=None)`; the driver computes the binder
+  version once per run.
+  - Per chunk it tallies `value_sum` and `count` per matched column, in
+    one array operation over `zone.present()`. A chunk whose column
+    layout differs from the first raises `ValueError`.
+  - `finalize()` sums the columns per card uuid, so two columns naming
+    one card both count. It writes `nocab_uuid`, `LABEL_COLUMN` and
+    `sample_count` for every card seen at least once. A CSV with no rows
+    writes a zero-row file with that full schema.
+  - Subclasses fix `LABEL_COLUMN`, `DEFAULT_OUTPUT_PATH` and `ZONE`, and
+    implement `_values(chunk)` (one value per row). They may override
+    `_extra_accumulate(chunk)` (no-op by default) and
+    `_label(value_sum, count)` (default: the average).
+- `game_card_average_metrics.py` — `GameCardWinRateMetric` (abstract;
+  `_values` is `won` as 1.0/0.0) and its three concretes:
+  - `WinRateWhenInDeckMetric`: `P(won | card in deck_<name>)`;
+  - `OpeningHandWinRateMetric`: `P(won | card in opening_hand_<name>)`;
+  - `DrawnWinRateMetric`: `P(won | card in drawn_<name>)`, a card seen
+    at any point in the game, opening hand or not.
 - `game_length_association_metric.py` — `GameLengthAssociationMetric`,
-  a fourth `GameCardAverageMetric` subclass kept in its own file since
-  it needs a format-wide baseline the base class doesn't track: it
-  overrides `_extra_accumulate()` to update a running
-  `(_global_turn_sum, _global_game_count)` unconditionally on every
-  row, then overrides `finalize()` to write each card's own average
-  `num_turns` minus that global baseline, instead of the base class's
-  plain average.
+  a `GameCardAverageMetric` over `deck_<name>` that averages
+  `num_turns`.
+  - `_extra_accumulate()` keeps a format-wide (turn sum, game count)
+    baseline over every row.
+  - `_label()` subtracts that baseline from each card's own average.
+  - It overrides nothing else.
 - `on_play_win_rate_delta_metric.py` — `OnPlayWinRateDeltaMetric`
   (standalone accumulation): per card, `P(won | in deck, on_play) -
   P(won | in deck, on_draw)`. Not a `GameCardAverageMetric` subclass —
@@ -127,21 +165,22 @@ is simply absent from all five `*_columns` lists.
 
 ## Card-binder and deck-box access shape
 
-Every metric's constructor takes `(card_binder, header, source_game,
-output_path=None)` directly (plus a required `deck_box` for the four
-deck-input metrics — `game_deck_label_metrics.py`'s three concretes and
-`OnPlayWinRateSensitivityByDeckMetric`) and builds its own private
-`GameCardColumns` internally via `GameCardColumns.from_header()`. Each
-metric re-parsing the same CSV header independently is a header-sized
-cost (thousands of columns for `game_data`), not a row-sized one, so
-paying it once per metric is negligible next to the scan itself. A
-driver scanning multiple metrics over the same CSV reads the header
-once itself and passes the same `header` object to every metric's
-constructor; a driver wanting decks deduped across several deck-input
-metrics passes the *same* `DeckBox` instance to each of their
-constructors and saves it itself once scanning finishes — no shared
-`GameCardColumns`/`DeckBox` instance is ever built or injected by
-`scanner.py` itself.
+The vectorized metrics (`GameCardAverageMetric` and its subclasses)
+never see the binder or the header. Card matching lives in
+`GameDataChunkParser`, which the driver builds once per CSV, and their
+constructor takes the run's `MetricVersionMetadata`.
+
+The row metrics still take `(card_binder, header, source_game,
+output_path=None)`. The four deck-input metrics also take a required
+`deck_box`: `game_deck_label_metrics.py`'s three concretes and
+`OnPlayWinRateSensitivityByDeckMetric`. Each builds its own private
+`GameCardColumns` via `GameCardColumns.from_header()`.
+
+The driver (`scripts/run_metrics.py`) owns everything shared:
+- it reads each CSV's header once;
+- it passes one metrics-private `DeckBox` to every deck-input metric,
+  so identical decks dedupe, and saves it after the last CSV;
+- it wraps the row metrics in `RowwiseMetric`.
 
 The per-game identifier this container settles on, since no single raw
 column is a unique key: the composite `(draft_id: str, match_number:
@@ -151,18 +190,20 @@ output columns — mirroring `draft_data`'s own `draft_id`/`pack_number`/
 
 ## How it works
 
-`GameCardAverageMetric` and its three `game_card_average_metrics.py`
-subclasses share one `accumulate()` sequence: tally every card this
-subclass's column set has present on a row toward a running
-`(value_sum, total_count)`, then call the optional `_extra_accumulate()`
-hook. `finalize()` writes one row per card seen at least once
-(`nocab_uuid`, `LABEL_COLUMN`, `sample_count`).
-`GameLengthAssociationMetric` reuses that same `accumulate()` unchanged
-but overrides `_extra_accumulate()`/`finalize()` to subtract a
-format-wide baseline from each card's own average — the same kind of
-documented Template Method exception
-[`../draft_data/pick_number_decay_curve_metric.py`](../draft_data/pick_number_decay_curve_metric.py)'s
-`PickNumberDecayCurveMetric` already established.
+`GameCardAverageMetric` and its four subclasses share one chunk-level
+`accumulate()`:
+1. tally this subclass's `ZONE` presence against `_values(chunk)`, per
+   column;
+2. call the optional `_extra_accumulate()` hook.
+
+`finalize()` groups the tallies by card and applies `_label()`.
+`GameLengthAssociationMetric` changes only the hooks, never
+`accumulate()` or `finalize()`.
+
+On `KTK.TradDraft.csv` (151 MB, 56k games), the four card-average
+metrics scan in 2.8 s against 27.0 s for the earlier row implementation.
+Their outputs are identical to that implementation's: the parity check
+is `scripts/compare_metric_outputs.py`.
 
 `GameDeckLabelMetric` and its three `game_deck_label_metrics.py`
 subclasses are streaming instead — one row already carries a complete
@@ -181,68 +222,23 @@ this codebase uses.
 
 ## How to run
 
-```python
-from pathlib import Path
+From the project root (ROCm venv):
 
-import pandas as pd
+```
+PYTHONPATH=. python scripts/run_metrics.py --source seventeenlands_game_data \
+    --raw-path data/raw/17lands/game_data/KTK.TradDraft.csv
+```
 
-from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.deck_box.deck_box import DeckBox
-from src.data_refinement.metrics.seventeenlands.game_data.game_card_average_metrics import (
-    DrawnWinRateMetric,
-    OpeningHandWinRateMetric,
-    WinRateWhenInDeckMetric,
-)
-from src.data_refinement.metrics.seventeenlands.game_data.game_length_association_metric import (
-    GameLengthAssociationMetric,
-)
-from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_rate_delta_metric import (
-    OnPlayWinRateDeltaMetric,
-)
-from src.data_refinement.metrics.seventeenlands.game_data.tutor_target_rate_metric import (
-    TutorTargetRateMetric,
-)
-from src.data_refinement.metrics.seventeenlands.game_data.game_deck_label_metrics import (
-    DeckGameLengthPredictionMetric,
-    DeckRankTierPredictionMetric,
-    DeckWinPredictionMetric,
-)
-from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_rate_sensitivity_by_deck_metric import (
-    OnPlayWinRateSensitivityByDeckMetric,
-)
-from src.data_refinement.metrics.seventeenlands.game_data.tutor_target_pool_metric import (
-    TutorTargetPoolMetric,
-)
-from src.data_refinement.metrics.seventeenlands.game_data.scanner import (
-    scan_game_csv,
-)
-from src.schema.game_id import GameId
+Each metric writes `data/metrics/seventeenlands/game_data/<SET>/<Format>/<name>.parquet`.
+The family deck box is `data/metrics/seventeenlands/game_data/deck_box.db`.
 
-binder = CardBinder.load([Path("data/final/cards/mtg.jsonl")])
-raw_csv_path = Path("data/raw/17lands/game_data/MSH.PremierDraft.csv")
-header = pd.read_csv(raw_csv_path, nrows=0).columns
-deck_box = DeckBox()  # metrics-private - never the published deck box,
-# shared across every deck-input metric below so identical decks dedupe
+Parity check: write the outputs to a scratch root with `--output-root`,
+then diff them against the existing outputs:
 
-metrics = [
-    WinRateWhenInDeckMetric(binder, header, GameId.MTG),
-    OpeningHandWinRateMetric(binder, header, GameId.MTG),
-    DrawnWinRateMetric(binder, header, GameId.MTG),
-    GameLengthAssociationMetric(binder, header, GameId.MTG),
-    OnPlayWinRateDeltaMetric(binder, header, GameId.MTG),
-    TutorTargetRateMetric(binder, header, GameId.MTG),
-    DeckWinPredictionMetric(binder, header, GameId.MTG, deck_box),
-    DeckGameLengthPredictionMetric(binder, header, GameId.MTG, deck_box),
-    DeckRankTierPredictionMetric(binder, header, GameId.MTG, deck_box),
-    OnPlayWinRateSensitivityByDeckMetric(binder, header, GameId.MTG, deck_box),
-    TutorTargetPoolMetric(binder, header, GameId.MTG),
-]
-scan_game_csv(raw_csv_path, metrics)
-# each metric's DEFAULT_OUTPUT_PATH now exists
-
-deck_box.save(
-    Path("data/metrics/seventeenlands/game_data/deck_box.db"),
-    GameId.MTG,
-    binder.version_for(GameId.MTG),
-)
+```
+PYTHONPATH=. python scripts/run_metrics.py --source seventeenlands_game_data \
+    --raw-path data/raw/17lands/game_data/KTK.TradDraft.csv --output-root scratch/parity
+PYTHONPATH=. python scripts/compare_metric_outputs.py \
+    --reference data/metrics/seventeenlands/game_data/KTK/TradDraft \
+    --candidate scratch/parity/seventeenlands/game_data/KTK/TradDraft
 ```

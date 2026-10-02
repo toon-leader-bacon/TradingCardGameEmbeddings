@@ -1,242 +1,245 @@
 """Template Method base for accumulation metrics that tally, per card
-seen present (count > 0) in some game_data column set, the running
-average of one scalar derived from that same row - see
-plans/game_data_metrics.md's Component overview #2.
+present (count > 0) in one game_data zone, the running average of one
+per-game scalar (plans/seventeenlands_chunk_scan.md, slice 1).
 
-Three of round 1's single-card metrics (game_card_average_metrics.py's
-WinRateWhenInDeckMetric, OpeningHandWinRateMetric, DrawnWinRateMetric)
-share this exact accumulate() sequence - look up every present card in
-one column set, tally value_sum/total_count - and differ only in which
-GameCardColumns column set counts as "present" (_present_card_uuids())
-and what value gets averaged (_value_for_row()). That's a Template
-Method (PATTERNS.md): this class owns every shared step; a subclass
-only fixes LABEL_COLUMN/DEFAULT_OUTPUT_PATH and implements
-_present_card_uuids()/_value_for_row(). Mirrors
-sts_gg/card_average_metric.py's CardAverageMetric relationship to its
-own nine subclasses, one level over onto a different raw source.
+Satisfies Metric[GameDataChunk]: accumulate() takes a whole chunk and
+tallies it with array operations, never a per-row Python loop. The base
+owns every shared step (tally, group by card, write); a subclass fixes
+LABEL_COLUMN / DEFAULT_OUTPUT_PATH / ZONE and implements _values(), and
+may override two optional steps:
 
-game_length_association_metric.py's GameLengthAssociationMetric also
-subclasses this base, reusing accumulate()/_present_card_uuids()/
-_value_for_row() but needing one more piece of state (a format-wide
-baseline) this base's own accumulate() doesn't track. Rather than
-letting that subclass override accumulate() itself (a break in this
-class's own Template Method contract - PATTERNS.md: the base owns the
-skeleton, a subclass only varies designated steps), accumulate() below
-ends by calling _extra_accumulate(row), an optional hook (no-op by
-default) that exists for exactly this - see that module's own
-docstring for how it's used.
+- _extra_accumulate(chunk): extra per-chunk bookkeeping not gated on
+  any card (GameLengthAssociationMetric's format-wide turn baseline);
+- _label(value_sum, count): how one card's tallies become its label
+  (default: the plain average; GameLengthAssociationMetric subtracts
+  its baseline).
 
-CARD_BINDER + HEADER, NOT A SHARED GameCardColumns: each metric takes
-(card_binder, header, source_game) directly - mirroring draft_data's
-PackCardTallyMetric and sts_gg's CardAverageMetric/DeckLabelMetric
-always taking card_binder in their own constructors - and builds its
-own GameCardColumns internally (GameCardColumns.from_header()) rather
-than receiving an already-built one from a shared driver.
+Tallies are kept per matched column, not per card, and are grouped by
+card uuid only in finalize(). Two header columns naming one card
+therefore still count twice, exactly as the row implementation did.
+
+VERSION METADATA, NOT A BINDER: the driver computes the CardBinder
+version once per family run and passes it in; card matching lives in
+GameDataChunkParser, so this class never needs the binder or the header.
 """
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import ClassVar, Iterable
+from typing import ClassVar
 from uuid import UUID
 
+import numpy as np
+import numpy.typing as npt
 import pandas as pd
 
-from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.metrics.seventeenlands.game_data.game_card_columns import (
-    GameCardColumns,
+from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+    GameDataChunk,
+    GameZone,
 )
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     write_dataframe_with_version_metadata,
 )
-from src.schema.game_id import GameId
 
 
 class GameCardAverageMetric(ABC):
-    """Per-card running average of one row-derived scalar, across every
-    game a card was present in (per some GameCardColumns column set).
-
-    Satisfies the Metric[dict] Protocol (../../metric.py) structurally.
+    """Per-card running average of one per-game scalar, across every
+    game the card was present in, in this subclass's ZONE.
     """
 
     LABEL_COLUMN: ClassVar[str]
     DEFAULT_OUTPUT_PATH: ClassVar[Path]
+    ZONE: ClassVar[GameZone]
 
     def __init__(
         self,
-        card_binder: CardBinder,
-        header: Iterable[str],
-        source_game: GameId,
+        version_metadata: MetricVersionMetadata,
         output_path: Path | None = None,
     ) -> None:
-        """
+        """Start a metric with no tallies; the first chunk sizes them.
+
         Inputs:
-            card_binder: registry to match this CSV's
-                opening_hand_<name>/drawn_<name>/tutored_<name>/
-                deck_<name>/sideboard_<name> column suffixes against -
-                assumed already fully populated for source_game. Never
-                queried directly by this class - only through the
-                GameCardColumns this constructor builds from it.
-            header: this CSV's column names (e.g.
-                pandas.read_csv(path, nrows=0).columns) - parsed once,
-                here, into this instance's own GameCardColumns.
-            source_game: which game's cards header names are matched
-                against.
+            version_metadata: the CardBinder version this run reads,
+                stamped onto the output.
             output_path: overrides DEFAULT_OUTPUT_PATH when given.
         Output: none (constructor).
-        Side effects: none beyond building this instance's own
-            GameCardColumns from card_binder/header - no further I/O
-            happens until finalize() is called.
+        Side effects: none (no I/O until finalize()).
         Exceptions: none.
         """
-        self._game_columns = GameCardColumns.from_header(
-            header, card_binder, source_game
-        )
-        self._version_metadata = MetricVersionMetadata(
-            game=source_game, card_binder_version=card_binder.version_for(source_game)
-        )
+        self._version_metadata = version_metadata
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
-        self._value_sum: dict[UUID, float] = {}
-        self._total_count: dict[UUID, int] = {}
+        # Per-column tallies, sized by the first chunk (see _tally)
+        self._card_uuids: tuple[UUID, ...] | None = None
+        self._value_sum: npt.NDArray[np.float64] | None = None
+        self._count: npt.NDArray[np.int64] | None = None
 
-    def accumulate(self, row: dict) -> None:
-        """Tally every present card this row qualifies toward this
-        metric's running per-card (value_sum, total_count), then run
-        this subclass's optional extra bookkeeping.
+    def accumulate(self, chunk: GameDataChunk) -> None:
+        """Tally every present (row, column) of this ZONE toward its
+        column's (value_sum, count), then run the optional extra step.
 
-        Inputs:
-            row: one game_data CSV row, dict-like - see
-                ../scanner.py's module docstring.
+        Inputs: chunk.
         Output: none.
-        Side effects: updates self._value_sum/_total_count in place,
-            once per card_uuid returned by
-            self._present_card_uuids(row); calls
-            self._extra_accumulate(row) once, unconditionally, as the
-            last step.
-        Exceptions: implementation-defined (expected: none for a
-            well-formed row - see ../scanner.py's isolation contract
-            for how a raised exception here is actually handled during
-            a real scan).
+        Side effects: updates this metric's per-column tallies; calls
+            _extra_accumulate(chunk) once.
+        Exceptions: ValueError if chunk's ZONE columns differ from the
+            first chunk's (a driver bug: chunks from two CSVs).
 
         Example:
-            >>> metric = SomeGameCardAverageMetric(card_binder, header, GameId.MTG)
-            >>> metric.accumulate(row)
+            >>> metric = WinRateWhenInDeckMetric(version_metadata)
+            >>> metric.accumulate(chunk)
             >>> metric.finalize()
         """
-        value = self._value_for_row(row)
+        zone = chunk.zones[self.ZONE]
 
-        # Tally every card this subclass's column set has present on
-        # this row.
-        for card_uuid in self._present_card_uuids(row):
-            self._value_sum[card_uuid] = self._value_sum.get(card_uuid, 0.0) + value
-            self._total_count[card_uuid] = self._total_count.get(card_uuid, 0) + 1
+        # Validate: same column layout as every earlier chunk
+        self._check_columns(zone.card_uuids)
 
-        # Hook for a subclass needing extra, non-card-keyed bookkeeping
-        # every row (see GameLengthAssociationMetric) - no-op by
-        # default.
-        self._extra_accumulate(row)
+        # Tally this chunk in one pass over its present matrix
+        self._tally(zone.present(), self._values(chunk))
+
+        # Optional subclass bookkeeping not gated on any card
+        self._extra_accumulate(chunk)
 
     def finalize(self) -> Path:
-        """Compute every seen card's average and write one row per card
-        to self._output_path.
+        """Group the per-column tallies by card and write one row per
+        card seen at least once.
 
-        Inputs: none (uses accumulated state).
+        Inputs: none.
         Output: self._output_path.
-        Side effects: creates self._output_path's parent directories if
-            missing; writes self._output_path (a parquet file with
-            columns nocab_uuid: str, self.LABEL_COLUMN: float,
-            sample_count: int - one row per card seen at least once).
-        Exceptions: whatever pyarrow.parquet.write_table raises.
+        Side effects: writes self._output_path (parquet: nocab_uuid
+            str, LABEL_COLUMN float, sample_count int, with version
+            metadata), creating parent directories. A run with no rows
+            writes a zero-row file with that full schema (the row
+            implementation wrote one with no columns).
+        Exceptions: whatever the parquet write raises.
 
         Example:
             >>> metric.finalize()
-            PosixPath('data/metrics/seventeenlands/game_data/some_average.parquet')
+            PosixPath('data/metrics/seventeenlands/game_data/win_rate_when_in_deck.parquet')
         """
-        result: list[dict] = [
-            self._average_row(card_uuid) for card_uuid in self._total_count
-        ]
+        result: list[dict] = []
+
+        # One output row per card with at least one sample
+        for card_uuid, (value_sum, count) in self._sum_tallies_per_card().items():
+            result.append(
+                {
+                    "nocab_uuid": str(card_uuid),
+                    self.LABEL_COLUMN: self._label(value_sum, count),
+                    "sample_count": count,
+                }
+            )
 
         write_dataframe_with_version_metadata(
-            pd.DataFrame(result), self._output_path, self._version_metadata
+            self._build_output_frame(result), self._output_path, self._version_metadata
         )
         return self._output_path
 
     @abstractmethod
-    def _present_card_uuids(self, row: dict) -> list[UUID]:
-        """Which cards count as "present" on this row, for this
-        subclass's own column set.
+    def _values(self, chunk: GameDataChunk) -> npt.NDArray[np.float64]:
+        """The scalar to average, one per row of chunk.
 
-        One of the two steps a subclass overrides - together with
-        _value_for_row(), defines what this metric measures.
-
-        Inputs:
-            row: one game_data CSV row, dict-like.
-        Output: every card_uuid this subclass's chosen column set
-            (e.g. self._game_columns.deck_columns) has present (count >
-            0) on row - typically
-            self._game_columns.present_uuids(row, <column set>).
-        Side effects: none expected.
-        Exceptions: implementation-defined.
+        Inputs: chunk. Output: shape (len(chunk),).
+        Side effects: none expected. Exceptions: implementation-defined.
         """
         raise NotImplementedError
 
-    @abstractmethod
-    def _value_for_row(self, row: dict) -> float:
-        """The scalar to average for every card _present_card_uuids()
-        returns on this row.
+    def _extra_accumulate(self, chunk: GameDataChunk) -> None:
+        """Optional per-chunk bookkeeping beyond the per-card tally.
 
-        The other step a subclass overrides.
+        No-op by default (see module docstring).
 
-        Inputs:
-            row: one game_data CSV row, dict-like - same row
-                accumulate() received.
-        Output: a value convertible to float (e.g. 1.0/0.0 for
-            row["won"]).
-        Side effects: implementation-defined (expected: none - a plain
-            field read).
-        Exceptions: implementation-defined.
+        Inputs: chunk. Output: none.
+        Side effects: none by default. Exceptions: implementation-defined.
         """
-        raise NotImplementedError
-
-    def _extra_accumulate(self, row: dict) -> None:
-        """Optional extra per-row bookkeeping a subclass needs beyond
-        the shared per-card tally above.
-
-        No-op by default. Overridden by
-        game_length_association_metric.py's GameLengthAssociationMetric
-        to track a format-wide baseline that isn't gated on any card's
-        presence - see that module's own docstring. This hook exists so
-        such a subclass never has to override accumulate() itself (see
-        this module's own docstring).
-
-        Inputs:
-            row: one game_data CSV row, dict-like - same row
-                accumulate() received.
-        Output: none.
-        Side effects: none by default; implementation-defined for an
-            overriding subclass.
-        Exceptions: implementation-defined.
-        """
-        # No-op by default - see class docstring.
         return
 
-    def _average_row(self, card_uuid: UUID) -> dict:
-        """Build one output row for a single already-tallied card.
+    def _label(self, value_sum: float, count: int) -> float:
+        """One card's label from its tallies: value_sum / count by
+        default.
 
-        Private helper - single consumer is finalize().
-
-        Inputs:
-            card_uuid: a key already present in self._total_count.
-        Output: a dict with keys "nocab_uuid" (str), self.LABEL_COLUMN
-            (float, self._value_sum[card_uuid] divided by
-            self._total_count[card_uuid]), and "sample_count" (int,
-            self._total_count[card_uuid]).
-        Side effects: none.
-        Exceptions: none.
+        Inputs: value_sum, count (count >= 1). Output: float.
+        Side effects: none. Exceptions: none.
         """
-        total = self._total_count[card_uuid]
-        return {
-            "nocab_uuid": str(card_uuid),
-            self.LABEL_COLUMN: self._value_sum[card_uuid] / total,
-            "sample_count": total,
-        }
+        return value_sum / count
+
+    def _check_columns(self, card_uuids: tuple[UUID, ...]) -> None:
+        """Record the first chunk's column layout; raise if a later
+        chunk's differs.
+
+        Inputs: card_uuids (this chunk's ZONE columns). Output: none.
+        Side effects: sets self._card_uuids and zero tallies on the
+            first call.
+        Exceptions: ValueError on a layout mismatch.
+        """
+        if self._card_uuids is None:
+            self._card_uuids = card_uuids
+            self._value_sum = np.zeros(len(card_uuids), dtype=np.float64)
+            self._count = np.zeros(len(card_uuids), dtype=np.int64)
+            return
+        if card_uuids != self._card_uuids:
+            raise ValueError(
+                f"{type(self).__name__}: chunk's {self.ZONE.name} columns differ "
+                "from the first chunk's (chunks from two CSVs?)"
+            )
+
+    def _tally(
+        self, present: npt.NDArray[np.bool_], values: npt.NDArray[np.float64]
+    ) -> None:
+        """Add one chunk to the per-column tallies.
+
+        Inputs: present (rows x columns), values (rows,).
+        Output: none.
+        Side effects: value_sum += present^T @ values;
+            count += present summed over rows.
+        Exceptions: ValueError if values' length differs from present's
+            row count.
+        """
+        if values.shape[0] != present.shape[0]:
+            raise ValueError(
+                f"{type(self).__name__}: {values.shape[0]} values for "
+                f"{present.shape[0]} rows"
+            )
+        assert self._value_sum is not None and self._count is not None
+        self._value_sum += present.T.astype(np.float64) @ values
+        self._count += present.sum(axis=0, dtype=np.int64)
+
+    def _sum_tallies_per_card(self) -> dict[UUID, tuple[float, int]]:
+        """Per-column tallies summed per card uuid, for cards with
+        count >= 1, in first-column order.
+
+        Inputs: none. Output: dict card_uuid -> (value_sum, count);
+            empty if no chunk ever arrived.
+        Side effects: none. Exceptions: none.
+        """
+        result: dict[UUID, tuple[float, int]] = {}
+        if self._card_uuids is None:
+            return result
+        assert self._value_sum is not None and self._count is not None
+
+        # Columns naming the same card add up, as in the row implementation
+        for card_uuid, value_sum, count in zip(
+            self._card_uuids, self._value_sum, self._count
+        ):
+            if count == 0:
+                continue
+            previous_sum, previous_count = result.get(card_uuid, (0.0, 0))
+            result[card_uuid] = (
+                previous_sum + float(value_sum),
+                previous_count + int(count),
+            )
+        return result
+
+    def _build_output_frame(self, rows: list[dict]) -> pd.DataFrame:
+        """rows as a DataFrame with the full output schema, even when
+        empty.
+
+        Inputs: rows. Output: DataFrame with columns nocab_uuid,
+            LABEL_COLUMN, sample_count.
+        Side effects: none. Exceptions: none.
+        """
+        frame = pd.DataFrame(
+            rows, columns=["nocab_uuid", self.LABEL_COLUMN, "sample_count"]
+        )
+        return frame.astype(
+            {"nocab_uuid": str, self.LABEL_COLUMN: "float64", "sample_count": "int64"}
+        )

@@ -54,6 +54,11 @@ larger amount of configuration surface - judged not worth it.
 ## Files
 
 - `metric.py` - `Metric[RawRowT]`, the accumulator-family Protocol.
+- `isolated_call.py` - `call_isolated(logger, subject, step, call)`,
+  which runs one metric step and logs (never raises) a failure as an
+  ERROR line starting `METRIC FAILURE`, so one metric's bug never stops
+  a scan. It is used by the 17lands chunk scanners; the older scanners
+  still carry their own copies of this logic.
 - `version_metadata.py` - writes/reads the `CardBinder` (and, where
   needed, `DeckBox`) version a metric's parquet output was built from,
   as parquet schema metadata; dojos check it at construction.

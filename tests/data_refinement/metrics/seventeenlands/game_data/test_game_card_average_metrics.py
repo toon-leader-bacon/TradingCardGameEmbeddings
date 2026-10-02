@@ -1,204 +1,193 @@
-"""Skeleton-stage test stubs for game_card_average_metric.py's
-GameCardAverageMetric, covered through its three
-game_card_average_metrics.py concretes (WinRateWhenInDeckMetric,
-OpeningHandWinRateMetric, DrawnWinRateMetric) - the same "cover the
-shared base through its concretes" convention
-tests/data_refinement/metrics/seventeenlands/draft_data/test_pack_card_tally_metrics.py
-uses for PackCardTallyMetric. Bodies are filled in by
-design-recipe-implement.
-"""
+"""Tests for game_card_average_metric.py's GameCardAverageMetric, covered
+through its game_card_average_metrics.py concretes and driven through
+scan_game_csv, as a real run drives them."""
 
-from datetime import datetime, timezone
 from pathlib import Path
-from uuid import uuid4
 
+import numpy as np
 import pandas as pd
+import pytest
 
-from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.seventeenlands.game_data.game_card_average_metrics import (
     DrawnWinRateMetric,
     OpeningHandWinRateMetric,
     WinRateWhenInDeckMetric,
 )
-from src.schema.card import GenericCard, Provenance
-from src.schema.data_source import DataSource
-from src.schema.game_id import GameId
-
-
-def _make_card(name: str) -> GenericCard:
-    return GenericCard(
-        nocab_uuid=uuid4(),
-        source_game=GameId.MTG,
-        name=name,
-        raw_content={},
-        provenance=Provenance(
-            data_source=DataSource.SCRYFALL,
-            source_id=name,
-            fetched_at=datetime.now(timezone.utc),
-        ),
-    )
-
-
-def _binder_with_cards(names: list[str]) -> CardBinder:
-    binder = CardBinder()
-    for name in names:
-        binder.create(_make_card(name))
-    return binder
-
-
-_HEADER = [
-    "won",
-    "num_turns",
-    "opening_hand_Owlbear",
-    "drawn_Owlbear",
-    "deck_Owlbear",
-    "opening_hand_Goblin Morningstar",
-    "drawn_Goblin Morningstar",
-    "deck_Goblin Morningstar",
-]
-
-
-def _row(
-    won: bool,
-    owlbear_deck: int = 0,
-    owlbear_opening_hand: int = 0,
-    owlbear_drawn: int = 0,
-    morningstar_deck: int = 0,
-) -> dict:
-    return {
-        "won": won,
-        "num_turns": 8,
-        "opening_hand_Owlbear": owlbear_opening_hand,
-        "drawn_Owlbear": owlbear_drawn,
-        "deck_Owlbear": owlbear_deck,
-        "opening_hand_Goblin Morningstar": 0,
-        "drawn_Goblin Morningstar": 0,
-        "deck_Goblin Morningstar": morningstar_deck,
-    }
-
-
-def _uuid_for(binder: CardBinder, name: str) -> object:
-    cards = binder.get_by_name(GameId.MTG, name)
-    assert len(cards) == 1
-    return cards[0].nocab_uuid
+from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+    GameDataChunk,
+    GameZone,
+    ZoneCounts,
+)
+from src.data_refinement.metrics.version_metadata import read_version_metadata
+from tests.data_refinement.metrics.seventeenlands.game_data._chunk_fixtures import (
+    MORNINGSTAR,
+    OWLBEAR,
+    VERSION,
+    binder_with_cards,
+    row,
+    scan_into_frame,
+    uuid_for,
+)
 
 
 class TestWinRateWhenInDeckMetric:
-    def test_averages_won_indicator_across_games_with_card_in_deck(
-        self, tmp_path: Path
-    ) -> None:
-        binder = _binder_with_cards(["Owlbear", "Goblin Morningstar"])
-        metric = WinRateWhenInDeckMetric(
-            binder, _HEADER, GameId.MTG, output_path=tmp_path / "out.parquet"
+    def test_averages_won_across_games_with_card_in_deck(self, tmp_path: Path) -> None:
+        binder = binder_with_cards([OWLBEAR, MORNINGSTAR])
+        metric = WinRateWhenInDeckMetric(VERSION, output_path=tmp_path / "out.parquet")
+
+        df = scan_into_frame(
+            tmp_path,
+            binder,
+            [row(won=True, owlbear_deck=4), row(won=False, owlbear_deck=4)],
+            metric,
         )
 
-        metric.accumulate(_row(won=True, owlbear_deck=4))
-        metric.accumulate(_row(won=False, owlbear_deck=4))
-        metric.finalize()
+        owlbear = str(uuid_for(binder, OWLBEAR))
+        assert df.loc[owlbear, "win_rate_when_in_deck"] == 0.5
+        assert df.loc[owlbear, "sample_count"] == 2
 
-        df = pd.read_parquet(tmp_path / "out.parquet").set_index("nocab_uuid")
-        owlbear_uuid = str(_uuid_for(binder, "Owlbear"))
-        assert df.loc[owlbear_uuid, "win_rate_when_in_deck"] == 0.5
-        assert df.loc[owlbear_uuid, "sample_count"] == 2
+    def test_a_card_never_in_a_deck_has_no_row(self, tmp_path: Path) -> None:
+        binder = binder_with_cards([OWLBEAR, MORNINGSTAR])
+        metric = WinRateWhenInDeckMetric(VERSION, output_path=tmp_path / "out.parquet")
 
-    def test_card_never_in_any_deck_never_appears_in_output(
-        self, tmp_path: Path
-    ) -> None:
-        binder = _binder_with_cards(["Owlbear", "Goblin Morningstar"])
-        metric = WinRateWhenInDeckMetric(
-            binder, _HEADER, GameId.MTG, output_path=tmp_path / "out.parquet"
+        df = scan_into_frame(tmp_path, binder, [row(won=True, owlbear_deck=4)], metric)
+
+        assert str(uuid_for(binder, MORNINGSTAR)) not in df.index
+
+    def test_sample_count_counts_qualifying_games(self, tmp_path: Path) -> None:
+        binder = binder_with_cards([OWLBEAR])
+        metric = WinRateWhenInDeckMetric(VERSION, output_path=tmp_path / "out.parquet")
+
+        rows = [
+            row(won=True, owlbear_deck=4),
+            row(won=True, owlbear_deck=4),
+            row(won=True),
+        ]
+        df = scan_into_frame(tmp_path, binder, rows, metric)
+
+        assert df.loc[str(uuid_for(binder, OWLBEAR)), "sample_count"] == 2
+
+    def test_many_small_chunks_tally_like_one(self, tmp_path: Path) -> None:
+        binder = binder_with_cards([OWLBEAR, MORNINGSTAR])
+        rows = [
+            row(won=i % 3 == 0, owlbear_deck=i % 2, morningstar_deck=1)
+            for i in range(60)
+        ]
+        one = scan_into_frame(
+            tmp_path,
+            binder,
+            rows,
+            WinRateWhenInDeckMetric(VERSION, tmp_path / "one.parquet"),
+        )
+        many = scan_into_frame(
+            tmp_path,
+            binder,
+            rows,
+            WinRateWhenInDeckMetric(VERSION, tmp_path / "many.parquet"),
+            block_size=256,
         )
 
-        metric.accumulate(_row(won=True, owlbear_deck=4, morningstar_deck=0))
-        metric.finalize()
+        pd.testing.assert_frame_equal(one.sort_index(), many.sort_index())
 
-        df = pd.read_parquet(tmp_path / "out.parquet")
-        morningstar_uuid = str(_uuid_for(binder, "Goblin Morningstar"))
-        assert morningstar_uuid not in set(df["nocab_uuid"])
+    def test_output_carries_the_run_version(self, tmp_path: Path) -> None:
+        binder = binder_with_cards([OWLBEAR])
+        metric = WinRateWhenInDeckMetric(VERSION, output_path=tmp_path / "out.parquet")
 
-    def test_sample_count_matches_number_of_qualifying_games(
-        self, tmp_path: Path
-    ) -> None:
-        binder = _binder_with_cards(["Owlbear"])
-        metric = WinRateWhenInDeckMetric(
-            binder, _HEADER, GameId.MTG, output_path=tmp_path / "out.parquet"
-        )
+        scan_into_frame(tmp_path, binder, [row(won=True, owlbear_deck=1)], metric)
 
-        metric.accumulate(_row(won=True, owlbear_deck=4))
-        metric.accumulate(_row(won=True, owlbear_deck=4))
-        metric.accumulate(_row(won=True, owlbear_deck=0))  # not present this game
-        metric.finalize()
-
-        df = pd.read_parquet(tmp_path / "out.parquet").set_index("nocab_uuid")
-        owlbear_uuid = str(_uuid_for(binder, "Owlbear"))
-        assert df.loc[owlbear_uuid, "sample_count"] == 2
+        metadata = read_version_metadata(tmp_path / "out.parquet")
+        assert metadata is not None
+        assert metadata.card_binder_version == "test-version"
 
 
 class TestOpeningHandWinRateMetric:
-    def test_averages_won_indicator_across_games_with_card_in_opening_hand(
+    def test_averages_won_across_games_with_card_in_opening_hand(
         self, tmp_path: Path
     ) -> None:
-        binder = _binder_with_cards(["Owlbear"])
-        metric = OpeningHandWinRateMetric(
-            binder, _HEADER, GameId.MTG, output_path=tmp_path / "out.parquet"
-        )
+        binder = binder_with_cards([OWLBEAR])
+        metric = OpeningHandWinRateMetric(VERSION, output_path=tmp_path / "out.parquet")
 
-        metric.accumulate(_row(won=True, owlbear_opening_hand=1))
-        metric.accumulate(_row(won=False, owlbear_opening_hand=1))
-        metric.finalize()
+        rows = [
+            row(won=True, owlbear_deck=4, owlbear_opening_hand=1),
+            row(won=False, owlbear_deck=4, owlbear_opening_hand=1),
+            row(won=True, owlbear_deck=4),  # in deck, not in the opening hand
+        ]
+        df = scan_into_frame(tmp_path, binder, rows, metric)
 
-        df = pd.read_parquet(tmp_path / "out.parquet").set_index("nocab_uuid")
-        owlbear_uuid = str(_uuid_for(binder, "Owlbear"))
-        assert df.loc[owlbear_uuid, "opening_hand_win_rate"] == 0.5
-        assert df.loc[owlbear_uuid, "sample_count"] == 2
+        owlbear = str(uuid_for(binder, OWLBEAR))
+        assert df.loc[owlbear, "opening_hand_win_rate"] == 0.5
+        assert df.loc[owlbear, "sample_count"] == 2
 
 
 class TestDrawnWinRateMetric:
-    def test_averages_won_indicator_across_games_with_card_drawn(
-        self, tmp_path: Path
-    ) -> None:
-        binder = _binder_with_cards(["Owlbear"])
-        metric = DrawnWinRateMetric(
-            binder, _HEADER, GameId.MTG, output_path=tmp_path / "out.parquet"
+    def test_counts_a_card_drawn_after_the_opening_hand(self, tmp_path: Path) -> None:
+        binder = binder_with_cards([OWLBEAR])
+        metric = DrawnWinRateMetric(VERSION, output_path=tmp_path / "out.parquet")
+
+        df = scan_into_frame(
+            tmp_path, binder, [row(won=True, owlbear_deck=4, owlbear_drawn=1)], metric
         )
 
-        metric.accumulate(_row(won=True, owlbear_drawn=1))
-        metric.finalize()
-
-        df = pd.read_parquet(tmp_path / "out.parquet").set_index("nocab_uuid")
-        owlbear_uuid = str(_uuid_for(binder, "Owlbear"))
-        assert df.loc[owlbear_uuid, "drawn_win_rate"] == 1.0
-
-    def test_counts_a_card_drawn_after_the_opening_hand_too(
-        self, tmp_path: Path
-    ) -> None:
-        """drawn_<name> covers a card seen at any point in the game,
-        not just the opening hand - distinct from
-        OpeningHandWinRateMetric."""
-        binder = _binder_with_cards(["Owlbear"])
-        metric = DrawnWinRateMetric(
-            binder, _HEADER, GameId.MTG, output_path=tmp_path / "out.parquet"
-        )
-
-        # Drawn later in the game, not in the opening hand.
-        metric.accumulate(_row(won=True, owlbear_opening_hand=0, owlbear_drawn=1))
-        metric.finalize()
-
-        df = pd.read_parquet(tmp_path / "out.parquet").set_index("nocab_uuid")
-        owlbear_uuid = str(_uuid_for(binder, "Owlbear"))
-        assert df.loc[owlbear_uuid, "sample_count"] == 1
+        owlbear = str(uuid_for(binder, OWLBEAR))
+        assert df.loc[owlbear, "drawn_win_rate"] == 1.0
+        assert df.loc[owlbear, "sample_count"] == 1
 
 
-def test_finalize_writes_one_parquet_row_per_card_with_expected_columns(
+def test_an_empty_csv_writes_a_zero_row_file_with_the_full_schema(
     tmp_path: Path,
 ) -> None:
-    binder = _binder_with_cards(["Owlbear"])
-    metric = WinRateWhenInDeckMetric(
-        binder, _HEADER, GameId.MTG, output_path=tmp_path / "out.parquet"
+    binder = binder_with_cards([OWLBEAR])
+    metric = WinRateWhenInDeckMetric(VERSION, output_path=tmp_path / "out.parquet")
+
+    df = scan_into_frame(tmp_path, binder, [], metric)
+
+    assert len(df) == 0
+    assert list(df.reset_index().columns) == [
+        "nocab_uuid",
+        "win_rate_when_in_deck",
+        "sample_count",
+    ]
+
+
+def test_two_columns_naming_one_card_both_count(tmp_path: Path) -> None:
+    owlbear_uuid = uuid_for(binder_with_cards([OWLBEAR]), OWLBEAR)
+    metric = WinRateWhenInDeckMetric(VERSION, output_path=tmp_path / "out.parquet")
+    deck = ZoneCounts(
+        card_uuids=(owlbear_uuid, owlbear_uuid),
+        counts=np.array([[1, 1], [1, 0]], np.int16),
     )
 
-    metric.accumulate(_row(won=True, owlbear_deck=4))
-    metric.finalize()
+    metric.accumulate(_chunk_with_deck(deck, won=[True, False]))
+    df = pd.read_parquet(metric.finalize()).set_index("nocab_uuid")
 
-    df = pd.read_parquet(tmp_path / "out.parquet")
-    assert set(df.columns) == {"nocab_uuid", "win_rate_when_in_deck", "sample_count"}
+    # The row implementation counted each matching column once per game
+    assert df.loc[str(owlbear_uuid), "sample_count"] == 3
+    assert df.loc[str(owlbear_uuid), "win_rate_when_in_deck"] == pytest.approx(2 / 3)
+
+
+def test_a_chunk_with_a_different_column_layout_is_rejected(tmp_path: Path) -> None:
+    binder = binder_with_cards([OWLBEAR, MORNINGSTAR])
+    metric = WinRateWhenInDeckMetric(VERSION, output_path=tmp_path / "out.parquet")
+    first = ZoneCounts((uuid_for(binder, OWLBEAR),), np.array([[1]], np.int16))
+    second = ZoneCounts((uuid_for(binder, MORNINGSTAR),), np.array([[1]], np.int16))
+
+    metric.accumulate(_chunk_with_deck(first, won=[True]))
+    with pytest.raises(ValueError, match="differ from the first chunk"):
+        metric.accumulate(_chunk_with_deck(second, won=[True]))
+
+
+def _chunk_with_deck(deck: ZoneCounts, won: list[bool]) -> GameDataChunk:
+    rows = len(won)
+    zones = {
+        zone: ZoneCounts((), np.zeros((rows, 0), np.int16))
+        for zone in GameZone
+        if zone is not GameZone.DECK
+    }
+    zones[GameZone.DECK] = deck
+    return GameDataChunk(
+        zones=zones,
+        won=np.array(won, np.bool_),
+        on_play=np.zeros(rows, np.bool_),
+        num_turns=np.full(rows, 8, np.int32),
+        source_frame=None,
+    )
