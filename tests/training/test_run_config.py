@@ -7,6 +7,9 @@ import torch
 
 from src.dojos.mods.card_field_mods import FieldMask
 from src.dojos.mods.mod_specs import (
+    CardDropoutSpec,
+    CardSubsampleSpec,
+    DuplicateCollapseSpec,
     RandomKeyMaskSpec,
     ShuffleKeysSpec,
     WeightedFieldMaskSpec,
@@ -341,6 +344,60 @@ class TestModOverrides:
         sub = table.entries[2].outcome
         assert isinstance(sub, DropTable)
         assert sub.entries[1].outcome == FieldMask((("card_faces", 0, "name"),))
+
+    def test_parses_every_deck_kind(self) -> None:
+        mods = {
+            "a": [
+                {"kind": "card_dropout", "drop_probability": 0.1},
+                {"kind": "card_subsample", "keep_fraction": 0.8, "groups": [1]},
+                {"kind": "duplicate_collapse", "groups": [0, 1]},
+            ]
+        }
+        specs = parse_run_config(self._with_mods(mods)).mod_overrides["a"]
+
+        assert specs == (
+            CardDropoutSpec(drop_probability=0.1, groups=(0,)),
+            CardSubsampleSpec(keep_fraction=0.8, groups=(1,)),
+            DuplicateCollapseSpec(groups=(0, 1)),
+        )
+
+    @pytest.mark.parametrize(
+        ("entry", "message"),
+        [
+            ({"kind": "card_dropout", "drop_probability": 2}, "config.mods.a.0"),
+            ({"kind": "card_subsample"}, "keep_fraction is required"),
+            ({"kind": "duplicate_collapse", "groups": 1}, "must be a list"),
+            ({"kind": "duplicate_collapse", "groups": ["x"]}, r"groups\.0"),
+            ({"kind": "duplicate_collapse", "groups": [-1]}, "config.mods.a.0"),
+        ],
+    )
+    def test_bad_deck_mods_raise_with_their_location(
+        self, entry: Any, message: str
+    ) -> None:
+        with pytest.raises(ValueError, match=message):
+            parse_run_config(self._with_mods({"a": [entry]}))
+
+    def test_parses_staple_thresholds(self) -> None:
+        document = _document()
+        document["staple_subsampling"] = {"a": 0.1}
+        assert parse_run_config(document).staple_thresholds == {"a": 0.1}
+        assert parse_run_config(_document()).staple_thresholds == {}
+
+    @pytest.mark.parametrize(
+        ("thresholds", "message"),
+        [
+            ({"z": 0.1}, "not in dojos"),
+            ({"a": 0}, "must be > 0"),
+            ({"a": -1}, "must be > 0"),
+            ({"a": float("inf")}, "finite"),
+            ({"a": "x"}, "number"),
+        ],
+    )
+    def test_bad_staple_thresholds_raise(self, thresholds: Any, message: str) -> None:
+        document = _document()
+        document["staple_subsampling"] = thresholds
+        with pytest.raises(ValueError, match=message):
+            parse_run_config(document)
 
     def test_an_empty_list_means_no_augmentation(self) -> None:
         assert parse_run_config(self._with_mods({"a": []})).mod_overrides == {"a": ()}

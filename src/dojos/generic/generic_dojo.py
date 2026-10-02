@@ -12,7 +12,7 @@ import math
 import random
 import time
 from pathlib import Path
-from typing import Any, Iterable, Iterator, List, Mapping
+from typing import Any, Iterable, Iterator, List, Mapping, Sequence
 
 import torch
 from torch import nn
@@ -30,7 +30,7 @@ from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.loss.label_stats import LabelStats
 from src.dojos.loss.loss_calibration import CalibratedLoss, LossCalibration
 from src.dojos.loss.nocab_loss import NocabLoss
-from src.dojos.mods.mod import ModTally
+from src.dojos.mods.mod import Mod, ModTally
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
@@ -256,6 +256,24 @@ class GenericDojo:
     def mod_tallies(self) -> Mapping[str, ModTally]:
         """See Dojo.mod_tallies: its data_mod_pipeline's tallies."""
         return self.data_mod_pipeline.mod_tallies()
+
+    def append_mods(self, mods: Sequence[Mod]) -> None:
+        """Run mods after this dojo's own mods, from the next batch on.
+
+        For the augmentations the catalog attaches (the game's default
+        card-field mods, or a run config's `mods:`): the dojo's own task
+        mods (e.g. a train_only=False mask) stay in place and run first.
+        Call before the first batch.
+
+        Inputs: mods (Sequence[Mod]). Output: none.
+        Side effects: replaces data_mod_pipeline with a new ModPipeline of
+            the old mods then mods (the old pipeline is not changed).
+        Exceptions: none.
+
+        Example:
+            >>> dojo.append_mods([CardDropoutMod(0.1)])
+        """
+        self.data_mod_pipeline = ModPipeline([*self.data_mod_pipeline.mods, *mods])
 
     def move_head_to(self, device: torch.device) -> None:
         """Move the decoder head to device, in place."""

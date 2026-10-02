@@ -340,6 +340,20 @@ a median of ~200 tokens and FaB to ~570.
   seconds instead of a quarantined round. `scripts/preflight_dojos.py`
   runs it over the gwent_one and sts_gg first-run candidates; not yet
   run against real data (no `data/` in this cloud session).
+- [x] **Let label dojos take the per-game card-field augmentations (D1)**
+  (2026-10-01, T5). Every catalog dojo now gets its game's defaults
+  (`augmentation_defaults.py`); a metric dojo runs them after its own task
+  mods (`GenericDojo.append_mods`), and `mods:` replaces them per dojo.
+  Default-on: card-field mods only remove information and never move a
+  card, so a masked target stays masked and option order and group
+  membership are kept (tested per game in `test_mod_specs.py`). Preflight
+  with defaults on: `scryfall.rarity_mask`, `sts2_runs.win` and
+  `final_decks.held_out_card_gwent` 3/3 OK, every mod firing. Deck mods
+  (D2) stay opt-in (`DECK_MOD_GROUPS`). Open: on a mask dojo whose target
+  is also a row of its game's mask table (e.g. `gwent_one.faction_mask`,
+  `spire_codex.color_mask`), that row only re-masks the target, so up to
+  half the draws do nothing yet count as changed in the tally; per-dojo
+  tables would fix it if it matters.
 - [ ] **Experiment: subsample common cards in contrastive pairs.**
   `SingleCardPairConstructor` (`src/dojos/contrastive/pair_constructor.py`)
   samples from a deck's full card multiset, so base cards (basic lands,
@@ -364,6 +378,19 @@ a median of ~200 tokens and FaB to ~570.
   Optional extra arm: logQ correction of in-batch negatives (subtract the
   log sampling frequency from the logits; Yi et al. 2019). Until this
   runs, give Dominion's contrastive dojo a low weight in a mixed diet.
+
+  **Knob built (2026-10-01, T5); the ablation itself has not run yet.**
+  `staple_subsampling: {contrastive.dominion: 0.1}` in a run config sets
+  `t`; a dojo left out keeps `t = inf`. See
+  `src/dojos/contrastive/staple_subsampling.py`. Document frequency comes
+  from 20,000 TRAIN decks, cached under `data/splits/contrastive/`. A deck
+  thinned below `items_per_deck` is skipped. Measured on 3,000 Dominion
+  VALIDATION decks, as the share of 2-card positive pairs with at least
+  one staple (df > 0.5): t = inf 79.8%, 0.3 66.3%, 0.1 53.9%, 0.03 42.5%,
+  0.01 42.2% (98.8% of decks kept). It levels off near 42% because decks
+  hold many staple copies. Suggested arms: inf, 0.1, 0.01.
+  `MultiCardPairConstructor` is not wired up, because its item sampler is
+  still a stub.
 
 ## D. Training driver
 

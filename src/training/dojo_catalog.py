@@ -14,11 +14,15 @@ A recipe may point an existing dojo class at another metric's output
 (metric_output): the sts2_runs keys reuse the sts_gg wrappers over
 data/metrics/sts2_runs/, whose files share the sts_gg label columns.
 
-Contrastive dojos read a game's final deck box directly (no metric) and
-take augmentation mods: the game's defaults
-(src/dojos/augmentation_defaults.py) unless the run config overrides that
-dojo's mods by name. Metric dojos build their own task mods and take no
-augmentations yet.
+Contrastive dojos read a game's final deck box directly (no metric).
+
+Every dojo takes train-only augmentation mods: its game's defaults
+(src/dojos/augmentation_defaults.py) unless the run config's `mods:` names
+that dojo, which replaces them (an empty list turns augmentation off). A
+metric dojo keeps its own task mods (e.g. a train_only=False mask) first
+and in order; its augmentations run after them. Deck mods
+(src/dojos/mods/deck_mods.py) are never a default: only the dojos in
+DECK_MOD_GROUPS take them, and only when `mods:` lists them.
 """
 
 import random
@@ -35,6 +39,10 @@ from src.data_refinement.metrics.sts_gg.deck_box_path import STS_GG_DECK_BOX_PAT
 from src.dojos.augmentation_defaults import default_augmentations_for
 from src.dojos.contrastive.dojo import ContrastiveDojo
 from src.dojos.contrastive.pair_constructor import SingleCardPairConstructor
+from src.dojos.contrastive.staple_subsampling import (
+    StapleSubsampling,
+    cached_document_frequency,
+)
 from src.dojos.dojo import Dojo
 from src.dojos.file_managers.deck_box_dealer import DeckBoxDealer
 from src.dojos.final_decks import held_out_card_dojos as final_decks
@@ -50,8 +58,9 @@ from src.dojos.scryfall import card_mask_dojos as scryfall_masks
 from src.dojos.spire_codex import card_mask_dojos as sts2_masks
 from src.dojos import isotropic
 from src.dojos.sts_gg import card_average_dojos as sts_cards
+from src.dojos.generic.generic_dojo import GenericDojo
 from src.dojos.mods.mod_pipeline import ModPipeline
-from src.dojos.mods.mod_specs import ModSpec
+from src.dojos.mods.mod_specs import DeckModSpec, ModSpec
 from src.dojos.play_gwent import card_inclusion_dojos as gwent_inclusion
 from src.dojos.play_gwent.deck_card_mask_dojos import LeaderMaskedFromDeckDojo
 from src.dojos.play_gwent.deck_label_dojos import GuideVotesDojo
@@ -61,6 +70,9 @@ from src.schema.holdout import HoldoutSpec
 
 # Contrastive dojos keep their deck split index here (see DeckBoxDealer)
 _CONTRASTIVE_INDEX_DIRECTORY = Path("data/splits/contrastive")
+
+# TRAIN decks a staple-subsampling document frequency is counted over
+_DOCUMENT_FREQUENCY_SAMPLE_DECKS = 20_000
 
 
 class CardDojoConstructor(Protocol):
@@ -76,7 +88,7 @@ class CardDojoConstructor(Protocol):
         path_to_training_data: Path | None = None,
         name: str | None = None,
         rng_seed: int | None = None,
-    ) -> Dojo: ...
+    ) -> GenericDojo: ...
 
 
 class DeckDojoConstructor(Protocol):
@@ -94,7 +106,7 @@ class DeckDojoConstructor(Protocol):
         path_to_training_data: Path | None = None,
         name: str | None = None,
         rng_seed: int | None = None,
-    ) -> Dojo: ...
+    ) -> GenericDojo: ...
 
 
 class CardShelf:
@@ -157,8 +169,12 @@ class DojoBuildContext:
     embed_dim. rng_seed: seeds each dojo's split shuffling, so a first
     split build is reproducible. mod_overrides: per dojo name,
     augmentation specs replacing that dojo's game defaults (an empty tuple
-    means no augmentation); build_dojos rejects a name that is not built
-    or takes no augmentations.
+    means no augmentation); build_dojos rejects a name that is not built,
+    and a deck spec on a dojo or group DECK_MOD_GROUPS does not allow.
+    staple_thresholds: per contrastive dojo name, its staple-subsampling t
+    (src/dojos/contrastive/staple_subsampling.py); a dojo not named keeps
+    t = inf (no subsampling). build_dojos rejects a name that is not a
+    contrastive dojo being built.
     """
 
     shelf: CardShelf
@@ -166,6 +182,7 @@ class DojoBuildContext:
     card_embedding_size: int
     rng_seed: int
     mod_overrides: Mapping[str, tuple[ModSpec, ...]] = field(default_factory=dict)
+    staple_thresholds: Mapping[str, float] = field(default_factory=dict)
 
 
 class DojoRecipe(Protocol):
@@ -189,8 +206,8 @@ class CardDojoRecipe:
     metric_output: Path | None = None
 
     def build(self, name: str, context: DojoBuildContext) -> Dojo:
-        """See DojoRecipe.build."""
-        return self.dojo_class(
+        """See DojoRecipe.build; augmentations as _with_augmentations."""
+        dojo = self.dojo_class(
             context.shelf.card_binder(self.game),
             context.holdout,
             context.card_embedding_size,
@@ -198,6 +215,7 @@ class CardDojoRecipe:
             name=name,
             rng_seed=context.rng_seed,
         )
+        return _with_augmentations(dojo, name, self.game, context)
 
 
 @dataclass(frozen=True)
@@ -211,8 +229,8 @@ class DeckDojoRecipe:
     metric_output: Path | None = None
 
     def build(self, name: str, context: DojoBuildContext) -> Dojo:
-        """See DojoRecipe.build."""
-        return self.dojo_class(
+        """See DojoRecipe.build; augmentations as _with_augmentations."""
+        dojo = self.dojo_class(
             context.shelf.card_binder(self.game),
             context.holdout,
             context.shelf.deck_box(self.deck_box_path),
@@ -221,6 +239,7 @@ class DeckDojoRecipe:
             name=name,
             rng_seed=context.rng_seed,
         )
+        return _with_augmentations(dojo, name, self.game, context)
 
 
 @dataclass(frozen=True)
@@ -242,7 +261,9 @@ class ContrastiveDojoRecipe:
         """See DojoRecipe.build. The dealer keeps its split index at
         data/splits/contrastive/<name>.db (seeded by context.rng_seed);
         mods come from context.mod_overrides[name] if present, else the
-        game's defaults, each built with its own seed."""
+        game's defaults, each built with its own seed. A
+        context.staple_thresholds[name] turns on staple subsampling, its
+        document frequency cached beside the split index."""
         binder = context.shelf.card_binder(self.game)
         dealer = DeckBoxDealer(
             context.shelf.deck_box(self.deck_box_path),
@@ -250,9 +271,14 @@ class ContrastiveDojoRecipe:
             _contrastive_index_path(name),
             seed=context.rng_seed,
         )
+        pair_constructor = SingleCardPairConstructor(
+            self.items_per_deck,
+            rng_seed=context.rng_seed,
+            staple_subsampling=_staple_subsampling(name, dealer, context),
+        )
         return ContrastiveDojo(
             dealer,
-            SingleCardPairConstructor(self.items_per_deck, rng_seed=context.rng_seed),
+            pair_constructor,
             binder,
             context.holdout,
             decks_per_sample=self.decks_per_sample,
@@ -267,14 +293,38 @@ def _contrastive_index_path(name: str) -> Path:
     return _CONTRASTIVE_INDEX_DIRECTORY / f"{name}.db"
 
 
+def _staple_subsampling(
+    name: str, dealer: DeckBoxDealer, context: DojoBuildContext
+) -> StapleSubsampling | None:
+    """name's staple subsampling, or None (t = inf) when the run config
+    names no threshold for it. Its document frequency comes from
+    cached_document_frequency, cached at
+    data/splits/contrastive/<name>.document_frequency.json.
+
+    Inputs: name, dealer (the dojo's), context.
+    Output: StapleSubsampling | None.
+    Side effects: may count and cache the document frequency (reads decks
+        through dealer; writes only the cache file).
+    Exceptions: as cached_document_frequency and StapleSubsampling.
+    """
+    threshold = context.staple_thresholds.get(name)
+    if threshold is None:
+        return None
+    cache_path = _CONTRASTIVE_INDEX_DIRECTORY / f"{name}.document_frequency.json"
+    frequency = cached_document_frequency(
+        dealer, cache_path, _DOCUMENT_FREQUENCY_SAMPLE_DECKS
+    )
+    return StapleSubsampling(threshold, frequency)
+
+
 def _augmentation_pipeline(
     name: str, game: GameId, context: DojoBuildContext
 ) -> ModPipeline:
-    """The dojo's mods: context.mod_overrides[name] if present, else
-    game's defaults. Each mod's seed is drawn from a stream seeded by
+    """The dojo's augmentations: context.mod_overrides[name] if present,
+    else game's defaults. Each mod's seed is drawn from a stream seeded by
     (rng_seed, name, "mods"), so mods neither share a random stream with
-    each other nor with the dealer and pair constructor (seeded by
-    rng_seed itself), and each dojo's mods differ.
+    each other nor with the dojo's own sampling (seeded by rng_seed
+    itself), and each dojo's mods differ.
 
     Inputs: name, game, context. Output: ModPipeline.
     Side effects: none. Exceptions: as a ModSpec's build.
@@ -282,6 +332,23 @@ def _augmentation_pipeline(
     specs = context.mod_overrides.get(name, default_augmentations_for(game))
     seeds = random.Random(f"{context.rng_seed}:{name}:mods")
     return ModPipeline([spec.build(seeds.randrange(2**32)) for spec in specs])
+
+
+def _with_augmentations(
+    dojo: GenericDojo, name: str, game: GameId, context: DojoBuildContext
+) -> GenericDojo:
+    """dojo with its augmentations (_augmentation_pipeline) appended after
+    its own task mods, which stay first and in order.
+
+    Inputs: dojo (a just-built metric dojo, no batch yet), name, game,
+        context. Output: dojo itself.
+    Side effects: dojo.append_mods when there is anything to append.
+    Exceptions: as a ModSpec's build.
+    """
+    mods = _augmentation_pipeline(name, game, context).mods
+    if mods:
+        dojo.append_mods(mods)
+    return dojo
 
 
 def _recipe_for_contrastive(game: GameId) -> ContrastiveDojoRecipe:
@@ -700,19 +767,35 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
 }
 
 
-def takes_augmentations(name: str) -> bool:
-    """Whether the catalog dojo named name accepts augmentation mods
-    (today: the contrastive dojos). build_dojos uses this to reject a
-    `mods:` override for any other dojo.
-
-    Inputs: name (a DOJO_CATALOG key). Output: bool.
-    Side effects: none. Exceptions: KeyError for an unknown name.
-
-    Example:
-        >>> takes_augmentations("contrastive.gwent")
-        True
-    """
-    return isinstance(DOJO_CATALOG[name], ContrastiveDojoRecipe)
+# Opt-in deck mods (src/dojos/mods/deck_mods.py): the multi-card metric
+# dojos a run config may thin, and which input groups (a multi-card input
+# is group 0). Data knowledge, and the only gate: a dojo not listed takes
+# no deck mods. Never listed: a label that is deck size, a copy count or a
+# run-length total that tracks deck size (sts total_*, floors, elites,
+# combats, relic count, card_deck_size, isotropic copy counts); a held-out
+# card dojo (thinning changes the answer set); an option-selection dojo's
+# options group (the label indexes it), so a MultiCardOptionSelection dojo
+# (options are its whole input) is never listed; a kingdom or single-card
+# group (fixed game context, not a deck).
+DECK_MOD_GROUPS: Mapping[str, frozenset[int]] = {
+    "sts_gg.ascension_prediction": frozenset({0}),
+    "sts_gg.character_prediction": frozenset({0}),
+    "sts2_runs.ascension_prediction": frozenset({0}),
+    "sts2_runs.character_prediction": frozenset({0}),
+    "sts2_runs.killed_by": frozenset({0}),
+    "sts2_runs.win": frozenset({0}),
+    "play_gwent.guide_votes": frozenset({0}),
+    "play_gwent.leader_masked_from_deck": frozenset({0}),
+    "fabtcg_decklists.hero_masked_from_deck": frozenset({0}),
+    "isotropic.full_deck_win_prediction": frozenset({0}),
+    # [partial deck, kingdom]: the partial deck only
+    "isotropic.mid_game_win_probability": frozenset({0}),
+    # Both decks of a symmetric pair
+    "isotropic.deck_pair_winner": frozenset({0, 1}),
+    "isotropic.mid_game_deck_pair_winner": frozenset({0, 1}),
+    # [options, partial deck]: the options group (0) is never thinned
+    "isotropic.mid_game_next_buy": frozenset({1}),
+}
 
 
 def build_dojos(names: Sequence[str], context: DojoBuildContext) -> list[Dojo]:
@@ -724,10 +807,11 @@ def build_dojos(names: Sequence[str], context: DojoBuildContext) -> list[Dojo]:
     Side effects: loads card data through context.shelf; a dojo whose
         split files do not exist yet writes them (seeded by
         context.rng_seed).
-    Exceptions: ValueError naming every unknown key, or any
-        context.mod_overrides name that is not in names or takes no
-        augmentations, raised before any dojo is built (so a typo does
-        not cost a binder load); whatever a recipe's build raises.
+    Exceptions: ValueError naming every unknown key, any
+        context.mod_overrides name that is not in names, or a deck spec
+        DECK_MOD_GROUPS does not allow, raised before any dojo is built
+        (so a typo does not cost a binder load); whatever a recipe's
+        build raises.
 
     Example:
         >>> context = DojoBuildContext(CardShelf(), holdout, 256, rng_seed=0)
@@ -741,8 +825,9 @@ def build_dojos(names: Sequence[str], context: DojoBuildContext) -> list[Dojo]:
     if unknown:
         raise ValueError(f"unknown dojos {unknown}; see DOJO_CATALOG")
     _require_valid_overrides(context.mod_overrides, names)
+    _require_contrastive_thresholds(context.staple_thresholds, names)
 
-    # Build each dojo from its recipe
+    # Build each dojo from its recipe (each attaches its own augmentations)
     for name in names:
         result.append(DOJO_CATALOG[name].build(name, context))
     return result
@@ -753,12 +838,58 @@ def _require_valid_overrides(
 ) -> None:
     """Inputs: mod_overrides, names (the dojos being built). Output: none.
     Side effects: none.
-    Exceptions: ValueError if an override names a dojo not being built, or
-        one that takes no augmentations (its override would be ignored).
+    Exceptions: ValueError if an override names a dojo not being built
+        (it would be ignored), or as _require_allowed_specs.
     """
     not_built = sorted(set(mod_overrides) - set(names))
     if not_built:
         raise ValueError(f"mods override dojos {not_built} that are not being built")
-    fixed = sorted(name for name in mod_overrides if not takes_augmentations(name))
-    if fixed:
-        raise ValueError(f"dojos {fixed} take no augmentation mods")
+    for name, specs in mod_overrides.items():
+        _require_allowed_specs(name, specs)
+
+
+def _require_contrastive_thresholds(
+    staple_thresholds: Mapping[str, float], names: Sequence[str]
+) -> None:
+    """Inputs: staple_thresholds, names (the dojos being built).
+    Output: none. Side effects: none.
+    Exceptions: ValueError if a threshold names a dojo not being built or
+        one that is not contrastive (it would be ignored).
+    """
+    refused = sorted(
+        name
+        for name in staple_thresholds
+        if name not in names
+        or not isinstance(DOJO_CATALOG[name], ContrastiveDojoRecipe)
+    )
+    if refused:
+        raise ValueError(
+            f"staple_subsampling names {refused}, which are not contrastive "
+            "dojos being built"
+        )
+
+
+def _require_allowed_specs(name: str, specs: tuple[ModSpec, ...]) -> None:
+    """Card-field specs suit every dojo; a deck spec needs a dojo in
+    DECK_MOD_GROUPS and only the groups listed there.
+
+    Inputs: name (a catalog dojo), specs (its override). Output: none.
+    Side effects: none.
+    Exceptions: ValueError for a deck spec on a dojo not in
+        DECK_MOD_GROUPS, or naming a group it does not allow.
+    """
+    for spec in specs:
+        if not isinstance(spec, DeckModSpec):
+            continue
+        spec_name = type(spec).__name__
+        if name not in DECK_MOD_GROUPS:
+            raise ValueError(
+                f"{name} takes no deck mods ({spec_name}); see DECK_MOD_GROUPS"
+            )
+        allowed = DECK_MOD_GROUPS[name]
+        refused = sorted(set(spec.groups) - allowed)
+        if refused:
+            raise ValueError(
+                f"{name} may thin groups {sorted(allowed)} only "
+                f"(DECK_MOD_GROUPS); {spec_name} names {refused}"
+            )

@@ -83,10 +83,29 @@ row, or by deck for contrastive) layer under it.
   unchanged and training continues; constructor arguments are validated.
   Each such mod keeps a `ModTally` (cards seen, changed, failed, and the
   first failure) so a mod that never fires or keeps failing is visible.
+  `deck_mods.py` holds train-only deck mods that thin the card lists of a
+  multi-card or multi-group input (a `DeckThinningMod` Template Method
+  base): `CardDropoutMod` drops each card with a probability,
+  `CardSubsampleMod` keeps `max(1, round(f * n))` of a group's cards, and
+  `DuplicateCollapseMod` keeps the first copy of each card. Each is built
+  with the group indexes it may thin (a multi-card input is group 0); other
+  groups pass through as the same lists. A non-empty group always keeps at
+  least one card, kept cards keep their order, and a datum the mod cannot
+  read (a single card, a group index past its groups) passes through and is
+  counted. Their `ModTally` counts the cards in thinned groups as seen and
+  the cards removed as changed. Deck mods are opt-in per dojo, never a
+  default: they change deck size and copy counts, so they must never reach
+  a dojo whose label depends on those. `DECK_MOD_GROUPS`
+  (`src/training/dojo_catalog.py`) lists the dojos that take them and which
+  groups; an option-selection dojo's options group is never listed (its
+  label indexes it). A run config's `mods:` attaches them, after the dojo's
+  own task mods (`GenericDojo.append_mods`); `mods:` replaces the dojo's
+  default augmentations, so list those too to keep them.
   `MASK_TOKEN` (`mod.py`) is the one mask string every masking mod writes,
   and `ModTally` lives there too (`Mod.tally` is None for mods that keep
   none). `mod_specs.py` holds `ModSpec`s: frozen, shareable recipes, one
-  per card-field mod, that each dojo builds into its own mods (a mod's
+  per card-field or deck mod (`DeckModSpec` for the latter, carrying its
+  `groups`), that each dojo builds into its own mods (a mod's
   random state and tally are per dojo, so mod objects are never shared).
   Per-game default specs are in `augmentation_defaults.py`; see
   `contrastive/` below.
@@ -130,6 +149,17 @@ row-independent `(output, label) -> loss`.
   pair. This is the research surface. `SingleCardPairConstructor`
   samples single cards (every same-deck card is a positive);
   `MultiCardPairConstructor` samples fixed-size groups of cards.
+- `staple_subsampling.py` - optional staple thinning for
+  `SingleCardPairConstructor`. Before sampling, each card occurrence is
+  kept with probability `min(1, sqrt(t / df))` (word2vec subsampling),
+  where `df` is the card's share of decks (`DocumentFrequency`).
+  `df` is counted once over the first 20,000 TRAIN decks, in the
+  dealer's seeded order. It is cached as JSON under `data/splits/` and
+  keyed by the box's CardBinder version and the sample size. The deck box
+  is only read. A deck thinned below `items_per_deck` is skipped. No
+  subsampling (`t = inf`, the default) is the old path and draws nothing
+  extra from the RNG. A run config's `staple_subsampling:` sets `t` per
+  contrastive dojo.
 - `contrastive_batch.py` - `ContrastiveBatch`: a flat pool of `inputs`
   (every item is both anchor and candidate), per-item card
   `identities` (so exact duplicate cards are excluded from an anchor's
@@ -167,8 +197,13 @@ Augmentation defaults: `augmentation_defaults.py` (at the top of
 each mainly masks the field that nearly identifies a card's deck (Gwent
 `faction`, STS2 `color`), so same-deck positives cannot be matched on that
 field alone. A `ModSpec` is a frozen recipe; each dojo builds its own mods
-from it, with its own seed and tally. Today only the contrastive dojos
-take these defaults (`src/training/dojo_catalog.py`).
+from it, with its own seed and tally. Every catalog dojo takes its game's
+defaults (`src/training/dojo_catalog.py`): a contrastive dojo as its whole
+pipeline, a metric dojo after its own task mods (`GenericDojo.append_mods`),
+so a task's mask (`train_only=False`) stays first and in order. Card-field
+mods only remove information and never move a card, so a mask stays masked
+and an option-selection dojo keeps its groups and option order. A run
+config's `mods:` replaces a dojo's defaults (an empty list turns them off).
 
 Not built yet: multi-positive SupCon, a pooling `ContrastiveLoss`
 Decorator, and mixed contrastive + label-based training in one step.

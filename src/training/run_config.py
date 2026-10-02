@@ -34,6 +34,9 @@ import yaml
 
 from src.dojos.mods.card_field_mods import FieldMask
 from src.dojos.mods.mod_specs import (
+    CardDropoutSpec,
+    CardSubsampleSpec,
+    DuplicateCollapseSpec,
     ModSpec,
     RandomKeyMaskSpec,
     ShuffleKeysSpec,
@@ -108,8 +111,14 @@ class RunConfig:
     plan: the TrainingPlan (phases, holdout, held-out dojos, seed).
     limits: HardwareLimits (batch cost ceiling, precision).
     mod_overrides: per run dojo, augmentation specs replacing that dojo's
-        game defaults (empty tuple: no augmentation). Checked here to name
-        run dojos; build_dojos checks each also takes augmentations.
+        game defaults (empty tuple: no augmentation); a metric dojo's own
+        task mods stay and run first. Checked here to name run dojos;
+        build_dojos checks deck specs against dojo_catalog.DECK_MOD_GROUPS.
+    staple_thresholds: per run dojo, the staple-subsampling t (finite, > 0)
+        of a contrastive dojo (see src/dojos/contrastive/
+        staple_subsampling.py); a dojo not named keeps t = inf (no
+        subsampling). Checked here to name run dojos; build_dojos checks
+        each is contrastive.
     """
 
     run_directory: Path
@@ -119,6 +128,7 @@ class RunConfig:
     plan: TrainingPlan
     limits: HardwareLimits
     mod_overrides: Mapping[str, tuple[ModSpec, ...]] = field(default_factory=dict)
+    staple_thresholds: Mapping[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # No duplicate dojos (the Trainer keys dojos by name and would
@@ -139,6 +149,11 @@ class RunConfig:
         unknown_overrides = sorted(set(self.mod_overrides) - known)
         if unknown_overrides:
             raise ValueError(f"mods names {unknown_overrides}, not in dojos")
+        unknown_thresholds = sorted(set(self.staple_thresholds) - known)
+        if unknown_thresholds:
+            raise ValueError(
+                f"staple_subsampling names {unknown_thresholds}, not in dojos"
+            )
 
 
 def read_config_document(path: Path) -> ConfigDocument:
@@ -195,7 +210,8 @@ def parse_run_config(document: ConfigDocument) -> RunConfig:
     Expected top-level keys: run_directory, device, seed, model, dojos,
     held_out_dojos (optional), holdout, hardware, eval_examples_per_dojo,
     phases, faults (optional), mods (optional: dojo name -> list of mod
-    entries, see _parse_mod_spec). A phase without a "dojos" key trains every
+    entries, see _parse_mod_spec), staple_subsampling (optional: dojo name
+    -> t, see _parse_staple_thresholds). A phase without a "dojos" key trains every
     run dojo that is not held out.
 
     Inputs: document (ConfigDocument).
@@ -241,6 +257,9 @@ def parse_run_config(document: ConfigDocument) -> RunConfig:
     model = _parse_model(top.required_section("model"))
     limits = _build_flat_dataclass(HardwareLimits, top.required_section("hardware"))
     mod_overrides = _parse_mod_overrides(top.optional_section("mods"))
+    staple_thresholds = _parse_staple_thresholds(
+        top.optional_section("staple_subsampling")
+    )
     top.reject_unread_keys()
     result = _construct_at(
         "config",
@@ -252,6 +271,7 @@ def parse_run_config(document: ConfigDocument) -> RunConfig:
             plan=plan,
             limits=limits,
             mod_overrides=mod_overrides,
+            staple_thresholds=staple_thresholds,
         ),
     )
     return result
@@ -546,8 +566,9 @@ def _parse_model(section: ConfigSection) -> ModelSpec:
 def _parse_mod_overrides(section: ConfigSection) -> dict[str, tuple[ModSpec, ...]]:
     """The `mods:` section: dojo name -> its augmentation specs.
 
-    RunConfig checks each name is a run dojo; build_dojos checks it takes
-    augmentations. An empty list means "no augmentation" for that dojo.
+    RunConfig checks each name is a run dojo; build_dojos checks any deck
+    spec against DECK_MOD_GROUPS. The list replaces the dojo's game
+    defaults; an empty list means "no augmentation" for that dojo.
     (A dojo name contains a ".", so --set cannot address it; edit the
     file instead.)
 
@@ -566,12 +587,41 @@ def _parse_mod_overrides(section: ConfigSection) -> dict[str, tuple[ModSpec, ...
     return result
 
 
+def _parse_staple_thresholds(section: ConfigSection) -> dict[str, float]:
+    """The `staple_subsampling:` section: contrastive dojo name -> t, the
+    staple-subsampling threshold (each card kept with probability
+    min(1, sqrt(t / df))). Leave a dojo out for t = inf (no subsampling).
+
+        staple_subsampling:
+          contrastive.dominion: 0.1
+
+    Inputs: section ("staple_subsampling", possibly empty). Output: dict.
+    Side effects: none.
+    Exceptions: ValueError for a value that is not a finite number > 0.
+    """
+    result: dict[str, float] = {}
+    for name in section.keys():
+        threshold = section.required(name, float)
+        if threshold <= 0:
+            raise ValueError(f"{section.location_of(name)} must be > 0")
+        result[name] = threshold
+    section.reject_unread_keys()
+    return result
+
+
 def _parse_mod_spec(section: ConfigSection) -> ModSpec:
     """One mod entry -> ModSpec, by its "kind":
 
         {kind: shuffle_keys}
         {kind: random_key_mask, probability: 0.1}
         {kind: weighted_field_mask, table: [<rows>]}   (see _parse_mask_table)
+        {kind: card_dropout, drop_probability: 0.1, groups: [0]}
+        {kind: card_subsample, keep_fraction: 0.8, groups: [1]}
+        {kind: duplicate_collapse}
+
+    The last three are deck mods (groups optional, default [0]); only the
+    dojos in dojo_catalog.DECK_MOD_GROUPS take them, for the groups listed
+    there.
 
     Dispatch is a kind -> parser table, not an if-chain.
 
@@ -663,7 +713,31 @@ _MOD_PARSERS: dict[str, Callable[[ConfigSection], ModSpec]] = {
             section.required_section_list("table"), section.location_of("table")
         )
     ),
+    "card_dropout": lambda section: CardDropoutSpec(
+        section.required("drop_probability", float), _parse_groups(section)
+    ),
+    "card_subsample": lambda section: CardSubsampleSpec(
+        section.required("keep_fraction", float), _parse_groups(section)
+    ),
+    "duplicate_collapse": lambda section: DuplicateCollapseSpec(_parse_groups(section)),
 }
+
+
+def _parse_groups(section: ConfigSection) -> tuple[int, ...]:
+    """A deck mod entry's optional `groups:` list of group indexes; (0,),
+    the deck of a multi-card input, when absent.
+
+    Inputs: section (one mod entry). Output: tuple[int, ...].
+    Side effects: records groups as read.
+    Exceptions: ValueError if groups is not a list of ints.
+    """
+    if not section.has("groups"):
+        return (0,)
+    where = section.location_of("groups")
+    return tuple(
+        _checked_scalar(item, int, f"{where}.{index}")
+        for index, item in enumerate(section.required_list("groups"))
+    )
 
 
 def _parse_device(text: str, where: str) -> torch.device:

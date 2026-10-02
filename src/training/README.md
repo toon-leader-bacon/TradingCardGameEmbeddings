@@ -61,9 +61,12 @@ Top level:
   entries (`contrastive.gwent`, `contrastive.flesh_and_blood`,
   `contrastive.slay_the_spire_2`) read the game's final deck box directly
   (positives: two cards from the same deck; split index under
-  `data/splits/contrastive/`) and take the game's default augmentation
-  mods, or a run config's per-dojo replacement (`mods:`); every mod gets
-  its own seed from a stream separate from the dealer's.
+  `data/splits/contrastive/`). Every dojo, contrastive or metric, takes
+  the game's default augmentation mods, or a run config's per-dojo
+  replacement (`mods:`); a metric dojo runs them after its own task mods.
+  Deck mods are opt-in, for the dojos and groups in `DECK_MOD_GROUPS`.
+  Every mod gets its own seed from a stream separate from the dojo's own
+  sampling.
 - [preflight.py](preflight.py): `preflight_dojo()` exercises one already-
   built dojo (one TRAIN batch, `compute_loss` against random embeddings,
   and that batch's `baseline_loss`, which must be finite and > 0)
@@ -224,8 +227,8 @@ The script builds the model and the config's dojos, preflights every dojo
 (any failure stops the run before training), then trains. Preflight also
 prints each augmentation mod's tally over its one batch (cards changed,
 failed) and warns on a mod that changed nothing or failed; that never
-stops the run. A config's optional `mods:` section replaces a contrastive
-dojo's default augmentations (see `configs/training/gwent_contrastive.yaml`);
+stops the run. A config's optional `mods:` section replaces a dojo's
+default augmentations (see `configs/training/gwent_contrastive.yaml`);
 dojo names contain ".", so `--set` cannot reach them. The run
 directory must not already exist; it receives `run_config.yaml` (the
 config with overrides applied; defaults it left out are not written),
