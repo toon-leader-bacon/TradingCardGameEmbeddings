@@ -8,7 +8,6 @@ Bodies are filled in by design-recipe-implement.
 from datetime import datetime, timezone
 from uuid import uuid4
 
-import numpy as np
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.seventeenlands.game_data.game_card_columns import (
@@ -139,48 +138,6 @@ class TestUuidForName:
 
         assert result is None
         assert "Nonexistent Card" in game_columns.unmatched_names
-
-
-class TestPresentUuids:
-    def test_only_columns_with_a_positive_count_are_present(self) -> None:
-        """A column set here is a copy COUNT (e.g. deck_<name> summing
-        to 40), not a per-copy list entry - present_uuids() should
-        still only report presence once per qualifying card, matching
-        draft_data's own present_uuids() semantics."""
-        binder = _binder_with_cards(["Owlbear", "Goblin Morningstar"])
-        header = ["deck_Owlbear", "deck_Goblin Morningstar"]
-        game_columns = GameCardColumns.from_header(header, binder, GameId.MTG)
-        owlbear_uuid = game_columns.uuid_for_name("Owlbear")
-        row = {"deck_Owlbear": 4, "deck_Goblin Morningstar": 0}
-
-        result = game_columns.present_uuids(row, game_columns.deck_columns)
-
-        assert result == [owlbear_uuid]
-
-    def test_nan_cell_is_treated_as_absent(self) -> None:
-        binder = _binder_with_cards(["Owlbear"])
-        header = ["deck_Owlbear"]
-        game_columns = GameCardColumns.from_header(header, binder, GameId.MTG)
-        row = {"deck_Owlbear": float("nan")}
-
-        result = game_columns.present_uuids(row, game_columns.deck_columns)
-
-        assert result == []
-
-    def test_numpy_nan_and_none_cells_are_treated_as_absent(self) -> None:
-        binder = _binder_with_cards(["Owlbear", "Goblin Morningstar", "Elf"])
-        header = ["deck_Owlbear", "deck_Goblin Morningstar", "deck_Elf"]
-        game_columns = GameCardColumns.from_header(header, binder, GameId.MTG)
-        elf_uuid = game_columns.uuid_for_name("Elf")
-        row = {
-            "deck_Owlbear": np.float64("nan"),
-            "deck_Goblin Morningstar": None,
-            "deck_Elf": np.int64(2),
-        }
-
-        result = game_columns.present_uuids(row, game_columns.deck_columns)
-
-        assert result == [elf_uuid]
 
 
 def test_unmatched_names_only_lists_names_that_never_matched() -> None:

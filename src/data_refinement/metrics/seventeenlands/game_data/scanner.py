@@ -1,145 +1,213 @@
-"""Drives a shared, per-row read pass over one 17lands game_data CSV
-across multiple Metric[dict] instances at once - see
-plans/game_data_metrics.md's Component overview #11.
+"""Drives one streaming read pass over a 17lands game_data CSV across
+every Metric[GameDataChunk] at once (plans/seventeenlands_chunk_scan.md).
 
-Byte-for-byte the same isolation contract as
-draft_data/scanner.py's scan_draft_csv(), renamed only to name this raw
-source - no behavioral difference. Chunking here is purely an
-I/O-efficiency detail internal to this function - every
-Metric.accumulate() call still receives one row at a time, never a
-whole chunk.
+The file is streamed with pyarrow.csv.open_csv in record batches. Each
+batch is parsed exactly once, by the GameDataChunkParser the driver
+built for this CSV, and that one GameDataChunk is handed to every
+metric. The scanner never sees the CardBinder or a DeckBox: card
+matching lives in the parser, and a deck-input metric received its
+DeckBox in its own constructor (the driver saves that box afterwards).
 
-DOES NOT BUILD GameCardColumns OR DeckBox: each metric builds its own
-GameCardColumns internally, from the (card_binder, header, source_game)
-it was itself constructed with; a metric that needs a DeckBox takes one
-directly in its own constructor. This function never touches either -
-it only ever drives already-constructed Metric[dict] instances over
-rows. A calling driver builds one shared DeckBox and passes it into
-every deck-input metric's constructor before calling this function,
-then saves that box itself once scanning finishes (same division of
-responsibility sts_gg/scanner.py's own docstring documents).
+Failure isolation is per (metric, chunk): one metric raising on a chunk
+is logged and skips that chunk for that metric only; every other metric
+still gets it. A metric that raises partway through accumulate() can be
+left with that chunk half-tallied, so a logged accumulate() failure
+means that metric's output for this CSV must not be trusted.
 """
 
 import logging
+from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
+from typing import Sequence
 
-import pandas as pd
+import pyarrow as pa
+import pyarrow.csv as pa_csv
 from tqdm import tqdm
 
+from src.data_refinement.metrics.isolated_call import FAILURE_MARKER, call_isolated
 from src.data_refinement.metrics.metric import Metric
+from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+    GameDataChunk,
+)
+from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk_parser import (
+    GameDataChunkParser,
+)
 
 _logger = logging.getLogger(__name__)
 
+_DEFAULT_BLOCK_SIZE = 64 << 20  # bytes of CSV per record batch
+
 
 def scan_game_csv(
-    raw_csv_path: Path, metrics: list[Metric[dict]], chunk_size: int = 100_000
+    raw_csv_path: Path,
+    metrics: Sequence[Metric[GameDataChunk]],
+    parser: GameDataChunkParser,
+    block_size: int = _DEFAULT_BLOCK_SIZE,
 ) -> None:
-    """Drive every metric in `metrics` over every row of raw_csv_path,
-    then finalize all of them.
+    """Drive every metric over every chunk of raw_csv_path, then
+    finalize all of them.
 
     Inputs:
-        raw_csv_path: path to a 17lands game_data CSV (e.g.
-            data/raw/17lands/game_data/MSH.PremierDraft.csv).
-        metrics: every Metric[dict] to drive over this one read pass -
-            each already constructed with this same raw_csv_path's
-            (card_binder, header, source_game) (see module docstring).
-        chunk_size: rows per pandas.read_csv chunk - an I/O-efficiency
-            knob only; does not change what any metric receives (still
-            one row at a time).
+        raw_csv_path: a game_data CSV (e.g.
+            data/raw/17lands/game_data/KTK.TradDraft.csv).
+        metrics: every metric to drive over this one read pass.
+        parser: built by the driver from this same CSV's header.
+        block_size: CSV bytes per record batch (an I/O knob; does not
+            change any metric's output).
     Output: none.
-    Side effects: reads raw_csv_path once, in chunks; calls
-        accumulate() on every metric for every row, then finalize() on
-        every metric. Logs loudly (via the stdlib logging module) on
-        any per-metric accumulate()/finalize() failure, rather than
-        raising - isolates one metric's bug from every other metric in
-        the list, same contract as draft_data/scanner.py's
-        scan_draft_csv(). Prints a tqdm progress bar to stderr, sized
-        against raw_csv_path's byte size and advanced by the
-        underlying file handle's position after each chunk.
-    Exceptions: raises if raw_csv_path doesn't exist or isn't parsable
-        as CSV - only a per-metric accumulate()/finalize() failure is
-        caught and isolated, not a raw-file-level failure.
+    Side effects: reads raw_csv_path once; calls accumulate(chunk) on
+        every metric per batch, then finalize() on every metric; logs
+        (does not raise) any one metric's failure, naming the metric,
+        the CSV and the chunk, then one summary line per failing metric
+        at the end; shows a tqdm byte progress bar on stderr.
+    Exceptions: raises if raw_csv_path is missing or not parsable as
+        CSV; ValueError naming the CSV and chunk if parser.parse()
+        rejects a batch (a null scalar). These are file-level failures,
+        not one metric's: they stop the whole family run.
 
     Example:
-        >>> header = pd.read_csv(raw_csv_path, nrows=0).columns
-        >>> deck_box = DeckBox()  # metrics-private
-        >>> metrics = [
-        ...     WinRateWhenInDeckMetric(card_binder, header, GameId.MTG),
-        ...     DeckWinPredictionMetric(card_binder, header, GameId.MTG, deck_box),
-        ... ]
-        >>> scan_game_csv(raw_csv_path, metrics)
+        >>> parser = GameDataChunkParser.from_header(header, binder, GameId.MTG)
+        >>> scan_game_csv(path, metrics, parser)
     """
-    total_bytes = raw_csv_path.stat().st_size
-    with open(raw_csv_path, "rb") as raw_file, tqdm(
-        total=total_bytes,
+    # Read only what the parser needs, with card counts as small ints
+    convert_options = pa_csv.ConvertOptions(
+        include_columns=parser.needed_columns(),
+        column_types=parser.column_types(),
+    )
+    read_options = pa_csv.ReadOptions(block_size=block_size)
+
+    failures = _FailureTally(raw_csv_path.name)
+    chunk_count = 0
+
+    # Stream batches; parse each once and hand it to every metric
+    with open(raw_csv_path, "rb") as raw_file, _byte_progress(raw_csv_path) as progress:
+        reader = pa_csv.open_csv(
+            raw_file, read_options=read_options, convert_options=convert_options
+        )
+        for chunk_index, batch in enumerate(reader):
+            chunk = _parse_or_raise(parser, batch, raw_csv_path, chunk_index)
+            chunk_count += 1
+            step = f"accumulate() on {raw_csv_path.name} chunk {chunk_index}"
+            for metric in metrics:
+                ok = call_isolated(
+                    _logger, metric, step, partial(metric.accumulate, chunk)
+                )
+                failures.record_accumulate(metric, ok)
+            progress.update(raw_file.tell() - progress.n)
+
+    # Finalize every metric, isolating one failure from the rest
+    for metric in metrics:
+        ok = call_isolated(
+            _logger, metric, f"finalize() on {raw_csv_path.name}", metric.finalize
+        )
+        failures.record_finalize(metric, ok)
+
+    failures.log_summary(chunk_count)
+
+
+def _parse_or_raise(
+    parser: GameDataChunkParser,
+    batch: pa.RecordBatch,
+    raw_csv_path: Path,
+    chunk_index: int,
+) -> GameDataChunk:
+    """parser.parse(batch), with a rejected batch's error naming the CSV
+    and chunk so the bad row can be found in the file.
+
+    Inputs: parser, batch, raw_csv_path, chunk_index. Output: the chunk.
+    Side effects: none.
+    Exceptions: ValueError, prefixed with the CSV name and chunk index.
+    """
+    try:
+        return parser.parse(batch)
+    except ValueError as error:
+        raise ValueError(f"{raw_csv_path.name} chunk {chunk_index}: {error}") from error
+
+
+def _byte_progress(raw_csv_path: Path) -> tqdm:
+    """A tqdm bar sized to raw_csv_path's byte size.
+
+    Inputs: raw_csv_path. Output: tqdm (a context manager).
+    Side effects: none until used. Exceptions: OSError if the file is
+        missing.
+    """
+    return tqdm(
+        total=raw_csv_path.stat().st_size,
         unit="B",
         unit_scale=True,
         desc=f"scan_game_csv: {raw_csv_path.name}",
-    ) as progress:
-        bytes_read = 0
-        for chunk in pd.read_csv(raw_file, chunksize=chunk_size):
-            position = raw_file.tell()
-            progress.update(position - bytes_read)
-            bytes_read = position
-
-            # Hand every metric one row at a time, never the chunk
-            # itself (see module docstring).
-            for row in chunk.to_dict(orient="records"):
-                for metric in metrics:
-                    _accumulate_isolated(metric, row)
-
-    # Finalize every metric, isolating one metric's finalize() failure
-    # from the rest of the list.
-    for metric in metrics:
-        _finalize_isolated(metric)
+    )
 
 
-def _accumulate_isolated(metric: Metric[dict], row: dict) -> None:
-    """Call metric.accumulate(row), logging (not raising) on failure.
+@dataclass
+class _MetricFailures:
+    """One metric's failed steps over one CSV.
 
-    Private helper - single consumer is scan_game_csv().
-
-    Inputs:
-        metric: the Metric[dict] to drive.
-        row: one parsed CSV row to feed it.
-    Output: none.
-    Side effects: whatever metric.accumulate() does on success; on
-        failure, emits one logging.exception() call instead of
-        propagating.
-    Exceptions: none - every exception from metric.accumulate() is
-        caught and logged here.
+    accumulate_failures: chunks whose accumulate() raised.
+    finalize_failed: whether finalize() raised (it runs once per CSV).
     """
-    try:
-        metric.accumulate(row)
-    except Exception:
-        _logger.exception(
-            "scan_game_csv: %r raised from accumulate() on one row - "
-            "skipping just that row for this metric, continuing the scan "
-            "for every other metric",
-            metric,
-        )
+
+    accumulate_failures: int = 0
+    finalize_failed: bool = False
 
 
-def _finalize_isolated(metric: Metric[dict]) -> None:
-    """Call metric.finalize(), logging (not raising) on failure.
+class _FailureTally:
+    """Each metric's failed steps over one CSV, so the scan ends with one
+    loud summary line per failing metric."""
 
-    Private helper - single consumer is scan_game_csv().
+    def __init__(self, csv_name: str) -> None:
+        """Start with no failures.
 
-    Inputs:
-        metric: the Metric[dict] to finalize.
-    Output: none.
-    Side effects: whatever metric.finalize() does on success; on
-        failure, emits one logging.exception() call instead of
-        propagating.
-    Exceptions: none - every exception from metric.finalize() is
-        caught and logged here.
-    """
-    try:
-        metric.finalize()
-    except Exception:
-        _logger.exception(
-            "scan_game_csv: %r raised from finalize() - its output may "
-            "be missing or incomplete, but every other metric still "
-            "finalizes normally",
-            metric,
-        )
+        Inputs: csv_name (named in the summary). Output: none.
+        Side effects: none. Exceptions: none.
+        """
+        self._csv_name = csv_name
+        self._failures: dict[str, _MetricFailures] = {}
+
+    def record_accumulate(self, metric: object, ok: bool) -> None:
+        """Count one failed accumulate() for metric (success: nothing).
+
+        Inputs: metric, ok (call_isolated's result). Output: none.
+        Side effects: updates the tally. Exceptions: none.
+        """
+        if not ok:
+            self._failures_of(metric).accumulate_failures += 1
+
+    def record_finalize(self, metric: object, ok: bool) -> None:
+        """Mark metric's finalize() as failed (success: nothing).
+
+        Inputs: metric, ok (call_isolated's result). Output: none.
+        Side effects: updates the tally. Exceptions: none.
+        """
+        if not ok:
+            self._failures_of(metric).finalize_failed = True
+
+    def log_summary(self, chunk_count: int) -> None:
+        """One ERROR line per failing metric; nothing when all passed.
+
+        Inputs: chunk_count (chunks scanned). Output: none.
+        Side effects: logs. Exceptions: none.
+        """
+        for metric_name, failures in self._failures.items():
+            _logger.error(
+                "%s summary for %s: %s failed accumulate() on %d of %d chunks%s",
+                FAILURE_MARKER,
+                self._csv_name,
+                metric_name,
+                failures.accumulate_failures,
+                chunk_count,
+                (
+                    " and failed finalize() (output missing or untrustworthy)"
+                    if failures.finalize_failed
+                    else ""
+                ),
+            )
+
+    def _failures_of(self, metric: object) -> _MetricFailures:
+        """metric's record, created on its first failure.
+
+        Inputs: metric. Output: _MetricFailures.
+        Side effects: may add a record. Exceptions: none.
+        """
+        return self._failures.setdefault(repr(metric), _MetricFailures())
