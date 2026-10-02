@@ -3,7 +3,7 @@
 A DataConstructor maps 1:1 to a metric FAMILY (the Template Method bases
 under src/data_refinement/metrics/, e.g. CardAverageMetric), never to an
 individual concrete metric subclass and never to a (input shape, task
-shape) generic dojo cell - see plans/dojo_v2.md's component overview.
+shape) generic dojo cell - see src/dojos/generic/README.md.
 A generic dojo (src/dojos/generic/*/dojo.py) takes one of these as an
 injected collaborator rather than owning/building it itself, so the same
 DataConstructor implementation can be reused across every concrete metric

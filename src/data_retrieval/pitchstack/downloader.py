@@ -6,8 +6,8 @@ land raw files on disk, no parsing or filtering (that's
 data_refinement's job) — whatever this project's own card identity
 scheme (nocab_uuid) turns out to need from pitchstack's own
 cardId/deck ids is explicitly out of scope here, deferred to a future
-data_refinement pass. See plans/pitchstack.md for this feature's scope
-and open questions.
+data_refinement pass. See pitchstack.md (next to this file) for this
+source's scope and open questions.
 
 Two phases, kept as two separate public methods rather than composed
 into one fetch() — same rationale as PlayGwentDownloader/
@@ -35,7 +35,7 @@ rather than reimplemented here — see that module's docstring.
        derived from the other), and the only confirmed way to get from
        one to the other is phase_2()'s own /v1/decks/{deck_id}
        response, which embeds "activeDeckVersionId" and a full
-       "deckVersions" list. See plans/pitchstack.md.
+       "deckVersions" list. See pitchstack.md.
 
     2. phase_2() — reads deck_ids.txt and, for every id not already
        recorded in decks_manifest.txt, fetches that deck's full record
@@ -64,7 +64,7 @@ rather than reimplemented here — see that module's docstring.
        above are the payload's only keys.
 
 Two more pitchstack.gg endpoints exist and are deliberately NOT
-implemented by this class yet (see plans/pitchstack.md):
+implemented by this class yet (see pitchstack.md):
 
     - GET /v1/deck_versions/{deck_version_id}/cards — one deck
       version's card list. phase_2()'s /v1/decks/{deck_id} response

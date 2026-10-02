@@ -1,8 +1,7 @@
 """Shared base class for every src/data_retrieval source.
 
-See plans/downloader_base_class.md for the design discussion this came
-out of, and src/data_retrieval/README.md for this container's overall
-scope (fetch and land raw files on disk, no parsing).
+See src/data_retrieval/README.md for this container's overall scope
+(fetch and land raw files on disk, no parsing).
 """
 
 from abc import ABC, abstractmethod

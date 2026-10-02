@@ -1,9 +1,8 @@
 """The shared interface every raw-source ingestion stage implements.
 
 See src/data_refinement/README.md for this container's scope,
-src/data_refinement/card_binder/README.md for the full contract this
-was built against, and plans/card_binder_v2.md's "Component overview"
-for the reasoning behind this design.
+and src/data_refinement/card_binder/README.md for the full contract
+this was built against and the reasoning behind it.
 
 CardIngestionStage is a Strategy (PATTERNS.md) — one implementation
 per raw source (e.g. ScryfallCardIngestionStage in ./scryfall/, a
@@ -20,8 +19,7 @@ of the pre-v2 design's centralization: that design kept collision
 logic in one place (CardBinder.add()) at the cost of assuming
 (source_game, name) was always a valid uniqueness key, which doesn't
 hold for every game (Slay the Spire 2's per-character Strike/Defend,
-Pokemon's same-named-but-different reprints) — see
-plans/card_binder_v2.md's "Why".
+Pokemon's same-named-but-different reprints).
 
 A stage also decides what goes into each card's raw_content, which a text
 encoder later reads verbatim: keep it lean and high-signal. See "What goes

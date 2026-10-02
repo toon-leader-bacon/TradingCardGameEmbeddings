@@ -1,7 +1,7 @@
 """The shared, generic contract every masking metric in this project
 satisfies structurally.
 
-See plans/masking_metrics.md for the design rationale: unlike
+Design rationale (see metrics/generic/README.md): unlike
 ../metric.py's Metric[RawRowT] Protocol (driven per-row by an external
 scanner over a large raw file it can't hold in memory all at once,
 e.g. ../sts_gg/scanner.py's scan_runs_jsonl), a masking metric's source

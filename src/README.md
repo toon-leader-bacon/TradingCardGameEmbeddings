@@ -50,7 +50,7 @@ Two flows hand data between containers as files on disk:
 | [`encoder_model/`](encoder_model/README.md) | in progress | The embedding model (PyTorch only): text encoder + embedding head, single- and multi-card. |
 | [`dojos/`](dojos/README.md) | in progress | Training tasks: each yields batches within the trainer's budget and scores embeddings with its own small decoder head and loss. |
 | [`training/`](training/README.md) | in progress | `Trainer`: phases, rounds and steps over a diet of dojos, with saturation-based stopping, fault isolation and checkpointing. Runs from a YAML config via `scripts/run_training.py`, on CPU or GPU. |
-| [`evaluation/`](evaluation/README.md) | in progress ([`plans/evaluation.md`](../plans/evaluation.md)) | Post-training evaluation of encoder checkpoints (intrinsic: embedding-table analyses against card labels; extrinsic: fresh-dojo-head curves on a frozen encoder via `Trainer`). Distinct from a training run's own TEST signal on a trainable encoder. |
+| [`evaluation/`](evaluation/README.md) | in progress ([`plans/archive/evaluation.md`](../plans/archive/evaluation.md)) | Post-training evaluation of encoder checkpoints (intrinsic: embedding-table analyses against card labels; extrinsic: fresh-dojo-head curves on a frozen encoder via `Trainer`). Distinct from a training run's own TEST signal on a trainable encoder. |
 
 ## A naming note: `Dojo` vs. `Gym`
 

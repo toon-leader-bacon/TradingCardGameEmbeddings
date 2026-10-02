@@ -3,16 +3,15 @@ also ends that run upgraded.
 
 CARD RESOLUTION: duplicates legacy/sts_gg/deck_outcome_metric.py's own
 "CARD."-prefix-strip + CardBinder.get_by_alias(GameId.SLAY_THE_SPIRE_2,
-DataSource.SPIRE_CODEX, ...) rule rather than sharing a helper with it
-- see plans/sts_gg_metrics.md's Explicitly out of scope section; this
-is the project's 4th/5th independent site with this exact logic,
+DataSource.SPIRE_CODEX, ...) rule rather than sharing a helper with
+it. This is the project's 4th/5th independent site with this exact logic,
 deliberately left duplicated pending one later comprehensive
 cross-cutting dedup pass, not extracted per-addition. On a miss: log
 loudly and skip just that one deck entry, never drop the whole run.
 
 COPY COUNTING: a card appearing twice in one run's final deck (e.g.
 two upgraded GRAND_FINALE copies) is tallied as two independent
-samples, not deduplicated to one-per-run - see plans/sts_gg_metrics.md.
+samples, not deduplicated to one-per-run.
 """
 
 import logging
@@ -65,7 +64,7 @@ class CardUpgradeRateMetric:
                 cards ingested (this class never writes to it).
             deck_box: accepted only for constructor-shape consistency
                 with this container's multi-card metrics (e.g.
-                AscensionPredictionMetric) - see plans/sts_gg_metrics.md.
+                AscensionPredictionMetric; see sts_gg/README.md).
                 This metric's output is per-card, not per-deck, so it
                 never reads from or writes into deck_box.
             output_path: overrides DEFAULT_OUTPUT_PATH when given.

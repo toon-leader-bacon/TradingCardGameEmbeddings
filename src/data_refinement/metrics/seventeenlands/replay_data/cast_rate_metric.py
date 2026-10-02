@@ -1,4 +1,4 @@
-"""CastRateMetric - plans/replay_data_metrics.md's "Cast Rate":
+"""CastRateMetric - BRAINSTORM.md's "Cast Rate":
 P(card cast in a game | card in deck_<name>), distinct from
 game_data's drawn rate since replay data can tell "drawn but never
 cast" from "cast."

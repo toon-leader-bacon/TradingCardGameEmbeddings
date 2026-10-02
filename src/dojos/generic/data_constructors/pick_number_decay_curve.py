@@ -17,10 +17,9 @@ class PickNumberDecayCurveDataConstructor:
     - single card in, a sparse bucket_index -> take_rate dict out
     (Dict[int, float]), scored by MaskedVectorRegressionLoss
     (src/dojos/loss/masked_vector_regression_loss.py) rather than
-    FixedClassificationLoss/SoftClassificationLoss - see
-    plans/seventeen_lands_dojos.md for why this metric's per-bucket
-    take-rate values are independent probabilities, not a distribution
-    that sums to 1.
+    FixedClassificationLoss/SoftClassificationLoss, because this
+    metric's per-bucket take-rate values are independent probabilities,
+    not a distribution that sums to 1.
 
     Like CardCharacterPredictionDataConstructor, this is the one metric
     in its family (no siblings), so there's no label_column to

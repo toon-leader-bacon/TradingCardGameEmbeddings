@@ -1,6 +1,6 @@
 """Template Method base for a per-card hit/total rate tallied across
-every per-turn occurrence in a game, rather than once per row - see
-plans/replay_data_metrics.md's ReplayTurnEventRateMetric component.
+every per-turn occurrence in a game, rather than once per row (see
+replay_data/README.md).
 
 The turn-indexed generalization of game_data's GameCardAverageMetric/
 sts_gg's CardAverageMetric shape, one level over: instead of one value
@@ -15,9 +15,8 @@ half-turn and which of those count as a "hit."
 Deliberately NOT shared with CastRateMetric/DiscardRateMetric/
 TutorTargetRateMetric (each its own standalone file): those three
 collapse to one hit/total pair PER GAME (a single set intersection
-against deck-present cards), not one pair per per-turn occurrence -
-see plans/replay_data_metrics.md's "why this earns a shared base"
-note for the full reasoning distinguishing the two groups.
+against deck-present cards), not one pair per per-turn occurrence,
+which is what distinguishes the two groups.
 """
 
 from abc import ABC, abstractmethod

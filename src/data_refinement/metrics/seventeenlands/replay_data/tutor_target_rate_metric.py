@@ -1,5 +1,5 @@
-"""TutorTargetRateMetric (replay-level) -
-plans/replay_data_metrics.md's "Tutor Target Rate (replay-level)":
+"""TutorTargetRateMetric (replay-level) - BRAINSTORM.md's "Tutor
+Target Rate (replay-level)":
 P(card in user_turn_N_cards_tutored for some N | card in deck_<name>).
 
 Distinct class from game_data.tutor_target_rate_metric.TutorTargetRateMetric

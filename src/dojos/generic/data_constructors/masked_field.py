@@ -26,9 +26,8 @@ class MaskedFieldDataConstructor:
 
     Returns the RAW label string as read off the row, unencoded against
     any vocabulary - a metric's LABEL_VALUES-based encoding is
-    FixedClassificationLoss's job, not this class's (see
-    plans/dojo_v2.md's "Fixed-classification label encoding lives in
-    the generic dojo, not the DataConstructor").
+    FixedClassificationLoss's job, not this class's: fixed-classification
+    label encoding lives in the generic dojo, not the DataConstructor.
     """
 
     def __init__(self, label_column: str) -> None:

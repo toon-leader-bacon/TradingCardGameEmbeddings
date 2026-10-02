@@ -43,7 +43,7 @@ class DeckLabelDataConstructor:
                 (e.g. "relic_count", "total_damage_taken") - read off
                 the paired DeckLabelMetric subclass's own LABEL_COLUMN
                 ClassVar by the thin wrapper that constructs this,
-                never duplicated as a literal (see plans/dojo_v2.md).
+                never duplicated as a literal.
             label_caster: converts each row's raw label_column cell to
                 the Label type the consuming dojo's loss expects.
                 Defaults to float, matching every DeckLabelMetric
@@ -77,7 +77,7 @@ class DeckLabelDataConstructor:
             within a resolved deck that fails to resolve is dropped
             from that deck's card list, not treated as a reason to skip
             the row (human decision - training data is inherently
-            messy; see plans/dojo_v2.md). A row is skipped outright if
+            messy). A row is skipped outright if
             its deck_uuid doesn't resolve, or if every one of that
             deck's cards fails to resolve (an empty MultiCardInput is
             never a valid training datum).

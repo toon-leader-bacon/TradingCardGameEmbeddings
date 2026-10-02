@@ -1,6 +1,6 @@
 """The multi-game deck store, backed by one SQLite file per game.
 
-See plans/deckbox_sqlite.md for the design, and
+See src/data_refinement/deck_box/README.md for the design, and
 src/data_refinement/card_binder/card_binder.py for the sibling this is
 modeled on. DeckBox mirrors CardBinder's CRUD-by-uuid shape
 only - it has NO AliasLedger and NO identity-collision handling of any

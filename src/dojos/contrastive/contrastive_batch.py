@@ -1,7 +1,7 @@
 """The (inputs, identities, positive_cliques) container a ContrastivePairConstructor builds.
 
-See plans/contrastive_dojo.md's "ContrastiveBatch" section. Deliberately
-not a two-list anchor/candidate split: every item acts as both an
+See src/dojos/README.md's contrastive section. Deliberately not a
+two-list anchor/candidate split: every item acts as both an
 anchor and a candidate for every other item in the same batch. Reuses
 BatchedTrainingInput exactly (no new input representation) - the same
 encoder forward() call every other dojo already makes.

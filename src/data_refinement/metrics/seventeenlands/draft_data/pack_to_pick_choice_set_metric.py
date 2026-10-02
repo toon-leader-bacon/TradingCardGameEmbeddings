@@ -12,10 +12,9 @@ writes a list-of-options column plus a single pick column, not a
 deck_uuid reference, since a pack's option set isn't a GenericDeck and
 has no reason to be deduplicated through a DeckBox.
 
-See plans/draft_data_metrics.md's "Open questions" #2 on why this and
-pool_conditioned_pick_metric.py's PoolConditionedPickMetric are kept as
-independent classes rather than sharing a base, despite their close
-similarity.
+This and pool_conditioned_pick_metric.py's PoolConditionedPickMetric
+are kept as independent classes rather than sharing a base, despite
+their close similarity (a deliberate choice).
 """
 
 from pathlib import Path

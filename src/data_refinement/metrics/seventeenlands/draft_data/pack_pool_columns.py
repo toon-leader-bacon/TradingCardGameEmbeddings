@@ -10,8 +10,7 @@ card_lookup.uuid_for_name_or_front_face() (no separate lookup/cache
 class in between).
 
 The same name -> nocab_uuid matching also answers the `pick` column's
-per-row cell value (see plans/draft_data_metrics.md's "Data facts"
-section) - a pick's name is always drawn from the same per-set card
+per-row cell value: a pick's name is always drawn from the same per-set card
 pool as the pack_card_/pool_ column suffixes, so uuid_for_name() serves
 both header-driven and value-driven lookups through the same cache.
 """

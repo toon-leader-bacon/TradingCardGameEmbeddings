@@ -1,8 +1,8 @@
 """Translates a Scryfall oracle-cards dump into stored cards.
 
 See src/data_refinement/card_binder/ingestion.py for the shared
-CardIngestionStage interface this implements, and plans/card_binder_v2.md
-for the full design this implements. This class is handed a live
+CardIngestionStage interface this implements, and
+src/data_refinement/card_binder/README.md for the full design. This class is handed a live
 CardBinder and owns its own duplicate-detection and
 collision-resolution directly against it, rather than returning
 IngestedCandidate data for a driver (build.py) to interpret centrally.
@@ -21,7 +21,7 @@ directly:
   - Not every row has every field — e.g. Arena-illegal cards have no
     arena_id.
 
-Design, per plans/card_binder_v2.md:
+Design (see card_binder/README.md):
   - DEDUPLICATION: this is entirely the get_by_alias() lookup at the
     top of _ingest_row() — a hit means "this row is a duplicate of an
     already-stored card," a miss means "this is a genuinely new card."
@@ -56,9 +56,8 @@ Design, per plans/card_binder_v2.md:
     construction.
   - Every row's own primary alias (oracle_id) and every secondary
     alias it carries are registered on EVERY branch — including a row
-    that matched an existing card but changed nothing — per
-    plans/card_binder_v2.md's "Open risks": a losing/no-op row's
-    identifier must never become a dead end for get_by_alias().
+    that matched an existing card but changed nothing: a losing/no-op
+    row's identifier must never become a dead end for get_by_alias().
 """
 
 import json

@@ -2,8 +2,7 @@
 
 See src/data_refinement/metrics/generic/masked_field_metric.py for the shared
 scan() sequence this fixes MASKED_FIELD/LABEL_VALUES/eligibility for,
-and plans/masking_metrics.md for the full design (this class's row in
-the gwent_one scope table).
+and metrics/gwent_one/README.md for this class's entry.
 
 STRATAGEM CARDS ARE EXCLUDED: confirmed against the full page_1.html
 corpus, data-provision="0" is exactly and only the 12 data-type=

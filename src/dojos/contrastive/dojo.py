@@ -1,7 +1,7 @@
 """ContrastiveDojo: the single-card contrastive dojo, this slice's vertical spine.
 
-See plans/contrastive_dojo.md's "The dojo itself and naming" section.
-Implements the shared `Dojo` contract (src/dojos/dojo.py): a "batch" is
+See src/dojos/README.md's contrastive section. Implements the shared
+`Dojo` contract (src/dojos/dojo.py): a "batch" is
 one ContrastiveBatch built from a sample of decks, an "example" is one
 source deck, and the batch budget is translated into a deck count (a
 contrastive batch only makes sense whole - its negatives are the other

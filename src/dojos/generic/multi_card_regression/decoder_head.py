@@ -11,8 +11,7 @@ src/dojos/generic/pooling.py) before running the same small MLP shape
 the single-card sibling uses. The pooling step is the one part of this
 architecture expected to grow variants later (e.g. a learned attention
 pooler); the MLP and the dojo's own constructor shape are not expected
-to change when that happens - see plans/dojo_v2.md's contract manifest
-for this cell.
+to change when that happens.
 """
 
 from typing import List

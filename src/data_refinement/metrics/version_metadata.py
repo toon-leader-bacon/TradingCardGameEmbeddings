@@ -2,7 +2,7 @@
 file was built from, plus whether a DeckBox is needed to fully verify
 it.
 
-See plans/card_binder_versioning.md for the full design. Stored as
+See metrics/README.md for how the version check is used. Stored as
 native parquet schema metadata - part of the one output file's own
 footer, not a sidecar - so it can never be separated from, or
 mismatched with, the file it describes. Every metric that writes via

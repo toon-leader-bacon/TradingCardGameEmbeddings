@@ -1,5 +1,5 @@
-"""CombatAggressionProfileMetric - plans/replay_data_metrics.md's "Full
-Deck -> Combat-Aggression-Profile Prediction": given the user's full
+"""CombatAggressionProfileMetric - BRAINSTORM.md's "Full Deck ->
+Combat-Aggression-Profile Prediction": given the user's full
 deck_<name> list, predict an aggregate combat-tempo scalar derived from
 this same game's per-turn columns - the average len(creatures_attacked)
 per user half-turn that had any attack at all.

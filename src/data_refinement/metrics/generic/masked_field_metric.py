@@ -1,7 +1,7 @@
 """Template Method base for masking metrics: one output row per
 (eligible card, masked field) - see _MaskedFieldRow below.
 
-See plans/masking_metrics.md for the full design. A subclass fixes
+See metrics/generic/README.md for the full design. A subclass fixes
 which field is masked (MASKED_FIELD), what its fixed label vocabulary
 is (LABEL_VALUES), and two decisions:
 
@@ -83,8 +83,7 @@ class MaskedFieldMetric(ABC):
                 already have self.SOURCE_GAME's cards ingested. Typed
                 as CardLookup (../../card_binder/card_lookup.py), not the
                 full CardBinder, since this class only ever calls
-                all_cards() - see plans/masking_metrics.md's
-                constructor rationale (a real CardBinder satisfies
+                all_cards() (a real CardBinder satisfies
                 CardLookup structurally, so callers pass one
                 directly - no adapter needed).
             output_path: overrides DEFAULT_OUTPUT_PATH when given.
@@ -178,9 +177,8 @@ class MaskedFieldMetric(ABC):
         so MASKED_FIELD is declared once and walked once here, rather
         than each subclass separately hardcoding the same key as a
         literal string (which would let MASKED_FIELD and the actual
-        lookup silently drift apart - see plans/masking_metrics.md:
-        MASKED_FIELD is meant to be a walkable path, not just
-        documentation).
+        lookup silently drift apart: MASKED_FIELD is meant to be a
+        walkable path, not just documentation).
 
         Inputs:
             card: a card to walk raw_content on.
@@ -226,9 +224,8 @@ class MaskedFieldMetric(ABC):
         Default: every card is eligible. Override when a field
         doesn't apply to every card (e.g. PowerMaskMetric/
         ArmorMaskMetric restricting to unit-type cards,
-        ProvisionMaskMetric excluding stratagem cards) - see
-        plans/masking_metrics.md's "Eligibility filtering is real
-        logic, not ceremony" section for why this decision belongs
+        ProvisionMaskMetric excluding stratagem cards). Eligibility
+        filtering is real logic, not ceremony: this decision belongs
         here rather than left to a Dojo to discover defensively.
 
         Inputs:

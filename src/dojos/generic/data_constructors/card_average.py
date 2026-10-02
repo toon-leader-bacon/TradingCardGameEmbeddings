@@ -41,7 +41,7 @@ class CardAverageDataConstructor:
                 (e.g. "average_relic_count", "win_rate") - read off the
                 paired CardAverageMetric subclass's own LABEL_COLUMN
                 ClassVar by the thin wrapper that constructs this, never
-                duplicated as a literal (see plans/dojo_v2.md).
+                duplicated as a literal.
             uuid_column: the column name holding this row's card id.
                 Defaults to "nocab_uuid" (every CardAverageMetric
                 subclass); override for a metric family whose id column

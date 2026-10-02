@@ -2,7 +2,7 @@
 
 See src/data_refinement/README.md for this container's scope and
 src/data_refinement/card_binder/README.md for the full design this
-implements. Design decided in plans/card_binder_v2.md.
+implements.
 
 CardBinder has no opinion about "sameness" beyond nocab_uuid — it does
 NOT enforce any uniqueness invariant over name, alias, or anything
@@ -120,8 +120,8 @@ class CardBinder:
         and provenance, if given, fully replace the existing card's
         value for that field; if omitted (None), that field is left
         untouched. This is the "dictionary merge" counterpart to
-        replace()'s full swap — see this class's docstring and
-        plans/card_binder_v2.md for the distinction.
+        replace()'s full swap — see this class's docstring for the
+        distinction.
 
         Inputs:
             nocab_uuid: identity of the card to update. MUST already
@@ -259,7 +259,7 @@ class CardBinder:
         BREAKING CHANGE from the pre-card_binder_v2 design: name is no
         longer assumed unique within a game (e.g. Slay the Spire 2 has
         5 cards named "Strike", Pokemon has same-named reprints with
-        different rules text) — see plans/card_binder_v2.md's "Why".
+        different rules text) — see card_binder/README.md.
 
         Inputs:
             source_game: which game's name namespace to look in.
@@ -552,8 +552,8 @@ class CardBinder:
         this itself (for both a row's own primary identifier and any
         secondary ones a source carries) on every branch of that
         handling, not just the branches that change stored content.
-        See plans/card_binder_v2.md's "Open risks" for why this isn't
-        centrally enforced.
+        Not centrally enforced: each stage owns its own collision
+        handling, so CardBinder can't see which branch a row took.
 
         Inputs:
             source_game: which game's namespace this identifier
@@ -593,7 +593,7 @@ class CardBinder:
         the given order, with no merge/richness logic, since collision
         resolution isn't CardBinder's job anywhere in this design.
 
-        REQUIRED test coverage per plans/card_binder_v2.md: a
+        REQUIRED test coverage: a
         save() -> load() round trip must be verified to return a
         card whose nocab_uuid is bit-for-bit identical to what was
         saved.
@@ -690,7 +690,7 @@ class CardBinder:
         <game>.alias_ledger.jsonl file — CardBinder never writes alias
         entries itself; AliasLedger owns its own file format.
 
-        REQUIRED test coverage per plans/card_binder_v2.md: pair with
+        REQUIRED test coverage: pair with
         load() in a round-trip test asserting nocab_uuid survives
         unchanged — see load()'s docstring.
 

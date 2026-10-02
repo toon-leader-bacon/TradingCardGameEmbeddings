@@ -1,6 +1,6 @@
 """Soft cross-entropy loss for a fixed-classification-shaped decoder head
 scored against a probability-vector target instead of a single hard
-class (plans/dojo_v2.md).
+class (see src/dojos/generic/README.md).
 
 Reuses FixedClassificationDecoderHead's (batch_size, num_classes) logits
 output unchanged - only the target shape and the loss formula differ
@@ -36,7 +36,7 @@ class SoftClassificationLoss(NocabLoss[List[torch.Tensor], List[Dict[str, float]
     FixedClassificationLoss._class_index()'s exact philosophy. In
     practice this is expected to never fire for CardCharacterPrediction-
     Dojo's own vocabulary (CharacterPredictionMetric.LABEL_VALUES,
-    confirmed against the full run corpus) - see plans/dojo_v2.md.
+    confirmed against the full run corpus).
     """
 
     def __init__(self, label_values: Sequence[str]) -> None:

@@ -1,95 +1,109 @@
 # CURRENT_STATUS
 
-A snapshot (2026-09-27) of which `data_retrieval` sources have
-matching `data_refinement` support, used as a soft TODO list. Update
-a row when its status changes. Hard bugs and chores live in each
-container's own `TODO.md`; this file tracks coverage only.
+A snapshot (2026-10-02, `main` at `ef95fae`) of what each
+`data_retrieval` source has in `data_refinement` and the dojo catalog.
+Update a row when its status changes. Bugs and chores live in each
+container's own `TODO.md`. The prioritized pre-training work list is
+`plans/pre_training_data.md` (local only; `plans/` is gitignored).
 
 Legend: ✅ exists · ❌ missing · 🟥 brainstorm only · 🟨 partial ·
-🟩 complete or mature.
+🟩 complete or mature. "Keys" counts `dojo_catalog.py` entries, which
+are what a training config can name.
+
+## Totals
+
+- **Card binders:** 7 games (MTG, Pokemon, FaB, Gwent, StS2, Dominion,
+  Hearthstone).
+- **Published deck boxes:** 6 games, all but Hearthstone, which has no
+  deck source.
+- **Metrics:** 150 classes, 148 with a dojo
+  (`docs/metric_dojo_inventory.csv`).
+- **Catalog:** 123 keys. Each passed `run_training.py --check` on real
+  data when added (2026-09-30 to 10-01).
+- **Not trainable yet:** all 26 17lands dojos. Their outputs are per-CSV
+  and unmerged, so no catalog key exists for them.
+
+## Raw data was re-downloaded on 2026-10-02
+
+Every `data/raw/` source was re-fetched today. **The binders, deck
+boxes and metrics on disk were built from the older files.** Differences
+that matter:
+
+- **scryfall:** a newer dump (`oracle-cards-20261002...`, was 09-12).
+- **spire_codex runs:** 40 pages / 6.1 GB (34 pages / 5.2 GB ingested).
+- **play_gwent:** guides re-downloading in progress.
+- **sts2runs:** `data/raw/sts2runs/` is **empty**. The download failed
+  on a DNS error (`sts2runs.com`). Its 6,796 decks are still in
+  `slay_the_spire_2.db` and in the `sts2_runs` metrics.
+- **17lands:** none of the 303 CSVs is tar-wrapped any more. The old
+  download had 19.
+
+A binder re-ingest that changes `version_for(game)` invalidates that
+game's deck box, metrics and splits. The refresh order is in the plan.
 
 ## Per-source matrix
 
+| Source (retrieval) | Game | Card binder | Deck box | Metrics | Keys |
+| --- | --- | --- | --- | --- | --- |
+| `scryfall` | MTG | ✅ `ScryfallCardIngestionStage` | n/a (cards only) | 🟨 6 single-card masks (cmc, type, rarity, colors, power, toughness) | 6 |
+| `seventeenlands` › `game_data` | MTG | (scryfall) | ✅ `seventeenlands_game_data` → `mtg.db`, 4.8M decks (one per draft), 0.71% Unknown slots | 🟨 11 built, all with dojos, all vectorized on the unmerged chunk-scan branches. Partial run: 76 set/format dirs, no PremierDraft | 0 (outputs not merged) |
+| `seventeenlands` › `draft_data` | MTG | (scryfall) | n/a (picks, not decks) | 🟨 6 built with dojos. Only one shakeout file run (OM1) | 0 |
+| `seventeenlands` › `replay_data` | MTG | (scryfall) | n/a (same games as game_data) | 🟨 9 built with dojos. Only one shakeout file run (PIO; Arena ids miss the binder) | 0 |
+| `pokemon_tcg` | Pokemon | ✅ `PokemonTcgCardIngestionStage` | ✅ `pokemon_tcg` → `pokemon.db`, 188 theme decks (prefabs, low value) | 🟨 5 single-card masks (HP, types, stage, retreat cost, weakness) | 5 |
+| `hearthstonejson` | Hearthstone | ✅ `HearthstoneJsonCardIngestionStage` (newest build only, 6,187 collectible cards) | n/a (cards only) | 🟨 8 single-card masks (cost, attack, health, class, rarity, type, races, spell school) | 8 |
+| `gwent_one` | Gwent | ✅ `GwentOneCardIngestionStage` | n/a (cards only) | 🟨 8 single-card masks | 8 |
+| `play_gwent` | Gwent | (gwent_one) | ✅ `play_gwent` → `gwent.db`, 60k guide decks | 🟨 4: leader masked from deck, card inclusion rate, faction-conditioned inclusion, guide votes. All four only read the published box | 4 |
+| `spire_codex` (cards) | StS2 | ✅ `SpireCodexCardIngestionStage` | n/a | 🟨 4 single-card masks (cost, type, rarity, color) | 4 |
+| `spire_codex` (runs) + `sts2runs` | StS2 | (spire_codex) | ✅ `spire_codex_runs` (subclasses the sts2runs stage) + `sts2runs` → `slay_the_spire_2.db`, ~2.76M decks incl. abandoned runs | 🟩 23 in `metrics/sts2_runs/` over 1.36M scored runs, with losses. Per-floor metrics (B2) not built | 23 |
+| `sts_gg` | StS2 | (spire_codex) | ✅ `sts_gg` (1,004 decks, into the same box) | 🟩 24 built with dojos. Wins only (a leaderboard), so the 4 win/killed-by labels are constant and have no key; `sts2_runs` covers them. `card_character_prediction` has a dojo but no key | 19 |
+| `cardvault_fabtcg` | FaB | ✅ `CardVaultFabtcgCardIngestionStage` | n/a (cards only) | 🟨 6 single-card masks (pitch, cost, power, defense, class, type) | 6 |
+| `fabtcg_decklists` | FaB | (cardvault_fabtcg) | ✅ `fabtcg_decklists` → `flesh_and_blood.db`, 4,161 decks (cards keyed by name) | 🟨 3: hero masked from deck, card inclusion rate, hero-conditioned inclusion. Pitch-curve shape not built | 3 |
+| `pitchstack` | FaB | (cardvault_fabtcg) | ❌ Blocked: `decks.jsonl` (1,686 decks) has metadata only; card lists need the unimplemented `/cards` endpoint | 🟥 brainstorm only | 0 |
+| `dominiontabs` | Dominion | ✅ `DominionTabsCardIngestionStage` | n/a (cards only) | 🟩 all 3 viable ideas (cost regression, set, type) | 3 |
+| `isotropic` | Dominion | (dominiontabs) | ✅ `isotropic` → `dominion.db`, 531,675 final decks (resigned players skipped) | 🟩 24 (13 summary, 11 games), re-run 2026-10-01. 22 with keys; `copies_bought_distribution` and `multiplayer_placement` have no dojo. Resignation metrics not built | 22 |
+| `dominion/` | Dominion | Not a downloader (research notes and a prototype scraper) | n/a | n/a | n/a |
+| none | Yu-Gi-Oh | ❌ `GameId.YUGIOH` exists, but there is no retrieval source | n/a | n/a | n/a |
 
-| Source (retrieval)               | Game             | Card binder stage                                            | Complete decks in source?                                                                                                                   | Deck box stage                                                                                                | Metrics                                                                                                                                                                                         |
-| -------------------------------- | ---------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scryfall`                       | MTG              | ✅ `ScryfallCardIngestionStage`                               | No (card data only)                                                                                                                         | n/a                                                                                                           | 🟨 6 single-card masks with dojos (cmc, card type, rarity, colors, power, toughness; 2026-10-01) |
-| `seventeenlands` › `draft_data`  | MTG              | (uses scryfall)                                              | No (picks, not decks)                                                                                                                       | n/a                                                                                                           | 🟨 6 of ~20 built, all with dojos                                                                                                                                                               |
-| `seventeenlands` › `game_data`   | MTG              | (uses scryfall)                                              | Yes (40-card limited decks, `deck_*` columns)                                                                                               | ✅ `seventeenlands_game_data`                                                                                  | 🟨 11 of ~19 built, all with dojos                                                                                                                                                              |
-| `seventeenlands` › `replay_data` | MTG              | (uses scryfall)                                              | Yes, but the same games as `game_data`, so redundant                                                                                        | n/a                                                                                                           | 🟨 9 of ~22 built, all with dojos                                                                                                                                                               |
-| `pokemon_tcg`                    | Pokemon          | ✅ `PokemonTcgCardIngestionStage`                             | Yes: 83 set files of official 60-card theme decks in `data/raw/pokemon_tcg/decks/`                                                          | ❌ Missing                                                                                                     | 🟨 5 single-card masks with dojos (HP, types, stage, retreat cost, weakness; 2026-10-01) |
-| `hearthstonejson`                | Hearthstone      | ✅ `HearthstoneJsonCardIngestionStage` (newest build only; 6,187 cards from build 251951) | No (card data only)                                                                                                                         | n/a                                                                                                           | 🟨 8 single-card masks with dojos (cost, attack, health, class, rarity, type, races, spell school; 2026-10-01) |
-| `gwent_one`                      | Gwent            | ✅ `GwentOneCardIngestionStage`                               | No                                                                                                                                          | n/a                                                                                                           | 🟨 8 masking metrics of ~30 ideas                                                                                                                                                               |
-| `play_gwent`                     | Gwent            | (uses gwent_one)                                             | Yes (community deck guides)                                                                                                                 | ✅ `play_gwent`                                                                                                | 🟨 4 of ~30, all with dojos: `LeaderMaskedFromDeckMetric` (its run saves the published box) plus card inclusion rate, faction-conditioned inclusion and guide votes (2026-10-01, read-only over the published box) |
-| `spire_codex` (cards)            | Slay the Spire 2 | ✅ `SpireCodexCardIngestionStage`                             | No (`cards.json`)                                                                                                                           | n/a                                                                                                           | 🟨 4 single-card masks with dojos (cost, type, rarity, color; 2026-10-01) |
-| `spire_codex` (runs)             | Slay the Spire 2 | (uses spire_codex)                                           | Yes: `players[].deck` holds the final deck; the run record looks like the same schema as sts2runs                                           | ✅ `spire_codex_runs` (subclass of the sts2runs stage) | 🟩 23 built with dojos, in `metrics/sts2_runs/` (shared with sts2runs; 2026-10-01). Full scan pending |
-| `sts2runs`                       | Slay the Spire 2 | (uses spire_codex)                                           | Yes                                                                                                                                         | ✅ `sts2runs`                                                                                                  | 🟩 23 built with dojos, in `metrics/sts2_runs/` (with spire_codex runs; 2026-10-01). Per-floor metrics (BRAINSTORM B2) not built |
-| `sts_gg`                         | Slay the Spire 2 | (uses spire_codex)                                           | Yes                                                                                                                                         | ✅ `sts_gg` (1,004 decks in the 2026-09-27 SQLite run; the old "0 decks" result doesn't happen on a fresh box) | 🟩 24 built, all with dojos (2026-10-01). Wins only (leaderboard source), so the win/killed-by labels are constant and left out of the catalog; `sts2_runs` has them. No `BRAINSTORM.md`, though its README points to one |
-| `cardvault_fabtcg`               | Flesh and Blood  | ✅ `CardVaultFabtcgCardIngestionStage`                        | No                                                                                                                                          | n/a                                                                                                           | 🟨 6 single-card masks with dojos (pitch, cost, power, defense, class, card type; 2026-10-01) |
-| `fabtcg_decklists`               | Flesh and Blood  | (uses cardvault_fabtcg)                                      | Yes (tournament decklists)                                                                                                                  | ✅ `fabtcg_decklists`                                                                                          | 🟨 3 built with dojos (hero masked from deck, card inclusion rate, hero-conditioned inclusion; 2026-10-01), reading the published FaB box read-only |
-| `pitchstack`                     | Flesh and Blood  | (uses cardvault_fabtcg)                                      | Not yet: `decks.jsonl` holds metadata only; card lists need the unimplemented `/cards` endpoint (`data_retrieval/pitchstack/pitchstack.md`) | ❌ Blocked on retrieval                                                                                        | 🟥 Brainstorm only (30, most blocked on card lists)                                                                                                                                             |
-| `dominiontabs`                   | Dominion         | ✅ `DominionTabsCardIngestionStage`                           | No                                                                                                                                          | n/a                                                                                                           | 🟩 All 3 viable ideas built, with dojos, and run                                                                                                                                                |
-| `isotropic`                      | Dominion         | (uses dominiontabs)                                          | Yes: summary archives hold each player's `end.deck`; `metrics/isotropic/summary/row_utils.deck_for_player()` already builds a `GenericDeck` | ❌ Missing                                                                                                     | 🟨 24 built (13 summary, 11 games), no dojos; registered in `run_metrics.py` and run (2026-09-27); resignation metrics unbuilt; partial-deck gap in `metrics/isotropic/games/TODO.md`           |
-| `dominion/`                      | Dominion         | Not a downloader (research notes and a prototype scraper)    | n/a                                                                                                                                         | n/a                                                                                                           | n/a                                                                                                                                                                                             |
-| none                             | Yu-Gi-Oh         | ❌ `GameId.YUGIOH` exists but no retrieval source             | n/a                                                                                                                                         | n/a                                                                                                           | n/a                                                                                                                                                                                             |
+Cross-source:
 
+- **`final_decks`:** a held-out card metric over each published deck
+  box (Pokemon, FaB, Gwent, Dominion, StS2, MTG): pick the held-out
+  card from 8 candidates. 6 keys, outputs on disk. Splits are by deck, so
+  a deck's several held-out rows never straddle TRAIN and TEST.
+- **`contrastive`:** one deck-contrastive key per deck-box game. 6 keys,
+  no metric needed.
 
+## Mods (`src/dojos/mods/`, `src/dojos/augmentation_defaults.py`)
 
+- **Card-field augmentations:** `ShuffleKeysMod`, `RandomKeyMaskMod` and
+  `WeightedFieldMaskMod`, with per-game defaults for all 7 games. They
+  are applied to every catalog dojo, TRAIN only, after its own task
+  mods. `mods:` in a run config replaces them.
+- **Task mods:** `MaskTargetKeyMod`, `ShuffleDeckMod`, and
+  `GroupSwapMod` (for symmetric deck pairs).
+- **Deck thinning (opt-in):** `CardDropoutMod`, `CardSubsampleMod` and
+  `DuplicateCollapseMod`, allowed per dojo and per group by
+  `DECK_MOD_GROUPS` (14 dojos today).
+- **Contrastive staple subsampling:** keep probability
+  `min(1, sqrt(t / df))`, set per dojo with `staple_subsampling:`. The
+  default `t = inf` is off; the ablation has not run.
 
-Cross-source (2026-10-01): `metrics/final_decks/` holds one held-out
-card metric per published deck box (Pokemon, FaB, Gwent, Dominion,
-StS2, MTG), each with a dojo and a `final_decks.held_out_card_<game>`
-catalog key. Outputs aren't generated yet; see that README for the
-per-box commands.
+## Open work, in priority order
 
-## Priority order
+The detail is in `plans/pre_training_data.md`. In short:
 
+1. **Code fixes before any rebuild:** done 2026-10-02. Binder ingestion
+   seeds the Unknown sentinel, `play_gwent` no longer writes `gwent.db`,
+   and the held-out-card and isotropic per-kingdom dojos split by group.
+2. **17lands:** merge the chunk-scan branches, build the per-metric
+   merge step, run the full corpus, add catalog keys.
+3. **Refresh from the 10-02 re-download:** a scratch binder version
+   check per game, then rebuild only the games that changed (Gwent and
+   the StS2 spire_codex runs for sure; MTG only as one combined job).
+4. **Metric breadth:** StS2 per-floor picks (B2), cross-game rarity, and
+   the small dojo and catalog gaps above.
+5. **Final gate:** regenerate the inventory, delete stale splits, and
+   preflight every key.
 
-
-### 1. A card binder for every game
-
-- **Hearthstone**: done (2026-10-01): the newest build only; older builds
-are not merged (a cross-build balance-change metric would read the raw
-builds directly).
-- **Yu-Gi-Oh**: needs a retrieval source first (`new_data_source`
-skill), or drop `GameId.YUGIOH` until one exists.
-
-
-
-### 2. Sources with no deck ingestion or no metrics at all
-
-Deck ingestion:
-
-- `pokemon_tcg` theme decks (raw data present).
-- `isotropic` final decks (raw data must be re-downloaded first).
-
-First metrics, deck-bearing sources:
-
-- `fabtcg_decklists`: first 3 done (2026-10-01).
-- `pokemon_tcg`
-
-First metrics, card-only sources: done (2026-10-01) for `scryfall`,
-`cardvault_fabtcg`, `spire_codex` cards and `hearthstonejson`
-(single-card masks; their other brainstorm ideas remain).
-
-Blocked: `pitchstack`, until retrieval adds the `/cards` endpoint.
-
-### 3. More metrics for sources that already have some
-
-- `play_gwent`: 4 of ~30 built.
-- `seventeenlands`: all three families.
-- `gwent_one`: the multi-card and multi-group ideas.
-- `isotropic`: dojos for the 24 existing metrics are arguably worth
-more than new metrics.
-
-
-
-### Cheap wins, any time
-
-- Finish the deck box re-ingestion into SQLite `.db` files. Done
-2026-09-27 for fabtcg_decklists, play_gwent, sts2runs and sts_gg.
-`seventeenlands_game_data` (`mtg.db`, now batched and one deck per
-draft) finished 2026-09-28: 4.8M decks, 0.71% Unknown slots; see
-`deck_box/TODO.md`, which also groups the unmatched card names. Run heavy
-jobs one at a time: two in parallel ran the machine out of memory.
-
+Blocked or parked: pitchstack (needs `/cards`), Yu-Gi-Oh (no source),
+older Hearthstone builds.

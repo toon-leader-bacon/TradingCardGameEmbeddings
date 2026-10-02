@@ -12,7 +12,7 @@ and no depth after the pool can recover them.
 - [ ] **Consider alternative text encoders.** ModernBERT-base was chosen
   in `src/training/TODO.md` section B (license, 8k context, code-heavy
   pretraining). Worth comparing, on the same dojos and the evaluation
-  suite (`plans/evaluation.md`): embedding-tuned models
+  suite (`plans/archive/evaluation.md`): embedding-tuned models
   (`nomic-ai/modernbert-embed-base`, which needs its prefixes;
   `jinaai/jina-embeddings-v2-base-code`, which needs
   `trust_remote_code`), ModernBERT-large if VRAM allows, and a small

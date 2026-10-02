@@ -1,4 +1,4 @@
-"""DiscardRateMetric - plans/replay_data_metrics.md's "Discard Rate":
+"""DiscardRateMetric - BRAINSTORM.md's "Discard Rate":
 P(card in cards_discarded (its own side's discards) in some turn |
 card in deck_<name>).
 
@@ -9,8 +9,8 @@ card). Standalone, not shared with CastRateMetric/TutorTargetRateMetric
 in this same package - see cast_rate_metric.py's module docstring for
 why.
 
-OPEN CAVEAT (plans/replay_data_metrics.md's Component overview, carried
-forward from BRAINSTORM.md, not settled here): whether a
+OPEN CAVEAT (carried forward from BRAINSTORM.md, not settled here):
+whether a
 user_turn_N_cards_discarded cell can ever reflect a FORCED discard
 (e.g. an opposing discard spell) rather than only a self-inflicted
 cleanup discard is unconfirmed - this metric's docstring states this

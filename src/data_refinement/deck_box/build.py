@@ -1,7 +1,7 @@
 """Drives one deck extraction run: load, extract, save.
 
-See plans/deck_box.md for the design this implements, and
-src/data_refinement/card_binder/build.py for the sibling this was
+See src/data_refinement/deck_box/README.md for the design this
+implements, and src/data_refinement/card_binder/build.py for the sibling this was
 deliberately modeled on. A plain function, not an orchestrator class —
 matches that same "thin runnable snippet" pattern.
 """

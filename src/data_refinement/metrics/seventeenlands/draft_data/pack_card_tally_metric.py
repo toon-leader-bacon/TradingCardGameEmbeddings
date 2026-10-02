@@ -1,7 +1,7 @@
 """Template Method base for accumulation metrics that tally
 (times_in_pack, times_picked) per (card_uuid, *stratifying key), across
-every pack_card_<name> column present (> 0) on a row - see
-plans/draft_data_metrics.md's "Component overview" #4.
+every pack_card_<name> column present (> 0) on a row (see
+draft_data/README.md).
 
 Three of round 1's four single-card metrics
 (pack_card_tally_metrics.py's CardTakeRateMetric, FirstPickRateMetric,

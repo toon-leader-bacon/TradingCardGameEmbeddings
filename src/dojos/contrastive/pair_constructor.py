@@ -1,7 +1,7 @@
 """The swappable research surface: raw decks -> a ContrastiveBatch.
 
-See plans/contrastive_dojo.md's "ContrastivePairConstructor (swappable)"
-section. Strategy (PATTERNS.md) - ContrastiveDojo owns one of these
+See src/dojos/README.md's contrastive section. Strategy (PATTERNS.md) -
+ContrastiveDojo owns one of these
 privately and delegates to it, so a different positive-pair definition
 or item shape (single-card vs. multi-card group) is a new class in this
 file, not a change to ContrastiveDojo's own constructor shape.

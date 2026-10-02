@@ -6,12 +6,12 @@ additionally conditions on the drafter's already-committed pool.
 
 Same streaming shape as PackToPickChoiceSetMetric (one row in, one row
 out, no cross-row state) - see that module's docstring for the
-DeckLabelMetric-style constructor/finalize() shape this reuses, and see
-plans/draft_data_metrics.md's "Open questions" #2 for why these two
-classes are kept independent rather than sharing a base.
+DeckLabelMetric-style constructor/finalize() shape this reuses, and
+pack_to_pick_choice_set_metric.py's for why these two classes are kept
+independent rather than sharing a base.
 
-pool_<name> columns are read as-is (already excluding this row's own
-pick - see plans/draft_data_metrics.md's "Data facts" section), so no
+pool_<name> columns are read as-is (they already exclude this row's
+own pick), so no
 extra "exclude the current pick" logic is needed here.
 """
 

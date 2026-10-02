@@ -1,8 +1,8 @@
 """Concrete PackCardTallyMetric (pack_card_tally_metric.py) subclasses:
 three of round 1's four single-card metrics from
 src/data_refinement/metrics/seventeenlands/draft_data/BRAINSTORM.md's
-"Human Review Short List" - see plans/draft_data_metrics.md's
-"Component overview" #4 for the key-shape rationale behind each.
+"Human Review Short List"; draft_data/README.md has the key-shape
+rationale behind each.
 
 PickNumberDecayCurveMetric (this list's fourth single-card metric) also
 subclasses PackCardTallyMetric, but lives in its own file
@@ -62,8 +62,7 @@ class RankStratifiedTakeRateMetric(PackCardTallyMetric):
     """Card Take Rate, additionally stratified by rank bucket -
     BRAINSTORM.md's single-card metric #6 (Rank-Stratified Take Rate).
 
-    KEY_COLUMNS below keeps pack_number/pick_number alongside rank, per
-    plans/draft_data_metrics.md's "Open questions" #1 - a
+    KEY_COLUMNS below keeps pack_number/pick_number alongside rank. A
     (card, rank)-only key (dropping pack_number/pick_number) is the
     documented alternative if this proves too sparse in practice.
     """
