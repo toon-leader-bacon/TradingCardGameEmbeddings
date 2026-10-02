@@ -18,7 +18,9 @@ Contrastive dojos read a game's final deck box directly (no metric) and
 take augmentation mods: the game's defaults
 (src/dojos/augmentation_defaults.py) unless the run config overrides that
 dojo's mods by name. Metric dojos build their own task mods and take no
-augmentations yet.
+default augmentations; the multi-card ones listed in DECK_MOD_GROUPS also
+take opt-in deck mods (src/dojos/mods/deck_mods.py) from the run config,
+appended after their own task mods.
 """
 
 import random
@@ -50,8 +52,10 @@ from src.dojos.scryfall import card_mask_dojos as scryfall_masks
 from src.dojos.spire_codex import card_mask_dojos as sts2_masks
 from src.dojos import isotropic
 from src.dojos.sts_gg import card_average_dojos as sts_cards
+from src.dojos.generic.generic_dojo import GenericDojo
+from src.dojos.mods.mod import Mod
 from src.dojos.mods.mod_pipeline import ModPipeline
-from src.dojos.mods.mod_specs import ModSpec
+from src.dojos.mods.mod_specs import DeckModSpec, ModSpec
 from src.dojos.play_gwent import card_inclusion_dojos as gwent_inclusion
 from src.dojos.play_gwent.deck_card_mask_dojos import LeaderMaskedFromDeckDojo
 from src.dojos.play_gwent.deck_label_dojos import GuideVotesDojo
@@ -156,9 +160,11 @@ class DojoBuildContext:
     requires every dojo to share it). card_embedding_size: the model's
     embed_dim. rng_seed: seeds each dojo's split shuffling, so a first
     split build is reproducible. mod_overrides: per dojo name,
-    augmentation specs replacing that dojo's game defaults (an empty tuple
-    means no augmentation); build_dojos rejects a name that is not built
-    or takes no augmentations.
+    augmentation specs replacing a contrastive dojo's game defaults (an
+    empty tuple means no augmentation), or deck specs appended to a
+    DECK_MOD_GROUPS dojo's own mods; build_dojos rejects a name that is
+    not built or takes no augmentations, and a deck spec naming a group
+    the dojo does not allow.
     """
 
     shelf: CardShelf
@@ -280,8 +286,18 @@ def _augmentation_pipeline(
     Side effects: none. Exceptions: as a ModSpec's build.
     """
     specs = context.mod_overrides.get(name, default_augmentations_for(game))
-    seeds = random.Random(f"{context.rng_seed}:{name}:mods")
-    return ModPipeline([spec.build(seeds.randrange(2**32)) for spec in specs])
+    return ModPipeline(_seeded_mods(name, specs, context.rng_seed))
+
+
+def _seeded_mods(name: str, specs: Sequence[ModSpec], rng_seed: int) -> list[Mod]:
+    """One mod per spec, in order, each seeded from a stream seeded by
+    (rng_seed, name, "mods") - see _augmentation_pipeline.
+
+    Inputs: name, specs, rng_seed. Output: list[Mod].
+    Side effects: none. Exceptions: as a ModSpec's build.
+    """
+    seeds = random.Random(f"{rng_seed}:{name}:mods")
+    return [spec.build(seeds.randrange(2**32)) for spec in specs]
 
 
 def _recipe_for_contrastive(game: GameId) -> ContrastiveDojoRecipe:
@@ -700,10 +716,42 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
 }
 
 
+# Opt-in deck mods (src/dojos/mods/deck_mods.py): the multi-card metric
+# dojos a run config may thin, and which input groups (a multi-card input
+# is group 0). Data knowledge, and the only gate: a dojo not listed takes
+# no deck mods. Never listed: a label that is deck size, a copy count or a
+# run-length total that tracks deck size (sts total_*, floors, elites,
+# combats, relic count, card_deck_size, isotropic copy counts); a held-out
+# card dojo (thinning changes the answer set); an option-selection dojo's
+# options group (the label indexes it), so a MultiCardOptionSelection dojo
+# (options are its whole input) is never listed; a kingdom or single-card
+# group (fixed game context, not a deck).
+DECK_MOD_GROUPS: Mapping[str, frozenset[int]] = {
+    "sts_gg.ascension_prediction": frozenset({0}),
+    "sts_gg.character_prediction": frozenset({0}),
+    "sts2_runs.ascension_prediction": frozenset({0}),
+    "sts2_runs.character_prediction": frozenset({0}),
+    "sts2_runs.killed_by": frozenset({0}),
+    "sts2_runs.win": frozenset({0}),
+    "play_gwent.guide_votes": frozenset({0}),
+    "play_gwent.leader_masked_from_deck": frozenset({0}),
+    "fabtcg_decklists.hero_masked_from_deck": frozenset({0}),
+    "isotropic.full_deck_win_prediction": frozenset({0}),
+    # [partial deck, kingdom]: the partial deck only
+    "isotropic.mid_game_win_probability": frozenset({0}),
+    # Both decks of a symmetric pair
+    "isotropic.deck_pair_winner": frozenset({0, 1}),
+    "isotropic.mid_game_deck_pair_winner": frozenset({0, 1}),
+    # [options, partial deck]: the options group (0) is never thinned
+    "isotropic.mid_game_next_buy": frozenset({1}),
+}
+
+
 def takes_augmentations(name: str) -> bool:
-    """Whether the catalog dojo named name accepts augmentation mods
-    (today: the contrastive dojos). build_dojos uses this to reject a
-    `mods:` override for any other dojo.
+    """Whether the catalog dojo named name accepts a `mods:` override: a
+    contrastive dojo (any specs, replacing its defaults) or a dojo in
+    DECK_MOD_GROUPS (deck specs only, appended after its own mods).
+    build_dojos uses this to reject a `mods:` override for any other dojo.
 
     Inputs: name (a DOJO_CATALOG key). Output: bool.
     Side effects: none. Exceptions: KeyError for an unknown name.
@@ -712,7 +760,8 @@ def takes_augmentations(name: str) -> bool:
         >>> takes_augmentations("contrastive.gwent")
         True
     """
-    return isinstance(DOJO_CATALOG[name], ContrastiveDojoRecipe)
+    is_contrastive = isinstance(DOJO_CATALOG[name], ContrastiveDojoRecipe)
+    return is_contrastive or name in DECK_MOD_GROUPS
 
 
 def build_dojos(names: Sequence[str], context: DojoBuildContext) -> list[Dojo]:
@@ -742,10 +791,29 @@ def build_dojos(names: Sequence[str], context: DojoBuildContext) -> list[Dojo]:
         raise ValueError(f"unknown dojos {unknown}; see DOJO_CATALOG")
     _require_valid_overrides(context.mod_overrides, names)
 
-    # Build each dojo from its recipe
+    # Build each dojo from its recipe, then attach any opt-in deck mods
     for name in names:
-        result.append(DOJO_CATALOG[name].build(name, context))
+        dojo = DOJO_CATALOG[name].build(name, context)
+        if name in DECK_MOD_GROUPS and name in context.mod_overrides:
+            _append_deck_mods(dojo, name, context)
+        result.append(dojo)
     return result
+
+
+def _append_deck_mods(dojo: Dojo, name: str, context: DojoBuildContext) -> None:
+    """Append context.mod_overrides[name]'s deck mods after dojo's own
+    mods, seeded as a contrastive dojo's mods are (_seeded_mods).
+
+    Inputs: dojo (just built, no batch yet), name (in DECK_MOD_GROUPS and
+        context.mod_overrides), context. Output: none.
+    Side effects: dojo.append_mods.
+    Exceptions: TypeError if dojo is not a GenericDojo (a catalog bug:
+        DECK_MOD_GROUPS lists only metric dojos).
+    """
+    if not isinstance(dojo, GenericDojo):
+        raise TypeError(f"{name} is in DECK_MOD_GROUPS but is not a GenericDojo")
+    specs = context.mod_overrides[name]
+    dojo.append_mods(_seeded_mods(name, specs, context.rng_seed))
 
 
 def _require_valid_overrides(
@@ -762,3 +830,33 @@ def _require_valid_overrides(
     fixed = sorted(name for name in mod_overrides if not takes_augmentations(name))
     if fixed:
         raise ValueError(f"dojos {fixed} take no augmentation mods")
+    for name, specs in mod_overrides.items():
+        _require_allowed_specs(name, specs)
+
+
+def _require_allowed_specs(name: str, specs: tuple[ModSpec, ...]) -> None:
+    """Inputs: name (a dojo that takes augmentations), specs (its
+        override). Output: none.
+    Side effects: none.
+    Exceptions: ValueError for a deck spec on a dojo not in
+        DECK_MOD_GROUPS or naming a group it does not allow, or a
+        card-field spec on a metric dojo (they take deck mods only).
+    """
+    takes_deck_mods = name in DECK_MOD_GROUPS
+    for spec in specs:
+        spec_name = type(spec).__name__
+        if not isinstance(spec, DeckModSpec):
+            if takes_deck_mods:
+                raise ValueError(f"{name} takes deck mods only, not {spec_name}")
+            continue
+        if not takes_deck_mods:
+            raise ValueError(
+                f"{name} takes no deck mods ({spec_name}); see DECK_MOD_GROUPS"
+            )
+        allowed = DECK_MOD_GROUPS[name]
+        refused = sorted(set(spec.groups) - allowed)
+        if refused:
+            raise ValueError(
+                f"{name} may thin groups {sorted(allowed)} only "
+                f"(DECK_MOD_GROUPS); {spec_name} names {refused}"
+            )

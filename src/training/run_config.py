@@ -34,6 +34,9 @@ import yaml
 
 from src.dojos.mods.card_field_mods import FieldMask
 from src.dojos.mods.mod_specs import (
+    CardDropoutSpec,
+    CardSubsampleSpec,
+    DuplicateCollapseSpec,
     ModSpec,
     RandomKeyMaskSpec,
     ShuffleKeysSpec,
@@ -107,9 +110,11 @@ class RunConfig:
         duplicates. Diet dojos and held-out dojos are both drawn from it.
     plan: the TrainingPlan (phases, holdout, held-out dojos, seed).
     limits: HardwareLimits (batch cost ceiling, precision).
-    mod_overrides: per run dojo, augmentation specs replacing that dojo's
-        game defaults (empty tuple: no augmentation). Checked here to name
-        run dojos; build_dojos checks each also takes augmentations.
+    mod_overrides: per run dojo, augmentation specs: for a contrastive
+        dojo they replace its game defaults (empty tuple: no augmentation);
+        for a dojo in dojo_catalog.DECK_MOD_GROUPS they are deck specs
+        appended after its own task mods. Checked here to name run dojos;
+        build_dojos checks each also takes them.
     """
 
     run_directory: Path
@@ -572,6 +577,13 @@ def _parse_mod_spec(section: ConfigSection) -> ModSpec:
         {kind: shuffle_keys}
         {kind: random_key_mask, probability: 0.1}
         {kind: weighted_field_mask, table: [<rows>]}   (see _parse_mask_table)
+        {kind: card_dropout, drop_probability: 0.1, groups: [0]}
+        {kind: card_subsample, keep_fraction: 0.8, groups: [1]}
+        {kind: duplicate_collapse}
+
+    The last three are deck mods (groups optional, default [0]); only the
+    dojos in dojo_catalog.DECK_MOD_GROUPS take them, for the groups listed
+    there.
 
     Dispatch is a kind -> parser table, not an if-chain.
 
@@ -663,7 +675,31 @@ _MOD_PARSERS: dict[str, Callable[[ConfigSection], ModSpec]] = {
             section.required_section_list("table"), section.location_of("table")
         )
     ),
+    "card_dropout": lambda section: CardDropoutSpec(
+        section.required("drop_probability", float), _parse_groups(section)
+    ),
+    "card_subsample": lambda section: CardSubsampleSpec(
+        section.required("keep_fraction", float), _parse_groups(section)
+    ),
+    "duplicate_collapse": lambda section: DuplicateCollapseSpec(_parse_groups(section)),
 }
+
+
+def _parse_groups(section: ConfigSection) -> tuple[int, ...]:
+    """A deck mod entry's optional `groups:` list of group indexes; (0,),
+    the deck of a multi-card input, when absent.
+
+    Inputs: section (one mod entry). Output: tuple[int, ...].
+    Side effects: records groups as read.
+    Exceptions: ValueError if groups is not a list of ints.
+    """
+    if not section.has("groups"):
+        return (0,)
+    where = section.location_of("groups")
+    return tuple(
+        _checked_scalar(item, int, f"{where}.{index}")
+        for index, item in enumerate(section.required_list("groups"))
+    )
 
 
 def _parse_device(text: str, where: str) -> torch.device:

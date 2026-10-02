@@ -5,7 +5,31 @@ from typing import Any
 import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.dojos.mods.mod_specs import ShuffleKeysSpec
+from src.dojos.generic.generic_dojo import GenericDojo
+from src.dojos.generic.multi_card_binary_classification.dojo import (
+    MultiCardBinaryClassificationDojo,
+)
+from src.dojos.generic.multi_card_fixed_classification.dojo import (
+    MultiCardFixedClassificationDojo,
+)
+from src.dojos.generic.multi_card_option_selection.dojo import (
+    MultiCardOptionSelectionDojo,
+)
+from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
+from src.dojos.generic.multi_group_binary_classification.dojo import (
+    MultiGroupBinaryClassificationDojo,
+)
+from src.dojos.generic.multi_group_option_selection.dojo import (
+    MultiGroupOptionSelectionDojo,
+)
+from src.dojos.generic.multi_group_regression.dojo import MultiGroupRegressionDojo
+from src.dojos.mods.common_mods import MaskTargetKeyMod
+from src.dojos.mods.mod_pipeline import ModPipeline
+from src.dojos.mods.mod_specs import (
+    CardDropoutSpec,
+    DuplicateCollapseSpec,
+    ShuffleKeysSpec,
+)
 from src.data_refinement.metrics.dominiontabs.cost_regression_metric import (
     CostRegressionMetric,
 )
@@ -39,12 +63,14 @@ from src.dojos.sts_gg import deck_label_dojos
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
 from src.training.dojo_catalog import (
+    DECK_MOD_GROUPS,
     DOJO_CATALOG,
     CardDojoRecipe,
     CardShelf,
     ContrastiveDojoRecipe,
     DeckDojoRecipe,
     DojoBuildContext,
+    _append_deck_mods,
     _augmentation_pipeline,
     build_dojos,
     takes_augmentations,
@@ -356,3 +382,101 @@ class TestAugmentationPipeline:
         assert draws != first_draws("contrastive.gwent", 1)
         # never the same stream as the pair constructor (seeded by rng_seed)
         assert random.Random(0).random() not in draws
+
+
+class TestDeckModOptIn:
+    def _context(self, overrides: dict) -> DojoBuildContext:
+        return DojoBuildContext(
+            shelf=_RecordingShelf(),
+            holdout=HoldoutSpec.no_holdout(),
+            card_embedding_size=32,
+            rng_seed=0,
+            mod_overrides=overrides,
+        )
+
+    def test_listed_dojos_take_augmentations(self) -> None:
+        assert all(takes_augmentations(name) for name in DECK_MOD_GROUPS)
+
+    def test_every_listed_dojo_is_in_the_catalog(self) -> None:
+        assert set(DECK_MOD_GROUPS) <= set(DOJO_CATALOG)
+
+    def test_no_options_group_is_ever_thinnable(self) -> None:
+        for name, groups in DECK_MOD_GROUPS.items():
+            dojo_class = getattr(DOJO_CATALOG[name], "dojo_class", None)
+            assert dojo_class is not None, name
+            assert not issubclass(dojo_class, MultiCardOptionSelectionDojo), name
+            if issubclass(dojo_class, MultiGroupOptionSelectionDojo):
+                assert 0 not in groups, name
+
+    def test_every_entry_fits_its_dojos_input_shape(self) -> None:
+        multi_card = (
+            MultiCardBinaryClassificationDojo,
+            MultiCardFixedClassificationDojo,
+            MultiCardRegressionDojo,
+        )
+        multi_group = (
+            MultiGroupBinaryClassificationDojo,
+            MultiGroupOptionSelectionDojo,
+            MultiGroupRegressionDojo,
+        )
+        for name, groups in DECK_MOD_GROUPS.items():
+            dojo_class = getattr(DOJO_CATALOG[name], "dojo_class")
+            if issubclass(dojo_class, multi_card):
+                assert groups == frozenset({0}), name
+            else:
+                assert issubclass(dojo_class, multi_group), name
+                assert groups and groups <= frozenset({0, 1}), name  # two groups
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "sts2_runs.card_deck_size",
+            "sts2_runs.total_cards_picked",
+            "sts_gg.total_cards_picked",
+            "isotropic.deck_card_set_copy_count",
+            "isotropic.winning_deck_count",
+            "final_decks.held_out_card_gwent",
+            "isotropic.kingdom_opening_buy_prediction",
+        ],
+    )
+    def test_count_and_answer_set_dojos_are_never_listed(self, name: str) -> None:
+        assert name in DOJO_CATALOG and name not in DECK_MOD_GROUPS
+
+    def test_a_deck_spec_is_rejected_for_an_unlisted_dojo(self) -> None:
+        context = self._context({"contrastive.gwent": (CardDropoutSpec(0.1),)})
+        with pytest.raises(ValueError, match="takes no deck mods"):
+            build_dojos(["contrastive.gwent"], context)
+
+    def test_a_group_the_dojo_does_not_allow_is_rejected(self) -> None:
+        name = "isotropic.mid_game_next_buy"
+        context = self._context({name: (CardDropoutSpec(0.1, groups=(0, 1)),)})
+        with pytest.raises(ValueError, match=r"may thin groups \[1\] only"):
+            build_dojos([name], context)
+        assert context.shelf.requested_games == []  # type: ignore[attr-defined]
+
+    def test_a_listed_dojo_takes_deck_specs_only(self) -> None:
+        context = self._context({"sts2_runs.win": (ShuffleKeysSpec(),)})
+        with pytest.raises(ValueError, match="deck mods only"):
+            build_dojos(["sts2_runs.win"], context)
+
+    def test_deck_mods_run_after_the_dojos_own_mods(self) -> None:
+        dojo = GenericDojo.__new__(GenericDojo)
+        task_mod = MaskTargetKeyMod("rarity", train_only=False)
+        dojo.data_mod_pipeline = ModPipeline([task_mod])
+        specs = (CardDropoutSpec(0.1), DuplicateCollapseSpec())
+        context = self._context({"sts2_runs.win": specs})
+
+        _append_deck_mods(dojo, "sts2_runs.win", context)
+
+        mods = dojo.data_mod_pipeline.mods
+        assert mods[0] is task_mod
+        assert [type(mod).__name__ for mod in mods[1:]] == [
+            "CardDropoutMod",
+            "DuplicateCollapseMod",
+        ]
+        assert all(mod.train_only for mod in mods[1:])
+
+    def test_deck_mods_need_a_generic_dojo(self) -> None:
+        context = self._context({"sts2_runs.win": (CardDropoutSpec(0.1),)})
+        with pytest.raises(TypeError, match="not a GenericDojo"):
+            _append_deck_mods(object(), "sts2_runs.win", context)  # type: ignore[arg-type]

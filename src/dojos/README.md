@@ -83,10 +83,28 @@ row, or by deck for contrastive) layer under it.
   unchanged and training continues; constructor arguments are validated.
   Each such mod keeps a `ModTally` (cards seen, changed, failed, and the
   first failure) so a mod that never fires or keeps failing is visible.
+  `deck_mods.py` holds train-only deck mods that thin the card lists of a
+  multi-card or multi-group input (a `DeckThinningMod` Template Method
+  base): `CardDropoutMod` drops each card with a probability,
+  `CardSubsampleMod` keeps `max(1, round(f * n))` of a group's cards, and
+  `DuplicateCollapseMod` keeps the first copy of each card. Each is built
+  with the group indexes it may thin (a multi-card input is group 0); other
+  groups pass through as the same lists. A non-empty group always keeps at
+  least one card, kept cards keep their order, and a datum the mod cannot
+  read (a single card, a group index past its groups) passes through and is
+  counted. Their `ModTally` counts the cards in thinned groups as seen and
+  the cards removed as changed. Deck mods are opt-in per dojo, never a
+  default: they change deck size and copy counts, so they must never reach
+  a dojo whose label depends on those. `DECK_MOD_GROUPS`
+  (`src/training/dojo_catalog.py`) lists the dojos that take them and which
+  groups; an option-selection dojo's options group is never listed (its
+  label indexes it). A run config's `mods:` attaches them, after the dojo's
+  own task mods (`GenericDojo.append_mods`).
   `MASK_TOKEN` (`mod.py`) is the one mask string every masking mod writes,
   and `ModTally` lives there too (`Mod.tally` is None for mods that keep
   none). `mod_specs.py` holds `ModSpec`s: frozen, shareable recipes, one
-  per card-field mod, that each dojo builds into its own mods (a mod's
+  per card-field or deck mod (`DeckModSpec` for the latter, carrying its
+  `groups`), that each dojo builds into its own mods (a mod's
   random state and tally are per dojo, so mod objects are never shared).
   Per-game default specs are in `augmentation_defaults.py`; see
   `contrastive/` below.

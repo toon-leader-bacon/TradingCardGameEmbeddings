@@ -10,8 +10,17 @@ from src.dojos.mods.card_field_mods import (
     ShuffleKeysMod,
     WeightedFieldMaskMod,
 )
+from src.dojos.mods.deck_mods import (
+    CardDropoutMod,
+    CardSubsampleMod,
+    DuplicateCollapseMod,
+)
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.dojos.mods.mod_specs import (
+    CardDropoutSpec,
+    CardSubsampleSpec,
+    DeckModSpec,
+    DuplicateCollapseSpec,
     RandomKeyMaskSpec,
     ShuffleKeysSpec,
     WeightedFieldMaskSpec,
@@ -86,3 +95,37 @@ class TestPipelineTallies:
         tallies = pipeline.mod_tallies()
         assert list(tallies) == ["1:ShuffleKeysMod", "2:ShuffleKeysMod"]
         assert tallies["1:ShuffleKeysMod"] is pipeline.mods[1].tally
+
+
+class TestDeckSpecs:
+    @pytest.mark.parametrize(
+        ("spec", "mod_class"),
+        [
+            (CardDropoutSpec(drop_probability=0.1), CardDropoutMod),
+            (CardSubsampleSpec(keep_fraction=0.8, groups=(1,)), CardSubsampleMod),
+            (DuplicateCollapseSpec(groups=(0, 1)), DuplicateCollapseMod),
+        ],
+    )
+    def test_build_makes_a_fresh_mod_for_its_groups(
+        self, spec: DeckModSpec, mod_class: type
+    ) -> None:
+        first, second = spec.build(rng_seed=1), spec.build(rng_seed=1)
+        assert isinstance(first, mod_class)
+        assert first is not second and first.tally is not second.tally
+        assert first.groups == frozenset(spec.groups)
+
+    def test_groups_default_to_the_deck(self) -> None:
+        assert CardDropoutSpec(drop_probability=0.1).groups == (0,)
+
+    @pytest.mark.parametrize(
+        "make_spec",
+        [
+            lambda: CardDropoutSpec(drop_probability=1.5),
+            lambda: CardSubsampleSpec(keep_fraction=0.0),
+            lambda: DuplicateCollapseSpec(groups=()),
+            lambda: DuplicateCollapseSpec(groups=(-1,)),
+        ],
+    )
+    def test_validates_at_construction(self, make_spec) -> None:
+        with pytest.raises(ValueError):
+            make_spec()
