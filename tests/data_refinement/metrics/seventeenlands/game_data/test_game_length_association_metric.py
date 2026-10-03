@@ -47,7 +47,12 @@ def test_the_baseline_counts_games_with_no_tallied_card(tmp_path: Path) -> None:
 def test_only_the_designated_steps_are_overridden() -> None:
     overridden = set(GameLengthAssociationMetric.__dict__)
 
-    assert {"_values", "_extra_accumulate", "_label"} <= overridden
+    assert {
+        "_values",
+        "_extra_accumulate",
+        "_baseline_counts",
+        "output_from_counts",
+    } <= overridden
     assert not {"accumulate", "finalize"} & overridden
 
 

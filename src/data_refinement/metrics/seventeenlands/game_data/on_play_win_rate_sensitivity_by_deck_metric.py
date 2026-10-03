@@ -7,16 +7,17 @@ sharing an identical deck.
 A vectorized Metric[GameDataChunk] (see game_data/README.md).
 Per chunk it stores the chunk's distinct decks in the shared
 DeckBox (store_chunk_decks()), counts each distinct deck's four
-OnPlayWinCounts tallies over its rows in one pass, and adds them to a
-running per-deck_uuid total.
+on_play_win_counts tallies over its rows in one pass, and adds them to a
+running per-deck_uuid total. A CountTableMetric (../sliced_metric.py):
+each partition holds those four counts per deck_uuid.
 
 ACCUMULATION, NOT STREAMING: unlike game_deck_label_metric.py's
 GameDeckLabelMetric family, this metric's label needs every game with
 an identical deck, so it does NOT subclass GameDeckLabelMetric.
 
 NULLABLE OUTPUT: same on-play/on-draw-side-must-both-have-samples rule
-as OnPlayWinRateDeltaMetric (OnPlayWinCounts.win_rate_delta()) - if a
-deck was never seen on one side, its delta is written as None.
+as OnPlayWinRateDeltaMetric (on_play_win_counts.on_play_delta_output())
+- a deck never seen on one side in a slice gets a null delta.
 """
 
 import dataclasses
@@ -26,9 +27,12 @@ from uuid import UUID
 
 import numpy as np
 import numpy.typing as npt
-import pandas as pd
+import pyarrow as pa
 
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.metrics.seventeenlands.count_table import (
+    write_count_table,
+)
 from src.data_refinement.metrics.seventeenlands.game_data.chunk_decks import (
     store_chunk_decks,
 )
@@ -37,34 +41,37 @@ from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import
     GameDataChunk,
 )
 from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_counts import (
+    COUNT_COLUMNS,
     TALLY_COUNT,
-    OnPlayWinCounts,
+    on_play_delta_output,
+    on_play_row_masks,
 )
-from src.data_refinement.metrics.version_metadata import (
-    MetricVersionMetadata,
-    write_dataframe_with_version_metadata,
-)
-
-_DEFAULT_OUTPUT_PATH = Path(
-    "data/metrics/seventeenlands/game_data/on_play_win_rate_sensitivity_by_deck.parquet"
-)
+from src.data_refinement.metrics.version_metadata import MetricVersionMetadata
+from src.data_retrieval.seventeenlands.refs import DataType
 
 
 class OnPlayWinRateSensitivityByDeckMetric:
     """Deck -> P(won | on_play) - P(won | on_draw), aggregated across
     every game sharing that exact deck.
 
-    Satisfies the Metric[GameDataChunk] Protocol (../../metric.py)
-    structurally.
+    Satisfies the Metric[GameDataChunk] Protocol (../../metric.py) and
+    CountTableMetric (../sliced_metric.py) structurally. A deck played
+    in two sets or formats sums across them in a slice that spans both.
     """
 
-    DEFAULT_OUTPUT_PATH: ClassVar[Path] = _DEFAULT_OUTPUT_PATH
+    FAMILY: ClassVar[DataType] = DataType.GAME
+    OUTPUT_STEM: ClassVar[str] = "on_play_win_rate_sensitivity_by_deck"
+    LABEL_COLUMN: ClassVar[str] = "on_play_win_rate_sensitivity"
+    LABEL_VERSION: ClassVar[int] = 1
+    KEY_COLUMNS: ClassVar[tuple[str, ...]] = ("deck_uuid",)
+    COUNT_COLUMNS: ClassVar[tuple[str, ...]] = COUNT_COLUMNS
+    HAS_BASELINE: ClassVar[bool] = False
 
     def __init__(
         self,
         version_metadata: MetricVersionMetadata,
         deck_box: DeckBox,
-        output_path: Path | None = None,
+        output_path: Path,
     ) -> None:
         """Start a metric with no tallies.
 
@@ -75,7 +82,8 @@ class OnPlayWinRateSensitivityByDeckMetric:
                 metric sees is written into - shared with every other
                 deck-input metric in the same scan pass. Never the
                 published deck_box/ box.
-            output_path: overrides DEFAULT_OUTPUT_PATH when given.
+            output_path: this CSV's partition path
+                (SeventeenLandsPartition.path()).
         Output: none (constructor).
         Side effects: none (no I/O until accumulate()/finalize()).
         Exceptions: none.
@@ -84,7 +92,7 @@ class OnPlayWinRateSensitivityByDeckMetric:
         self._version_metadata = dataclasses.replace(
             version_metadata, requires_deck_box=True
         )
-        self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
+        self._output_path = output_path
         self._tallies: dict[UUID, npt.NDArray[np.int64]] = {}
 
     def accumulate(self, chunk: GameDataChunk) -> None:
@@ -99,7 +107,7 @@ class OnPlayWinRateSensitivityByDeckMetric:
 
         Example:
             >>> metric = OnPlayWinRateSensitivityByDeckMetric(
-            ...     version_metadata, deck_box
+            ...     version_metadata, deck_box, partition_path
             ... )
             >>> metric.accumulate(chunk)
             >>> metric.finalize()
@@ -107,7 +115,7 @@ class OnPlayWinRateSensitivityByDeckMetric:
         store_chunk_decks(chunk.decks, self._deck_box)
 
         # Each distinct deck's four tallies over this chunk's rows
-        masks = OnPlayWinCounts.row_masks(chunk.won, chunk.on_play)
+        masks = on_play_row_masks(chunk.won, chunk.on_play)
         per_deck = _count_per_deck(masks, chunk.decks)
 
         # Add them to the running per-deck_uuid totals (a copy, so no
@@ -120,31 +128,40 @@ class OnPlayWinRateSensitivityByDeckMetric:
             )
 
     def finalize(self) -> Path:
-        """Compute every seen deck's on-play/on-draw win rate delta and
-        write one row per deck to self._output_path.
+        """Write this partition's per-deck counts.
 
         Inputs: none (uses accumulated state).
         Output: self._output_path.
-        Side effects: creates self._output_path's parent directories if
-            missing; writes self._output_path (a parquet file with
-            columns deck_uuid: str, on_play_win_rate_sensitivity: float
-            | None, sample_count: int - one row per deck seen at least
-            once). Built from row dicts, as the row implementation did.
-        Exceptions: whatever pyarrow.parquet.write_table raises.
+        Side effects: writes self._output_path via write_count_table:
+            deck_uuid, then on_play_win_counts' four COUNT_COLUMNS (int64),
+            one row per deck seen.
+        Exceptions: whatever the parquet write raises.
 
         Example:
             >>> metric.finalize()
-            PosixPath('data/metrics/seventeenlands/game_data/on_play_win_rate_sensitivity_by_deck.parquet')
+            PosixPath('data/metrics/seventeenlands/game_data/on_play_win_rate_sensitivity_by_deck/KTK/TradDraft.parquet')
         """
-        result: list[dict] = [
-            _sensitivity_row(deck_uuid, OnPlayWinCounts.from_tallies(tallies))
-            for deck_uuid, tallies in self._tallies.items()
-        ]
-
-        write_dataframe_with_version_metadata(
-            pd.DataFrame(result), self._output_path, self._version_metadata
+        deck_uuids = [str(deck_uuid) for deck_uuid in self._tallies]
+        return write_count_table(
+            self._output_path,
+            type(self),
+            {"deck_uuid": deck_uuids},
+            _count_columns(list(self._tallies.values())),
+            self._version_metadata,
         )
-        return self._output_path
+
+    @classmethod
+    def output_from_counts(
+        cls, summed: pa.Table, baseline: pa.Table | None
+    ) -> pa.Table:
+        """See CountTableMetric.output_from_counts(): the on-play minus
+        on-draw win rate per deck (null when either side has no games).
+
+        Inputs: summed (deck_uuid + the four counts), baseline (None).
+        Output: deck_uuid, on_play_win_rate_sensitivity, sample_count.
+        Side effects: none. Exceptions: none.
+        """
+        return on_play_delta_output(summed, cls.KEY_COLUMNS, cls.LABEL_COLUMN)
 
 
 def _count_per_deck(
@@ -164,15 +181,19 @@ def _count_per_deck(
     ).astype(np.int64)
 
 
-def _sensitivity_row(deck_uuid: UUID, counts: OnPlayWinCounts) -> dict:
-    """One output row: deck_uuid, on_play_win_rate_sensitivity,
-    sample_count.
+def _count_columns(
+    tallies: list[npt.NDArray[np.int64]],
+) -> dict[str, npt.NDArray[np.int64]]:
+    """Per-subject tally vectors as one int64 array per COUNT_COLUMNS
+    name.
 
-    Inputs: deck_uuid, counts. Output: dict keyed by the output columns.
+    Inputs: tallies, each shape (TALLY_COUNT,). Output: dict of arrays,
+        each len(tallies) long (empty arrays for no tallies).
     Side effects: none. Exceptions: none.
     """
-    return {
-        "deck_uuid": str(deck_uuid),
-        "on_play_win_rate_sensitivity": counts.win_rate_delta(),
-        "sample_count": counts.game_count(),
-    }
+    stacked = (
+        np.stack(tallies, axis=1)
+        if tallies
+        else np.zeros((TALLY_COUNT, 0), dtype=np.int64)
+    )
+    return {name: stacked[index] for index, name in enumerate(COUNT_COLUMNS)}

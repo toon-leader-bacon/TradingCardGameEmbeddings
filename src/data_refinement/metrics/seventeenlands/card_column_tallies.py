@@ -1,16 +1,17 @@
 """CardColumnTallies - numeric tallies kept per matched header column of
-one zone across a CSV's chunks, then summed per card uuid
-(see game_data/README.md).
+one zone across a CSV's chunks, then summed per card uuid.
 
-Shared by every vectorized per-card game_data metric:
-GameCardAverageMetric (float tallies: a value sum and a count),
-OnPlayWinRateDeltaMetric and TutorTargetRateMetric (integer counts).
+Shared by both chunk families' per-card count tables: game_data's
+CardCountTableMetric (game_data/card_count_table_metric.py) keeps one,
+and draft_data's KeyedCardTallies (draft_data/keyed_card_tallies.py)
+keeps one per stratum key. count_columns() returns the tallies as
+count-table columns.
 Tallying per column and grouping by card only at the end keeps the row
 implementation's counting exactly: two header columns naming one card
-both count, as the row implementation's present_uuids() listed that
-card twice.
+both count, as the row implementations listed that card twice.
 """
 
+from collections.abc import Callable
 from typing import Generic, TypeVar
 from uuid import UUID
 
@@ -100,6 +101,41 @@ class CardColumnTallies(Generic[TallyT]):
                 column_tallies.copy() if previous is None else previous + column_tallies
             )
         return result
+
+    def count_columns(
+        self, names: tuple[str, ...], keep: Callable[[npt.NDArray[TallyT]], bool]
+    ) -> tuple[list[str], dict[str, npt.NDArray[TallyT]]]:
+        """per_card() as count-table columns: the kept cards' uuids, and
+        one array per tally, named by names.
+
+        Inputs:
+            names: one column name per tally, in tally order.
+            keep: whether a card's summed tallies earn it a row (e.g. at
+                least one game).
+        Output: (card uuid strings, {name: array}), every array as long
+            as the uuid list (all empty if no card is kept).
+        Side effects: none.
+        Exceptions: ValueError if len(names) is not tally_count.
+
+        Example:
+            >>> uuids, counts = tallies.count_columns(
+            ...     ("in_deck", "tutored"), lambda t: t[0] > 0
+            ... )
+        """
+        if len(names) != self._tally_count:
+            raise ValueError(
+                f"{self._owner}: {len(names)} names for {self._tally_count} tallies"
+            )
+        kept = {card: t for card, t in self.per_card().items() if keep(t)}
+
+        # One column per tally, rows in first-column card order
+        stacked = (
+            np.stack(list(kept.values()), axis=1)
+            if kept
+            else np.zeros((self._tally_count, 0), dtype=self._dtype)
+        )
+        columns = {name: stacked[index] for index, name in enumerate(names)}
+        return [str(card) for card in kept], columns
 
     def _tallies_for(self, card_uuids: tuple[UUID, ...]) -> npt.NDArray[TallyT]:
         """The running tallies, after recording the first layout (and

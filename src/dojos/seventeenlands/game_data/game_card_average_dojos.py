@@ -2,8 +2,8 @@
 win-rate-shaped concrete subclasses
 (src/data_refinement/metrics/seventeenlands/game_data/game_card_average_metrics.py).
 
-Each is a CardAverageMetricDojo (../../generic/paired_metric_dojos.py)
-that only names its paired metric. GameLengthAssociationMetric, this
+Each is a SeventeenLandsCardLabelDojo (../sliced_dojos.py) that only
+names its paired metric. GameLengthAssociationMetric, this
 family's fourth subclass, is wrapped in game_length_association_dojo.py,
 mirroring that metric's own separate module.
 """
@@ -13,22 +13,22 @@ from src.data_refinement.metrics.seventeenlands.game_data.game_card_average_metr
     OpeningHandWinRateMetric,
     WinRateWhenInDeckMetric,
 )
-from src.dojos.generic.paired_metric_dojos import CardAverageMetricDojo
+from src.dojos.seventeenlands.sliced_dojos import SeventeenLandsCardLabelDojo
 
 
-class WinRateWhenInDeckDojo(CardAverageMetricDojo):
+class WinRateWhenInDeckDojo(SeventeenLandsCardLabelDojo):
     """Card -> predicted P(won | card in deck_<name>) (WinRateWhenInDeckMetric)."""
 
     METRIC = WinRateWhenInDeckMetric
 
 
-class OpeningHandWinRateDojo(CardAverageMetricDojo):
+class OpeningHandWinRateDojo(SeventeenLandsCardLabelDojo):
     """Card -> predicted P(won | card in opening_hand_<name>) (OpeningHandWinRateMetric)."""
 
     METRIC = OpeningHandWinRateMetric
 
 
-class DrawnWinRateDojo(CardAverageMetricDojo):
+class DrawnWinRateDojo(SeventeenLandsCardLabelDojo):
     """Card -> predicted P(won | card in drawn_<name>) (DrawnWinRateMetric)."""
 
     METRIC = DrawnWinRateMetric

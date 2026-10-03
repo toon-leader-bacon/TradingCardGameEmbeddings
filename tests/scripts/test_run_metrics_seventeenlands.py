@@ -10,7 +10,11 @@ import pandas as pd
 import pytest
 
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.metrics.seventeenlands.game_data.game_card_average_metrics import (
+    WinRateWhenInDeckMetric,
+)
 from src.data_refinement.metrics.seventeenlands.rowwise_metric import RowwiseMetric
+from src.data_retrieval.seventeenlands.refs import DataType, Expansion, format_code
 from tests.data_refinement.metrics.seventeenlands.game_data._chunk_fixtures import (
     HEADER,
     VERSION,
@@ -49,6 +53,7 @@ def _family(
 ):
     return script._SeventeenLandsFamily(
         name="test_family",
+        data_type=DataType.GAME,
         family_dir=Path("unused"),
         metric_specs=specs,
         scanning=scanning,
@@ -70,37 +75,58 @@ def _context(script: ModuleType, deck_box: DeckBox | None) -> object:
         header=pd.Index(HEADER),
         source_game=VERSION.game,
         version_metadata=VERSION,
-        expansion="KTK",
-        format_code="TradDraft",
+        expansion=Expansion.KTK,
+        format_code=format_code.TradDraft,
         output_root=Path("scratch"),
         deck_box=deck_box,
     )
 
 
-def test_output_paths_are_namespaced_by_expansion_and_format(
-    script: ModuleType,
-) -> None:
-    default = Path(
-        "data/metrics/seventeenlands/game_data/win_rate_when_in_deck.parquet"
+def test_output_paths_are_partition_paths(script: ModuleType) -> None:
+    family = _family(script, (), _chunk_scanning(script), None)
+    spec = script.ChunkMetricSpec(WinRateWhenInDeckMetric)
+    context = script._CsvMetricContext(
+        **{**vars(_context(script, None)), "output_root": None}
     )
 
-    path = script._namespaced_output_path(default, "KTK", "TradDraft", None)
+    path = script._partition_path(family, spec, context)
 
     assert path == Path(
-        "data/metrics/seventeenlands/game_data/KTK/TradDraft/win_rate_when_in_deck.parquet"
+        "data/metrics/seventeenlands/game_data/win_rate_when_in_deck/KTK/TradDraft.parquet"
     )
 
 
-def test_an_output_root_re_roots_the_namespaced_path(script: ModuleType) -> None:
-    default = Path(
-        "data/metrics/seventeenlands/game_data/win_rate_when_in_deck.parquet"
-    )
+def test_an_output_root_re_roots_the_partition_path(script: ModuleType) -> None:
+    family = _family(script, (), _chunk_scanning(script), None)
+    spec = script.ChunkMetricSpec(WinRateWhenInDeckMetric)
 
-    path = script._namespaced_output_path(default, "KTK", "TradDraft", Path("scratch"))
+    path = script._partition_path(family, spec, _context(script, None))
 
     assert path == Path(
-        "scratch/seventeenlands/game_data/KTK/TradDraft/win_rate_when_in_deck.parquet"
+        "scratch/seventeenlands/game_data/win_rate_when_in_deck/KTK/TradDraft.parquet"
     )
+
+
+def test_a_row_spec_partitions_under_its_default_path_stem(script: ModuleType) -> None:
+    family = _family(script, (), _row_scanning(script), None)
+    spec = script.RowMetricSpec(_FakeRowMetric)
+
+    path = script._partition_path(family, spec, _context(script, None))
+
+    assert path == Path("scratch/seventeenlands/game_data/fake/KTK/TradDraft.parquet")
+
+
+def test_csv_names_parse_into_set_and_format(script: ModuleType) -> None:
+    assert script._parse_expansion_format(Path("x/Cube_-_Powered.Sealed.csv")) == (
+        Expansion.Powered_Cube,
+        format_code.Sealed,
+    )
+
+
+@pytest.mark.parametrize("name", ["KTK.csv", "XXX.Sealed.csv", "KTK.Nope.csv"])
+def test_unknown_csv_names_are_rejected(script: ModuleType, name: str) -> None:
+    with pytest.raises(ValueError):
+        script._parse_expansion_format(Path(name))
 
 
 def test_an_output_root_also_re_roots_the_deck_box(script: ModuleType) -> None:
@@ -214,9 +240,7 @@ def test_a_deck_box_chunk_metric_without_a_box_is_rejected(
 
 def test_game_data_scans_refuse_a_source_frame(script: ModuleType) -> None:
     with pytest.raises(ValueError, match="no source frame"):
-        script._scan_game_data_csv(
-            pd.Index(HEADER), binder_with_cards(["Owlbear"]), True
-        )
+        script._GAME_DATA_SCAN(pd.Index(HEADER), binder_with_cards(["Owlbear"]), True)
 
 
 def test_a_row_scanning_family_scans_every_csv_the_same_way(

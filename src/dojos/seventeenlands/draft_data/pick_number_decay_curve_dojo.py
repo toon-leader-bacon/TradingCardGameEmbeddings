@@ -31,6 +31,9 @@ own docstring).
 from pathlib import Path
 
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.metrics.seventeenlands.data_slice import (
+    SeventeenLandsSlice,
+)
 from src.data_refinement.metrics.seventeenlands.draft_data.pick_number_decay_curve_metric import (  # noqa: E501
     PickNumberDecayCurveMetric,
 )
@@ -41,6 +44,10 @@ from src.dojos.generic.single_card_fixed_classification.dojo import (
 )
 from src.dojos.generic.single_card_fixed_classification.loss_spec import (
     MASKED_VECTOR_REGRESSION_LOSS_SPEC,
+)
+from src.dojos.seventeenlands.sliced_dojos import (
+    ALL_DATA,
+    seventeenlands_training_path,
 )
 from src.schema.holdout import HoldoutSpec
 
@@ -58,6 +65,7 @@ class PickNumberDecayCurveDojo(SingleCardFixedClassificationDojo):
         card_binder: CardBinder,
         holdout: HoldoutSpec,
         card_embedding_size: int,
+        data_slice: SeventeenLandsSlice = ALL_DATA,
         path_to_training_data: Path | None = None,
         name: str | None = None,
         rng_seed: int | None = None,
@@ -66,8 +74,9 @@ class PickNumberDecayCurveDojo(SingleCardFixedClassificationDojo):
         super().__init__(
             card_lookup=card_binder,
             holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or PickNumberDecayCurveMetric.DEFAULT_OUTPUT_PATH,
+            path_to_training_data=seventeenlands_training_path(
+                PickNumberDecayCurveMetric, data_slice, path_to_training_data
+            ),
             data_constructor=PickNumberDecayCurveDataConstructor(
                 min_sample_count=MIN_SAMPLE_COUNT
             ),

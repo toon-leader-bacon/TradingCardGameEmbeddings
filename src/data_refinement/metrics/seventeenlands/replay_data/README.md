@@ -92,11 +92,9 @@ shared `Metric[dict]` Protocol ([`../../metric.py`](../../metric.py)).
   `len(creatures_attacked)` per user half-turn that had any attack at
   all. `deck_box` is a required constructor parameter.
 - `attacker_blocker_combat_outcome_metric.py` —
-  `AttackerBlockerCombatOutcomeMetric` (streaming, fan-out): the second
-  fan-out-shaped metric in this codebase (after
-  [`../game_data/tutor_target_pool_metric.py`](../game_data/tutor_target_pool_metric.py)'s
-  `TutorTargetPoolMetric`) - one row fans out to one output example per
-  half-turn with at least one attacker. `net_kill_delta` is
+  `AttackerBlockerCombatOutcomeMetric` (streaming, fan-out): one row
+  fans out to one output example per half-turn with at least one
+  attacker. `net_kill_delta` is
   attacker-favorable-positive: `len(defending side's
   creatures_killed_combat)` minus `len(attacking side's own
   creatures_killed_combat)`, this half-turn. No `deck_box` - this
@@ -190,11 +188,7 @@ closes that builder, mirroring
 [`../../sts_gg/deck_label_metric.py`](../../sts_gg/deck_label_metric.py)'s
 shape. `AttackerBlockerCombatOutcomeMetric` is streaming but fans a
 single input row out to zero or more output rows (one per qualifying
-half-turn), calling `write_row()` once per fanned-out row, the same
-fan-out convention
-[`../game_data/tutor_target_pool_metric.py`](../game_data/tutor_target_pool_metric.py)'s
-`TutorTargetPoolMetric` established first, applied here over turns
-within a game rather than over pool members.
+half-turn), calling `write_row()` once per fanned-out row.
 
 ## How to run
 

@@ -4,13 +4,10 @@ half-turn that had at least one attacker, group 1 = that half-turn's
 creatures_attacked, group 2 = creatures_blocking, label = a signed
 net-kill-count delta.
 
-NEW SHAPE (second occurrence in this codebase, after
-game_data.TutorTargetPoolMetric) - FAN-OUT STREAMING: one row fans out
-to one output example PER QUALIFYING HALF-TURN, not per row. Written
-the same way TutorTargetPoolMetric writes its fan-out: a list of row
-dicts, one ParquetBuilder.write_row() call per fanned-out row per
-accumulate() call - except this fans out over turns within a game, not
-over pool members.
+FAN-OUT STREAMING: one row fans out to one output example PER
+QUALIFYING HALF-TURN, not per row: a list of row dicts, one
+ParquetBuilder.write_row() call per fanned-out row per accumulate()
+call.
 
 No deck_box - this metric's identity is (draft_id, match_number,
 game_number, actor, turn), never a deck_uuid.

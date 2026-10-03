@@ -27,17 +27,21 @@ from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import
     GameDataChunk,
     GameKeys,
     GameZone,
-    ZoneCounts,
+)
+from src.data_refinement.metrics.seventeenlands.batch_columns import (
+    CARD_COUNT_TYPE,
+    raise_on_null,
+    read_column,
+    read_zone_counts,
 )
 from src.schema.game_id import GameId
 
 # Every scalar column a GameDataChunk carries, with its read type. A
 # string column reads an empty cell as "" (pyarrow's default), never as
 # null, so an unranked event's rank is "" (and an empty draft_id would
-# pass through as "", as it did when the row metrics read it). Every
-# game_data CSV under
-# data/raw/17lands/ carries all seven (checked 2026-10-02), so a header
-# missing one fails the whole CSV rather than one metric.
+# pass through as "", as it did when the row metrics read it). A header
+# missing a required scalar fails the whole CSV rather than one metric;
+# an optional one (_OPTIONAL_SCALAR_DEFAULTS) reads as its default.
 _SCALAR_TYPES: Mapping[str, pa.DataType] = {
     "won": pa.bool_(),
     "on_play": pa.bool_(),
@@ -47,6 +51,14 @@ _SCALAR_TYPES: Mapping[str, pa.DataType] = {
     "game_number": pa.int64(),
     "rank": pa.string(),
 }
+
+# Optional scalars and the value every row gets when the CSV lacks the
+# column. The older exports (AFR, KHM, MID, STX, VOW; 10 of 132 CSVs)
+# have no match_number and restart game_number at 1 for each match;
+# match_number reads as 0 there, the deck box extraction stage's
+# convention (deck_box/seventeenlands_game_data/extraction_stage.py).
+# Modern exports number matches from 1, so 0 always means "unknown".
+_OPTIONAL_SCALAR_DEFAULTS: Mapping[str, int] = {"match_number": 0}
 
 
 class GameDataChunkParser:
@@ -88,8 +100,9 @@ class GameDataChunkParser:
             source_game: whose cards the column suffixes name.
         Output: a GameDataChunkParser.
         Side effects: none (no I/O).
-        Exceptions: ValueError if a scalar column in _SCALAR_TYPES is
-            missing from header.
+        Exceptions: ValueError if a required scalar column (in
+            _SCALAR_TYPES, not _OPTIONAL_SCALAR_DEFAULTS) is missing from
+            header.
 
         Example:
             >>> GameDataChunkParser.from_header(header, binder, GameId.MTG)
@@ -131,10 +144,16 @@ class GameDataChunkParser:
         Example:
             >>> pyarrow.csv.ConvertOptions(column_types=parser.column_types())
         """
-        result: dict[str, pa.DataType] = dict(_SCALAR_TYPES)
+        result: dict[str, pa.DataType] = {
+            column: kind
+            for column, kind in _SCALAR_TYPES.items()
+            if column in self._header
+        }
+        # float32, not int16: some exports (e.g. BRO.PremierDraft) write
+        # counts as "0.0"; read_zone_counts() narrows them to int16
         for columns in self._zone_columns.values():
             for column, _ in columns:
-                result[column] = pa.int16()
+                result[column] = CARD_COUNT_TYPE
         return result
 
     def parse(self, batch: pa.RecordBatch) -> GameDataChunk:
@@ -145,33 +164,35 @@ class GameDataChunkParser:
             scalars, and each row's deck.
         Side effects: none.
         Exceptions: ValueError naming the column and first row offset
-            if any scalar column holds a null.
+            if any scalar column holds a null. A missing optional scalar
+            (match_number) reads as its default instead.
 
         Example:
             >>> chunk = parser.parse(next(iter(reader)))
         """
         # Validate the scalars before building anything from them
         for column in _SCALAR_TYPES:
-            _raise_on_null(batch, column)
+            if column in batch.schema.names:
+                raise_on_null(batch, column)
 
         # Each zone: one count matrix over its matched columns
         zones = {
-            zone: _read_zone_counts(batch, columns)
+            zone: read_zone_counts(batch, columns)
             for zone, columns in self._zone_columns.items()
         }
         keys = GameKeys(
-            draft_id=_read_column(batch, "draft_id", np.object_),
-            match_number=_read_column(batch, "match_number", np.int64),
-            game_number=_read_column(batch, "game_number", np.int64),
+            draft_id=read_column(batch, "draft_id", np.object_),
+            match_number=_read_optional_column(batch, "match_number"),
+            game_number=read_column(batch, "game_number", np.int64),
         )
 
         return GameDataChunk(
             zones=zones,
-            won=_read_column(batch, "won", np.bool_),
-            on_play=_read_column(batch, "on_play", np.bool_),
-            num_turns=_read_column(batch, "num_turns", np.int32),
+            won=read_column(batch, "won", np.bool_),
+            on_play=read_column(batch, "on_play", np.bool_),
+            num_turns=read_column(batch, "num_turns", np.int32),
             keys=keys,
-            rank=_read_column(batch, "rank", np.object_),
+            rank=read_column(batch, "rank", np.object_),
             decks=build_chunk_decks(zones[GameZone.DECK], keys, self._source_game),
         )
 
@@ -182,7 +203,11 @@ def _require_scalar_columns(header: Sequence[str]) -> None:
     Inputs: header. Output: none. Side effects: none.
     Exceptions: ValueError naming the missing columns.
     """
-    missing = [column for column in _SCALAR_TYPES if column not in header]
+    missing = [
+        column
+        for column in _SCALAR_TYPES
+        if column not in header and column not in _OPTIONAL_SCALAR_DEFAULTS
+    ]
     if missing:
         raise ValueError(f"game_data CSV header lacks scalar columns {missing}")
 
@@ -205,53 +230,14 @@ def _group_zone_columns(
     return {zone: tuple(columns) for zone, columns in per_zone.items()}
 
 
-def _read_zone_counts(
-    batch: pa.RecordBatch, columns: tuple[tuple[str, UUID], ...]
-) -> ZoneCounts:
-    """One zone's (rows x columns) int16 count matrix; nulls become 0.
+def _read_optional_column(batch: pa.RecordBatch, column: str) -> npt.NDArray:
+    """An optional int64 scalar column, or its default on every row when
+    the CSV lacks it.
 
-    Inputs: batch, columns (header column, card uuid) for this zone.
-    Output: ZoneCounts (empty card_uuids and a (rows, 0) matrix when
-        columns is empty).
+    Inputs: batch, column (a key of _OPTIONAL_SCALAR_DEFAULTS).
+    Output: int64 array, shape (batch.num_rows,).
     Side effects: none. Exceptions: none.
     """
-    if not columns:
-        return ZoneCounts(card_uuids=(), counts=np.zeros((batch.num_rows, 0), np.int16))
-
-    # One numpy column per matched header column; a null cell means 0
-    arrays = [
-        batch.column(column).fill_null(0).to_numpy(zero_copy_only=False)
-        for column, _ in columns
-    ]
-    counts = np.column_stack(arrays).astype(np.int16, copy=False)
-    return ZoneCounts(card_uuids=tuple(uuid for _, uuid in columns), counts=counts)
-
-
-def _raise_on_null(batch: pa.RecordBatch, column: str) -> None:
-    """Raise if batch's column holds a null.
-
-    Inputs: batch, column. Output: none. Side effects: none.
-    Exceptions: ValueError naming column and the first null's offset.
-    """
-    values = batch.column(column)
-    if values.null_count == 0:
-        return
-    first_null = int(np.flatnonzero(values.is_null().to_numpy(zero_copy_only=False))[0])
-    raise ValueError(
-        f"game_data column {column!r} is null at batch row {first_null} "
-        f"({values.null_count} nulls in this batch)"
-    )
-
-
-def _read_column(
-    batch: pa.RecordBatch, column: str, dtype: type[np.generic]
-) -> npt.NDArray:
-    """batch's column as a numpy array of dtype (nulls already
-    rejected).
-
-    Inputs: batch, column, dtype (e.g. np.bool_, np.int64, np.object_
-        for strings). Output: shape (rows,).
-    Side effects: none. Exceptions: none.
-    """
-    values = batch.column(column).to_numpy(zero_copy_only=False)
-    return np.asarray(values, dtype=dtype)
+    if column in batch.schema.names:
+        return read_column(batch, column, np.int64)
+    return np.full(batch.num_rows, _OPTIONAL_SCALAR_DEFAULTS[column], np.int64)

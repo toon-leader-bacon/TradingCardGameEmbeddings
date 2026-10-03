@@ -1,8 +1,10 @@
 # game_data
 
 Converts 17lands' raw per-game data
-(`data/raw/17lands/game_data/<Set>.<EventType>.csv`) into training-data
-parquet files under `data/metrics/seventeenlands/game_data/`, matching
+(`data/raw/17lands/game_data/<Set>.<EventType>.csv`) into one partition
+file per metric per CSV under `data/metrics/seventeenlands/game_data/`
+(see [`../README.md`](../README.md) for the layout and how dojos read a
+slice of them), matching
 each CSV's `opening_hand_<name>`/`drawn_<name>`/`tutored_<name>`/
 `deck_<name>`/`sideboard_<name>` column suffixes against a `CardBinder`
 already populated for `GameId.MTG` (see
@@ -82,57 +84,71 @@ Python.
   one zone. The first chunk fixes the column layout; a later chunk with
   a different layout raises `ValueError`. `per_card()` sums the columns
   per card uuid, so two columns naming one card both count.
-- `on_play_win_counts.py` — `OnPlayWinCounts(play_games, play_wins,
-  draw_games, draw_wins)`. `row_masks(won, on_play)` gives the four
-  per-row masks, `from_tallies()` reads them back, and
-  `win_rate_delta()` is `P(won | on_play) - P(won | on_draw)`, or `None`
-  when either side has no games.
+  `count_columns(names, keep)` returns the kept cards' uuids and one
+  array per tally, the shape a count table writes.
+- `on_play_win_counts.py` — the four on-play tallies (`COUNT_COLUMNS`:
+  `play_games`, `play_wins`, `draw_games`, `draw_wins`) and the one
+  place the delta rule lives. `on_play_row_masks(won, on_play)` gives
+  the four per-row masks, `has_on_play_games(tallies)` says whether a
+  subject has a game on either side, and `on_play_delta_output(summed,
+  key_columns, label_column)` labels a slice:
+  `P(won | on_play) - P(won | on_draw)`, null when either side has no
+  games.
 
-### Per-card metrics (accumulation)
+### Count tables
 
-Each takes `(version_metadata, output_path=None)` and writes
-`nocab_uuid`, its label and `sample_count` for every card seen.
+Every metric here except the three deck-label row streams is a count
+table (`../sliced_metric.py`): each partition holds raw, summable counts
+per key, and the label is computed only when a slice is built
+(`output_from_counts`). Each takes `(version_metadata, output_path)`,
+`output_path` being the CSV's partition path.
 
-- `game_card_average_metric.py` — `GameCardAverageMetric` (Template
-  Method, abstract): a per-card average of one per-game value over every
-  game the card was present in, in the subclass's `ZONE`. Per chunk it
-  adds `(value_sum, count)` per column to a float64 `CardColumnTallies`.
-  A CSV with no rows writes a zero-row file with the full schema.
-  Subclasses fix `LABEL_COLUMN`, `DEFAULT_OUTPUT_PATH` and `ZONE`,
-  implement `_values(chunk)`, and may override
-  `_extra_accumulate(chunk)` (no-op by default) and
-  `_label(value_sum, count)` (default: the average).
+- `card_count_table_metric.py` — `CardCountTableMetric` (Template
+  Method, abstract): the per-card count table. It owns a float64
+  `CardColumnTallies` over `ZONE`'s columns, `accumulate()` (add the
+  subclass's `_increments(chunk)`) and `finalize()` (one row per card
+  with `_has_samples()`, by default a first count above zero, plus the
+  optional baseline row from `_baseline_counts()`). A CSV with no rows
+  writes the full schema.
+- `game_card_average_metric.py` — `GameCardAverageMetric` (abstract):
+  counts `(games, value_sum)` per card present in `ZONE`; the label is
+  `value_sum / games`. Subclasses implement `_values(chunk)`.
 - `game_card_average_metrics.py` — `GameCardWinRateMetric` (abstract;
   `_values` is `won` as 1.0/0.0) and its three concretes:
   `WinRateWhenInDeckMetric`, `OpeningHandWinRateMetric` and
   `DrawnWinRateMetric` (`P(won | card in deck_/opening_hand_/drawn_)`).
 - `game_length_association_metric.py` — `GameLengthAssociationMetric`:
-  a card's average `num_turns` when in the deck, minus the format-wide
-  average (kept by `_extra_accumulate()`, subtracted by `_label()`).
+  a card's average `num_turns` when in the deck, minus the slice's
+  average. Each partition writes its own `(games, turn sum)` as a
+  baseline row with a null key; the slice sums them.
 - `on_play_win_rate_delta_metric.py` — `OnPlayWinRateDeltaMetric`: per
-  card in the deck, `OnPlayWinCounts.win_rate_delta()`. Keeps the four
-  counts per deck column in an int64 `CardColumnTallies`. A card never
-  seen on one side writes a `None` delta.
+  card in the deck, the four on-play counts; labelled by
+  `on_play_delta_output`.
 - `tutor_target_rate_metric.py` — `TutorTargetRateMetric`: per card,
-  `P(tutored | in deck)`. Per deck column it counts games in the deck
-  and games also tutored (the card present under any `tutored_` column,
-  via `present_for`). `sample_count` matters here: most cards' true
-  rate is near zero.
+  `P(tutored | in deck)`, from `(in_deck, tutored)` counts ("tutored":
+  the card present under any `tutored_` column, via `present_for`).
+  `_counted_rows(chunk)` picks the games that count (all of them).
+  `sample_count` matters here: most cards' true rate is near zero.
+- `tutor_choice_rate_metric.py` — `TutorChoiceRateMetric`: a
+  `TutorTargetRateMetric` whose `_counted_rows` keeps only games with a
+  tutored card, so the label is `P(tutored | in deck, a card was
+  tutored that game)`. Deck only; the sideboard is not counted.
+- `on_play_win_rate_sensitivity_by_deck_metric.py` —
+  `OnPlayWinRateSensitivityByDeckMetric`: the four on-play counts per
+  `deck_uuid`, counted per chunk with `np.bincount` over `row_deck`.
+  Takes the family `deck_box` (`store_chunk_decks` per chunk) and stamps
+  its output `requires_deck_box=True`.
 
-These three standalone metrics build their output from row dicts, so
-a CSV with no rows writes a column-less file.
-
-### Deck-input metrics
-
-Each takes `(version_metadata, deck_box, output_path=None)`, stores every
-chunk's decks with `store_chunk_decks` (a deck already in the box keeps
-its stored entry), and stamps its output `requires_deck_box=True`.
+### Row streams (deck-input metrics)
 
 - `game_deck_label_metric.py` — `GameDeckLabelMetric` (Template Method,
-  abstract, streaming): one output row per game, `draft_id`,
-  `match_number`, `game_number`, `deck_uuid` and one label, written per
-  chunk with `ParquetBuilder.write_columns()`. Subclasses fix
-  `LABEL_COLUMN`/`LABEL_TYPE`/`DEFAULT_OUTPUT_PATH` and implement
+  abstract, streaming; a `RowStreamMetric`): one output row per game,
+  `draft_id`, `match_number`, `game_number`, `deck_uuid` and one label,
+  written per chunk with `ParquetBuilder.write_columns()`. Takes
+  `(version_metadata, deck_box, output_path)`, stores every chunk's
+  decks with `store_chunk_decks` (a deck already in the box keeps its
+  stored entry), and stamps its output `requires_deck_box=True`.
+  Subclasses fix `LABEL_COLUMN`/`LABEL_TYPE`/`OUTPUT_STEM` and implement
   `_labels(chunk)`.
 - `game_deck_label_metrics.py` — its three concretes:
   `DeckWinPredictionMetric` (`won`, `pa.bool_()`),
@@ -140,21 +156,6 @@ its stored entry), and stamps its output `requires_deck_box=True`.
   `DeckRankTierPredictionMetric` (`rank`, `pa.string()`: `bronze`/
   `silver`/`gold`/`platinum`/`diamond`/`mythic`, and `OTHER_LABEL` for
   anything else, including the empty rank of unranked events).
-- `on_play_win_rate_sensitivity_by_deck_metric.py` —
-  `OnPlayWinRateSensitivityByDeckMetric` (accumulation): per deck,
-  `OnPlayWinCounts.win_rate_delta()` over every game played with it.
-  Per chunk it counts each deck's four tallies with `np.bincount` over
-  `row_deck` and adds them to a running per-`deck_uuid` total.
-
-### Pool metric
-
-- `tutor_target_pool_metric.py` — `TutorTargetPoolMetric` (streaming,
-  fan-out): one output row per (game, distinct card in `deck_` ∪
-  `sideboard_`), labelled with whether it was tutored that game. Per
-  chunk it lines the three zones up over one card axis and writes every
-  pool cell at once. Its identity is the per-game triple plus a
-  `pool_card_uuid`, never a deck id (the pool is a different multiset
-  from the deck), so it takes no `deck_box`.
 
 - `BRAINSTORM.md` — candidate metrics from this raw source not yet
   built (this container implements the eleven ideas on its "Human
@@ -192,9 +193,8 @@ flowchart LR
     csv[game_data CSV] -->|record batches| scanner[scan_game_csv]
     parser[GameDataChunkParser] -->|parse once| chunk[GameDataChunk<br/>zones, scalars, keys, rank, decks]
     scanner --> parser
-    chunk --> card[per-card metrics<br/>CardColumnTallies]
+    chunk --> card[per-card count tables<br/>CardColumnTallies]
     chunk --> deck[deck-input metrics]
-    chunk --> pool[TutorTargetPoolMetric]
     deck -->|store_chunk_decks| box[(family DeckBox)]
 ```
 
@@ -216,8 +216,10 @@ PYTHONPATH=. python scripts/run_metrics.py --source seventeenlands_game_data \
     --raw-path data/raw/17lands/game_data/KTK.TradDraft.csv
 ```
 
-Each metric writes `data/metrics/seventeenlands/game_data/<SET>/<Format>/<name>.parquet`.
+Each metric writes its partition,
+`data/metrics/seventeenlands/game_data/<OUTPUT_STEM>/<SET>/<Format>.parquet`.
 The family deck box is `data/metrics/seventeenlands/game_data/deck_box.db`.
+Dojos build their slice files from the partitions on first use.
 
 Parity check: write the outputs to a scratch root with `--output-root`,
 then diff them against the existing outputs:
@@ -226,6 +228,6 @@ then diff them against the existing outputs:
 PYTHONPATH=. python scripts/run_metrics.py --source seventeenlands_game_data \
     --raw-path data/raw/17lands/game_data/KTK.TradDraft.csv --output-root scratch/parity
 PYTHONPATH=. python scripts/compare_metric_outputs.py \
-    --reference data/metrics/seventeenlands/game_data/KTK/TradDraft \
-    --candidate scratch/parity/seventeenlands/game_data/KTK/TradDraft
+    --reference data/metrics/seventeenlands/game_data/drawn_win_rate \
+    --candidate scratch/parity/seventeenlands/game_data/drawn_win_rate
 ```

@@ -15,7 +15,10 @@ DeckRankTierPredictionMetric) share every step and differ only in which
 per-row value is the label and what type/column name it is written
 under. That's a Template Method (PATTERNS.md): this class owns every
 shared step; a subclass only fixes LABEL_COLUMN/LABEL_TYPE/
-DEFAULT_OUTPUT_PATH and implements _labels().
+OUTPUT_STEM and implements _labels().
+
+A RowStreamMetric (../sliced_metric.py): a slice concatenates its
+partitions.
 
 on_play_win_rate_sensitivity_by_deck_metric.py's
 OnPlayWinRateSensitivityByDeckMetric also stores the chunk's decks, but
@@ -37,7 +40,7 @@ than one joined string.
 import dataclasses
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 import numpy as np
 import numpy.typing as npt
@@ -55,25 +58,28 @@ from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     schema_with_version_metadata,
 )
+from src.data_retrieval.seventeenlands.refs import DataType
 
 
 class GameDeckLabelMetric(ABC):
     """One game's constructed deck -> (deck_uuid, label), one row per
     game, written as soon as accumulate() sees it.
 
-    Satisfies the Metric[GameDataChunk] Protocol (../../metric.py)
-    structurally.
+    Satisfies the Metric[GameDataChunk] Protocol (../../metric.py) and
+    RowStreamMetric (../sliced_metric.py) structurally.
     """
 
     LABEL_COLUMN: ClassVar[str]
     LABEL_TYPE: ClassVar[pa.DataType]
-    DEFAULT_OUTPUT_PATH: ClassVar[Path]
+    FAMILY: ClassVar[DataType] = DataType.GAME
+    OUTPUT_STEM: ClassVar[str]
+    IS_ROW_STREAM: ClassVar[Literal[True]] = True
 
     def __init__(
         self,
         version_metadata: MetricVersionMetadata,
         deck_box: DeckBox,
-        output_path: Path | None = None,
+        output_path: Path,
     ) -> None:
         """Open the output for streaming.
 
@@ -85,7 +91,8 @@ class GameDeckLabelMetric(ABC):
                 deck-input metric in the same scan pass, so identical
                 decks dedupe against each other. Never the published
                 deck_box/ box.
-            output_path: overrides DEFAULT_OUTPUT_PATH when given.
+            output_path: this CSV's partition path
+                (SeventeenLandsPartition.path()).
         Output: none (constructor).
         Side effects: creates output_path's parent directories if
             missing; opens output_path for writing (truncating any
@@ -96,7 +103,7 @@ class GameDeckLabelMetric(ABC):
             output_path for writing.
         """
         self._deck_box = deck_box
-        self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
+        self._output_path = output_path
         output_schema = schema_with_version_metadata(
             pa.schema(
                 [
@@ -126,7 +133,9 @@ class GameDeckLabelMetric(ABC):
             batch-wide errors.
 
         Example:
-            >>> metric = DeckWinPredictionMetric(version_metadata, deck_box)
+            >>> metric = DeckWinPredictionMetric(
+            ...     version_metadata, deck_box, partition_path
+            ... )
             >>> metric.accumulate(chunk)
             >>> metric.finalize()
         """
@@ -162,7 +171,7 @@ class GameDeckLabelMetric(ABC):
 
         Example:
             >>> metric.finalize()
-            PosixPath('data/metrics/seventeenlands/game_data/some_label.parquet')
+            PosixPath('data/metrics/seventeenlands/game_data/deck_win_prediction/KTK/TradDraft.parquet')
         """
         self._writer.close()
         return self._output_path

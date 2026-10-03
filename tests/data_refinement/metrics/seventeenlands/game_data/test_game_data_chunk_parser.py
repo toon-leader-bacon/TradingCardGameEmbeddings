@@ -50,10 +50,10 @@ def test_needed_columns_skips_unmatched_columns() -> None:
     } <= set(needed)
 
 
-def test_column_types_reads_card_counts_as_int16_and_scalars_typed() -> None:
+def test_column_types_reads_card_counts_as_float32_and_scalars_typed() -> None:
     types = parser_for(binder_with_cards([OWLBEAR])).column_types()
 
-    assert types[f"deck_{OWLBEAR}"] == pa.int16()
+    assert types[f"deck_{OWLBEAR}"] == pa.float32()
     assert types["won"] == pa.bool_()
     assert types["num_turns"] == pa.int32()
     assert types["rank"] == pa.string()
@@ -168,3 +168,37 @@ def test_parse_identifies_each_rows_deck(tmp_path: Path) -> None:
 
     assert chunk.decks.row_deck.tolist() == [0, 1, 0]
     assert chunk.decks.decks[0].card_nocab_uuids == [uuid_for(binder, OWLBEAR)]
+
+
+def test_an_older_export_without_match_number_reads_it_as_zero(
+    tmp_path: Path,
+) -> None:
+    # AFR/KHM/MID/STX/VOW exports have no match_number column
+    binder = binder_with_cards([OWLBEAR])
+    header = [column for column in HEADER if column != "match_number"]
+    rows = [row(won=True, game_number=1), row(won=False, game_number=2)]
+    for each in rows:
+        del each["match_number"]
+    parser = parser_for(binder, header=header)
+
+    chunk = parse_one(write_csv(tmp_path / "g.csv", rows, header=header), parser)
+
+    assert "match_number" not in parser.needed_columns()
+    assert "match_number" not in parser.column_types()
+    assert chunk.keys.match_number.tolist() == [0, 0]
+    assert chunk.keys.game_number.tolist() == [1, 2]
+
+
+def test_float_formatted_counts_read_as_int16(tmp_path: Path) -> None:
+    # Some exports (e.g. BRO.PremierDraft) write counts as "1.0"
+    binder = binder_with_cards([OWLBEAR])
+    csv_path = write_csv(tmp_path / "g.csv", [row(won=True, owlbear_deck=2)])
+    csv_path.write_text(
+        csv_path.read_text().replace(",2,", ",2.0,").replace(",0,", ",0.0,")
+    )
+
+    chunk = parse_one(csv_path, parser_for(binder))
+
+    deck = chunk.zones[GameZone.DECK]
+    assert deck.counts.dtype.name == "int16"
+    assert deck.counts.tolist() == [[2]]

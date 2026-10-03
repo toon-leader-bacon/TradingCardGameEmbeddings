@@ -123,29 +123,6 @@ class TestUuidForName:
         assert "Nonexistent Card" in draft_columns.unmatched_names
 
 
-class TestPresentUuids:
-    def test_only_columns_with_a_positive_count_are_present(self) -> None:
-        binder = _binder_with_cards(["Owlbear", "Goblin Morningstar"])
-        header = ["pack_card_Owlbear", "pack_card_Goblin Morningstar"]
-        draft_columns = DraftCardColumns.from_header(header, binder, GameId.MTG)
-        owlbear_uuid = draft_columns.uuid_for_name("Owlbear")
-        row = {"pack_card_Owlbear": 1, "pack_card_Goblin Morningstar": 0}
-
-        result = draft_columns.present_uuids(row, draft_columns.pack_columns)
-
-        assert result == [owlbear_uuid]
-
-    def test_nan_cell_is_treated_as_absent(self) -> None:
-        binder = _binder_with_cards(["Owlbear"])
-        header = ["pack_card_Owlbear"]
-        draft_columns = DraftCardColumns.from_header(header, binder, GameId.MTG)
-        row = {"pack_card_Owlbear": float("nan")}
-
-        result = draft_columns.present_uuids(row, draft_columns.pack_columns)
-
-        assert result == []
-
-
 def test_unmatched_names_only_lists_names_that_never_matched() -> None:
     binder = _binder_with_cards(["Owlbear"])
     draft_columns = DraftCardColumns(binder, GameId.MTG)

@@ -123,7 +123,11 @@ rows never straddle TRAIN and TEST.
   `sts_gg/`, `seventeenlands/{draft_data,game_data,replay_data}/`,
   `isotropic/`, `final_decks/`, `scryfall/`, `pokemon_tcg/`, `cardvault_fabtcg/`,
   `hearthstonejson/`, `spire_codex/`, `fabtcg_decklists/`: one thin generic-cell subclass per metric (see
-  `generic/README.md`'s "Per-metric wrappers"). Every implemented metric
+  `generic/README.md`'s "Per-metric wrappers"). The 17lands game_data
+  wrappers take a `data_slice` (sets and formats) and train on that
+  slice's file (`seventeenlands/sliced_dojos.py`; see
+  `../data_refinement/metrics/seventeenlands/README.md`, "Partitions and
+  slices"). Every implemented metric
   has one, except two isotropic ones: `CopiesBoughtDistributionMetric`
   (raw samples of the mean `AverageCopiesBoughtDojo` already learns) and
   `MultiplayerPlacementMetric` (a ranking over 3-4 decks; no cell ranks

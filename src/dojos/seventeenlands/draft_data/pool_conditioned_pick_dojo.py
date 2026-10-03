@@ -10,6 +10,9 @@ for the sibling with no pool conditioning.
 from pathlib import Path
 
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.metrics.seventeenlands.data_slice import (
+    SeventeenLandsSlice,
+)
 from src.data_refinement.metrics.seventeenlands.draft_data.pool_conditioned_pick_metric import (  # noqa: E501
     PoolConditionedPickMetric,
 )
@@ -20,6 +23,10 @@ from src.dojos.generic.multi_group_option_selection.dojo import (
 )
 from src.dojos.generic.option_scoring import OptionScoringHead
 from src.dojos.generic.pooling import EmbeddingPooler
+from src.dojos.seventeenlands.sliced_dojos import (
+    ALL_DATA,
+    seventeenlands_training_path,
+)
 from src.schema.holdout import HoldoutSpec
 
 
@@ -32,6 +39,7 @@ class PoolConditionedPickDojo(MultiGroupOptionSelectionDojo):
         card_binder: CardBinder,
         holdout: HoldoutSpec,
         card_embedding_size: int,
+        data_slice: SeventeenLandsSlice = ALL_DATA,
         path_to_training_data: Path | None = None,
         scoring_head: OptionScoringHead | None = None,
         pooler: EmbeddingPooler | None = None,
@@ -42,8 +50,9 @@ class PoolConditionedPickDojo(MultiGroupOptionSelectionDojo):
         super().__init__(
             card_lookup=card_binder,
             holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or PoolConditionedPickMetric.DEFAULT_OUTPUT_PATH,
+            path_to_training_data=seventeenlands_training_path(
+                PoolConditionedPickMetric, data_slice, path_to_training_data
+            ),
             data_constructor=PoolConditionedPickDataConstructor(),
             card_embedding_size=card_embedding_size,
             scoring_head=scoring_head,

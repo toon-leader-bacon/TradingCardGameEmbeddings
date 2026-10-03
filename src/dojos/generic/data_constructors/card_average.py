@@ -26,8 +26,8 @@ class CardAverageDataConstructor:
     uuid_column defaults to "nocab_uuid" for that same family, but is
     itself a constructor argument for the rare metric whose id column
     is named something else because it isn't "the" card in the usual
-    single-card-per-row sense - e.g. TutorTargetPoolMetric's
-    "pool_card_uuid", one of several pool cards per output row.
+    single-card-per-row sense (e.g. one of several cards per output
+    row).
     """
 
     def __init__(

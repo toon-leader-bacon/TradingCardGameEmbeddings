@@ -1,58 +1,22 @@
-"""Thin wrapper over OnPlayWinRateSensitivityByDeckMetric
+"""Wrapper over OnPlayWinRateSensitivityByDeckMetric
 (src/data_refinement/metrics/seventeenlands/game_data/on_play_win_rate_sensitivity_by_deck_metric.py).
 
-A single MultiCardRegressionDojo subclass - adds no behavior of its
-own, only configuration. This metric declares no LABEL_COLUMN ClassVar
-(it writes "on_play_win_rate_sensitivity" as a literal in its own
-_sensitivity_row() - see that class's source), so this wrapper's
-DeckLabelDataConstructor is configured with that same literal rather
-than a class attribute reference.
+A SeventeenLandsDeckRegressionDojo (../sliced_dojos.py): it only names
+its metric.
 
-NULLABLE LABEL: a deck never seen on one side of on_play writes None
-for its sensitivity (round-trips as NaN through the parquet float64
-column) - DeckLabelDataConstructor.build() now skips a NaN label the
-same way it skips an unresolvable deck_uuid (see
-src/dojos/generic/data_constructors/).
+NULLABLE LABEL: a deck never seen on one side of on_play has a null
+sensitivity (NaN in the float64 column); DeckLabelDataConstructor.build()
+skips those rows (see src/dojos/generic/data_constructors/).
 """
 
-from pathlib import Path
-
-from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_rate_sensitivity_by_deck_metric import (  # noqa: E501
     OnPlayWinRateSensitivityByDeckMetric,
 )
-from src.dojos.generic.data_constructors import DeckLabelDataConstructor
-from src.dojos.generic.dojo_config import DojoConfig
-from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
-from src.schema.holdout import HoldoutSpec
+from src.dojos.seventeenlands.sliced_dojos import SeventeenLandsDeckRegressionDojo
 
 
-class OnPlayWinRateSensitivityByDeckDojo(MultiCardRegressionDojo):
+class OnPlayWinRateSensitivityByDeckDojo(SeventeenLandsDeckRegressionDojo):
     """Deck -> predicted P(won | on_play) - P(won | on_draw)
     (OnPlayWinRateSensitivityByDeckMetric)."""
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        deck_box: DeckBox,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        name: str | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or OnPlayWinRateSensitivityByDeckMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=DeckLabelDataConstructor(
-                deck_box, "on_play_win_rate_sensitivity"
-            ),
-            card_embedding_size=card_embedding_size,
-            config=DojoConfig(
-                name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = OnPlayWinRateSensitivityByDeckMetric

@@ -1,53 +1,22 @@
-"""Thin wrapper over TutorTargetRateMetric
+"""Wrapper over TutorTargetRateMetric
 (src/data_refinement/metrics/seventeenlands/game_data/tutor_target_rate_metric.py).
-
-A single SingleCardRegressionDojo subclass - adds no behavior of its
-own, only configuration. This metric declares no LABEL_COLUMN ClassVar
-(it writes "tutor_target_rate" as a literal in its own
-_tutor_rate_row() - see that class's source), so this wrapper's
-CardAverageDataConstructor is configured with that same literal rather
-than a class attribute reference.
 
 Distinct class from
 src/dojos/seventeenlands/replay_data/tutor_target_rate_dojo.py's own
-TutorTargetRateDojo - each lives in its own source-specific package,
-mirroring the two paired metric classes' own naming convention (see
-that metric's module docstring).
+TutorTargetRateDojo - each lives in its own source-specific package.
+
+A SeventeenLandsCardLabelDojo (../sliced_dojos.py): it only names its
+metric; the slice file supplies nocab_uuid, LABEL_COLUMN and
+sample_count.
 """
 
-from pathlib import Path
-
-from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.seventeenlands.game_data.tutor_target_rate_metric import (
     TutorTargetRateMetric,
 )
-from src.dojos.generic.data_constructors import CardAverageDataConstructor
-from src.dojos.generic.dojo_config import DojoConfig
-from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
-from src.schema.holdout import HoldoutSpec
+from src.dojos.seventeenlands.sliced_dojos import SeventeenLandsCardLabelDojo
 
 
-class TutorTargetRateDojo(SingleCardRegressionDojo):
+class TutorTargetRateDojo(SeventeenLandsCardLabelDojo):
     """Card -> predicted P(tutored | in deck) (TutorTargetRateMetric)."""
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        name: str | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or TutorTargetRateMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=CardAverageDataConstructor("tutor_target_rate"),
-            card_embedding_size=card_embedding_size,
-            config=DojoConfig(
-                name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = TutorTargetRateMetric

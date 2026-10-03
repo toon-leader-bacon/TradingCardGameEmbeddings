@@ -5,7 +5,7 @@ from uuid import uuid4
 import numpy as np
 import pytest
 
-from src.data_refinement.metrics.seventeenlands.game_data.card_column_tallies import (
+from src.data_refinement.metrics.seventeenlands.card_column_tallies import (
     CardColumnTallies,
 )
 
@@ -59,3 +59,29 @@ def test_per_card_does_not_alias_the_running_tallies() -> None:
     tallies.per_card()[owlbear][0] = 99
 
     assert tallies.per_card()[owlbear].tolist() == [1]
+
+
+def test_count_columns_keeps_only_cards_the_predicate_keeps() -> None:
+    owlbear, morningstar = uuid4(), uuid4()
+    tallies = CardColumnTallies("test", 2, np.float64)
+    tallies.add((owlbear, morningstar), np.array([[2.0, 0.0], [1.0, 0.0]]))
+
+    uuids, columns = tallies.count_columns(("games", "wins"), lambda t: t[0] > 0)
+
+    assert uuids == [str(owlbear)]
+    assert columns["games"].tolist() == [2.0]
+    assert columns["wins"].tolist() == [1.0]
+
+
+def test_count_columns_with_no_cards_gives_empty_columns() -> None:
+    uuids, columns = CardColumnTallies("test", 2, np.float64).count_columns(
+        ("games", "wins"), lambda t: True
+    )
+
+    assert uuids == []
+    assert [len(column) for column in columns.values()] == [0, 0]
+
+
+def test_count_columns_needs_one_name_per_tally() -> None:
+    with pytest.raises(ValueError, match="1 names for 2 tallies"):
+        CardColumnTallies("test", 2, np.float64).count_columns(("games",), bool)

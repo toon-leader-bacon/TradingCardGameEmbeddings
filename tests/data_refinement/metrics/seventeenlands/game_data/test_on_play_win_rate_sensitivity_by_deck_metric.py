@@ -19,6 +19,7 @@ from tests.data_refinement.metrics.seventeenlands.game_data._chunk_fixtures impo
     VERSION,
     binder_with_cards,
     parser_for,
+    read_finished,
     row,
     uuid_for,
     write_csv,
@@ -36,7 +37,7 @@ def _scan(
     )
     csv_path = write_csv(tmp_path / "games.csv", rows)
     scan_game_csv(csv_path, [metric], parser_for(_BINDER), block_size=block_size)
-    return pd.read_parquet(metric.finalize()).set_index("deck_uuid")
+    return read_finished(metric).set_index("deck_uuid")
 
 
 def test_computes_on_play_rate_minus_on_draw_rate_per_deck(tmp_path: Path) -> None:
