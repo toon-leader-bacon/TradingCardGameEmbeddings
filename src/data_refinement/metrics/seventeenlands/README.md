@@ -11,8 +11,18 @@ A failing row is skipped; once the chunk is done, one `RowFailures`
 error reports how many rows failed, chained to the first row's
 exception. The scanner logs and counts that error once per chunk. A
 family uses the adapter only while it still has row metrics; no family
-does today (game_data is fully vectorized, draft_data and replay_data
-still scan rows).
+does today (game_data and draft_data are fully vectorized, replay_data
+still scans rows with its own scanner).
+
+Shared by the two chunk families (game_data, draft_data):
+`chunk_scanner.py` (`ChunkParser` Protocol and `scan_chunked_csv()`:
+one read pass per CSV, each pyarrow batch parsed once and handed to
+every metric, failures isolated per (metric, chunk) and logged as
+`METRIC FAILURE` lines), `batch_columns.py` (typed numpy columns from a
+batch; card counts read as float32 and narrowed to int16),
+`zone_counts.py` (`ZoneCounts`: one card-column family's per-row count
+matrix) and `card_column_tallies.py` (`CardColumnTallies`: per-column
+tallies summed per card).
 
 ## Partitions and slices
 
@@ -38,7 +48,11 @@ tells them apart):
   `deck_uuid`), written by `count_table.py`'s `write_count_table()`,
   which checks the columns against the metric's declaration. A slice
   sums the counts per key, then the metric's `output_from_counts()`
-  labels them (`count_table.ratio_output()` for the common ratio).
+  labels them (`count_table.ratio_output()` for the common ratio). The
+  finished table is keys, label and `sample_count`, except where a
+  metric regroups its keys into the shape its dojo reads
+  (`PickNumberDecayCurveMetric`: one row per card, per-pick-number
+  lists).
   Summing then dividing is exact for any slice. A metric with
   `HAS_BASELINE` also writes one null-key baseline row per partition;
   the slice sums those into its own baseline (a card's game length
@@ -66,15 +80,17 @@ take `data_slice` (default: everything), so a dojo's default name and
 split prefix is the slice file's stem (`win_rate_when_in_deck.all`).
 `FileManagerParquet` and the generic dojo bases are unchanged.
 
-Converted so far: game_data (8 count tables, 3 row streams). draft_data
-and replay_data metrics still write their old per-CSV shapes into the
-partition layout (`run_metrics.py` takes their directory name from
-`DEFAULT_OUTPUT_PATH`), and their dojos still read `DEFAULT_OUTPUT_PATH`.
+Converted so far: game_data (8 count tables, 3 row streams) and
+draft_data (4 count tables, 2 row streams). replay_data metrics still
+write their old per-CSV shapes into the partition layout
+(`run_metrics.py` takes their directory name from `DEFAULT_OUTPUT_PATH`),
+and their dojos still read `DEFAULT_OUTPUT_PATH`.
 
 ## Containers
 
-- **`draft_data/`** - six `Metric[dict]` metrics over per-pick draft
-  CSVs (`data/raw/17lands/draft_data/<Set>.<EventType>.csv`). See
+- **`draft_data/`** - six vectorized `Metric[DraftDataChunk]` metrics
+  (four count tables, two row streams) over per-pick draft CSVs
+  (`data/raw/17lands/draft_data/<Set>.<EventType>.csv`). See
   [`draft_data/README.md`](draft_data/README.md).
 - **`game_data/`** - eleven vectorized `Metric[GameDataChunk]` metrics (eight
   count tables, three row streams)

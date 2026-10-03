@@ -26,7 +26,12 @@ StratumKey = tuple[object, ...]
 
 class KeyedCardTallies:
     """tally_count float64 tallies per (stratum key, column) of one
-    zone's layout, the layout fixed by the first chunk for every key."""
+    zone's layout, the layout fixed by the first chunk for every key.
+
+    float64 although every tally is a whole number: it matches game_data's
+    CardCountTableMetric, so every count table writes one count dtype,
+    and it is exact for any count below 2**53.
+    """
 
     def __init__(self, owner: str, tally_count: int) -> None:
         """Start with no layout and no keys.
@@ -40,6 +45,7 @@ class KeyedCardTallies:
         self._owner = owner
         self._tally_count = tally_count
         self._card_uuids: tuple[UUID, ...] | None = None
+        self._stratum_count: int | None = None
         self._per_key: dict[StratumKey, CardColumnTallies[np.float64]] = {}
 
     def add(
@@ -108,6 +114,11 @@ class KeyedCardTallies:
             >>> tallies.count_columns(("nocab_uuid", "pick_number"), ("in_pack", "picked"), keep)
         """
         stratum_count = len(key_names) - 1
+        if self._stratum_count is not None and stratum_count != self._stratum_count:
+            raise ValueError(
+                f"{self._owner}: {len(key_names)} key names for "
+                f"{self._stratum_count} strata plus the card"
+            )
         result_keys: dict[str, list[object]] = {name: [] for name in key_names}
         count_parts: dict[str, list[npt.NDArray[np.float64]]] = {
             name: [] for name in count_names
@@ -147,6 +158,11 @@ class KeyedCardTallies:
         Side effects: stores the layout on the first call.
         Exceptions: ValueError naming the owner.
         """
+        if increments.ndim != 3:
+            raise ValueError(
+                f"{self._owner}: increments must be (tallies, rows, columns), "
+                f"got shape {increments.shape}"
+            )
         expected = (self._tally_count, increments.shape[1], len(card_uuids))
         if increments.shape != expected:
             raise ValueError(
@@ -158,6 +174,13 @@ class KeyedCardTallies:
                     f"{self._owner}: a stratum has shape {stratum.shape}, "
                     f"expected ({increments.shape[1]},)"
                 )
+        if self._stratum_count is None:
+            self._stratum_count = len(strata)
+        elif len(strata) != self._stratum_count:
+            raise ValueError(
+                f"{self._owner}: {len(strata)} strata, first chunk had "
+                f"{self._stratum_count}"
+            )
         if self._card_uuids is None:
             self._card_uuids = card_uuids
         elif card_uuids != self._card_uuids:

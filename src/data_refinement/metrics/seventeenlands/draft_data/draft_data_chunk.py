@@ -18,6 +18,7 @@ parser's code table), and each row's pick(s) are coded the same way, so
 """
 
 from dataclasses import dataclass
+from functools import cached_property
 from enum import Enum
 
 import numpy as np
@@ -134,11 +135,24 @@ class DraftDataChunk:
         Example:
             >>> chunk.picked().sum(axis=0)  # times each column was taken
         """
+        return self._picked_cells
+
+    @cached_property
+    def _picked_cells(self) -> npt.NDArray[np.bool_]:
+        """picked()'s mask, computed once per chunk: every take-rate
+        metric reads it.
+
+        Inputs: none. Output: bool array shaped like pack.counts.
+        Side effects: caches the array on this instance, read-only (it is
+            shared by every metric). Exceptions: none.
+        """
         codes = self.pack_column_codes[np.newaxis, :]
         taken = (codes == self.picks.first_codes[:, np.newaxis]) | (
             codes == self.picks.second_codes[:, np.newaxis]
         )
-        return self.pack.present() & taken
+        result = self.pack.present() & taken
+        result.flags.writeable = False
+        return result
 
     def stratum(self, stratum: DraftStratum) -> npt.NDArray[np.generic]:
         """One stratifying value per row.

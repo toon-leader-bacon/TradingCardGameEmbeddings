@@ -162,7 +162,9 @@ def test_a_chunk_family_still_wrapping_row_metrics_keeps_a_source_frame(
 
 
 def test_a_row_family_never_keeps_a_source_frame(script: ModuleType) -> None:
-    family = _family(script, script._DRAFT_DATA_METRICS, _row_scanning(script), None)
+    family = _family(
+        script, script._REPLAY_DATA_METRICS, _row_scanning(script), Path("box.db")
+    )
 
     assert script._check_family_specs(family) is False
 

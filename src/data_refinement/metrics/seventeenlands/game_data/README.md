@@ -23,8 +23,9 @@ Python.
 
 - `game_data_chunk.py` — the chunk's data types:
   - `GameZone`: the five card-column families, valued by header prefix.
-  - `ZoneCounts`: one zone's card uuids (one per matched header column,
-    possibly repeating) and an int16 `(rows, columns)` count matrix.
+  - `ZoneCounts` (shared, `../zone_counts.py`): one zone's card uuids
+    (one per matched header column, possibly repeating) and an int16
+    `(rows, columns)` count matrix.
     `present()` is `counts > 0`; `present_for(card_uuids)` lines the zone
     up against any card list (a card's presence under any of its
     columns; never present if the zone has no column for it).
@@ -65,10 +66,11 @@ Python.
   `deck_columns`/`sideboard_columns` (`list[tuple[str, UUID]]`), plus
   `uuid_for_name(name)` and `unmatched_names`.
 - `scanner.py` — `scan_game_csv(raw_csv_path, metrics, parser,
-  block_size)` streams the CSV with `pyarrow.csv.open_csv`, reading only
-  `parser.needed_columns()`. It parses each batch once and hands the
-  chunk to every metric, then finalizes them all. It never touches the
-  `CardBinder` or a `DeckBox`.
+  block_size)`: the shared `../chunk_scanner.py`'s `scan_chunked_csv()`,
+  typed for game_data. It streams the CSV with `pyarrow.csv.open_csv`,
+  reading only `parser.needed_columns()`, parses each batch once and
+  hands the chunk to every metric, then finalizes them all. It never
+  touches the `CardBinder` or a `DeckBox`.
   - Failures are isolated per (metric, chunk) through `call_isolated`
     ([`../../isolated_call.py`](../../isolated_call.py)). Each failure
     logs an ERROR line starting `METRIC FAILURE` that names the metric,
@@ -79,11 +81,12 @@ Python.
 
 ### Shared tallies
 
-- `card_column_tallies.py` — `CardColumnTallies(owner, tally_count,
-  dtype)`: `tally_count` int64 or float64 tallies per matched column of
-  one zone. The first chunk fixes the column layout; a later chunk with
-  a different layout raises `ValueError`. `per_card()` sums the columns
-  per card uuid, so two columns naming one card both count.
+- `../card_column_tallies.py` (shared with draft_data) —
+  `CardColumnTallies(owner, tally_count, dtype)`: `tally_count` int64 or
+  float64 tallies per matched column of one zone. The first chunk fixes
+  the column layout; a later chunk with a different layout raises
+  `ValueError`. `per_card()` sums the columns per card uuid, so two
+  columns naming one card both count.
   `count_columns(names, keep)` returns the kept cards' uuids and one
   array per tally, the shape a count table writes.
 - `on_play_win_counts.py` — the four on-play tallies (`COUNT_COLUMNS`:

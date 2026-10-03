@@ -2,10 +2,8 @@
 
 Built once per CSV, by that CSV's DraftDataChunkParser
 (draft_data_chunk_parser.py). Every pack_card_<name>/pool_<name> column
-is parsed and its
-<name> suffix matched against card_binder with
-card_lookup.uuid_for_name_or_front_face() (no separate lookup/cache
-class in between).
+is parsed and its <name> suffix matched against card_binder with
+card_lookup.uuid_for_name_or_front_face().
 
 The same name -> nocab_uuid matching also answers the `pick` column's
 per-row cell value: a pick's name is always drawn from the same per-set card

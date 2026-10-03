@@ -75,9 +75,12 @@ class CountTableMetric(SlicedMetric, Protocol):
                 over the slice's partitions (baseline rows excluded).
             baseline: one row of COUNT_COLUMNS summed over the slice's
                 baseline rows; None unless HAS_BASELINE.
-        Output: KEY_COLUMNS + LABEL_COLUMN + "sample_count". A label is
-            null where it is undefined (e.g. no games on one side of a
-            delta).
+        Output: by default KEY_COLUMNS + LABEL_COLUMN + "sample_count".
+            A metric may instead regroup the keys into the shape its
+            dojo reads, as PickNumberDecayCurveMetric does (one row per
+            card with per-pick-number lists); its docstring says so. A
+            label is null where it is undefined (e.g. no games on one
+            side of a delta).
         Side effects: none.
         Exceptions: ValueError if HAS_BASELINE and baseline is None.
         """

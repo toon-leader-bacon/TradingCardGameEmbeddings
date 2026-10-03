@@ -1333,6 +1333,9 @@ def _run_seventeenlands_family(
 class _FamilyRun:
     """What every CSV of one family run shares.
 
+    family: the family being run.
+    binder: the MTG CardBinder, loaded once.
+    version_metadata: its version, hashed once.
     deck_box: the family box, or None for a family without one.
     output_root: None writes under data/metrics/.
     keep_source_frame: from _check_family_specs.
@@ -1347,7 +1350,8 @@ class _FamilyRun:
 
 
 def _scan_one_csv(run: _FamilyRun, csv_path: Path) -> bool:
-    """Build one CSV's metrics and scan, and run it.
+    """Scan one CSV: build its metrics and its parser from its header,
+    then run every metric over it.
 
     Inputs: run, csv_path.
     Output: True if the CSV scanned; False if anything raised (logged

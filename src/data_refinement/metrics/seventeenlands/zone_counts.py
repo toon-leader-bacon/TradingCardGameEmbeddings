@@ -8,6 +8,7 @@ implementations' per-column counting exactly.
 """
 
 from dataclasses import dataclass
+from functools import cached_property
 from uuid import UUID
 
 import numpy as np
@@ -38,7 +39,20 @@ class ZoneCounts:
         Example:
             >>> chunk.zones[GameZone.DECK].present().sum(axis=0)
         """
-        return self.counts > 0
+        return self._present_cells
+
+    @cached_property
+    def _present_cells(self) -> npt.NDArray[np.bool_]:
+        """counts > 0, computed once per ZoneCounts: every metric of a
+        scan reads the same chunk's zones.
+
+        Inputs: none. Output: bool array shaped like counts.
+        Side effects: caches the array on this instance, read-only (it is
+            shared by every metric). Exceptions: none.
+        """
+        result = self.counts > 0
+        result.flags.writeable = False
+        return result
 
     def present_for(self, card_uuids: tuple[UUID, ...]) -> npt.NDArray[np.bool_]:
         """Which rows hold each of card_uuids in this zone, under any of
