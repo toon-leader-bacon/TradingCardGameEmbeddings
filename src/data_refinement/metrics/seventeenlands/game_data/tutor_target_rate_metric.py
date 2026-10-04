@@ -3,7 +3,7 @@ Target Rate": P(card in tutored_<name> | card in deck_<name>) - among
 games where a card was in the deck, how often did a tutor effect
 actually fetch it that game.
 
-A CardCountTableMetric (card_count_table_metric.py). Per deck column it
+A GameCardCountTableMetric (card_count_table_metric.py). Per deck column it
 counts (games in deck, games in deck and tutored); "tutored" is the deck
 column's card present under any tutored_<name> column, via
 ZoneCounts.present_for(). The rate is taken only when a slice is built.
@@ -31,7 +31,7 @@ import pyarrow as pa
 
 from src.data_refinement.metrics.seventeenlands.count_table import ratio_output
 from src.data_refinement.metrics.seventeenlands.game_data.card_count_table_metric import (
-    CardCountTableMetric,
+    GameCardCountTableMetric,
 )
 from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
@@ -42,7 +42,7 @@ IN_DECK_COLUMN = "in_deck"
 TUTORED_COLUMN = "tutored"
 
 
-class TutorTargetRateMetric(CardCountTableMetric):
+class TutorTargetRateMetric(GameCardCountTableMetric):
     """Card -> P(tutored | in deck)."""
 
     OUTPUT_STEM: ClassVar[str] = "tutor_target_rate"

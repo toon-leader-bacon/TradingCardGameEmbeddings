@@ -29,23 +29,25 @@ Python.
     `present()` is `counts > 0`; `present_for(card_uuids)` lines the zone
     up against any card list (a card's presence under any of its
     columns; never present if the zone has no column for it).
-  - `GameKeys`: each row's `(draft_id, match_number, game_number)`.
-  - `ChunkDecks`: every distinct deck in the chunk (one `GenericDeck`
-    per deck id, in order of first row) and `row_deck`, each row's index
-    into them; `row_deck_uuids()` gives each row's id as a str. It
+  - `GameKeys` and `ChunkDecks` (shared, `../chunk_decks.py`): each
+    row's `(draft_id, match_number, game_number)`, and every distinct
+    deck in the chunk (one `GenericDeck` per deck id, in order of first
+    row) with `row_deck`, each row's index into them;
+    `row_deck_uuids()` gives each row's id as a str. `ChunkDecks`
     rejects two decks with one id, or a row naming no deck.
   - `GameDataChunk`: every zone's `ZoneCounts`, typed `won`/`on_play`/
     `num_turns`, `keys`, `rank` (str; `""` for unranked Trad and Sealed
     events) and `decks`. It checks at construction that every zone is
     present and every per-row field has the same row count.
-- `chunk_decks.py` — `build_chunk_decks(deck_zone, keys, source_game)`
-  and `store_chunk_decks(decks, deck_box)`. A row's deck is one card
+- `../chunk_decks.py` (shared with replay_data) — `build_chunk_decks(
+  deck_zone, keys, source_game, family_label)` and
+  `store_chunk_decks(decks, deck_box)`. A row's deck is one card
   uuid per present `deck_<name>` column, in header order. Rows are
   grouped by present-column pattern; each pattern is hashed once with
   `deck_ids.deck_uuid_from_cards()`. Patterns with the same id (two
   columns naming one card) share the earliest row's deck. A deck is
-  named after its first row's game (`game_data <draft_id>/<match>/<game>
-  deck`). `store_chunk_decks` calls `create_if_absent` once per deck;
+  named after its first row's game (`<family_label> <draft_id>/<match>/
+  <game> deck`, here `game_data`). `store_chunk_decks` calls `create_if_absent` once per deck;
   each deck-input metric calls it itself, so a deck recurs (a cheap
   lookup) once per such metric, and each metric's deck writes stay
   inside its own failure isolation.
@@ -106,13 +108,15 @@ per key, and the label is computed only when a slice is built
 (`output_from_counts`). Each takes `(version_metadata, output_path)`,
 `output_path` being the CSV's partition path.
 
-- `card_count_table_metric.py` — `CardCountTableMetric` (Template
-  Method, abstract): the per-card count table. It owns a float64
-  `CardColumnTallies` over `ZONE`'s columns, `accumulate()` (add the
-  subclass's `_increments(chunk)`) and `finalize()` (one row per card
-  with `_has_samples()`, by default a first count above zero, plus the
-  optional baseline row from `_baseline_counts()`). A CSV with no rows
-  writes the full schema.
+- `card_count_table_metric.py` — `GameCardCountTableMetric`, the
+  shared `../card_count_table_metric.py` `CardCountTableMetric`
+  (Template Method, abstract) fixed to game_data: the per-card count
+  table over `ZONE`'s columns. The shared base owns a float64
+  `CardColumnTallies` over the subclass's `_column_card_uuids(chunk)`,
+  `accumulate()` (add the subclass's `_increments(chunk)`) and
+  `finalize()` (one row per card with `_has_samples()`, by default a
+  first count above zero, plus the optional baseline row from
+  `_baseline_counts()`). A CSV with no rows writes the full schema.
 - `game_card_average_metric.py` — `GameCardAverageMetric` (abstract):
   counts `(games, value_sum)` per card present in `ZONE`; the label is
   `value_sum / games`. Subclasses implement `_values(chunk)`.

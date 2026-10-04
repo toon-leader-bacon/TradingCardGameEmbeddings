@@ -7,11 +7,11 @@ import numpy as np
 
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.deck_ids import deck_uuid_from_cards
-from src.data_refinement.metrics.seventeenlands.game_data.chunk_decks import (
+from src.data_refinement.metrics.seventeenlands.chunk_decks import (
     build_chunk_decks,
     store_chunk_decks,
 )
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+from src.data_refinement.metrics.seventeenlands.chunk_decks import (
     GameKeys,
 )
 from src.data_refinement.metrics.seventeenlands.zone_counts import ZoneCounts
@@ -33,7 +33,7 @@ def test_rows_with_the_same_present_columns_share_one_deck() -> None:
         (owlbear, morningstar), np.array([[4, 1], [0, 2], [1, 3]], np.int16)
     )
 
-    decks = build_chunk_decks(zone, _keys(3), GameId.MTG)
+    decks = build_chunk_decks(zone, _keys(3), GameId.MTG, "game_data")
 
     assert len(decks.decks) == 2
     assert decks.row_deck.tolist() == [0, 1, 0]
@@ -45,7 +45,7 @@ def test_deck_ids_are_the_row_implementations_hash() -> None:
     owlbear, morningstar = uuid4(), uuid4()
     zone = ZoneCounts((owlbear, morningstar), np.array([[1, 1]], np.int16))
 
-    (deck,) = build_chunk_decks(zone, _keys(1), GameId.MTG).decks
+    (deck,) = build_chunk_decks(zone, _keys(1), GameId.MTG, "game_data").decks
 
     assert deck.nocab_uuid == deck_uuid_from_cards([owlbear, morningstar])
     assert deck.source_game is GameId.MTG
@@ -55,7 +55,7 @@ def test_a_card_in_two_columns_is_listed_twice() -> None:
     owlbear = uuid4()
     zone = ZoneCounts((owlbear, owlbear), np.array([[1, 1]], np.int16))
 
-    (deck,) = build_chunk_decks(zone, _keys(1), GameId.MTG).decks
+    (deck,) = build_chunk_decks(zone, _keys(1), GameId.MTG, "game_data").decks
 
     assert deck.card_nocab_uuids == [owlbear, owlbear]
     assert deck.nocab_uuid == deck_uuid_from_cards([owlbear, owlbear])
@@ -65,7 +65,7 @@ def test_each_deck_is_named_after_its_first_row() -> None:
     owlbear = uuid4()
     zone = ZoneCounts((owlbear,), np.array([[0], [1], [1]], np.int16))
 
-    decks = build_chunk_decks(zone, _keys(3), GameId.MTG)
+    decks = build_chunk_decks(zone, _keys(3), GameId.MTG, "game_data")
 
     assert [deck.name for deck in decks.decks] == [
         "game_data d0/0/2 deck",
@@ -76,7 +76,7 @@ def test_each_deck_is_named_after_its_first_row() -> None:
 def test_an_empty_deck_zone_gives_every_row_the_empty_deck() -> None:
     zone = ZoneCounts((), np.zeros((2, 0), np.int16))
 
-    decks = build_chunk_decks(zone, _keys(2), GameId.MTG)
+    decks = build_chunk_decks(zone, _keys(2), GameId.MTG, "game_data")
 
     assert decks.row_deck.tolist() == [0, 0]
     assert decks.decks[0].nocab_uuid == deck_uuid_from_cards([])
@@ -85,7 +85,7 @@ def test_an_empty_deck_zone_gives_every_row_the_empty_deck() -> None:
 def test_no_rows_gives_no_decks() -> None:
     zone = ZoneCounts((uuid4(),), np.zeros((0, 1), np.int16))
 
-    decks = build_chunk_decks(zone, _keys(0), GameId.MTG)
+    decks = build_chunk_decks(zone, _keys(0), GameId.MTG, "game_data")
 
     assert decks.decks == ()
     assert decks.row_deck.shape == (0,)
@@ -99,7 +99,9 @@ def test_many_columns_group_correctly() -> None:
     counts[1, [0, 9]] = 1
     counts[2, [0, 9, 19]] = 2
 
-    decks = build_chunk_decks(ZoneCounts(cards, counts), _keys(3), GameId.MTG)
+    decks = build_chunk_decks(
+        ZoneCounts(cards, counts), _keys(3), GameId.MTG, "game_data"
+    )
 
     assert decks.row_deck.tolist() == [0, 1, 0]
     assert decks.decks[0].card_nocab_uuids == [cards[0], cards[9], cards[19]]
@@ -111,7 +113,7 @@ def test_patterns_hashing_to_one_deck_share_its_earliest_entry() -> None:
     owlbear = uuid4()
     zone = ZoneCounts((owlbear, owlbear), np.array([[1, 0], [0, 1]], np.int16))
 
-    decks = build_chunk_decks(zone, _keys(2), GameId.MTG)
+    decks = build_chunk_decks(zone, _keys(2), GameId.MTG, "game_data")
 
     assert decks.row_deck.tolist() == [0, 0]
     assert len(decks.decks) == 1
@@ -121,7 +123,7 @@ def test_patterns_hashing_to_one_deck_share_its_earliest_entry() -> None:
 def test_store_chunk_decks_stores_each_deck_once() -> None:
     owlbear, morningstar = uuid4(), uuid4()
     zone = ZoneCounts((owlbear, morningstar), np.array([[1, 0], [0, 1]], np.int16))
-    decks = build_chunk_decks(zone, _keys(2), GameId.MTG)
+    decks = build_chunk_decks(zone, _keys(2), GameId.MTG, "game_data")
     deck_box = DeckBox()
 
     store_chunk_decks(decks, deck_box)

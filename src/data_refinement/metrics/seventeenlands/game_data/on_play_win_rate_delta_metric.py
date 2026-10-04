@@ -3,7 +3,7 @@
 on_play=True) - P(won | card in deck, on_play=False) - a tempo/curve-
 sensitivity proxy.
 
-A CardCountTableMetric (card_count_table_metric.py): each partition
+A GameCardCountTableMetric (card_count_table_metric.py): each partition
 holds, per card in the deck, the four on_play_win_counts COUNT_COLUMNS;
 the delta is taken only when a slice is built.
 
@@ -19,7 +19,7 @@ import numpy.typing as npt
 import pyarrow as pa
 
 from src.data_refinement.metrics.seventeenlands.game_data.card_count_table_metric import (
-    CardCountTableMetric,
+    GameCardCountTableMetric,
 )
 from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
@@ -33,7 +33,7 @@ from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_counts imp
 )
 
 
-class OnPlayWinRateDeltaMetric(CardCountTableMetric):
+class OnPlayWinRateDeltaMetric(GameCardCountTableMetric):
     """Card -> P(won | in deck, on_play) - P(won | in deck, on_draw)."""
 
     OUTPUT_STEM: ClassVar[str] = "on_play_win_rate_delta"

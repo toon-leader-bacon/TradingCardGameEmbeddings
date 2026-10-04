@@ -1,44 +1,39 @@
-"""AttackerBlockerCombatOutcomeMetric - BRAINSTORM.md's "Attacker
-Group vs. Blocker Group -> Combat Outcome": for every
-half-turn that had at least one attacker, group 1 = that half-turn's
-creatures_attacked, group 2 = creatures_blocking, label = a signed
-net-kill-count delta.
+"""AttackerBlockerCombatOutcomeMetric - BRAINSTORM.md's "Attacker Group
+vs. Blocker Group -> Combat Outcome": for every half-turn with at least
+one matched attacker, group 1 = its creatures_attacked, group 2 = its
+creatures_blocking, label = a signed net-kill-count delta.
 
-FAN-OUT STREAMING: one row fans out to one output example PER
-QUALIFYING HALF-TURN, not per row: a list of row dicts, one
-ParquetBuilder.write_row() call per fanned-out row per accumulate()
-call.
+A vectorized Metric[ReplayDataChunk] and a RowStreamMetric
+(../sliced_metric.py), fanning out: one output row per qualifying
+half-turn, in (row, user before oppo, turn) order, each group listing
+its matched cards in cell order. No deck_box: the identity is
+(draft_id, match_number, game_number, actor, turn).
 
-No deck_box - this metric's identity is (draft_id, match_number,
-game_number, actor, turn), never a deck_uuid.
-
-SIGN CONVENTION SETTLED: net_kill_delta is attacker-favorable-positive -
-len(the DEFENDING side's creatures_killed_combat this half-turn) minus
-len(the ATTACKING side's - actor's own - creatures_killed_combat this
-half-turn). A positive value means the attacker traded up (killed more
-of the defender's creatures than it lost of its own that turn); a
-negative value means the attack went badly for the attacker.
+SIGN CONVENTION: net_kill_delta is attacker-favorable-positive - the
+number of matched cards in the DEFENDING side's creatures_killed_combat
+this half-turn, minus the number in the ATTACKING side's (the actor's
+own). Positive means the attacker traded up.
 """
 
 from pathlib import Path
-from typing import ClassVar, Iterable, Literal
+from typing import ClassVar, Literal
 
+import numpy as np
+import numpy.typing as npt
 import pyarrow as pa
 
-from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.parquet_builder import ParquetBuilder
-from src.data_refinement.metrics.seventeenlands.replay_data.replay_card_columns import (
-    ReplayCardColumns,
+from src.data_refinement.metrics.seventeenlands.replay_data.replay_data_chunk import (
+    Actor,
+    ReplayDataChunk,
+    ReplayField,
+    TurnEvents,
 )
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     schema_with_version_metadata,
 )
-from src.schema.game_id import GameId
-
-_DEFAULT_OUTPUT_PATH = Path(
-    "data/metrics/seventeenlands/replay_data/attacker_blocker_combat_outcome.parquet"
-)
+from src.data_retrieval.seventeenlands.refs import DataType
 
 _OUTPUT_SCHEMA = pa.schema(
     [
@@ -55,215 +50,175 @@ _OUTPUT_SCHEMA = pa.schema(
 
 
 class AttackerBlockerCombatOutcomeMetric:
-    """Every half-turn with an attacker -> (attacker group, blocker
-    group, net-kill outcome), one row per qualifying half-turn.
+    """One attacking half-turn -> (attackers, blockers, net kill delta).
 
-    Satisfies the Metric[dict] Protocol (../../metric.py) structurally.
+    Satisfies the Metric[ReplayDataChunk] Protocol (../../metric.py) and
+    RowStreamMetric (../sliced_metric.py) structurally.
     """
 
-    DEFAULT_OUTPUT_PATH: ClassVar[Path] = _DEFAULT_OUTPUT_PATH
+    FAMILY: ClassVar[DataType] = DataType.REPLAY
+    OUTPUT_STEM: ClassVar[str] = "attacker_blocker_combat_outcome"
+    LABEL_COLUMN: ClassVar[str] = "net_kill_delta"
+    IS_ROW_STREAM: ClassVar[Literal[True]] = True
 
     def __init__(
-        self,
-        card_binder: CardBinder,
-        header: Iterable[str],
-        source_game: GameId,
-        output_path: Path | None = None,
+        self, version_metadata: MetricVersionMetadata, output_path: Path
     ) -> None:
-        """
-        Inputs:
-            card_binder: registry to match this CSV's per-turn
-                creatures_attacked/creatures_blocking/
-                creatures_killed_combat Arena-ID cells against -
-                assumed already fully populated for source_game. Never
-                queried directly by this class - only through the
-                ReplayCardColumns this constructor builds from it.
-            header: this CSV's column names (e.g.
-                pandas.read_csv(path, nrows=0).columns) - parsed once,
-                here, into this instance's own ReplayCardColumns.
-            source_game: which game's cards header names are matched
-                against.
-            output_path: overrides DEFAULT_OUTPUT_PATH when given.
+        """Open the output for streaming.
+
+        Inputs: version_metadata (stamped onto the output), output_path
+            (this CSV's partition path).
         Output: none (constructor).
-        Side effects: creates output_path's parent directories if
-            missing; opens output_path for writing (truncating any
-            existing file) via a ParquetBuilder held open for the
-            lifetime of this instance - callers MUST call finalize()
-            when done, or the file is left incomplete.
-        Exceptions: whatever ParquetBuilder raises on failure to open
-            output_path for writing.
+        Side effects: creates output_path's parent directories; opens
+            output_path for writing through a ParquetBuilder held open
+            until finalize().
+        Exceptions: whatever ParquetBuilder raises opening output_path.
         """
-        self._replay_columns = ReplayCardColumns.from_header(
-            header, card_binder, source_game
-        )
-        self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
-        self._output_schema = schema_with_version_metadata(
-            _OUTPUT_SCHEMA,
-            MetricVersionMetadata(
-                game=source_game,
-                card_binder_version=card_binder.version_for(source_game),
-            ),
-        )
-        self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._writer = ParquetBuilder(self._output_path, self._output_schema)
+        self._output_path = output_path
+        schema = schema_with_version_metadata(_OUTPUT_SCHEMA, version_metadata)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._writer = ParquetBuilder(output_path, schema)
 
-    def accumulate(self, row: dict) -> None:
-        """Convert one replay_data row into zero or more output rows
-        (one per half-turn with at least one attacker) and buffer them
-        for writing.
+    def accumulate(self, chunk: ReplayDataChunk) -> None:
+        """Write one output row per qualifying half-turn of chunk.
 
-        Inputs:
-            row: one replay_data CSV row, dict-like - see
-                ../scanner.py's module docstring.
+        Inputs: chunk.
         Output: none.
-        Side effects: buffers one row per (actor, turn) half-turn on
-            this row whose creatures_attacked is non-empty, into the
-            open ParquetBuilder (flushed to disk automatically once
-            its batch size is reached, or by finalize()) - zero rows
-            if the game had no attacks.
-        Exceptions: implementation-defined (expected: none for a
-            well-formed row - see ../scanner.py's isolation contract).
+        Side effects: writes the chunk's qualifying half-turns to the
+            open ParquetBuilder (none if no half-turn attacked).
+        Exceptions: none expected.
 
         Example:
-            >>> metric = AttackerBlockerCombatOutcomeMetric(card_binder, header, GameId.MTG)
-            >>> metric.accumulate(row)
+            >>> metric = AttackerBlockerCombatOutcomeMetric(version_metadata, path)
+            >>> metric.accumulate(chunk)
             >>> metric.finalize()
         """
-        half_turns = self._qualifying_half_turns(row)
-        if not half_turns:
-            return
+        attackers = chunk.events[ReplayField.CREATURES_ATTACKED].matched()
+        blockers = chunk.events[ReplayField.CREATURES_BLOCKING].matched()
 
-        for output_row in self._output_rows(row, half_turns):
-            self._writer.write_row(output_row)
+        # Qualifying half-turns: those with a matched attacker, in order
+        half_turns = np.unique(attackers.half_turn_ids())
+        if half_turns.size == 0:
+            return
+        rows, actors, turns = attackers.split_half_turn_ids(half_turns)
+
+        # Each half-turn's groups and its net kill delta
+        card_strings = tuple(str(card_uuid) for card_uuid in chunk.card_uuids)
+        self._writer.write_columns(
+            {
+                "draft_id": chunk.keys.draft_id[rows],
+                "match_number": chunk.keys.match_number[rows],
+                "game_number": chunk.keys.game_number[rows],
+                "actor": np.array([Actor(a).label for a in actors], np.object_),
+                "turn": turns,
+                "attacker_uuids": _uuid_lists_per_half_turn(
+                    attackers, half_turns, card_strings
+                ),
+                "blocker_uuids": _uuid_lists_per_half_turn(
+                    blockers, half_turns, card_strings
+                ),
+                "net_kill_delta": _net_kill_deltas(chunk, half_turns, actors),
+            }
+        )
 
     def finalize(self) -> Path:
-        """Flush any buffered rows and close the underlying writer.
-
-        A true no-op relative to data - every row this instance will
-        ever write was already buffered by accumulate(). Idempotent: a
-        second call is a no-op.
+        """Flush and close the writer. Idempotent.
 
         Inputs: none.
         Output: self._output_path.
-        Side effects: closes the ParquetBuilder opened in __init__, if
-            not already closed (flushing any rows still buffered).
+        Side effects: closes the ParquetBuilder.
         Exceptions: whatever ParquetBuilder.close() raises.
 
         Example:
             >>> metric.finalize()
-            PosixPath('data/metrics/seventeenlands/replay_data/attacker_blocker_combat_outcome.parquet')
+            PosixPath('data/metrics/seventeenlands/replay_data/attacker_blocker_combat_outcome/PIO/TradSealed.parquet')
         """
         self._writer.close()
         return self._output_path
 
-    def _qualifying_half_turns(
-        self, row: dict
-    ) -> list[tuple[Literal["user", "oppo"], int]]:
-        """Every (actor, turn) half-turn on this row whose
-        creatures_attacked is non-empty.
 
-        Private helper - single consumer is accumulate().
+def _net_kill_deltas(
+    chunk: ReplayDataChunk,
+    half_turns: npt.NDArray[np.int64],
+    actors: npt.NDArray[np.int64],
+) -> npt.NDArray[np.int64]:
+    """Per qualifying half-turn, the defender's matched combat kills
+    minus the attacker's own: on a USER half-turn, oppo's killed field
+    minus user's; on an OPPO half-turn, the reverse.
 
-        Inputs:
-            row: one replay_data CSV row, dict-like.
-        Output: every (actor, turn) pair, across both actors' own
-            turn-number ranges, where
-            self._replay_columns.arena_uuids(row[creatures_attacked
-            column]) is non-empty.
-        Side effects: none.
-        Exceptions: none expected.
-        """
-        half_turns: list[tuple[Literal["user", "oppo"], int]] = []
-        for actor in ReplayCardColumns.ACTORS:
-            turn_numbers = (
-                self._replay_columns.user_turn_numbers
-                if actor == "user"
-                else self._replay_columns.oppo_turn_numbers
-            )
-            for turn in turn_numbers:
-                attackers = self._replay_columns.arena_uuids(
-                    row[
-                        ReplayCardColumns.turn_column(actor, turn, "creatures_attacked")
-                    ]
-                )
-                if attackers:
-                    half_turns.append((actor, turn))
-        return half_turns
+    Inputs: chunk, half_turns (sorted, distinct), actors (each half-turn's
+        Actor value, from split_half_turn_ids).
+    Output: int64 array, one per half-turn.
+    Side effects: none. Exceptions: none.
+    """
+    user_killed = chunk.events[ReplayField.USER_CREATURES_KILLED_COMBAT].matched()
+    oppo_killed = chunk.events[ReplayField.OPPO_CREATURES_KILLED_COMBAT].matched()
+    user_losses = _counts_per_half_turn(user_killed, half_turns)
+    oppo_losses = _counts_per_half_turn(oppo_killed, half_turns)
 
-    def _net_kill_delta(
-        self, row: dict, actor: Literal["user", "oppo"], turn: int
-    ) -> int:
-        """Signed net-kill-count delta for one qualifying half-turn.
+    # The defender is whoever is not attacking this half-turn
+    attacker_is_user = actors == Actor.USER.value
+    return np.where(
+        attacker_is_user, oppo_losses - user_losses, user_losses - oppo_losses
+    )
 
-        Private helper - single consumer is _output_rows(). See module
-        docstring's "SIGN CONVENTION SETTLED" - positive favors the
-        attacking side (actor).
 
-        Inputs:
-            row: one replay_data CSV row, dict-like.
-            actor: which half-turn - "user" or "oppo" - the attacking
-                side this half-turn.
-            turn: that actor's own turn-number counter.
-        Output: len(defending side's creatures_killed_combat) minus
-            len(actor's own creatures_killed_combat), this half-turn.
-        Side effects: none.
-        Exceptions: none expected.
-        """
-        own_killed = self._replay_columns.arena_uuids(
-            row[
-                ReplayCardColumns.turn_column(
-                    actor, turn, f"{actor}_creatures_killed_combat"
-                )
-            ]
-        )
-        defender = "oppo" if actor == "user" else "user"
-        defender_killed = self._replay_columns.arena_uuids(
-            row[
-                ReplayCardColumns.turn_column(
-                    actor, turn, f"{defender}_creatures_killed_combat"
-                )
-            ]
-        )
-        return len(defender_killed) - len(own_killed)
+def _uuid_lists_per_half_turn(
+    events: TurnEvents,
+    half_turns: npt.NDArray[np.int64],
+    card_uuids: tuple[str, ...],
+) -> pa.ListArray:
+    """For each half-turn id in half_turns (sorted, distinct), the uuids
+    of events' entries in that half-turn, in entry order.
 
-    def _output_rows(
-        self, row: dict, half_turns: list[tuple[Literal["user", "oppo"], int]]
-    ) -> list[dict]:
-        """Build one output row dict per qualifying half-turn, matching
-        _OUTPUT_SCHEMA's columns.
+    Inputs: events (matched), half_turns, card_uuids (the code table
+        as strings).
+    Output: pa.ListArray of strings, one list per half-turn (empty where
+        none).
+    Side effects: none. Exceptions: none.
+    """
+    positions = _half_turn_positions(events, half_turns)
+    in_half_turns = positions >= 0
 
-        Private helper - single consumer is accumulate().
+    # Group the entries by half-turn; a stable sort keeps entry order
+    order = np.argsort(positions[in_half_turns], kind="stable")
+    codes = events.codes[in_half_turns][order]
+    sizes = np.bincount(positions[in_half_turns], minlength=half_turns.shape[0])
+    offsets = np.concatenate([[0], np.cumsum(sizes)]).astype(np.int32)
+    uuids = pa.array([card_uuids[code] for code in codes], pa.string())
+    return pa.ListArray.from_arrays(pa.array(offsets), uuids)
 
-        Inputs:
-            row: the same row accumulate() received.
-            half_turns: this row's already-computed
-                _qualifying_half_turns(row).
-        Output: a list of len(half_turns) dicts, each keyed by every
-            _OUTPUT_SCHEMA column name: draft_id/match_number/
-            game_number repeated per row, actor/turn/attacker_uuids/
-            blocker_uuids/net_kill_delta one entry per half_turns
-            member.
-        Side effects: none.
-        Exceptions: none expected.
-        """
-        output_rows = []
-        for actor, turn in half_turns:
-            attackers = self._replay_columns.arena_uuids(
-                row[ReplayCardColumns.turn_column(actor, turn, "creatures_attacked")]
-            )
-            blockers = self._replay_columns.arena_uuids(
-                row[ReplayCardColumns.turn_column(actor, turn, "creatures_blocking")]
-            )
-            output_rows.append(
-                {
-                    "draft_id": row["draft_id"],
-                    "match_number": row["match_number"],
-                    "game_number": row["game_number"],
-                    "actor": actor,
-                    "turn": turn,
-                    "attacker_uuids": [str(uuid) for uuid in attackers],
-                    "blocker_uuids": [str(uuid) for uuid in blockers],
-                    "net_kill_delta": self._net_kill_delta(row, actor, turn),
-                }
-            )
-        return output_rows
+
+def _counts_per_half_turn(
+    events: TurnEvents, half_turns: npt.NDArray[np.int64]
+) -> npt.NDArray[np.int64]:
+    """For each half-turn id in half_turns (sorted, distinct), how many of
+    events' entries fall in it.
+
+    Inputs: events (matched), half_turns.
+    Output: int64 array, one per half-turn.
+    Side effects: none. Exceptions: none.
+    """
+    positions = _half_turn_positions(events, half_turns)
+    return np.bincount(positions[positions >= 0], minlength=half_turns.shape[0]).astype(
+        np.int64
+    )
+
+
+def _half_turn_positions(
+    events: TurnEvents, half_turns: npt.NDArray[np.int64]
+) -> npt.NDArray[np.intp]:
+    """Each entry's index into half_turns (sorted, distinct), or -1 where
+    its half-turn is not listed.
+
+    Inputs: events, half_turns.
+    Output: intp array, one per entry.
+    Side effects: none. Exceptions: none.
+    """
+    ids = events.half_turn_ids()
+    if half_turns.size == 0:
+        return np.full(ids.shape, -1, np.intp)
+    positions = np.searchsorted(half_turns, ids)
+    clipped = np.minimum(positions, half_turns.shape[0] - 1)
+    listed = (positions < half_turns.shape[0]) & (half_turns[clipped] == ids)
+    return np.where(listed, positions, -1)

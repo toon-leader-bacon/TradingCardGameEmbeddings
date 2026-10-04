@@ -41,14 +41,13 @@ failure is logged and does not stop the rest.
 """
 
 import argparse
+import csv
 from functools import partial
 import sys
 import traceback
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol, Sequence
-
-import pandas as pd
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
@@ -57,7 +56,6 @@ from src.data_refinement.deck_box.sts_gg.extraction_stage import (
 )
 from src.data_refinement.metrics.generic.corpus_scan_metric import CorpusScanMetric
 from src.data_refinement.metrics.metric import Metric
-from src.data_refinement.metrics.seventeenlands.rowwise_metric import RowwiseMetric
 from src.data_refinement.metrics.version_metadata import MetricVersionMetadata
 from src.data_refinement.metrics.seventeenlands.partition import (
     METRICS_ROOT,
@@ -354,6 +352,9 @@ from src.data_refinement.metrics.seventeenlands.replay_data.discard_rate_metric 
 from src.data_refinement.metrics.seventeenlands.replay_data.replay_turn_event_rate_metrics import (
     CombatDamagePushThroughRateMetric,
     CombatKillInvolvementRateMetric,
+)
+from src.data_refinement.metrics.seventeenlands.replay_data.replay_data_chunk_parser import (
+    ReplayDataChunkParser,
 )
 from src.data_refinement.metrics.seventeenlands.replay_data.scanner import (
     scan_replay_csv,
@@ -865,35 +866,6 @@ def _parse_expansion_format(
     return refs.Expansion(expansion), refs.format_code(format_name)
 
 
-class RowMetricClass(Protocol):
-    """A row metric class (Metric[dict]) built from one CSV's header."""
-
-    DEFAULT_OUTPUT_PATH: Path
-
-    def __call__(
-        self,
-        card_binder: CardBinder,
-        header: pd.Index,
-        source_game: GameId,
-        output_path: Path | None = None,
-    ) -> Metric[dict]: ...
-
-
-class DeckBoxRowMetricClass(Protocol):
-    """A row metric class that also writes decks into the family box."""
-
-    DEFAULT_OUTPUT_PATH: Path
-
-    def __call__(
-        self,
-        card_binder: CardBinder,
-        header: pd.Index,
-        source_game: GameId,
-        deck_box: DeckBox,
-        output_path: Path | None = None,
-    ) -> Metric[dict]: ...
-
-
 class ChunkMetricClass(Protocol):
     """A chunk metric class: built from the run's version metadata (no
     binder, no header), writing one partition file."""
@@ -916,39 +888,6 @@ class DeckBoxChunkMetricClass(Protocol):
         deck_box: DeckBox,
         output_path: Path,
     ) -> Metric[Any]: ...
-
-
-@dataclass(frozen=True)
-class RowMetricSpec:
-    """A row metric a family scans. Transitional: deleted with the last
-    row metric."""
-
-    metric_class: RowMetricClass
-
-    @property
-    def output_stem(self) -> str:
-        """The partition directory name: DEFAULT_OUTPUT_PATH's stem,
-        until this family's metrics declare OUTPUT_STEM.
-
-        Inputs: none. Output: str. Side effects: none. Exceptions: none.
-        """
-        return self.metric_class.DEFAULT_OUTPUT_PATH.stem
-
-
-@dataclass(frozen=True)
-class DeckBoxRowMetricSpec:
-    """A row metric that takes the family deck box. Transitional."""
-
-    metric_class: DeckBoxRowMetricClass
-
-    @property
-    def output_stem(self) -> str:
-        """The partition directory name: DEFAULT_OUTPUT_PATH's stem,
-        until this family's metrics declare OUTPUT_STEM.
-
-        Inputs: none. Output: str. Side effects: none. Exceptions: none.
-        """
-        return self.metric_class.DEFAULT_OUTPUT_PATH.stem
 
 
 @dataclass(frozen=True)
@@ -981,72 +920,13 @@ class DeckBoxChunkMetricSpec:
         return self.metric_class.OUTPUT_STEM
 
 
-RowSpec = RowMetricSpec | DeckBoxRowMetricSpec
-ChunkSpec = ChunkMetricSpec | DeckBoxChunkMetricSpec
-SeventeenLandsMetricSpec = RowSpec | ChunkSpec
+SeventeenLandsMetricSpec = ChunkMetricSpec | DeckBoxChunkMetricSpec
 
 # One CSV's scan, (csv_path, metrics) -> None.
 FamilyScan = Callable[[Path, list[Metric[Any]]], None]
 
-# Builds one CSV's scan from (header, binder, keep_source_frame). The
-# driver computes keep_source_frame once from the family's specs.
-ScanForCsv = Callable[[pd.Index, CardBinder, bool], FamilyScan]
-
-
-@dataclass(frozen=True)
-class RowScanning:
-    """A family that still scans rows: the same row scanner for every
-    CSV, and only row specs.
-
-    scan: the family's row scanner.
-    """
-
-    scan: FamilyScan
-
-    def scan_for_csv(
-        self, header: pd.Index, binder: CardBinder, keep_source_frame: bool
-    ) -> FamilyScan:
-        """self.scan, whatever the CSV (header, binder and
-        keep_source_frame are unused: a row scanner reads every column).
-
-        Inputs: header, binder, keep_source_frame. Output: FamilyScan.
-        Side effects: none. Exceptions: none.
-
-        Example:
-            >>> RowScanning(scan_replay_csv).scan_for_csv(header, binder, False)
-        """
-        return self.scan
-
-
-@dataclass(frozen=True)
-class ChunkScanning:
-    """A family that scans typed chunks.
-
-    scan_builder: builds one CSV's scan (game_data builds its
-        GameDataChunkParser here).
-    frame_of: set only while the family still wraps row metrics; they
-        are then wrapped in RowwiseMetric(metric, frame_of). None for a
-        family whose metrics are all chunk metrics, where a row spec is
-        rejected before any CSV is read.
-    """
-
-    scan_builder: ScanForCsv
-    frame_of: Callable[[Any], pd.DataFrame] | None
-
-    def scan_for_csv(
-        self, header: pd.Index, binder: CardBinder, keep_source_frame: bool
-    ) -> FamilyScan:
-        """One CSV's scan, from scan_builder.
-
-        Inputs: header, binder, keep_source_frame (from
-            _check_family_specs). Output: FamilyScan.
-        Side effects: scan_builder's. Exceptions: scan_builder's.
-
-        Example:
-            >>> ChunkScanning(_GAME_DATA_SCAN, None).scan_for_csv(
-            ...     header, binder, False)
-        """
-        return self.scan_builder(header, binder, keep_source_frame)
+# Builds one CSV's scan from (header, binder).
+ScanForCsv = Callable[[Sequence[str], CardBinder], FamilyScan]
 
 
 @dataclass(frozen=True)
@@ -1054,14 +934,15 @@ class _SeventeenLandsFamily:
     """Everything _run_seventeenlands_family needs to know about one
     family.
 
-    scanning: how the family scans a CSV: rows, or typed chunks.
+    scan_for_csv: builds one CSV's scan from its header (the family's
+        chunk parser, bound into its scan function).
     """
 
     name: str
     data_type: refs.DataType
     family_dir: Path
     metric_specs: Sequence[SeventeenLandsMetricSpec]
-    scanning: RowScanning | ChunkScanning
+    scan_for_csv: ScanForCsv
     deck_box_output_path: Path | None
 
 
@@ -1089,15 +970,15 @@ _GAME_DATA_METRICS: tuple[SeventeenLandsMetricSpec, ...] = (
 )
 
 _REPLAY_DATA_METRICS: tuple[SeventeenLandsMetricSpec, ...] = (
-    RowMetricSpec(AverageTurnCastMetric),
-    RowMetricSpec(CastRateMetric),
-    RowMetricSpec(TurnsToGameEndAfterCastMetric),
-    RowMetricSpec(DiscardRateMetric),
-    RowMetricSpec(ReplayTutorTargetRateMetric),
-    RowMetricSpec(CombatKillInvolvementRateMetric),
-    RowMetricSpec(CombatDamagePushThroughRateMetric),
-    DeckBoxRowMetricSpec(CombatAggressionProfileMetric),
-    RowMetricSpec(AttackerBlockerCombatOutcomeMetric),
+    ChunkMetricSpec(AverageTurnCastMetric),
+    ChunkMetricSpec(CastRateMetric),
+    ChunkMetricSpec(TurnsToGameEndAfterCastMetric),
+    ChunkMetricSpec(DiscardRateMetric),
+    ChunkMetricSpec(ReplayTutorTargetRateMetric),
+    ChunkMetricSpec(CombatKillInvolvementRateMetric),
+    ChunkMetricSpec(CombatDamagePushThroughRateMetric),
+    DeckBoxChunkMetricSpec(CombatAggressionProfileMetric),
+    ChunkMetricSpec(AttackerBlockerCombatOutcomeMetric),
 )
 
 
@@ -1105,16 +986,11 @@ _REPLAY_DATA_METRICS: tuple[SeventeenLandsMetricSpec, ...] = (
 class _CsvMetricContext:
     """The per-CSV, per-run values every metric constructor draws from.
 
-    binder/header/source_game: the row constructors' inputs.
-    version_metadata: the chunk constructors' input, computed once per
-        run.
+    version_metadata: every constructor's input, computed once per run.
     expansion/format_code/output_root: where outputs go.
     deck_box: the family box, for deck-box specs.
     """
 
-    binder: CardBinder
-    header: pd.Index
-    source_game: GameId
     version_metadata: MetricVersionMetadata
     expansion: refs.Expansion
     format_code: refs.format_code
@@ -1130,10 +1006,7 @@ def _namespaced_metrics(
 
     Inputs: family (its specs already checked by _check_family_specs),
         context.
-    Output: list of metrics, in family.metric_specs order. Chunk
-        metrics come back as built. Row metrics are wrapped in
-        RowwiseMetric when the family scans chunks with a frame_of, and
-        come back as built in a row family.
+    Output: list of metrics, in family.metric_specs order.
     Side effects: none beyond the metric constructors'.
     Exceptions: ValueError if a deck-box spec meets a context without a
         deck box.
@@ -1141,41 +1014,14 @@ def _namespaced_metrics(
     Example:
         >>> _namespaced_metrics(game_data_family, context)
     """
-    result: list[Metric[Any]] = []
-    frame_of = _frame_of(family.scanning)
-
-    for spec in family.metric_specs:
-        output_path = _partition_path(family, spec, context)
-
-        # Chunk metrics: built from the run's version metadata
-        if isinstance(spec, (ChunkMetricSpec, DeckBoxChunkMetricSpec)):
-            result.append(_build_chunk_metric(spec, context, output_path))
-            continue
-
-        # Row metrics: built as before, wrapped only in a chunk family
-        row_metric = _build_row_metric(spec, context, output_path)
-        if frame_of is None:
-            result.append(row_metric)
-        else:
-            result.append(RowwiseMetric(row_metric, frame_of))
-
-    return result
-
-
-def _frame_of(
-    scanning: RowScanning | ChunkScanning,
-) -> Callable[[Any], pd.DataFrame] | None:
-    """The frame_of row metrics are wrapped with: a chunk family's, or
-    None for a row family (its row metrics run unwrapped).
-
-    Inputs: scanning. Output: the callable, or None.
-    Side effects: none. Exceptions: none.
-    """
-    return scanning.frame_of if isinstance(scanning, ChunkScanning) else None
+    return [
+        _build_chunk_metric(spec, context, _partition_path(family, spec, context))
+        for spec in family.metric_specs
+    ]
 
 
 def _build_chunk_metric(
-    spec: ChunkSpec, context: _CsvMetricContext, output_path: Path
+    spec: SeventeenLandsMetricSpec, context: _CsvMetricContext, output_path: Path
 ) -> Metric[Any]:
     """Construct one chunk metric from the run's version metadata (and
     the family deck box, for a deck-box spec).
@@ -1192,75 +1038,20 @@ def _build_chunk_metric(
     return spec.metric_class(context.version_metadata, context.deck_box, output_path)
 
 
-def _build_row_metric(
-    spec: RowSpec,
-    context: _CsvMetricContext,
-    output_path: Path,
-) -> Metric[dict]:
-    """Construct one row metric exactly as before this migration.
-
-    Inputs: spec, context, output_path. Output: the metric.
-    Side effects: the constructor's (row metrics still call
-        binder.version_for themselves).
-    Exceptions: ValueError if spec is a DeckBoxRowMetricSpec and
-        context.deck_box is None.
-    """
-    if isinstance(spec, RowMetricSpec):
-        return spec.metric_class(
-            context.binder, context.header, context.source_game, output_path=output_path
-        )
-    if context.deck_box is None:
-        raise ValueError(f"{spec.metric_class!r} needs the family DeckBox")
-    return spec.metric_class(
-        context.binder,
-        context.header,
-        context.source_game,
-        context.deck_box,
-        output_path=output_path,
-    )
-
-
-def _check_family_specs(family: _SeventeenLandsFamily) -> bool:
-    """Reject an impossible family before any CSV is read, and report
-    whether it still wraps row metrics (its chunks must then carry a
-    source frame). This is the single source of that fact.
+def _check_family_specs(family: _SeventeenLandsFamily) -> None:
+    """Reject an impossible family before any CSV is read.
 
     Inputs: family.
-    Output: True if the family scans chunks with a frame_of and has a
-        row spec; False otherwise (game_data, whose metrics are all
-        chunk metrics, is False).
+    Output: none.
     Side effects: none.
-    Exceptions: ValueError if a row family registers a chunk spec, a
-        chunk family without a frame_of registers a row spec, or a
-        deck-box spec meets a family with no deck_box_output_path.
+    Exceptions: ValueError if a deck-box spec meets a family with no
+        deck_box_output_path.
     """
-    specs = family.metric_specs
-    has_row_specs = any(
-        isinstance(s, (RowMetricSpec, DeckBoxRowMetricSpec)) for s in specs
-    )
-    has_chunk_specs = any(
-        isinstance(s, (ChunkMetricSpec, DeckBoxChunkMetricSpec)) for s in specs
-    )
     has_deck_box_specs = any(
-        isinstance(s, (DeckBoxRowMetricSpec, DeckBoxChunkMetricSpec)) for s in specs
+        isinstance(spec, DeckBoxChunkMetricSpec) for spec in family.metric_specs
     )
-    frame_of = _frame_of(family.scanning)
-
-    # Reject what can't run, before any CSV is read
-    if isinstance(family.scanning, RowScanning) and has_chunk_specs:
-        raise ValueError(f"{family.name} scans rows but registers a chunk metric")
-    if (
-        isinstance(family.scanning, ChunkScanning)
-        and frame_of is None
-        and has_row_specs
-    ):
-        raise ValueError(
-            f"{family.name} scans chunks with no frame_of but registers a row metric"
-        )
     if has_deck_box_specs and family.deck_box_output_path is None:
         raise ValueError(f"{family.name} has a deck-box metric but no deck box path")
-
-    return frame_of is not None and has_row_specs
 
 
 def _run_seventeenlands_family(
@@ -1288,8 +1079,8 @@ def _run_seventeenlands_family(
         >>> _run_seventeenlands_family(game_data_family, Path(
         ...     "data/raw/17lands/game_data/KTK.TradDraft.csv"), None)
     """
-    # Validate the family, and learn whether row metrics remain
-    keep_source_frame = _check_family_specs(family)
+    # Validate the family before any CSV is read
+    _check_family_specs(family)
 
     # The binder, loaded once, and its version, hashed once
     binder = _require_binder(GameId.MTG, _MTG_BINDER_HINT)
@@ -1307,9 +1098,7 @@ def _run_seventeenlands_family(
     deck_box = _load_family_deck_box(deck_box_path)
 
     # Each CSV: one failing file is logged and skipped, never fatal
-    run = _FamilyRun(
-        family, binder, version_metadata, deck_box, output_root, keep_source_frame
-    )
+    run = _FamilyRun(family, binder, version_metadata, deck_box, output_root)
     failed_csvs: list[Path] = []
     try:
         for csv_path in csv_paths:
@@ -1338,7 +1127,6 @@ class _FamilyRun:
     version_metadata: its version, hashed once.
     deck_box: the family box, or None for a family without one.
     output_root: None writes under data/metrics/.
-    keep_source_frame: from _check_family_specs.
     """
 
     family: _SeventeenLandsFamily
@@ -1346,7 +1134,6 @@ class _FamilyRun:
     version_metadata: MetricVersionMetadata
     deck_box: DeckBox | None
     output_root: Path | None
-    keep_source_frame: bool
 
 
 def _scan_one_csv(run: _FamilyRun, csv_path: Path) -> bool:
@@ -1361,11 +1148,8 @@ def _scan_one_csv(run: _FamilyRun, csv_path: Path) -> bool:
     """
     try:
         expansion, format_code = _parse_expansion_format(csv_path)
-        header = pd.read_csv(csv_path, nrows=0).columns
+        header = _read_header(csv_path)
         context = _CsvMetricContext(
-            binder=run.binder,
-            header=header,
-            source_game=GameId.MTG,
             version_metadata=run.version_metadata,
             expansion=expansion,
             format_code=format_code,
@@ -1373,9 +1157,7 @@ def _scan_one_csv(run: _FamilyRun, csv_path: Path) -> bool:
             deck_box=run.deck_box,
         )
         metrics = _namespaced_metrics(run.family, context)
-        scan = run.family.scanning.scan_for_csv(
-            header, run.binder, run.keep_source_frame
-        )
+        scan = run.family.scan_for_csv(header, run.binder)
 
         print(
             f"=== {run.family.name}: {csv_path} ({expansion.value}.{format_code.value}) ==="
@@ -1386,6 +1168,21 @@ def _scan_one_csv(run: _FamilyRun, csv_path: Path) -> bool:
     except Exception:  # one bad CSV must not end a multi-hour family run
         print(f"CSV FAILURE {csv_path}:\n{traceback.format_exc()}")
         return False
+
+
+def _read_header(csv_path: Path) -> tuple[str, ...]:
+    """A CSV's column names, from its first line.
+
+    Inputs: csv_path. Output: the column names, in file order.
+    Side effects: reads csv_path's first line.
+    Exceptions: OSError reading csv_path; ValueError if it is empty.
+    """
+    # utf-8-sig drops a byte-order mark, as pyarrow's reader does
+    with csv_path.open(newline="", encoding="utf-8-sig") as raw_csv:
+        header = next(csv.reader(raw_csv), None)
+    if header is None:
+        raise ValueError(f"{csv_path} is empty")
+    return tuple(header)
 
 
 def _deck_box_path(default_path: Path | None, output_root: Path | None) -> Path | None:
@@ -1414,7 +1211,7 @@ def _load_family_deck_box(path: Path | None) -> DeckBox | None:
 
 class _ChunkParserFactory(Protocol):
     """A chunk parser's from_header (GameDataChunkParser,
-    DraftDataChunkParser)."""
+    DraftDataChunkParser, ReplayDataChunkParser)."""
 
     def __call__(
         self, header: Sequence[str], card_binder: CardBinder, source_game: GameId
@@ -1426,46 +1223,34 @@ class _ChunkScanBuilder:
     """A chunk family's ScanForCsv: per CSV, a parser built from its
     header, bound into the family's typed scan function.
 
-    family_name: named in the error for a stray row metric.
     make_parser: the parser's from_header.
-    scan_csv: the family's scan (scan_game_csv, scan_draft_csv), called
-        as scan_csv(path, metrics, parser=parser).
+    scan_csv: the family's scan (scan_game_csv, scan_draft_csv,
+        scan_replay_csv), called as scan_csv(path, metrics,
+        parser=parser).
     """
 
-    family_name: str
     make_parser: _ChunkParserFactory
     scan_csv: Callable[..., None]
 
-    def __call__(
-        self, header: pd.Index, binder: CardBinder, keep_source_frame: bool
-    ) -> FamilyScan:
+    def __call__(self, header: Sequence[str], binder: CardBinder) -> FamilyScan:
         """This CSV's scan.
 
-        Inputs: header, binder, keep_source_frame (from
-            _check_family_specs; always False for a family with no row
-            metrics).
+        Inputs: header, binder.
         Output: FamilyScan.
         Side effects: none (no I/O).
-        Exceptions: ValueError if keep_source_frame is True (a row
-            metric registered in a chunk family, whose chunks carry no
-            source frame); make_parser's.
+        Exceptions: make_parser's.
 
         Example:
-            >>> _GAME_DATA_SCAN(header, binder, False)(csv_path, metrics)
+            >>> _GAME_DATA_SCAN(header, binder)(csv_path, metrics)
         """
-        if keep_source_frame:
-            raise ValueError(
-                f"{self.family_name} chunks carry no source frame for row metrics"
-            )
-        parser = self.make_parser(list(header), binder, GameId.MTG)
+        parser = self.make_parser(header, binder, GameId.MTG)
         return partial(self.scan_csv, parser=parser)
 
 
-_GAME_DATA_SCAN = _ChunkScanBuilder(
-    "game_data", GameDataChunkParser.from_header, scan_game_csv
-)
-_DRAFT_DATA_SCAN = _ChunkScanBuilder(
-    "draft_data", DraftDataChunkParser.from_header, scan_draft_csv
+_GAME_DATA_SCAN = _ChunkScanBuilder(GameDataChunkParser.from_header, scan_game_csv)
+_DRAFT_DATA_SCAN = _ChunkScanBuilder(DraftDataChunkParser.from_header, scan_draft_csv)
+_REPLAY_DATA_SCAN = _ChunkScanBuilder(
+    ReplayDataChunkParser.from_header, scan_replay_csv
 )
 
 
@@ -1489,7 +1274,7 @@ def run_seventeenlands_draft_data(
             data_type=refs.DataType.DRAFT,
             family_dir=SeventeenLandsDownloader.DEFAULT_RAW_DATA_DIR / "draft_data",
             metric_specs=_DRAFT_DATA_METRICS,
-            scanning=ChunkScanning(_DRAFT_DATA_SCAN, frame_of=None),
+            scan_for_csv=_DRAFT_DATA_SCAN,
             deck_box_output_path=None,
         ),
         raw_path,
@@ -1519,7 +1304,7 @@ def run_seventeenlands_game_data(
             data_type=refs.DataType.GAME,
             family_dir=SeventeenLandsDownloader.DEFAULT_RAW_DATA_DIR / "game_data",
             metric_specs=_GAME_DATA_METRICS,
-            scanning=ChunkScanning(_GAME_DATA_SCAN, frame_of=None),
+            scan_for_csv=_GAME_DATA_SCAN,
             deck_box_output_path=Path(
                 "data/metrics/seventeenlands/game_data/deck_box.db"
             ),
@@ -1532,7 +1317,7 @@ def run_seventeenlands_game_data(
 def run_seventeenlands_replay_data(
     raw_path: Path | None, output_root: Path | None = None
 ) -> None:
-    """Run the replay_data family (row metrics, row scanner).
+    """Run the replay_data family (chunk scan, chunk metrics only).
 
     Inputs: raw_path (one CSV, or None for every replay_data CSV),
         output_root (None, or a scratch root for parity runs).
@@ -1549,7 +1334,7 @@ def run_seventeenlands_replay_data(
             data_type=refs.DataType.REPLAY,
             family_dir=SeventeenLandsDownloader.DEFAULT_RAW_DATA_DIR / "replay_data",
             metric_specs=_REPLAY_DATA_METRICS,
-            scanning=RowScanning(scan_replay_csv),
+            scan_for_csv=_REPLAY_DATA_SCAN,
             deck_box_output_path=Path(
                 "data/metrics/seventeenlands/replay_data/deck_box.db"
             ),

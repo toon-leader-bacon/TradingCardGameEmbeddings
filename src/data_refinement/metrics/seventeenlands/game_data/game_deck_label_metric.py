@@ -48,7 +48,7 @@ import pyarrow as pa
 
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.parquet_builder import ParquetBuilder
-from src.data_refinement.metrics.seventeenlands.game_data.chunk_decks import (
+from src.data_refinement.metrics.seventeenlands.chunk_decks import (
     store_chunk_decks,
 )
 from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (

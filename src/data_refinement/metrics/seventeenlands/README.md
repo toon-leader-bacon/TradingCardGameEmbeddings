@@ -2,27 +2,33 @@
 
 Metric classes over 17lands' public MTG draft/game/replay data exports
 (`data/raw/17lands/`). Each raw export gets its own subdirectory here,
-independent of the others - none share state or a scanner.
+independent of the others: none share state, though they share the
+chunk-scan machinery below.
 
-`rowwise_metric.py` - `RowwiseMetric(inner, frame_of)`, an Adapter that
-runs a not-yet-vectorized row metric (`Metric[dict]`) inside a chunk
-scan. It feeds each chunk's rows to the inner metric one dict at a time.
-A failing row is skipped; once the chunk is done, one `RowFailures`
-error reports how many rows failed, chained to the first row's
-exception. The scanner logs and counts that error once per chunk. A
-family uses the adapter only while it still has row metrics; no family
-does today (game_data and draft_data are fully vectorized, replay_data
-still scans rows with its own scanner).
+Every family scans its CSVs in typed chunks, sharing:
 
-Shared by the two chunk families (game_data, draft_data):
-`chunk_scanner.py` (`ChunkParser` Protocol and `scan_chunked_csv()`:
-one read pass per CSV, each pyarrow batch parsed once and handed to
-every metric, failures isolated per (metric, chunk) and logged as
-`METRIC FAILURE` lines), `batch_columns.py` (typed numpy columns from a
-batch; card counts read as float32 and narrowed to int16),
-`zone_counts.py` (`ZoneCounts`: one card-column family's per-row count
-matrix) and `card_column_tallies.py` (`CardColumnTallies`: per-column
-tallies summed per card).
+- `chunk_scanner.py` - the `ChunkParser` Protocol and
+  `scan_chunked_csv()`: one read pass per CSV, each pyarrow batch parsed
+  once and handed to every metric, failures isolated per (metric,
+  chunk) and logged as `METRIC FAILURE` lines.
+- `batch_columns.py` - typed numpy columns from a batch; card counts
+  read as float32 and narrowed to int16.
+- `zone_counts.py` - `ZoneCounts`: one card-column family's per-row
+  count matrix.
+- `card_column_tallies.py` - `CardColumnTallies`: per-column tallies
+  summed per card.
+- `card_count_table_metric.py` - `CardCountTableMetric[ChunkT]`
+  (Template Method, abstract): a per-card count table tallied over a
+  chunk's card columns. A subclass names the columns
+  (`_column_card_uuids(chunk)`) and their per-column increments
+  (`_increments(chunk)`). game_data's `GameCardCountTableMetric` and
+  replay_data's `DeckEventRateMetric` build on it.
+- `chunk_decks.py` - `GameKeys` (each row's `draft_id`,
+  `match_number`, `game_number`), `ChunkDecks` and
+  `build_chunk_decks(deck_zone, keys, source_game, family_label)`: each
+  row's deck, identified once per distinct card pattern, and
+  `store_chunk_decks()` to add them to a family deck box. Used by
+  game_data and replay_data.
 
 ## Partitions and slices
 
@@ -80,11 +86,9 @@ take `data_slice` (default: everything), so a dojo's default name and
 split prefix is the slice file's stem (`win_rate_when_in_deck.all`).
 `FileManagerParquet` and the generic dojo bases are unchanged.
 
-Converted so far: game_data (8 count tables, 3 row streams) and
-draft_data (4 count tables, 2 row streams). replay_data metrics still
-write their old per-CSV shapes into the partition layout
-(`run_metrics.py` takes their directory name from `DEFAULT_OUTPUT_PATH`),
-and their dojos still read `DEFAULT_OUTPUT_PATH`.
+Every 17lands metric is sliced: game_data (8 count tables, 3 row
+streams), draft_data (4 count tables, 2 row streams) and replay_data (7
+count tables, 2 row streams).
 
 ## Containers
 
@@ -97,8 +101,10 @@ and their dojos still read `DEFAULT_OUTPUT_PATH`.
   over per-game CSVs (`data/raw/17lands/game_data/<Set>.<EventType>.csv`),
   scanned in typed numpy chunks (`GameDataChunk`). See
   [`game_data/README.md`](game_data/README.md).
-- **`replay_data/`** - nine `Metric[dict]` metrics over per-game replay
-  CSVs (`data/raw/17lands/replay_data/<Set>.<EventType>.csv`). See
+- **`replay_data/`** - nine vectorized `Metric[ReplayDataChunk]`
+  metrics (seven count tables, two row streams) over per-game replay
+  CSVs (`data/raw/17lands/replay_data/<Set>.<EventType>.csv`), each
+  per-half-turn field read as long-form `TurnEvents`. See
   [`replay_data/README.md`](replay_data/README.md).
 
 `BRAINSTORM.md` (this directory) is the original, now-superseded

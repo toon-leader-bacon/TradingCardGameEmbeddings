@@ -1,10 +1,11 @@
 """CardColumnTallies - numeric tallies kept per matched header column of
 one zone across a CSV's chunks, then summed per card uuid.
 
-Shared by both chunk families' per-card count tables: game_data's
-CardCountTableMetric (game_data/card_count_table_metric.py) keeps one,
-and draft_data's KeyedCardTallies (draft_data/keyed_card_tallies.py)
-keeps one per stratum key. count_columns() returns the tallies as
+Shared by the chunk families' per-card count tables:
+CardCountTableMetric (card_count_table_metric.py; game_data's zone
+counts, replay_data's deck rates) keeps one, and draft_data's
+KeyedCardTallies (draft_data/keyed_card_tallies.py) keeps one per
+stratum key. count_columns() returns the tallies as
 count-table columns.
 Tallying per column and grouping by card only at the end keeps the row
 implementation's counting exactly: two header columns naming one card

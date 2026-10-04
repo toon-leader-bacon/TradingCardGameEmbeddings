@@ -17,13 +17,15 @@ from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.metric import Metric
 from src.data_refinement.metrics.seventeenlands.slice_file import finished_count_table
 from src.data_refinement.metrics.seventeenlands.sliced_metric import is_count_table
-from src.data_refinement.metrics.seventeenlands.game_data.chunk_decks import (
+from src.data_refinement.metrics.seventeenlands.chunk_decks import (
     build_chunk_decks,
 )
 from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
-    GameKeys,
     GameZone,
+)
+from src.data_refinement.metrics.seventeenlands.chunk_decks import (
+    GameKeys,
 )
 from src.data_refinement.metrics.seventeenlands.zone_counts import ZoneCounts
 from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk_parser import (
@@ -179,7 +181,9 @@ def chunk_with_zones(
         num_turns=np.full(rows, 8, np.int32),
         keys=keys,
         rank=np.full(rows, "", object),
-        decks=build_chunk_decks(all_zones[GameZone.DECK], keys, GameId.MTG),
+        decks=build_chunk_decks(
+            all_zones[GameZone.DECK], keys, GameId.MTG, "game_data"
+        ),
     )
 
 

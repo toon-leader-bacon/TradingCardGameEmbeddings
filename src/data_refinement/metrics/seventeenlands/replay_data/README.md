@@ -1,256 +1,184 @@
 # replay_data
 
 Converts 17lands' raw per-game replay data
-(`data/raw/17lands/replay_data/<Set>.<EventType>.csv`) into training-data
-parquet files under `data/metrics/seventeenlands/replay_data/`, matching
-each CSV's `deck_<name>`/`sideboard_<name>` column suffixes against a
-`CardBinder` already populated for `GameId.MTG` (see
-[`../../../card_binder/README.md`](../../../card_binder/README.md)), and
-resolving every per-turn Arena-ID cell (`creatures_cast`,
-`creatures_attacked`, `creatures_killed_combat`, ...) against the same
-`CardBinder` via its Arena-alias index. Every metric here satisfies the
-shared `Metric[dict]` Protocol ([`../../metric.py`](../../metric.py)).
+(`data/raw/17lands/replay_data/<Set>.<EventType>.csv`) into one partition
+file per metric per CSV under `data/metrics/seventeenlands/replay_data/`
+(see [`../README.md`](../README.md), "Partitions and slices"). Each CSV's
+`deck_<name>` column suffixes and every Arena id in its per-half-turn
+cells are matched against a `CardBinder` already populated for
+`GameId.MTG`, Arena aliases included (see
+[`../../../card_binder/README.md`](../../../card_binder/README.md)).
+
+One row is one game. Besides the deck and the keys, a row has about
+2,500 per-half-turn columns, `f"{actor}_turn_{N}_{field}"` (actor
+`user` or `oppo`, N the actor's own turn counter), each holding a
+`"|"`-delimited list of Arena card ids. The metrics read nine of those
+fields; every other column is never read.
+
+The scan is chunked and typed, like game_data's and draft_data's. The
+shared `../chunk_scanner.py` streams a CSV in pyarrow record batches;
+`ReplayDataChunkParser` turns each batch into one `ReplayDataChunk`, and
+every metric's `accumulate()` receives that chunk. All nine metrics are
+vectorized `Metric[ReplayDataChunk]`s: seven count tables and two row
+streams. No metric splits a cell or visits a row in Python.
 
 ## Files
 
-- `replay_card_columns.py` — `ReplayCardColumns`: built once per metric
-  instance from that metric's own `(card_binder, header, source_game)`.
-  Two independent matching mechanisms live here (see "Card matching"
-  below): `deck_columns`/`sideboard_columns` (header-parsed, like the
-  sibling containers), and `uuid_for_arena_id()`/`arena_uuids()`
-  (per-cell, Arena-ID based - this container's only card-shaped columns
-  beyond `deck_`/`sideboard_`, since replay_data has no
-  `opening_hand_<name>` family the way `game_data` does).
-  `user_turn_numbers`/`oppo_turn_numbers` are derived from the header at
-  construction (never hardcoded), and `turn_column(actor, turn, field)`
-  builds the literal `f"{actor}_turn_{turn}_{field}"` column name every
-  metric below needs.
-- `scanner.py` — `scan_replay_csv(raw_csv_path, metrics, chunk_size)`
-  drives every metric in a list over one chunked read pass of a
-  replay_data CSV, handing each metric one row at a time and isolating
-  one metric's `accumulate()`/`finalize()` failure (logged, not raised)
-  from every other metric in the list. Reads with `low_memory=False` -
-  a deliberate deviation from `draft_data`/`game_data`'s scanners,
-  since replay_data's ~2500 mostly-sparse per-turn columns otherwise
-  get inconsistent per-internal-chunk dtype inference from pandas' C
-  parser (see "Card matching" below for why `ReplayCardColumns` already
-  tolerates either dtype regardless).
-- `replay_turn_event_rate_metric.py` — `ReplayTurnEventRateMetric`
-  (Template Method, abstract, accumulation): the turn-indexed
-  generalization of `game_data.GameCardAverageMetric`'s shape - instead
-  of one value applied to every card present on a row, this walks every
-  `(actor, turn)` half-turn on a row and tallies a `(hit_count,
-  total_count)` pair per card across every occurrence. A subclass fixes
-  `LABEL_COLUMN`/`DEFAULT_OUTPUT_PATH` and implements
-  `_denominator_cards_for_turn()`/`_numerator_cards_for_turn()`.
-- `replay_turn_event_rate_metrics.py` — two concrete
-  `ReplayTurnEventRateMetric` subclasses: `CombatKillInvolvementRateMetric`
-  (`P(a creature died in combat that half-turn | card fought that
-  half-turn)` - denominator is `creatures_attacked ∪ creatures_blocking`,
-  numerator is a turn-wide boolean checked against the RAW
-  `user_creatures_killed_combat`/`oppo_creatures_killed_combat` cells'
-  presence, not `arena_uuids()`'s matched output, since a creature that
-  died but doesn't match a known card should still count as "something
-  died") and `CombatDamagePushThroughRateMetric` (`P(card in
-  creatures_unblocked | card in creatures_attacked)` - a genuine
-  per-card numerator, not turn-wide).
-- `average_turn_cast_metric.py` — `AverageTurnCastMetric` (standalone,
-  accumulation): per card, the average turn number it's cast on across
-  every `(actor, turn)` occurrence in every game scanned - both actors'
-  occurrences count, no deck-membership conditioning.
-- `cast_rate_metric.py` — `CastRateMetric` (standalone, accumulation):
-  `P(cast at least once in the game | card in deck_<name>)`.
-  User-deck-only, and scans only `user_turn_*` half-turns (a card in
-  the user's own deck can only ever be cast by the user).
+### Chunk, parser, scanner
+
+- `replay_data_chunk.py` — the chunk's data types:
+  - `Actor` (`USER` = 0, `OPPO` = 1; `label` is the column prefix) and
+    `ReplayField`, the nine fields the metrics read, valued by column
+    suffix: `creatures_cast`, `non_creatures_cast`, `creatures_attacked`,
+    `creatures_blocking`, `creatures_unblocked`,
+    `user_creatures_killed_combat`, `oppo_creatures_killed_combat`,
+    `cards_discarded`, `cards_tutored`. `CAST_FIELDS` is the first two.
+  - `TurnEvents`: one field's card occurrences over a chunk, long form.
+    One entry per (row, actor, turn, card occurrence), so two copies in
+    one cell are two entries. `codes` index the chunk's card table; an
+    Arena id no card matches is kept with code `UNMATCHED` (-1), since
+    the kill metric needs "something died" even for unknown cards.
+    `matched()`, `for_actor()` and `select()` filter entries;
+    `half_turn_ids()` encodes each entry's half-turn as one int,
+    `(row * 2 + actor) * turn_span + turn`, which sorts by row, then
+    user before oppo, then turn; `split_half_turn_ids()` decodes it.
+    `rows_naming(codes, row_count)` lines the entries up against any
+    card list (rows × list positions), and `combine()` concatenates
+    fields.
+  - `ReplayDataChunk`: `deck` (`../zone_counts.py`'s `ZoneCounts`),
+    `deck_codes` (each deck column's card code), `events` (a read-only
+    mapping with a `TurnEvents` for every `ReplayField`; empty where the
+    CSV lacks the field), `card_uuids` (the card table as of this
+    chunk), `keys`, `num_turns` and `decks` (each row's deck, from
+    `../chunk_decks.py`). Construction checks row counts, that every
+    field is present, that event rows and codes are in range, and that
+    `deck_codes` name `deck.card_uuids`. `events_for(fields)` combines
+    several fields.
+- `replay_data_chunk_parser.py` — `ReplayDataChunkParser.from_header(
+  header, card_binder, source_game)`, the only place that knows the
+  column grammar. A field column's suffix must equal a `ReplayField`
+  value exactly. Every field column is read as a string; per column,
+  pyarrow splits each cell on `"|"` and flattens it, and empty tokens
+  (empty cells) are dropped. Each distinct token is normalized to the
+  Arena alias ledger's form (`str(int(float(token)))`, so `"104936"`
+  and `"104936.0"` match alike) and matched once per CSV; a non-numeric
+  token fails the CSV. `CardCodeTable` is the CSV's append-only card
+  table, seeded with the deck columns' cards, so a code means the same
+  card in every chunk. Deck counts are read as float32 and narrowed to
+  int16 by `../batch_columns.py`. A missing scalar column (`draft_id`,
+  `match_number`, `game_number`, `num_turns`) fails the CSV; a null
+  scalar raises naming the column and row.
+- `replay_card_columns.py` — `ReplayCardColumns`: every matched
+  `deck_`/`sideboard_` column as `(column, uuid)` pairs, plus
+  `uuid_for_name(name)` and `uuid_for_arena_id(arena_id)`, each cached
+  separately, and their `unmatched_names`/`unmatched_arena_ids`.
+- `scanner.py` — `scan_replay_csv(raw_csv_path, metrics, parser,
+  block_size)`: the shared `scan_chunked_csv()`, typed for
+  replay_data. Failures are isolated per (metric, chunk) and logged as
+  `METRIC FAILURE` lines.
+
+### Count tables over card codes
+
+- `code_tallies.py` — `CodeTallies(owner, tally_count)`: float64
+  tallies per card code, grown as new codes appear. `add(tally, codes,
+  weights=None)` is one `np.bincount`; `count_columns(card_uuids,
+  names, keep)` returns the count-table columns.
+- `code_count_table_metric.py` — `CodeCountTableMetric` (Template
+  Method, abstract): owns the tallies, keeps the latest card table and
+  writes the partition, one row per card whose first count is above
+  zero. A subclass implements `_tally(chunk)` and
+  `output_from_counts()`.
+- `replay_turn_event_rate_metric.py` — `ReplayTurnEventRateMetric`:
+  per card, `(total, hits)` over half-turns; the label is `hits /
+  total`, `sample_count = total`. A subclass implements
+  `_denominator_and_hit_codes(chunk)`.
+- `replay_turn_event_rate_metrics.py` — its two concretes:
+  - `CombatKillInvolvementRateMetric`: P(a creature died in combat
+    that half-turn | the card fought that half-turn). The denominator
+    is each half-turn's distinct matched cards in `creatures_attacked`
+    ∪ `creatures_blocking`. A half-turn is a hit for all of them when
+    either side's `creatures_killed_combat` names anything, matched or
+    not.
+  - `CombatDamagePushThroughRateMetric`: P(card in
+    `creatures_unblocked` | card in `creatures_attacked`, same
+    half-turn). Every matched attack entry counts in the denominator
+    (two copies attacking count twice); each distinct (half-turn, card)
+    both attacked and unblocked is one hit.
+- `average_turn_cast_metric.py` — `AverageTurnCastMetric`: per card,
+  `(count, turn_sum)` over every matched cast entry, either actor; the
+  label is the average cast turn.
 - `turns_to_game_end_after_cast_metric.py` —
-  `TurnsToGameEndAfterCastMetric` (standalone, accumulation): per card,
-  average `row["num_turns"] - first_cast_turn` (first occurrence,
-  either actor). Verified directly against
-  `data/raw/17lands/replay_data/MSH.PremierDraft.csv` that `num_turns`
-  is on the same per-actor turn-number scale as
-  `user_turn_N`/`oppo_turn_N` (roughly "the highest turn number either
-  player reached before the game ended"), not a combined elapsed-turn
-  count across both players - so this formula needs no unit
-  conversion.
-- `discard_rate_metric.py` / `tutor_target_rate_metric.py` — two
-  standalone accumulation metrics, same user-deck-only,
-  `user_turn_*`-only shape as `CastRateMetric`. `DiscardRateMetric`
-  carries a documented, unverified assumption that every
-  `user_turn_N_cards_discarded` hit is self-inflicted, never a forced
-  discard from an opposing effect. `TutorTargetRateMetric` here is a
-  distinct class from
-  [`../game_data/tutor_target_rate_metric.py`](../game_data/tutor_target_rate_metric.py)'s
-  same-named class - each lives in its own source-specific package,
-  the same convention every repeated concept name across
-  `draft_data`/`game_data` already follows. There is no
-  `oppo_turn_N_cards_tutored` column at all (opponent tutoring is
-  hidden), so this one's `user_turn_*`-only scope isn't a choice.
+  `TurnsToGameEndAfterCastMetric`: per (game, card cast that game),
+  `num_turns` minus the card's first cast turn, the smallest turn on
+  either actor's counter; partitions hold `(count, delta_sum)`.
+  `num_turns` is on the same per-actor scale as the turn columns
+  (checked against MSH.PremierDraft), so no conversion is needed.
+
+### Count tables over deck columns
+
+- `deck_event_rate_metric.py` — `DeckEventRateMetric`: a
+  `../card_count_table_metric.py` `CardCountTableMetric` over the deck
+  columns. Per card, `(in_deck, hit)`: games it was in the user's deck,
+  and of those, games the user's `FIELDS` entries named it. Only the
+  user's half-turns are read: a card in the user's own deck can only be
+  cast, discarded or tutored by the user, and there is no
+  `oppo_turn_N_cards_tutored` column at all.
+- `cast_rate_metric.py` (`CAST_FIELDS`), `discard_rate_metric.py`
+  (`cards_discarded`) and `tutor_target_rate_metric.py`
+  (`cards_tutored`) — its three concretes. `DiscardRateMetric` assumes
+  every user discard is self-inflicted (unverified).
+  `TutorTargetRateMetric` is distinct from game_data's class of the
+  same name.
+
+### Row streams
+
 - `combat_aggression_profile_metric.py` —
-  `CombatAggressionProfileMetric` (streaming): the user's full
-  `deck_<name>` list (referenced by `deck_uuid`, written into a shared
-  `DeckBox`) paired with a derived combat-tempo scalar - the average
-  `len(creatures_attacked)` per user half-turn that had any attack at
-  all. `deck_box` is a required constructor parameter.
+  `CombatAggressionProfileMetric`: one row per game, `draft_id`,
+  `match_number`, `game_number`, `deck_uuid` (the user's deck, stored in
+  the family deck box) and `combat_aggression_profile`: the mean number
+  of matched attackers over the user's half-turns with at least one
+  matched attacker (0.0 when there were none).
 - `attacker_blocker_combat_outcome_metric.py` —
-  `AttackerBlockerCombatOutcomeMetric` (streaming, fan-out): one row
-  fans out to one output example per half-turn with at least one
-  attacker. `net_kill_delta` is
-  attacker-favorable-positive: `len(defending side's
-  creatures_killed_combat)` minus `len(attacking side's own
-  creatures_killed_combat)`, this half-turn. No `deck_box` - this
-  metric's identity is `(draft_id, match_number, game_number, actor,
-  turn)`, never a `deck_uuid`.
+  `AttackerBlockerCombatOutcomeMetric`: one row per half-turn with at
+  least one matched attacker, in (row, user before oppo, turn) order:
+  `draft_id`, `match_number`, `game_number`, `actor`, `turn`,
+  `attacker_uuids` and `blocker_uuids` (matched cards in cell order)
+  and `net_kill_delta`: the defending side's matched combat kills minus
+  the attacking side's own, so positive means the attacker traded up.
+
 - `BRAINSTORM.md` — candidate metrics from this raw source not yet
-  built (this container currently implements the nine ideas covered
-  above; several ideas - the hardest temporal-state metrics, the
-  freeze-turn-blocked multi-group idea, the structurally-incomplete
-  opponent-deck idea, and a couple trimmed for scope discipline - remain
-  future work, see that file's own "Deferred to future work" note).
+  built.
 
 ## Card matching
 
-Two independent mechanisms, since replay_data exposes cards two
-different ways - unlike `draft_data`/`game_data`, which only ever match
-cards by header column suffix:
+Deck columns are matched once per CSV with
+`card_lookup.uuid_for_name_or_front_face()`, the policy draft_data and
+game_data use: a unique exact name match, else a unique split/MDFC
+front-face match, else unmatched. An unmatched deck column is absent
+from the deck.
 
-1. **Name-suffixed header columns** (`deck_<name>`/`sideboard_<name>`
-   only): matched once at construction with
-   `card_lookup.uuid_for_name_or_front_face()` (a unique exact name
-   match, else a unique split/MDFC front-face match, else unmatched),
-   the same policy `draft_data`/`game_data` use.
-2. **Arena-ID pipe-delimited cells** (every per-turn event column, plus
-   `opening_hand`/`candidate_hand_N`/`eot_{side}_*_in_play`):
-   `uuid_for_arena_id(arena_id)` matches an already-normalized Arena id
-   string via `card_binder.get_by_alias(source_game, DataSource.ARENA,
-   arena_id)`, caching hit or miss in a cache separate from
-   `uuid_for_name()`'s. `arena_uuids(cell)` is the caller-facing entry
-   point: it handles a `NaN`/`None` cell (`[]`), a bare `float`/`int`
-   cell (pandas' single-id-column dtype inference), and a
-   `"|"`-delimited `str` cell uniformly, normalizing every token via
-   `str(int(float(token)))` before the lookup - **this normalization is
-   load-bearing, not cosmetic**: a per-turn Arena-ID column where every
-   populated cell in a chunk happens to hold exactly one id is inferred
-   as `float64` by `pandas.read_csv` (e.g. a cell arrives as the Python
-   float `104936.0`), while `ScryfallCardIngestionStage` registers each
-   Arena alias as `str(int)` with no decimal (`"104936"`) - a naive
-   `str()` call would silently miss every such cell. Unmatched ids are
-   dropped into `unmatched_arena_ids` rather than raising, mirroring
-   the name-matching path's unmatched handling.
-
-## Card-binder and deck-box access shape
-
-Every metric's constructor takes `(card_binder, header, source_game,
-output_path=None)` directly (plus a required `deck_box` for
-`CombatAggressionProfileMetric`, the only deck-input metric this round)
-and builds its own private `ReplayCardColumns` internally via
-`ReplayCardColumns.from_header()`. Each metric re-parsing the same CSV
-header independently is a header-sized cost, not a row-sized one, so
-paying it once per metric is negligible next to the scan itself.
-
-The per-game identifier this container settles on, since no single raw
-column is a unique key: the composite `(draft_id: str, match_number:
-int, game_number: int)`, read directly off each row as three separate
-output columns - the same convention `game_data` already settled on.
-`AttackerBlockerCombatOutcomeMetric` extends this with two more
-separate columns, `actor: str` (written from a `Literal["user",
-"oppo"]` value) and `turn: int`, for its per-half-turn identity.
-
-## How it works
-
-`ReplayTurnEventRateMetric` and its two
-`replay_turn_event_rate_metrics.py` subclasses share one `accumulate()`
-sequence: for each actor in `("user", "oppo")`, for each turn in that
-actor's own dynamically-discovered turn-number range, call
-`_denominator_cards_for_turn()` and (if non-empty)
-`_numerator_cards_for_turn()`, tallying a running `(hit_count,
-total_count)` per card. `finalize()` writes one row per card seen at
-least once (`nocab_uuid`, `LABEL_COLUMN`, `sample_count`).
-
-`AverageTurnCastMetric`/`TurnsToGameEndAfterCastMetric` are standalone
-accumulators with their own per-card tallies (a `(turn_sum,
-occurrence_count)` running average, and a `(delta_sum,
-occurrence_count)` running average respectively) - genuinely different
-shapes from the hit/total ratio above, so neither subclasses
-`ReplayTurnEventRateMetric`. `CastRateMetric`/`DiscardRateMetric`/
-`TutorTargetRateMetric` are three more standalone accumulators sharing
-a simpler per-game `(hit_count, total_count)` shape (one set
-intersection against `present_uuids(row, deck_columns)` per game, not a
-per-turn double loop) - kept separate from each other and from the
-`ReplayTurnEventRateMetric` family, since the shared logic in each case
-is small enough that forcing an abstraction would cost more than the
-duplication it removes (see [`../../TODO.md`](../../TODO.md)).
-
-`CombatAggressionProfileMetric` is streaming - one row already carries
-a complete example (the deck plus a scalar this class computes via its
-own turn loop), so `accumulate()` buffers it into an open
-[`ParquetBuilder`](../../parquet_builder.py) and `finalize()` only
-closes that builder, mirroring
-[`../../sts_gg/deck_label_metric.py`](../../sts_gg/deck_label_metric.py)'s
-shape. `AttackerBlockerCombatOutcomeMetric` is streaming but fans a
-single input row out to zero or more output rows (one per qualifying
-half-turn), calling `write_row()` once per fanned-out row.
+Arena ids are matched with `card_binder.get_by_alias(source_game,
+DataSource.ARENA, arena_id)`. `ScryfallCardIngestionStage` registers
+each alias as `str(int)` with no decimal, which is why tokens are
+normalized first. Sets whose cards lack Arena aliases in the binder
+(PIO, SIR) match almost no event cells, so their event outputs are
+nearly empty; their deck outputs are unaffected.
 
 ## How to run
 
-```python
-from pathlib import Path
+From the project root (ROCm venv):
 
-import pandas as pd
-
-from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.deck_box.deck_box import DeckBox
-from src.data_refinement.metrics.seventeenlands.replay_data.average_turn_cast_metric import (
-    AverageTurnCastMetric,
-)
-from src.data_refinement.metrics.seventeenlands.replay_data.cast_rate_metric import (
-    CastRateMetric,
-)
-from src.data_refinement.metrics.seventeenlands.replay_data.turns_to_game_end_after_cast_metric import (
-    TurnsToGameEndAfterCastMetric,
-)
-from src.data_refinement.metrics.seventeenlands.replay_data.discard_rate_metric import (
-    DiscardRateMetric,
-)
-from src.data_refinement.metrics.seventeenlands.replay_data.tutor_target_rate_metric import (
-    TutorTargetRateMetric,
-)
-from src.data_refinement.metrics.seventeenlands.replay_data.replay_turn_event_rate_metrics import (
-    CombatDamagePushThroughRateMetric,
-    CombatKillInvolvementRateMetric,
-)
-from src.data_refinement.metrics.seventeenlands.replay_data.combat_aggression_profile_metric import (
-    CombatAggressionProfileMetric,
-)
-from src.data_refinement.metrics.seventeenlands.replay_data.attacker_blocker_combat_outcome_metric import (
-    AttackerBlockerCombatOutcomeMetric,
-)
-from src.data_refinement.metrics.seventeenlands.replay_data.scanner import (
-    scan_replay_csv,
-)
-from src.schema.game_id import GameId
-
-binder = CardBinder.load([Path("data/final/cards/mtg.jsonl")])
-raw_csv_path = Path("data/raw/17lands/replay_data/MSH.PremierDraft.csv")
-header = pd.read_csv(raw_csv_path, nrows=0).columns
-deck_box = DeckBox()  # metrics-private - never the published deck box
-
-metrics = [
-    AverageTurnCastMetric(binder, header, GameId.MTG),
-    CastRateMetric(binder, header, GameId.MTG),
-    TurnsToGameEndAfterCastMetric(binder, header, GameId.MTG),
-    DiscardRateMetric(binder, header, GameId.MTG),
-    TutorTargetRateMetric(binder, header, GameId.MTG),
-    CombatKillInvolvementRateMetric(binder, header, GameId.MTG),
-    CombatDamagePushThroughRateMetric(binder, header, GameId.MTG),
-    CombatAggressionProfileMetric(binder, header, GameId.MTG, deck_box),
-    AttackerBlockerCombatOutcomeMetric(binder, header, GameId.MTG),
-]
-scan_replay_csv(raw_csv_path, metrics)
-# each metric's DEFAULT_OUTPUT_PATH now exists
-
-deck_box.save(
-    Path("data/metrics/seventeenlands/replay_data/deck_box.db"),
-    GameId.MTG,
-    binder.version_for(GameId.MTG),
-)
 ```
+PYTHONPATH=. python scripts/run_metrics.py --source seventeenlands_replay_data \
+    --raw-path data/raw/17lands/replay_data/LTR.TradSealed.csv
+```
+
+Each metric writes its partition,
+`data/metrics/seventeenlands/replay_data/<OUTPUT_STEM>/<SET>/<Format>.parquet`,
+and the family deck box is
+`data/metrics/seventeenlands/replay_data/deck_box.db`; dojos build their
+slice files from the partitions on first use.
+
+On `LTR.TradSealed.csv` (32 MB, 5,001 games) the family runs in about
+14 s including the binder load; the row implementation took 49 s. Its
+outputs and deck box match the row implementation's exactly.

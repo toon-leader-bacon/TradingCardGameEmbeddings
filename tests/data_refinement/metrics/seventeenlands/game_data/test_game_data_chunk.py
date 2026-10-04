@@ -7,10 +7,12 @@ import numpy as np
 import pytest
 
 from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
-    ChunkDecks,
     GameDataChunk,
-    GameKeys,
     GameZone,
+)
+from src.data_refinement.metrics.seventeenlands.chunk_decks import (
+    ChunkDecks,
+    GameKeys,
 )
 from src.data_refinement.metrics.seventeenlands.zone_counts import ZoneCounts
 from src.schema.card import GenericDeck

@@ -2,7 +2,7 @@
 scalar over every game a card was present (count > 0) in, in one
 game_data zone (see game_data/README.md).
 
-A CardCountTableMetric (card_count_table_metric.py): each partition
+A GameCardCountTableMetric (card_count_table_metric.py): each partition
 holds, per card, the raw (games, value_sum) counts; the average is taken
 only when a slice is built (output_from_counts), so any slice's average
 is exact.
@@ -27,7 +27,7 @@ import pyarrow as pa
 
 from src.data_refinement.metrics.seventeenlands.count_table import ratio_output
 from src.data_refinement.metrics.seventeenlands.game_data.card_count_table_metric import (
-    CardCountTableMetric,
+    GameCardCountTableMetric,
 )
 from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
@@ -37,7 +37,7 @@ GAMES_COLUMN = "games"
 VALUE_SUM_COLUMN = "value_sum"
 
 
-class GameCardAverageMetric(CardCountTableMetric):
+class GameCardAverageMetric(GameCardCountTableMetric):
     """Per-card average of one per-game scalar, across every game the
     card was present in, in this subclass's ZONE."""
 

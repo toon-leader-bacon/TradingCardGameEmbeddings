@@ -1,8 +1,8 @@
 """Tests for replay_card_columns.py's ReplayCardColumns - structure
 mirrors
 tests/data_refinement/metrics/seventeenlands/game_data/test_game_card_columns.py's
-coverage shape, extended for this class's second (Arena-ID) matching
-mechanism and per-actor turn-number discovery.
+coverage shape, extended for this class's second (Arena-id) matching
+mechanism.
 """
 
 from datetime import datetime, timezone
@@ -108,35 +108,6 @@ class TestFromHeader:
         assert replay_columns.deck_columns == []
         assert "Strike" in replay_columns.unmatched_names
 
-    def test_discovers_user_and_oppo_turn_numbers_from_header(self) -> None:
-        """A header with user_turn_1_*/user_turn_2_*/oppo_turn_1_*
-        columns should yield user_turn_numbers == [1, 2],
-        oppo_turn_numbers == [1] - derived from header, never a
-        hardcoded range."""
-        binder = _binder_with_cards([])
-        header = [
-            "user_turn_1_creatures_cast",
-            "user_turn_2_creatures_cast",
-            "oppo_turn_1_creatures_cast",
-        ]
-
-        replay_columns = ReplayCardColumns.from_header(header, binder, GameId.MTG)
-
-        assert replay_columns.user_turn_numbers == [1, 2]
-        assert replay_columns.oppo_turn_numbers == [1]
-
-    def test_turn_numbers_are_sorted_and_deduplicated(self) -> None:
-        binder = _binder_with_cards([])
-        header = [
-            "user_turn_3_creatures_cast",
-            "user_turn_1_creatures_cast",
-            "user_turn_3_creatures_attacked",
-        ]
-
-        replay_columns = ReplayCardColumns.from_header(header, binder, GameId.MTG)
-
-        assert replay_columns.user_turn_numbers == [1, 3]
-
 
 class TestUuidForName:
     def test_caches_result_across_calls(self) -> None:
@@ -195,101 +166,6 @@ class TestUuidForArenaId:
         assert arena_result is None
         assert "104936" in replay_columns.unmatched_arena_ids
         assert "104936" not in replay_columns.unmatched_names
-
-
-class TestArenaUuids:
-    def _replay_columns_with_alias(self, name: str, arena_id: str) -> ReplayCardColumns:
-        binder = _binder_with_cards([name])
-        card_uuid = binder.get_by_name(GameId.MTG, name)[0].nocab_uuid
-        binder.register_alias(GameId.MTG, DataSource.ARENA, arena_id, card_uuid)
-        return ReplayCardColumns(binder, GameId.MTG)
-
-    def test_matches_a_pipe_delimited_cell_to_every_matched_card(self) -> None:
-        binder = CardBinder()
-        owlbear = _make_card("Owlbear")
-        wasp = _make_card("The Wondrous Wasp")
-        binder.create(owlbear)
-        binder.create(wasp)
-        binder.register_alias(GameId.MTG, DataSource.ARENA, "1", owlbear.nocab_uuid)
-        binder.register_alias(GameId.MTG, DataSource.ARENA, "2", wasp.nocab_uuid)
-        replay_columns = ReplayCardColumns(binder, GameId.MTG)
-
-        result = replay_columns.arena_uuids("1|2")
-
-        assert set(result) == {owlbear.nocab_uuid, wasp.nocab_uuid}
-
-    def test_nan_cell_yields_empty_list(self) -> None:
-        replay_columns = self._replay_columns_with_alias("Owlbear", "104936")
-
-        assert replay_columns.arena_uuids(float("nan")) == []
-        assert replay_columns.arena_uuids(None) == []
-
-    def test_normalizes_a_bare_float_cell_before_lookup(self) -> None:
-        """The dtype trap this class exists to close: a cell arriving
-        as the Python float 104936.0 (pandas' single-id-column
-        inference) must match the same card as the string "104936"
-        would - str(int(float(token))) normalization, not a naive
-        str() call."""
-        replay_columns = self._replay_columns_with_alias("Owlbear", "104936")
-
-        result = replay_columns.arena_uuids(104936.0)
-
-        assert result == replay_columns.arena_uuids("104936")
-        assert len(result) == 1
-
-    def test_normalizes_a_float_suffixed_string_token_before_lookup(self) -> None:
-        """A "|"-split piece that itself looks like "104936.0" (not
-        just a bare float cell) must normalize the same way."""
-        replay_columns = self._replay_columns_with_alias("Owlbear", "104936")
-
-        result = replay_columns.arena_uuids("104936.0")
-
-        assert len(result) == 1
-
-    def test_unmatched_token_is_dropped_not_raised(self) -> None:
-        replay_columns = self._replay_columns_with_alias("Owlbear", "104936")
-
-        result = replay_columns.arena_uuids("104936|999999")
-
-        assert len(result) == 1
-        assert "999999" in replay_columns.unmatched_arena_ids
-
-
-class TestPresentUuids:
-    def test_only_columns_with_a_positive_count_are_present(self) -> None:
-        binder = _binder_with_cards(["Owlbear", "Goblin Morningstar"])
-        header = ["deck_Owlbear", "deck_Goblin Morningstar"]
-        replay_columns = ReplayCardColumns.from_header(header, binder, GameId.MTG)
-        owlbear_uuid = replay_columns.uuid_for_name("Owlbear")
-        row = {"deck_Owlbear": 4, "deck_Goblin Morningstar": 0}
-
-        result = replay_columns.present_uuids(row, replay_columns.deck_columns)
-
-        assert result == [owlbear_uuid]
-
-    def test_nan_cell_is_treated_as_absent(self) -> None:
-        binder = _binder_with_cards(["Owlbear"])
-        header = ["deck_Owlbear"]
-        replay_columns = ReplayCardColumns.from_header(header, binder, GameId.MTG)
-        row = {"deck_Owlbear": float("nan")}
-
-        result = replay_columns.present_uuids(row, replay_columns.deck_columns)
-
-        assert result == []
-
-
-class TestTurnColumn:
-    def test_builds_the_literal_column_name(self) -> None:
-        """ReplayCardColumns.turn_column("oppo", 5, "creatures_attacked")
-        == "oppo_turn_5_creatures_attacked"."""
-        assert (
-            ReplayCardColumns.turn_column("oppo", 5, "creatures_attacked")
-            == "oppo_turn_5_creatures_attacked"
-        )
-        assert (
-            ReplayCardColumns.turn_column("user", 3, "creatures_cast")
-            == "user_turn_3_creatures_cast"
-        )
 
 
 def test_unmatched_names_only_lists_names_that_never_matched() -> None:

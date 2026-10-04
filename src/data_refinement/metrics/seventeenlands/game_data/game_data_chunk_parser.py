@@ -17,7 +17,7 @@ import numpy.typing as npt
 import pyarrow as pa
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.metrics.seventeenlands.game_data.chunk_decks import (
+from src.data_refinement.metrics.seventeenlands.chunk_decks import (
     build_chunk_decks,
 )
 from src.data_refinement.metrics.seventeenlands.game_data.game_card_columns import (
@@ -25,8 +25,10 @@ from src.data_refinement.metrics.seventeenlands.game_data.game_card_columns impo
 )
 from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
-    GameKeys,
     GameZone,
+)
+from src.data_refinement.metrics.seventeenlands.chunk_decks import (
+    GameKeys,
 )
 from src.data_refinement.metrics.seventeenlands.batch_columns import (
     CARD_COUNT_TYPE,
@@ -193,7 +195,9 @@ class GameDataChunkParser:
             num_turns=read_column(batch, "num_turns", np.int32),
             keys=keys,
             rank=read_column(batch, "rank", np.object_),
-            decks=build_chunk_decks(zones[GameZone.DECK], keys, self._source_game),
+            decks=build_chunk_decks(
+                zones[GameZone.DECK], keys, self._source_game, "game_data"
+            ),
         )
 
 
