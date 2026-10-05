@@ -11,7 +11,7 @@ signal here, unlike CastRateMetric's user-deck-only conditioning).
 """
 
 from pathlib import Path
-from typing import ClassVar, Iterable, Literal
+from typing import ClassVar, Iterable
 from uuid import UUID
 
 import pandas as pd
@@ -104,7 +104,9 @@ class AverageTurnCastMetric:
                 else self._replay_columns.oppo_turn_numbers
             )
             for turn in turn_numbers:
-                for card_uuid in self._cast_uuids_for_turn(row, actor, turn):
+                for card_uuid in self._replay_columns.cast_uuids_for_turn(
+                    row, actor, turn
+                ):
                     self._turn_sum[card_uuid] = self._turn_sum.get(card_uuid, 0) + turn
                     self._occurrence_count[card_uuid] = (
                         self._occurrence_count.get(card_uuid, 0) + 1
@@ -132,32 +134,6 @@ class AverageTurnCastMetric:
             pd.DataFrame(result), self._output_path, self._version_metadata
         )
         return self._output_path
-
-    def _cast_uuids_for_turn(
-        self, row: dict, actor: Literal["user", "oppo"], turn: int
-    ) -> list[UUID]:
-        """Every card matched out of this half-turn's creatures_cast
-        union non_creatures_cast cell.
-
-        Private helper - single consumer is accumulate().
-
-        Inputs:
-            row: one replay_data CSV row, dict-like.
-            actor: which half-turn - "user" or "oppo".
-            turn: that actor's own turn-number counter.
-        Output: every matched card in creatures_cast union
-            non_creatures_cast for this half-turn. Empty list if
-            neither cell names a card.
-        Side effects: none.
-        Exceptions: none expected.
-        """
-        creatures = self._replay_columns.arena_uuids(
-            row[ReplayCardColumns.turn_column(actor, turn, "creatures_cast")]
-        )
-        non_creatures = self._replay_columns.arena_uuids(
-            row[ReplayCardColumns.turn_column(actor, turn, "non_creatures_cast")]
-        )
-        return creatures + non_creatures
 
     def _cast_row(self, card_uuid: UUID) -> dict:
         """Build one output row for a single already-tallied card.

@@ -187,7 +187,12 @@ class TurnsToGameEndAfterCastMetric:
         union non_creatures_cast cell.
 
         Private helper - single consumer is _first_cast_turn()/
-        _every_cast_card().
+        _every_cast_card(). Thin set(...) wrapper over
+        ReplayCardColumns.cast_uuids_for_turn() (shared with
+        average_turn_cast_metric.py's AverageTurnCastMetric, which
+        instead keeps that method's list form) - this metric's own
+        callers only ever need membership tests/set unions, never
+        duplicate-preserving order.
 
         Inputs:
             row: one replay_data CSV row, dict-like.
@@ -198,13 +203,7 @@ class TurnsToGameEndAfterCastMetric:
         Side effects: none.
         Exceptions: none expected.
         """
-        creatures = self._replay_columns.arena_uuids(
-            row[ReplayCardColumns.turn_column(actor, turn, "creatures_cast")]
-        )
-        non_creatures = self._replay_columns.arena_uuids(
-            row[ReplayCardColumns.turn_column(actor, turn, "non_creatures_cast")]
-        )
-        return set(creatures) | set(non_creatures)
+        return set(self._replay_columns.cast_uuids_for_turn(row, actor, turn))
 
     def _every_cast_card(self, row: dict) -> set[UUID]:
         """Every card matched out of any actor's creatures_cast/
