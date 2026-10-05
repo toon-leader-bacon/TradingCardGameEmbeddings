@@ -11,6 +11,9 @@ import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.deck_box.seventeenlands_game_data import (
+    extraction_stage as extraction_stage_module,
+)
 from src.data_refinement.deck_box.seventeenlands_game_data.extraction_stage import (
     SeventeenLandsGameDataDeckExtractionStage,
     _GameKey,
@@ -187,12 +190,25 @@ class TestExtract:
         second = stage.extract(raw_path, box, binder)
 
         assert len(first) == 1
-        assert second == []
+        # The second run's create_if_absent() call recurs (no-op)
+        # against the same content-addressed deck_uuid - still
+        # reported, per extract()'s changed_uuids contract (see module
+        # docstring).
+        assert second == first
         assert len(list(box.all_decks(GameId.MTG))) == 1
 
-    def test_reextracting_after_resolution_changes_updates_not_duplicates(
+    def test_reextracting_after_resolution_changes_creates_a_new_content_addressed_deck(
         self, tmp_path: Path
     ) -> None:
+        # Content-addressed identity means resolving a previously-
+        # unresolvable card changes the draft's card multiset, which
+        # changes its deck_uuid - this is NOT an in-place update of the
+        # old entry (there is no stable per-draft id to update anymore
+        # - see module docstring's ONE DECK PER DRAFT, CONTENT-ADDRESSED
+        # section). The box ends up holding BOTH the old, stale
+        # (Unknown-sentinel) deck and the new, correctly-resolved one;
+        # nothing here collapses or deletes the stale one, and that's
+        # intentional under this identity scheme.
         binder = _mtg_card_binder(["Plains"])
         unknown = binder.ensure_unknown_card(GameId.MTG)
         box = DeckBox()
@@ -206,8 +222,8 @@ class TestExtract:
 
         first = stage.extract(raw_path, box, binder)
         assert len(first) == 1
-        deck_uuid = first[0]
-        deck_after_first = box.get_by_uuid(deck_uuid)
+        first_deck_uuid = first[0]
+        deck_after_first = box.get_by_uuid(first_deck_uuid)
         assert unknown.nocab_uuid in deck_after_first.card_nocab_uuids
 
         # MTG's own CardBinder gains the previously-unresolvable card.
@@ -216,11 +232,16 @@ class TestExtract:
 
         second = stage.extract(raw_path, box, binder)
 
-        assert second == [deck_uuid]
-        assert len(list(box.all_decks(GameId.MTG))) == 1
-        deck_after_second = box.get_by_uuid(deck_uuid)
+        assert second != first
+        assert len(second) == 1
+        second_deck_uuid = second[0]
+        assert len(list(box.all_decks(GameId.MTG))) == 2
+        deck_after_second = box.get_by_uuid(second_deck_uuid)
         assert bolt_card.nocab_uuid in deck_after_second.card_nocab_uuids
         assert unknown.nocab_uuid not in deck_after_second.card_nocab_uuids
+        # The stale first deck is untouched.
+        stale_deck = box.get_by_uuid(first_deck_uuid)
+        assert unknown.nocab_uuid in stale_deck.card_nocab_uuids
 
     def test_raises_runtime_error_when_unknown_sentinel_not_seeded(
         self, tmp_path: Path
@@ -340,7 +361,32 @@ class TestExtract:
         assert len(changed_uuids) == 1
         assert len(list(box.all_decks(GameId.MTG))) == 1
 
-    def test_distinct_drafts_produce_distinct_decks(self, tmp_path: Path) -> None:
+    def test_distinct_drafts_with_distinct_decklists_produce_distinct_decks(
+        self, tmp_path: Path
+    ) -> None:
+        binder = _mtg_card_binder(["Plains", "Mountain"])
+        box = DeckBox()
+        raw_path = tmp_path / "MSH.PremierDraft.csv"
+        _write_game_data_csv(
+            raw_path,
+            ["Plains", "Mountain"],
+            [_row("d1", 1, 1, {"Plains": 17}), _row("d2", 1, 1, {"Mountain": 17})],
+        )
+        stage = SeventeenLandsGameDataDeckExtractionStage()
+
+        changed_uuids = stage.extract(raw_path, box, binder)
+
+        assert len(set(changed_uuids)) == 2
+        assert len(list(box.all_decks(GameId.MTG))) == 2
+
+    def test_distinct_drafts_with_identical_decklists_collapse_to_one_deck(
+        self, tmp_path: Path
+    ) -> None:
+        # The whole point of the content-addressed identity change
+        # (see module docstring's ONE DECK PER DRAFT, CONTENT-ADDRESSED
+        # section): two different drafts ("d1", "d2") that happen to
+        # build the exact same 40-card deck must collapse into ONE
+        # stored GenericDeck.
         binder = _mtg_card_binder(["Plains"])
         box = DeckBox()
         raw_path = tmp_path / "MSH.PremierDraft.csv"
@@ -353,8 +399,8 @@ class TestExtract:
 
         changed_uuids = stage.extract(raw_path, box, binder)
 
-        assert len(set(changed_uuids)) == 2
-        assert len(list(box.all_decks(GameId.MTG))) == 2
+        assert len(set(changed_uuids)) == 1
+        assert len(list(box.all_decks(GameId.MTG))) == 1
 
     @pytest.mark.parametrize(
         "game_keys",
@@ -399,10 +445,11 @@ class TestExtract:
         )
         stage = SeventeenLandsGameDataDeckExtractionStage()
 
-        stage.extract(raw_path, box, binder)
+        first = stage.extract(raw_path, box, binder)
         second = stage.extract(raw_path, box, binder)
 
-        assert second == []
+        assert second == first
+        assert len(list(box.all_decks(GameId.MTG))) == 1
 
     def test_out_of_order_games_report_their_draft_once(self, tmp_path: Path) -> None:
         binder = _mtg_card_binder(["Plains"])
@@ -419,9 +466,16 @@ class TestExtract:
 
         assert len(changed_uuids) == 1
 
-    def test_a_lower_game_in_a_later_file_replaces_the_stored_deck(
+    def test_same_draft_id_across_files_produces_independent_decks(
         self, tmp_path: Path
     ) -> None:
+        # Accumulation is per-file (see module docstring's STREAMING
+        # and TWO-PHASE EXTRACTION sections) - this stage never merges
+        # one draft_id's rows across two files. 17Lands' own convention
+        # keeps a draft_id's rows in one file, but if that assumption
+        # is ever violated, each file's own canonical game for "d1"
+        # is hashed and stored independently, producing two decks
+        # rather than one being replaced by the other.
         binder = _mtg_card_binder(["Plains", "Mountain"])
         box = DeckBox()
         later_path = tmp_path / "later.csv"
@@ -436,13 +490,15 @@ class TestExtract:
         )
         stage = SeventeenLandsGameDataDeckExtractionStage()
 
-        stage.extract(later_path, box, binder)
-        changed_uuids = stage.extract(earlier_path, box, binder)
+        first = stage.extract(later_path, box, binder)
+        second = stage.extract(earlier_path, box, binder)
 
-        (deck,) = list(box.all_decks(GameId.MTG))
-        assert changed_uuids == [deck.nocab_uuid]
-        assert deck.provenance is not None
-        assert deck.provenance.source_id == "d1:0:1:1"
+        assert first != second
+        assert len(list(box.all_decks(GameId.MTG))) == 2
+        earlier_deck = box.get_by_uuid(second[0])
+        assert earlier_deck is not None
+        assert earlier_deck.provenance is not None
+        assert earlier_deck.provenance.source_id == "d1:0:1:1"
 
     def test_a_file_without_match_number_keeps_the_first_build(
         self, tmp_path: Path
@@ -466,7 +522,7 @@ class TestExtract:
         )
         stage = SeventeenLandsGameDataDeckExtractionStage()
 
-        stage.extract(raw_path, box, binder)
+        first = stage.extract(raw_path, box, binder)
         second = stage.extract(raw_path, box, binder)
 
         (deck,) = list(box.all_decks(GameId.MTG))
@@ -474,7 +530,77 @@ class TestExtract:
         assert deck.card_nocab_uuids.count(mountain_uuid) == 1
         assert deck.provenance is not None
         assert deck.provenance.source_id == "d1:0:0:1"
-        assert second == []
+        assert second == first
+
+    def test_canonical_game_wins_even_when_split_across_chunks(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Forces each row into its own pandas chunk (see
+        # extraction_stage.py's _CHUNK_SIZE), so the draft's three rows
+        # are accumulated across three separate _accumulate_best_games()
+        # calls spanning three chunk iterations - the lowest _GameKey
+        # must still win regardless, exercising module docstring's
+        # TWO-PHASE EXTRACTION accumulation across chunk boundaries, not
+        # just across out-of-order rows within one chunk.
+        monkeypatch.setattr(extraction_stage_module, "_CHUNK_SIZE", 1)
+        binder = _mtg_card_binder(["Plains", "Mountain"])
+        box = DeckBox()
+        raw_path = tmp_path / "MSH.PremierDraft.csv"
+        _write_game_data_csv(
+            raw_path,
+            ["Plains", "Mountain"],
+            [
+                _row("d1", 2, 1, {"Plains": 16, "Mountain": 3}),
+                _row("d1", 1, 2, {"Plains": 16, "Mountain": 2}),
+                _row("d1", 1, 1, {"Plains": 16, "Mountain": 1}),
+            ],
+        )
+        stage = SeventeenLandsGameDataDeckExtractionStage()
+
+        stage.extract(raw_path, box, binder)
+
+        (deck,) = list(box.all_decks(GameId.MTG))
+        mountain_uuid = binder.get_by_name_single(GameId.MTG, "Mountain").nocab_uuid
+        assert deck.card_nocab_uuids.count(mountain_uuid) == 1
+        assert deck.provenance is not None
+        assert deck.provenance.source_id == "d1:0:1:1"
+
+    def test_reprocessing_the_same_file_twice_is_crash_retry_safe(
+        self, tmp_path: Path
+    ) -> None:
+        # Simulates a crash-then-retry: re-running extract() against
+        # the exact same file must not raise and must converge to the
+        # exact same final box content (see module docstring's
+        # TWO-PHASE EXTRACTION section's own crash-retry-safety claim).
+        binder = _mtg_card_binder(["Plains", "Mountain"])
+        box = DeckBox()
+        raw_path = tmp_path / "MSH.PremierDraft.csv"
+        _write_game_data_csv(
+            raw_path,
+            ["Plains", "Mountain"],
+            [
+                _row("d1", 1, 1, {"Plains": 17}),
+                _row("d2", 1, 1, {"Plains": 16, "Mountain": 1}),
+            ],
+        )
+        stage = SeventeenLandsGameDataDeckExtractionStage()
+
+        stage.extract(raw_path, box, binder)
+        decks_after_first = {
+            deck.nocab_uuid: deck for deck in box.all_decks(GameId.MTG)
+        }
+
+        stage.extract(raw_path, box, binder)
+        decks_after_second = {
+            deck.nocab_uuid: deck for deck in box.all_decks(GameId.MTG)
+        }
+
+        assert decks_after_first.keys() == decks_after_second.keys()
+        assert len(decks_after_second) == 2
+        for nocab_uuid, deck in decks_after_first.items():
+            assert Counter(deck.card_nocab_uuids) == Counter(
+                decks_after_second[nocab_uuid].card_nocab_uuids
+            )
 
 
 class TestGameKey:

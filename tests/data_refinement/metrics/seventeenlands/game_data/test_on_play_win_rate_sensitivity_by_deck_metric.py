@@ -50,7 +50,8 @@ def test_computes_on_play_rate_minus_on_draw_rate_per_deck(tmp_path: Path) -> No
         DeckBox(),
     )
 
-    deck_uuid = str(deck_uuid_from_cards([uuid_for(_BINDER, OWLBEAR)]))
+    # owlbear_deck=4: the full multiset is 4 copies of Owlbear.
+    deck_uuid = str(deck_uuid_from_cards([uuid_for(_BINDER, OWLBEAR)] * 4))
     assert list(df.index) == [deck_uuid]
     assert df.loc[deck_uuid, "on_play_win_rate_sensitivity"] == 1.0
 

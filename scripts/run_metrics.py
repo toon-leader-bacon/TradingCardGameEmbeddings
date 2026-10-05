@@ -312,6 +312,9 @@ from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_rate_delta
 from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_rate_sensitivity_by_deck_metric import (  # noqa: E501
     OnPlayWinRateSensitivityByDeckMetric,
 )
+from src.data_refinement.metrics.seventeenlands.game_data.deck_occurrence_count_metric import (  # noqa: E501
+    DeckOccurrenceCountMetric,
+)
 from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk_parser import (
     GameDataChunkParser,
 )
@@ -1029,6 +1032,7 @@ _GAME_DATA_METRICS: tuple[SeventeenLandsMetricSpec, ...] = (
     DeckBoxChunkMetricSpec(DeckGameLengthPredictionMetric),
     DeckBoxChunkMetricSpec(DeckRankTierPredictionMetric),
     DeckBoxChunkMetricSpec(OnPlayWinRateSensitivityByDeckMetric),
+    DeckBoxChunkMetricSpec(DeckOccurrenceCountMetric),
     ChunkMetricSpec(TutorTargetPoolMetric),
 )
 
@@ -1413,7 +1417,9 @@ class _SeventeenLandsRunner(Protocol):
     """A seventeenlands family runner: --raw-path, and an optional
     --output-root. Also a plain _FAMILIES runner (raw_path only)."""
 
-    def __call__(self, raw_path: Path | None, output_root: Path | None = None) -> None: ...
+    def __call__(
+        self, raw_path: Path | None, output_root: Path | None = None
+    ) -> None: ...
 
 
 # The three seventeenlands runners, the only families --output-root

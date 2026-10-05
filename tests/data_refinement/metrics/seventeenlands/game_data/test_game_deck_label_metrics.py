@@ -66,8 +66,10 @@ class TestDeckWinPredictionMetric:
         scan_game_csv(csv_path, [metric], parser_for(binder))
 
         (output,) = pq.read_table(metric.finalize()).to_pylist()
+        # 4 copies of Owlbear, 1 of Morningstar - the full multiset, not
+        # merely which columns are present.
         expected = deck_uuid_from_cards(
-            [uuid_for(binder, OWLBEAR), uuid_for(binder, MORNINGSTAR)]
+            [uuid_for(binder, OWLBEAR)] * 4 + [uuid_for(binder, MORNINGSTAR)]
         )
         assert output["deck_uuid"] == str(expected)
 

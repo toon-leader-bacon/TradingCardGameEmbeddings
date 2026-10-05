@@ -11,7 +11,7 @@ already populated for `GameId.MTG` (see
 The scan is chunked and typed. `scan_game_csv` streams a CSV in pyarrow
 record batches. `GameDataChunkParser` turns each batch into one
 `GameDataChunk` (numpy arrays, plus each row's deck identified once),
-and every metric's `accumulate()` receives that chunk. All eleven
+and every metric's `accumulate()` receives that chunk. All twelve
 metrics are vectorized `Metric[GameDataChunk]`s: none loops over rows in
 Python.
 
@@ -36,11 +36,17 @@ Python.
     events) and `decks`. It checks at construction that every zone is
     present and every per-row field has the same row count.
 - `chunk_decks.py` — `build_chunk_decks(deck_zone, keys, source_game)`
-  and `store_chunk_decks(decks, deck_box)`. A row's deck is one card
-  uuid per present `deck_<name>` column, in header order. Rows are
-  grouped by present-column pattern; each pattern is hashed once with
-  `deck_ids.deck_uuid_from_cards()`. Patterns with the same id (two
-  columns naming one card) share the earliest row's deck. A deck is
+  and `store_chunk_decks(decks, deck_box)`. A row's deck is the FULL
+  copy-count multiset over `deck_<name>` columns: each present column
+  contributes `deck_zone.counts[row, column]` copies of its card uuid,
+  in header order (matching
+  `deck_box/seventeenlands_game_data/extraction_stage.py`'s own
+  full-multiset expansion), not merely one uuid per present column.
+  Rows are grouped by that full count pattern (presence alone is not a
+  safe pre-grouping key once copy counts matter); each pattern is
+  hashed once with `deck_ids.deck_uuid_from_cards()`. Patterns with the
+  same id (two columns naming one card, or any other coincidence
+  producing the same multiset) share the earliest row's deck. A deck is
   named after its first row's game (`game_data <draft_id>/<match>/<game>
   deck`). `store_chunk_decks` calls `create_if_absent` once per deck;
   each deck-input metric calls it itself, so a deck recurs (a cheap
@@ -145,6 +151,14 @@ its stored entry), and stamps its output `requires_deck_box=True`.
   `OnPlayWinCounts.win_rate_delta()` over every game played with it.
   Per chunk it counts each deck's four tallies with `np.bincount` over
   `row_deck` and adds them to a running per-`deck_uuid` total.
+- `deck_occurrence_count_metric.py` — `DeckOccurrenceCountMetric`
+  (accumulation): per deck, `occurrence_count` — the number of DISTINCT
+  `draft_id`s that chose it, not the number of game rows (a draft plays
+  3-7 games sharing one deck, which would otherwise inflate a popular
+  deck's count by however many games each of its drafts played). Per
+  chunk it adds every row's `draft_id` to a running per-`deck_uuid` set
+  of distinct drafts seen so far, then writes one row per deck at
+  `finalize()`.
 
 ### Pool metric
 
