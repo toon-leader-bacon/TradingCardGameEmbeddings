@@ -53,6 +53,7 @@ class OnPlayWinRateDeltaMetric:
     structurally.
     """
 
+    LABEL_COLUMN: ClassVar[str] = "on_play_win_rate_delta"
     DEFAULT_OUTPUT_PATH: ClassVar[Path] = _DEFAULT_OUTPUT_PATH
 
     def __init__(

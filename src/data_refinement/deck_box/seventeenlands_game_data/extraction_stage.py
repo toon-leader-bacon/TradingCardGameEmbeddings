@@ -120,44 +120,33 @@ replace(), and read back to find the stored deck's _GameKey (see
 CANONICAL GAME above).
 """
 
-import logging
-import tarfile
 from collections import Counter
-from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import IO, ClassVar, Iterable, Iterator, NamedTuple
+from typing import ClassVar
 from uuid import UUID, uuid5
 
 import pandas as pd
 from tqdm import tqdm
 
-from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.card_binder.card_lookup import (
-    CardLookup,
-    uuid_for_name_or_front_face,
-)
+from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.deck_box.seventeenlands_game_data._card_columns import (
+    _deck_column_index,
+)
+from src.data_refinement.deck_box.seventeenlands_game_data._game_key import _GameKey
+from src.data_refinement.deck_box.seventeenlands_game_data._tar_aware_csv_stream import (
+    _open_stream,
+)
 from src.data_retrieval.seventeenlands.downloader import SeventeenLandsDownloader
 from src.schema.card import GenericDeck, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 
-_logger = logging.getLogger(__name__)
-
-_DECK_COLUMN_PREFIX = "deck_"
-
 # I/O-efficiency knob only (see scan_game_csv()'s own chunk_size
 # parameter for precedent) - never changes what _extract_row() sees,
 # still one row at a time.
 _CHUNK_SIZE = 100_000
-
-# POSIX ustar header layout: the "ustar" magic sits at byte offset 257
-# of every 512-byte tar header - same constant SeventeenLandsDownloader
-# now checks at download time (see module docstring's TAR-WRAPPED FILES
-# section for why this is re-checked here rather than assumed fixed).
-_TAR_MAGIC_OFFSET = 257
-_TAR_MAGIC = b"ustar"
 
 # Fixed, arbitrary — never regenerate. Namespace for this stage's
 # deterministic per-draft_id deck uuids (see module docstring's ONE
@@ -166,80 +155,6 @@ _TAR_MAGIC = b"ustar"
 # per-game namespace (a3d8f1c2-...), so no per-game deck id can
 # collide with a per-draft one.
 _DECK_NAMESPACE = UUID("163ae839-092d-4a55-88ff-782edffc99f6")
-
-
-class _GameKey(NamedTuple):
-    """One game's position within its draft; the lowest one is canonical.
-
-    Field order is the comparison order: NamedTuple compares as a tuple,
-    so build_index decides first, then match_number, then game_number
-    (see module docstring's CANONICAL GAME section). Owns both
-    directions of the provenance.source_id round trip (source_id_for()
-    and from_provenance()), so the written and parsed formats can't
-    drift.
-    """
-
-    build_index: int
-    match_number: int
-    game_number: int
-
-    @staticmethod
-    def from_row(row: dict) -> "_GameKey":
-        """Parse one game_data row's build_index/match_number/game_number.
-
-        Inputs:
-            row: one game_data CSV row, dict-like. pandas may hand the
-                numbers over as floats (e.g. 1.0) when a chunk holds a
-                NaN; int() normalizes them. match_number counts as 0
-                when the row has no such key, which (since pandas gives
-                every row every header column) means the whole file
-                lacks the column - see module docstring's CANONICAL
-                GAME section.
-        Output: that row's _GameKey.
-        Side effects: none.
-        Exceptions: raises KeyError if build_index or game_number is
-            missing, and ValueError if any present value is NaN.
-        """
-        return _GameKey(
-            int(row["build_index"]),
-            int(row.get("match_number", 0)),
-            int(row["game_number"]),
-        )
-
-    def source_id_for(self, draft_id: str) -> str:
-        """Format the provenance.source_id that from_provenance() parses.
-
-        Inputs:
-            draft_id: the game's draft_id.
-        Output: f"{draft_id}:{build_index}:{match_number}:{game_number}",
-            e.g. "d1:0:1:2".
-        Side effects: none.
-        Exceptions: none.
-        """
-        return f"{draft_id}:{self.build_index}:{self.match_number}:{self.game_number}"
-
-    @staticmethod
-    def from_provenance(provenance: Provenance | None) -> "_GameKey | None":
-        """Parse the game key a stored deck's provenance.source_id records.
-
-        Inputs:
-            provenance: a stored deck's provenance, whose source_id is
-                f"{draft_id}:{build_index}:{match_number}:{game_number}".
-        Output: that game's _GameKey, or None when provenance is None
-            or source_id doesn't have that shape (a deck this stage
-            didn't write). Callers treat None as "replace it".
-        Side effects: none.
-        Exceptions: none.
-        """
-        if provenance is None:
-            return None
-        # rsplit: the three numbers are always the last three fields,
-        # even if a draft_id ever contained a colon.
-        fields = provenance.source_id.rsplit(":", 3)
-        numbers = fields[1:]
-        if len(fields) != 4 or not all(number.isdigit() for number in numbers):
-            return None
-        return _GameKey(*(int(number) for number in numbers))
 
 
 class SeventeenLandsGameDataDeckExtractionStage:
@@ -341,10 +256,12 @@ class SeventeenLandsGameDataDeckExtractionStage:
         """
         changed_uuids: list[UUID] = []
 
-        with self._open_stream(csv_path) as (binary_stream, total_bytes):
+        with _open_stream(csv_path) as (binary_stream, total_bytes):
             header_columns = pd.read_csv(binary_stream, nrows=0).columns
             binary_stream.seek(0)
-            deck_columns = self._deck_column_index(header_columns, card_lookup)
+            deck_columns = _deck_column_index(
+                header_columns, card_lookup, self.SOURCE_GAME
+            )
 
             with tqdm(
                 total=total_bytes,
@@ -450,78 +367,6 @@ class SeventeenLandsGameDataDeckExtractionStage:
             box.replace(deck_uuid, deck)
         return deck_uuid
 
-    def _deck_column_index(
-        self, header_columns: Iterable[str], card_lookup: CardLookup
-    ) -> list[tuple[str, UUID]]:
-        """Match every "deck_<name>" column in header_columns to a nocab_uuid.
-
-        Private helper — single consumer is _extract_csv(). Every
-        distinct <name> is resolved at most once per call (a local
-        cache), via _card_uuid_for_name().
-
-        Inputs:
-            header_columns: this CSV's own header (e.g.
-                pandas.read_csv(path, nrows=0).columns) — every column,
-                not just deck_-prefixed ones; non-matching columns are
-                ignored.
-            card_lookup: registry each distinct <name> is resolved
-                against.
-        Output: every "deck_<name>" column paired with its resolved (or
-            Unknown-sentinel-substituted — see module docstring's
-            UNRESOLVED CARDS section) nocab_uuid, in header_columns' own
-            order.
-        Side effects: emits one logging.error() per distinct
-            unresolved <name> (via _card_uuid_for_name()).
-        Exceptions: raises RuntimeError if self.SOURCE_GAME's Unknown
-            sentinel card isn't found on card_lookup.
-        """
-        name_cache: dict[str, UUID] = {}
-        deck_columns: list[tuple[str, UUID]] = []
-        for column in header_columns:
-            if not column.startswith(_DECK_COLUMN_PREFIX):
-                continue
-            name = column[len(_DECK_COLUMN_PREFIX) :]
-            if name not in name_cache:
-                name_cache[name] = self._card_uuid_for_name(name, card_lookup)
-            deck_columns.append((column, name_cache[name]))
-        return deck_columns
-
-    def _card_uuid_for_name(self, name: str, card_lookup: CardLookup) -> UUID:
-        """Resolve one bare card name to a nocab_uuid, falling back to Unknown.
-
-        Private helper — single consumer is _deck_column_index().
-        uuid_for_name_or_front_face(), then the Unknown sentinel — see
-        module docstring's CARD MATCHING and UNRESOLVED CARDS sections.
-
-        Inputs:
-            name: one deck_<name> column's bare <name> suffix.
-            card_lookup: registry to resolve name against.
-        Output: the matching nocab_uuid, or (on a miss) the Unknown
-            sentinel's nocab_uuid.
-        Side effects: emits one logging.error() call on a miss.
-        Exceptions: raises RuntimeError if even the Unknown sentinel
-            isn't found on card_lookup.
-        """
-        card_uuid = uuid_for_name_or_front_face(card_lookup, self.SOURCE_GAME, name)
-        if card_uuid is not None:
-            return card_uuid
-
-        _logger.error(
-            "SeventeenLandsGameDataDeckExtractionStage: unresolved card name "
-            "%r — substituting the Unknown sentinel card",
-            name,
-        )
-        unknown_card = card_lookup.get_by_name_single(
-            self.SOURCE_GAME, CardBinder.UNKNOWN_CARD_NAME, strict=False
-        )
-        if unknown_card is None:
-            raise RuntimeError(
-                f"SeventeenLandsGameDataDeckExtractionStage: {self.SOURCE_GAME!r}'s "
-                "Unknown sentinel card is not seeded — call "
-                "CardBinder.ensure_unknown_card() before extract()"
-            )
-        return unknown_card.nocab_uuid
-
     def _card_nocab_uuids_for_row(
         self, row: dict, deck_columns: list[tuple[str, UUID]]
     ) -> list[UUID]:
@@ -593,81 +438,3 @@ class SeventeenLandsGameDataDeckExtractionStage:
         Exceptions: none.
         """
         return uuid5(_DECK_NAMESPACE, draft_id)
-
-    @staticmethod
-    def _is_tar_wrapped(csv_path: Path) -> bool:
-        """Detect whether csv_path is actually a tar archive on disk.
-
-        Private helper — single consumer is _open_stream(). Peeks the
-        first 512 bytes and checks for the ustar magic at its known
-        offset — same technique and constants
-        SeventeenLandsDownloader.download_one() now uses at download
-        time (see module docstring's TAR-WRAPPED FILES section).
-
-        Inputs:
-            csv_path: path to check.
-        Output: True if csv_path's first 512 bytes carry a ustar tar
-            header; False otherwise (a plain CSV).
-        Side effects: none — reads only the first 512 bytes.
-        Exceptions: none expected.
-        """
-        with open(csv_path, "rb") as probe_file:
-            header = probe_file.read(512)
-        return header[_TAR_MAGIC_OFFSET : _TAR_MAGIC_OFFSET + len(_TAR_MAGIC)] == (
-            _TAR_MAGIC
-        )
-
-    @contextmanager
-    def _open_stream(self, csv_path: Path) -> Iterator[tuple[IO[bytes], int]]:
-        """Open csv_path for repeated binary reads, tar-wrapped or not.
-
-        Private helper — single consumer is _extract_csv(). Dispatches
-        on _is_tar_wrapped(): for a tar-wrapped file, opens it via
-        tarfile.open(csv_path, mode="r") (random-access mode — the
-        on-disk quirk here is already-decompressed, so this is a plain
-        seekable file, unlike download_one()'s in-flight gzip stream)
-        and yields its one member's extractfile() stream (which itself
-        supports .seek()/.tell() since the underlying tar file does);
-        for a plain file, yields a standard open(csv_path, "rb"). Both
-        branches yield a stream _extract_csv() reads TWICE — once via
-        pandas for the header (nrows=0), then seek(0) back to the
-        start for the real chunked pass — so the returned stream must
-        support seek(0) either way.
-
-        Inputs:
-            csv_path: the file to open.
-        Output (yielded): (stream, total_bytes) — stream is the binary
-            handle to read; total_bytes is the CSV content's own byte
-            length (the tar member's declared size when tar-wrapped,
-            not csv_path's on-disk size, which for a tar-wrapped file
-            includes header/padding overhead).
-        Side effects: opens csv_path (and, when tar-wrapped, the
-            TarFile it belongs to); both are closed on context exit.
-        Exceptions: raises ValueError if csv_path is tar-wrapped but
-            its tar has no members, or its first member isn't a regular
-            file (mirrors
-            SeventeenLandsDownloader._extract_tar_member()'s own
-            guards).
-
-        Example:
-            >>> with self._open_stream(csv_path) as (stream, total_bytes):
-            ...     header = pd.read_csv(stream, nrows=0).columns
-            ...     stream.seek(0)
-        """
-        if self._is_tar_wrapped(csv_path):
-            with tarfile.open(csv_path, mode="r") as tar:
-                member = tar.next()
-                if member is None:
-                    raise ValueError(
-                        f"_open_stream: {csv_path} is tar-wrapped but has no members"
-                    )
-                member_file = tar.extractfile(member)
-                if member_file is None:
-                    raise ValueError(
-                        f"_open_stream: {csv_path}'s first member "
-                        f"{member.name!r} isn't a regular file"
-                    )
-                yield member_file, member.size
-        else:
-            with open(csv_path, "rb") as csv_file:
-                yield csv_file, csv_path.stat().st_size

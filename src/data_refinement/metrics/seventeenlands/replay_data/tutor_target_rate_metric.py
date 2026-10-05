@@ -44,6 +44,7 @@ class TutorTargetRateMetric:
     Satisfies the Metric[dict] Protocol (../../metric.py) structurally.
     """
 
+    LABEL_COLUMN: ClassVar[str] = "tutor_target_rate"
     DEFAULT_OUTPUT_PATH: ClassVar[Path] = _DEFAULT_OUTPUT_PATH
 
     def __init__(
