@@ -1,5 +1,16 @@
 # TODO
 
+- [ ] **`Label = Any` in `src/schema/type_hints.py` crosses every
+  dojo's label boundary untyped** (`TrainingDatum = Tuple[TrainingInput,
+  Label]`). The module docstring and an inline comment already flag it
+  as a known looseness ("typically a single scalar value, but could be
+  a list of values"), which is itself the §1 (data & types: no
+  untyped `Any` past a boundary) violation PRINCIPLES.md asks to avoid.
+  A discriminated union or a per-dojo generic would make a mismatched
+  label shape an illegal (unrepresentable) state instead of a runtime
+  surprise - but it fans out to every dojo file, so it's a real design
+  task, not a local fix. Flagged during a 2026-10-05 project-wide
+  cleanup scan, not yet fixed.
 - Use the test loss to adjust the loss function temperature in an
   intelligent way.
 - Explore a "just-in-time" metric-generation architecture where a dojo
