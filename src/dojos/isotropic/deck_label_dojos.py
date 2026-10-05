@@ -2,7 +2,11 @@
 group from the metrics-private DeckBox (data/metrics/isotropic/deck_box.db)
 and whose label is one value per row - the DeckLabelDataConstructor shape.
 
-- FullDeckWinPredictionDojo: final deck -> won (binary).
+- FullDeckWinPredictionDojo: final deck -> won (binary); a thin
+  DeckBinaryLabelMetricDojo subclass (see
+  src/dojos/generic/paired_metric_dojos.py) naming only METRIC, since
+  its deck column is already "deck_uuid" and its metric declares
+  LABEL_COLUMN.
 - KingdomGameLengthDojo: kingdom -> winner's turn count (regression).
 - NextTurnActionCountDojo: mid-game partial deck -> Action cards played
   next turn (regression).
@@ -12,9 +16,9 @@ and whose label is one value per row - the DeckLabelDataConstructor shape.
 DECK COLUMN: DeckLabelDataConstructor reads a fixed "deck_uuid" column;
 the kingdom and partial-deck metrics name theirs kingdom_uuid and
 partial_deck_uuid, so those wrappers wrap it in a
-RenamedColumnDataConstructor. Label column names are literals in the
-metrics' parquet schemas (no LABEL_COLUMN ClassVar), so they are named
-once here as module constants.
+RenamedColumnDataConstructor. Their label column names are literals in
+the metrics' parquet schemas (no LABEL_COLUMN ClassVar), so they are
+named once here as module constants.
 
 DECK BOX: every wrapper passes deck_box to its cell as well as to its
 constructor, so GenericDojo's version check can confirm the box and the
@@ -42,13 +46,11 @@ from src.data_refinement.metrics.isotropic.summary.kingdom_game_length_metric im
 from src.dojos.generic.data_constructor import DataConstructor
 from src.dojos.generic.data_constructors import DeckLabelDataConstructor
 from src.dojos.generic.dojo_config import DojoConfig
-from src.dojos.generic.multi_card_binary_classification.dojo import (
-    MultiCardBinaryClassificationDojo,
-)
 from src.dojos.generic.multi_card_fixed_classification.dojo import (
     MultiCardFixedClassificationDojo,
 )
 from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
+from src.dojos.generic.paired_metric_dojos import DeckBinaryLabelMetricDojo
 from src.dojos.isotropic.renamed_column_data_constructor import (
     RenamedColumnDataConstructor,
 )
@@ -59,7 +61,6 @@ _DECK_UUID_COLUMN = "deck_uuid"
 _KINGDOM_UUID_COLUMN = "kingdom_uuid"
 _PARTIAL_DECK_UUID_COLUMN = "partial_deck_uuid"
 
-_WON_COLUMN = "won"
 _WINNER_TURNS_COLUMN = "winner_turns"
 _NEXT_TURN_ACTION_COUNT_COLUMN = "next_turn_action_count"
 _ENDING_TYPE_COLUMN = "ending_type"
@@ -205,47 +206,13 @@ class NextTurnActionCountDojo(IsotropicDeckRegressionDojo):
     LABEL_CAP = 30.0
 
 
-class FullDeckWinPredictionDojo(MultiCardBinaryClassificationDojo):
+class FullDeckWinPredictionDojo(DeckBinaryLabelMetricDojo):
     """One player's final deck -> finished first (FullDeckWinPredictionMetric).
 
     The final deck holds its Victory cards, so part of this is learning
     which cards score; that is intended signal, not a leak."""
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        deck_box: DeckBox,
-        card_embedding_size: int,
-        path_to_training_data: Path | None = None,
-        name: str | None = None,
-        rng_seed: int | None = None,
-        strict_version_check: bool = True,
-    ) -> None:
-        """
-        Inputs: as IsotropicDeckRegressionDojo.
-        Output: none (constructor).
-        Side effects: see MultiCardBinaryClassificationDojo (may write
-            split files).
-        Exceptions: see MultiCardBinaryClassificationDojo.
-
-        Example:
-            >>> FullDeckWinPredictionDojo(binder, HoldoutSpec.no_holdout(), box, 32)
-        """
-        super().__init__(
-            card_lookup=card_binder,
-            holdout=holdout,
-            path_to_training_data=path_to_training_data
-            or FullDeckWinPredictionMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=build_deck_label_constructor(
-                deck_box, _DECK_UUID_COLUMN, _WON_COLUMN
-            ),
-            card_embedding_size=card_embedding_size,
-            deck_box=deck_box,
-            config=DojoConfig(
-                name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
-            ),
-        )
+    METRIC = FullDeckWinPredictionMetric
 
 
 class KingdomEndingTypeDojo(MultiCardFixedClassificationDojo):

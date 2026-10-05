@@ -32,6 +32,7 @@ from src.data_refinement.metrics.generic.masked_field_regression_metric import (
 )
 from src.dojos.generic.data_constructors import (
     CardAverageDataConstructor,
+    DeckCardMaskDataConstructor,
     DeckLabelDataConstructor,
     HeldOutDeckCardDataConstructor,
     MaskedFieldDataConstructor,
@@ -83,6 +84,15 @@ class LabelValuesMetric(Protocol):
 
     DEFAULT_OUTPUT_PATH: Path
     LABEL_COLUMN: str
+    LABEL_VALUES: tuple[str, ...]
+
+
+class DeckCardMaskLabelValuesMetric(Protocol):
+    """A DeckCardMaskMetric-shaped class: a closed-vocabulary label, but
+    (unlike LabelValuesMetric) always written to a fixed "label" column,
+    so there is no LABEL_COLUMN to read by reference."""
+
+    DEFAULT_OUTPUT_PATH: Path
     LABEL_VALUES: tuple[str, ...]
 
 
@@ -312,6 +322,57 @@ class DeckFixedLabelMetricDojo(MultiCardFixedClassificationDojo):
             data_constructor=DeckLabelDataConstructor(
                 deck_box, self.METRIC.LABEL_COLUMN, label_caster=str
             ),
+            label_values=self.METRIC.LABEL_VALUES,
+            card_embedding_size=card_embedding_size,
+            deck_box=deck_box,
+            config=DojoConfig(
+                name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
+            ),
+        )
+
+
+class DeckCardMaskMetricDojo(MultiCardFixedClassificationDojo):
+    """Whole deck (one card masked out) in -> the masked card's identity
+    (a closed vocabulary str, always the metric's "label" column) out.
+
+    Subclasses set METRIC to a DeckCardMaskMetric-shaped class with
+    DEFAULT_OUTPUT_PATH and LABEL_VALUES; label_values is passed through
+    unchanged (a metric with an OTHER_LABEL fallback already includes
+    it in LABEL_VALUES - see that metric's own docstring). Unlike
+    DeckFixedLabelMetricDojo's metrics, there is no LABEL_COLUMN to read
+    by reference here - DeckCardMaskDataConstructor always reads the
+    masked card's identity off the metric's fixed "label" column.
+    """
+
+    METRIC: ClassVar[DeckCardMaskLabelValuesMetric]
+
+    def __init__(
+        self,
+        card_binder: CardBinder,
+        holdout: HoldoutSpec,
+        deck_box: DeckBox,
+        card_embedding_size: int,
+        path_to_training_data: Path | None = None,
+        name: str | None = None,
+        rng_seed: int | None = None,
+        strict_version_check: bool = True,
+    ) -> None:
+        """
+        Inputs: as DeckLabelMetricDojo.
+        Output: none (constructor).
+        Side effects: see MultiCardFixedClassificationDojo (may write
+            split files).
+        Exceptions: see MultiCardFixedClassificationDojo.
+
+        Example:
+            >>> LeaderMaskedFromDeckDojo(binder, HoldoutSpec.no_holdout(), box, 32)
+        """
+        super().__init__(
+            card_lookup=card_binder,
+            holdout=holdout,
+            path_to_training_data=path_to_training_data
+            or self.METRIC.DEFAULT_OUTPUT_PATH,
+            data_constructor=DeckCardMaskDataConstructor(deck_box, "label"),
             label_values=self.METRIC.LABEL_VALUES,
             card_embedding_size=card_embedding_size,
             deck_box=deck_box,
