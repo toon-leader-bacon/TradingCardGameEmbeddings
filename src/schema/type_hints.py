@@ -8,7 +8,7 @@ to the same shapes instead of each re-deriving them.
 """
 
 from enum import Enum
-from typing import Any, Callable, Iterator, List, Tuple, Union, cast
+from typing import Any, Callable, Iterator, List, Tuple, TypeAlias, Union, cast
 
 import torch
 
@@ -165,9 +165,9 @@ TrainingDatum = Tuple[TrainingInput, Label]
 
 
 # region Outputs
-Embedding = torch.Tensor
+Embedding: TypeAlias = torch.Tensor
 
-SingleCardEmbedding = Embedding
+SingleCardEmbedding: TypeAlias = Embedding
 BatchedSingleCardEmbedding = List[SingleCardEmbedding]
 
 MultiCardEmbedding = List[Embedding]
