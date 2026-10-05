@@ -41,7 +41,7 @@ import logging
 from uuid import UUID
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.data_refinement.metrics.deck_ids import deck_uuid_from_cards
+from src.data_refinement.deck_ids import deck_uuid_from_cards
 from src.data_refinement.metrics.isotropic.card_names import (
     card_uuid_for_name as card_uuid_for_name,
 )

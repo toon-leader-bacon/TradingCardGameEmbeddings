@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 
-from src.data_refinement.metrics.deck_ids import deck_uuid_from_cards
+from src.data_refinement.deck_ids import deck_uuid_from_cards
 from src.data_refinement.metrics.generic.masked_field_metric import OTHER_LABEL
 from src.data_refinement.metrics.seventeenlands.game_data.game_deck_label_metrics import (
     DeckGameLengthPredictionMetric,

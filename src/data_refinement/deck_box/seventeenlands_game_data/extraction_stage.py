@@ -51,7 +51,7 @@ and a draft plays 3-7 games with the same or nearly the same deck
 the box ~5x (~28M decks) and let 17lands dominate every deck-based
 dojo, so this stage stores at most one deck per draft. That deck's
 identity is deck_uuid_from_cards() (see
-src/data_refinement/metrics/deck_ids.py) over the draft's canonical
+src/data_refinement/deck_ids.py) over the draft's canonical
 game's fully-resolved card multiset — a CONTENT hash, not a function
 of draft_id — so two different drafts that build the exact same
 40-card deck collapse into ONE stored GenericDeck, letting the box
@@ -188,7 +188,7 @@ from src.data_refinement.deck_box.seventeenlands_game_data._game_key import _Gam
 from src.data_refinement.deck_box.seventeenlands_game_data._tar_aware_csv_stream import (
     _open_stream,
 )
-from src.data_refinement.metrics.deck_ids import deck_uuid_from_cards
+from src.data_refinement.deck_ids import deck_uuid_from_cards
 from src.data_retrieval.seventeenlands.downloader import SeventeenLandsDownloader
 from src.schema.card import GenericDeck, Provenance
 from src.schema.data_source import DataSource

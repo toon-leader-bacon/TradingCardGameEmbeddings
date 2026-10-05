@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.data_refinement.metrics.deck_ids import deck_uuid_from_cards
+from src.data_refinement.deck_ids import deck_uuid_from_cards
 from src.data_refinement.metrics.seventeenlands.game_data.deck_occurrence_count_metric import (  # noqa: E501
     DeckOccurrenceCountMetric,
 )

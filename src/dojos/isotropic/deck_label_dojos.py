@@ -51,7 +51,7 @@ from src.dojos.generic.multi_card_fixed_classification.dojo import (
 )
 from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
 from src.dojos.generic.paired_metric_dojos import DeckBinaryLabelMetricDojo
-from src.dojos.isotropic.renamed_column_data_constructor import (
+from src.dojos.generic.renamed_column_data_constructor import (
     RenamedColumnDataConstructor,
 )
 from src.schema.holdout import HoldoutSpec

@@ -66,10 +66,16 @@ larger amount of configuration surface - judged not worth it.
   bounded row groups so a metric over a tens-of-millions-row source
   keeps flat memory. `write_columns()` writes a whole batch of rows at
   once (e.g. one 17lands chunk), after any rows already buffered.
-- `deck_ids.py` - content-addressed deck-id hashing shared across
-  `Metric[RawRowT]`-family containers (see its own module docstring);
-  not used by the `CorpusScanMetric` family, which has no deck concept.
 - `generic/` - source-agnostic metric bases, described above.
+
+Content-addressed deck-id hashing (`deck_uuid_from_cards()`) now lives
+at [`../deck_ids.py`](../deck_ids.py), not here - a sibling `deck_box`
+extraction stage needs the exact same hashing as its game's metrics
+(so the canonical box and the metrics agree on identity), so it moved
+one level up to data_refinement/ rather than staying metrics-private.
+Shared across every `Metric[RawRowT]`-family container (see its own
+module docstring); not used by the `CorpusScanMetric` family, which
+has no deck concept.
 
 ## Containers
 

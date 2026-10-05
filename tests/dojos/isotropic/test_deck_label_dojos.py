@@ -22,7 +22,7 @@ from src.dojos.isotropic.deck_label_dojos import (
     build_deck_label_constructor,
     label_capped_at,
 )
-from src.dojos.isotropic.renamed_column_data_constructor import (
+from src.dojos.generic.renamed_column_data_constructor import (
     RenamedColumnDataConstructor,
 )
 from src.schema.holdout import HoldoutSpec
