@@ -3,11 +3,9 @@ through its three game_deck_label_metrics.py concretes and driven
 through scan_game_csv, as a real run drives them."""
 
 from pathlib import Path
-from uuid import UUID
 
 import pyarrow.parquet as pq
 
-from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.deck_ids import deck_uuid_from_cards
 from src.data_refinement.metrics.generic.masked_field_metric import OTHER_LABEL
 from src.data_refinement.metrics.seventeenlands.game_data.game_deck_label_metrics import (
@@ -17,7 +15,6 @@ from src.data_refinement.metrics.seventeenlands.game_data.game_deck_label_metric
 )
 from src.data_refinement.metrics.seventeenlands.game_data.scanner import scan_game_csv
 from src.data_refinement.metrics.version_metadata import read_version_metadata
-from src.schema.game_id import GameId
 from tests.data_refinement.metrics.seventeenlands.game_data._chunk_fixtures import (
     MORNINGSTAR,
     OWLBEAR,
@@ -30,12 +27,10 @@ from tests.data_refinement.metrics.seventeenlands.game_data._chunk_fixtures impo
 )
 
 
-def _scan_rows(
-    tmp_path: Path, rows: list[dict], metric_class: type, deck_box: DeckBox
-) -> list[dict]:
+def _scan_rows(tmp_path: Path, rows: list[dict], metric_class: type) -> list[dict]:
     """Scan rows through one metric_class instance; its output rows."""
     binder = binder_with_cards([OWLBEAR, MORNINGSTAR])
-    metric = metric_class(VERSION, deck_box, output_path=tmp_path / "out.parquet")
+    metric = metric_class(VERSION, output_path=tmp_path / "out.parquet")
     csv_path = write_csv(tmp_path / "games.csv", rows)
     scan_game_csv(csv_path, [metric], parser_for(binder), block_size=256)
     return pq.read_table(tmp_path / "out.parquet").to_pylist()
@@ -49,7 +44,6 @@ class TestDeckWinPredictionMetric:
             tmp_path,
             [row(won=True, owlbear_deck=4), row(won=False, owlbear_deck=4)],
             DeckWinPredictionMetric,
-            DeckBox(),
         )
 
         assert [r["won"] for r in rows] == [True, False]
@@ -57,9 +51,7 @@ class TestDeckWinPredictionMetric:
 
     def test_deck_uuid_is_the_row_implementations_hash(self, tmp_path: Path) -> None:
         binder = binder_with_cards([OWLBEAR, MORNINGSTAR])
-        metric = DeckWinPredictionMetric(
-            VERSION, DeckBox(), output_path=tmp_path / "out.parquet"
-        )
+        metric = DeckWinPredictionMetric(VERSION, output_path=tmp_path / "out.parquet")
         csv_path = write_csv(
             tmp_path / "games.csv", [row(won=True, owlbear_deck=4, morningstar_deck=1)]
         )
@@ -73,39 +65,19 @@ class TestDeckWinPredictionMetric:
         )
         assert output["deck_uuid"] == str(expected)
 
-    def test_identical_decks_across_games_dedupe_in_the_shared_deck_box(
+    def test_identical_decks_across_games_share_one_deck_uuid(
         self, tmp_path: Path
     ) -> None:
-        deck_box = DeckBox()
-
-        _scan_rows(
+        rows = _scan_rows(
             tmp_path,
             [
                 row(won=True, owlbear_deck=4, game_number=1),
                 row(won=True, owlbear_deck=4, game_number=2),
             ],
             DeckWinPredictionMetric,
-            deck_box,
         )
 
-        assert len(list(deck_box.all_uuids(GameId.MTG))) == 1
-
-    def test_a_deck_is_named_after_its_first_game(self, tmp_path: Path) -> None:
-        deck_box = DeckBox()
-
-        first, _ = _scan_rows(
-            tmp_path,
-            [
-                row(won=True, owlbear_deck=4, draft_id="d7", match_number=2),
-                row(won=True, owlbear_deck=4, draft_id="d8"),
-            ],
-            DeckWinPredictionMetric,
-            deck_box,
-        )
-
-        deck = deck_box.get_by_uuid(UUID(first["deck_uuid"]))
-        assert deck is not None
-        assert deck.name == "game_data d7/2/1 deck"
+        assert rows[0]["deck_uuid"] == rows[1]["deck_uuid"]
 
     def test_output_row_carries_draft_id_match_number_game_number(
         self, tmp_path: Path
@@ -114,7 +86,6 @@ class TestDeckWinPredictionMetric:
             tmp_path,
             [row(won=True, draft_id="draft42", match_number=3, game_number=1)],
             DeckWinPredictionMetric,
-            DeckBox(),
         )
 
         assert output["draft_id"] == "draft42"
@@ -122,7 +93,7 @@ class TestDeckWinPredictionMetric:
         assert output["game_number"] == 1
 
     def test_output_requires_the_deck_box(self, tmp_path: Path) -> None:
-        _scan_rows(tmp_path, [row(won=True)], DeckWinPredictionMetric, DeckBox())
+        _scan_rows(tmp_path, [row(won=True)], DeckWinPredictionMetric)
 
         metadata = read_version_metadata(tmp_path / "out.parquet")
         assert metadata is not None
@@ -135,7 +106,6 @@ class TestDeckGameLengthPredictionMetric:
             tmp_path,
             [row(won=True, num_turns=11)],
             DeckGameLengthPredictionMetric,
-            DeckBox(),
         )
 
         assert output["num_turns"] == 11
@@ -147,7 +117,6 @@ class TestDeckRankTierPredictionMetric:
             tmp_path,
             [row(won=True, rank="mythic")],
             DeckRankTierPredictionMetric,
-            DeckBox(),
         )
 
         assert output["rank"] == "mythic"
@@ -157,7 +126,6 @@ class TestDeckRankTierPredictionMetric:
             tmp_path,
             [row(won=True, rank="unranked_prerelease")],
             DeckRankTierPredictionMetric,
-            DeckBox(),
         )
 
         assert output["rank"] == OTHER_LABEL
@@ -168,16 +136,13 @@ class TestDeckRankTierPredictionMetric:
             tmp_path,
             [row(won=True, rank=""), row(won=True, rank="gold")],
             DeckRankTierPredictionMetric,
-            DeckBox(),
         )
 
         assert [r["rank"] for r in rows] == [OTHER_LABEL, "gold"]
 
 
 def test_finalize_closes_writer_and_is_idempotent(tmp_path: Path) -> None:
-    metric = DeckWinPredictionMetric(
-        VERSION, DeckBox(), output_path=tmp_path / "out.parquet"
-    )
+    metric = DeckWinPredictionMetric(VERSION, output_path=tmp_path / "out.parquet")
 
     first = metric.finalize()
     second = metric.finalize()

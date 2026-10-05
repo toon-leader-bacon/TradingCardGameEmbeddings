@@ -2,10 +2,11 @@
 this family has seen.
 
 A vectorized Metric[GameDataChunk] (see game_data/README.md). Per
-chunk it stores the chunk's distinct decks in the shared DeckBox
-(store_chunk_decks(), same as every other deck-input metric) and adds
-each row's draft_id to the running per-deck_uuid set of distinct
-drafts seen so far.
+chunk it adds each row's draft_id to the running per-deck_uuid set of
+distinct drafts seen so far - no DeckBox of its own. The canonical
+DeckBox (src/data_refinement/deck_box/seventeenlands_game_data/
+extraction_stage.py) already holds every deck this metric would ever
+see, under the same deck_uuid_from_cards() identity.
 
 ACCUMULATION, NOT STREAMING: like
 on_play_win_rate_sensitivity_by_deck_metric.py's
@@ -32,11 +33,7 @@ from uuid import UUID
 
 import pyarrow as pa
 
-from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.parquet_builder import ParquetBuilder
-from src.data_refinement.metrics.seventeenlands.game_data.chunk_decks import (
-    store_chunk_decks,
-)
 from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
 )
@@ -70,25 +67,20 @@ class DeckOccurrenceCountMetric:
     def __init__(
         self,
         version_metadata: MetricVersionMetadata,
-        deck_box: DeckBox,
         output_path: Path | None = None,
     ) -> None:
         """Start a metric with no decks seen yet.
 
         Inputs:
             version_metadata: the CardBinder version this run reads;
-                stamped onto the output with requires_deck_box=True.
-            deck_box: the metrics-private DeckBox every deck this
-                metric sees is written into - shared with every other
-                deck-input metric in the same scan pass, so identical
-                decks dedupe against each other. Never the published
-                deck_box/ box.
+                stamped onto the output with requires_deck_box=True
+                (a downstream reader of deck_uuid still needs some
+                DeckBox - see module docstring).
             output_path: overrides DEFAULT_OUTPUT_PATH when given.
         Output: none (constructor).
         Side effects: none (no I/O until accumulate()/finalize()).
         Exceptions: none.
         """
-        self._deck_box = deck_box
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
         self._version_metadata = dataclasses.replace(
             version_metadata, requires_deck_box=True
@@ -96,25 +88,20 @@ class DeckOccurrenceCountMetric:
         self._draft_ids_by_deck: dict[UUID, set[str]] = {}
 
     def accumulate(self, chunk: GameDataChunk) -> None:
-        """Store the chunk's decks and add each row's draft_id to its
-        deck's running set of distinct drafts.
+        """Add each row's draft_id to its deck's running set of distinct
+        drafts.
 
         Inputs: chunk.
         Output: none.
-        Side effects: store_chunk_decks(chunk.decks, self._deck_box) (a
-            deck already in the box, from this or another metric
-            sharing it, is left as stored); grows the per-deck_uuid
-            draft_id sets held in memory for the lifetime of this
-            instance.
-        Exceptions: DeckBox's batch-wide errors.
+        Side effects: grows the per-deck_uuid draft_id sets held in
+            memory for the lifetime of this instance.
+        Exceptions: none.
 
         Example:
-            >>> metric = DeckOccurrenceCountMetric(version_metadata, deck_box)
+            >>> metric = DeckOccurrenceCountMetric(version_metadata)
             >>> metric.accumulate(chunk)
             >>> metric.finalize()
         """
-        store_chunk_decks(chunk.decks, self._deck_box)
-
         deck_uuids = chunk.decks.row_deck_uuids()
         draft_ids = chunk.keys.draft_id
         for deck_uuid, draft_id in zip(deck_uuids, draft_ids):

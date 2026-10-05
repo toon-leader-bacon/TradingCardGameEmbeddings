@@ -35,11 +35,11 @@ Python.
     `num_turns`, `keys`, `rank` (str; `""` for unranked Trad and Sealed
     events) and `decks`. It checks at construction that every zone is
     present and every per-row field has the same row count.
-- `chunk_decks.py` — `build_chunk_decks(deck_zone, keys, source_game)`
-  and `store_chunk_decks(decks, deck_box)`. A row's deck is the FULL
-  copy-count multiset over `deck_<name>` columns: each present column
-  contributes `deck_zone.counts[row, column]` copies of its card uuid,
-  in header order (matching
+- `chunk_decks.py` — `build_chunk_decks(deck_zone, keys, source_game)`.
+  A row's deck is the FULL copy-count multiset over `deck_<name>`
+  columns: each present column contributes
+  `deck_zone.counts[row, column]` copies of its card uuid, in header
+  order (matching
   `deck_box/seventeenlands_game_data/extraction_stage.py`'s own
   full-multiset expansion), not merely one uuid per present column.
   Rows are grouped by that full count pattern (presence alone is not a
@@ -48,10 +48,11 @@ Python.
   same id (two columns naming one card, or any other coincidence
   producing the same multiset) share the earliest row's deck. A deck is
   named after its first row's game (`game_data <draft_id>/<match>/<game>
-  deck`). `store_chunk_decks` calls `create_if_absent` once per deck;
-  each deck-input metric calls it itself, so a deck recurs (a cheap
-  lookup) once per such metric, and each metric's deck writes stay
-  inside its own failure isolation.
+  deck`). Deck identity is hashed the same way as the canonical
+  `DeckBox` builder (`deck_box/seventeenlands_game_data/
+  extraction_stage.py`), so no metric needs to store any of this
+  module's decks anywhere: the canonical box already has them, under
+  the same id.
 - `game_data_chunk_parser.py` — `GameDataChunkParser.from_header(header,
   card_binder, source_game)`, the only place that knows the CSV's
   column names. Card matching is `GameCardColumns.from_header()`'s.
@@ -130,9 +131,17 @@ a CSV with no rows writes a column-less file.
 
 ### Deck-input metrics
 
-Each takes `(version_metadata, deck_box, output_path=None)`, stores every
-chunk's decks with `store_chunk_decks` (a deck already in the box keeps
-its stored entry), and stamps its output `requires_deck_box=True`.
+Each takes `(version_metadata, output_path=None)` — no `deck_box` of its
+own — and stamps its output `requires_deck_box=True`. That flag still
+means what it always did: a `deck_uuid` output column is only useful to
+a reader (the training-side dojo,
+`src/dojos/generic/generic_dojo.py`) that can resolve it back to card
+lists via a `DeckBox`. These metrics just no longer need to build or
+write to one themselves — the canonical box
+(`deck_box/seventeenlands_game_data/extraction_stage.py`) already holds
+every deck they'd ever see, under the same `deck_uuid_from_cards()`
+identity (see `chunk_decks.py` above), so a metrics-private scratch box
+would be pure redundant work.
 
 - `game_deck_label_metric.py` — `GameDeckLabelMetric` (Template Method,
   abstract, streaming): one output row per game, `draft_id`,
@@ -191,9 +200,14 @@ metric is built from the run's `MetricVersionMetadata` (the binder
 version, hashed once per run).
 
 The driver (`scripts/run_metrics.py`) owns everything shared:
-- it reads each CSV's header once and builds its parser;
-- it passes one metrics-private `DeckBox` to every deck-input metric,
-  so identical decks dedupe, and saves it after the last CSV.
+- it reads each CSV's header once and builds its parser.
+
+This family has no deck box of its own (`deck_box_output_path=None`):
+every deck-input metric only needs a `deck_uuid` for its output row,
+which it already gets from the chunk's own `ChunkDecks`
+(`chunk.decks.row_deck_uuids()`), so none of them ever read a `DeckBox`
+back. The canonical box that resolves those ids to card lists is built
+separately, by `deck_box/seventeenlands_game_data/extraction_stage.py`.
 
 A game's identifier is the composite `(draft_id: str, match_number:
 int, game_number: int)`, written as three output columns: no single raw
@@ -209,7 +223,6 @@ flowchart LR
     chunk --> card[per-card metrics<br/>CardColumnTallies]
     chunk --> deck[deck-input metrics]
     chunk --> pool[TutorTargetPoolMetric]
-    deck -->|store_chunk_decks| box[(family DeckBox)]
 ```
 
 Per chunk, every metric works on whole arrays: per-column tallies are
@@ -231,7 +244,7 @@ PYTHONPATH=. python scripts/run_metrics.py --source seventeenlands_game_data \
 ```
 
 Each metric writes `data/metrics/seventeenlands/game_data/<SET>/<Format>/<name>.parquet`.
-The family deck box is `data/metrics/seventeenlands/game_data/deck_box.db`.
+This family has no deck box of its own.
 
 Parity check: write the outputs to a scratch root with `--output-root`,
 then diff them against the existing outputs:

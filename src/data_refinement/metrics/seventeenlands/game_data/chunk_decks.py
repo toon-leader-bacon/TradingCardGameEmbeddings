@@ -19,9 +19,6 @@ other coincidence that still produces the same multiset), so patterns
 are then merged by deck id, keeping the earliest row's deck: the deck
 the row implementation stored first.
 
-store_chunk_decks() writes a chunk's decks into the family DeckBox; it
-lives here rather than on ChunkDecks so the chunk data module stays
-free of the storage layer.
 """
 
 from uuid import UUID
@@ -29,7 +26,6 @@ from uuid import UUID
 import numpy as np
 import numpy.typing as npt
 
-from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.deck_ids import deck_uuid_from_cards
 from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
     ChunkDecks,
@@ -72,23 +68,6 @@ def build_chunk_decks(
     # Patterns hashing to one deck id share that id's earliest deck
     decks, pattern_to_deck = _merge_by_deck_id(pattern_decks)
     return ChunkDecks(decks=decks, row_deck=pattern_to_deck[row_pattern])
-
-
-def store_chunk_decks(decks: ChunkDecks, deck_box: DeckBox) -> None:
-    """Store every deck of a chunk in deck_box, once per deck. A deck
-    already in the box keeps its stored entry.
-
-    Inputs: decks (a chunk's), deck_box (the family's metrics-private
-        box).
-    Output: none.
-    Side effects: deck_box.create_if_absent() once per deck.
-    Exceptions: DeckBox's batch-wide errors (see deck_box.py).
-
-    Example:
-        >>> store_chunk_decks(chunk.decks, deck_box)
-    """
-    for deck in decks.decks:
-        deck_box.create_if_absent(deck)
 
 
 def _group_rows_by_pattern(

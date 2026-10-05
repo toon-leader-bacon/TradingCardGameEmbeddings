@@ -1028,11 +1028,11 @@ _GAME_DATA_METRICS: tuple[SeventeenLandsMetricSpec, ...] = (
     ChunkMetricSpec(GameLengthAssociationMetric),
     ChunkMetricSpec(OnPlayWinRateDeltaMetric),
     ChunkMetricSpec(GameTutorTargetRateMetric),
-    DeckBoxChunkMetricSpec(DeckWinPredictionMetric),
-    DeckBoxChunkMetricSpec(DeckGameLengthPredictionMetric),
-    DeckBoxChunkMetricSpec(DeckRankTierPredictionMetric),
-    DeckBoxChunkMetricSpec(OnPlayWinRateSensitivityByDeckMetric),
-    DeckBoxChunkMetricSpec(DeckOccurrenceCountMetric),
+    ChunkMetricSpec(DeckWinPredictionMetric),
+    ChunkMetricSpec(DeckGameLengthPredictionMetric),
+    ChunkMetricSpec(DeckRankTierPredictionMetric),
+    ChunkMetricSpec(OnPlayWinRateSensitivityByDeckMetric),
+    ChunkMetricSpec(DeckOccurrenceCountMetric),
     ChunkMetricSpec(TutorTargetPoolMetric),
 )
 
@@ -1361,7 +1361,9 @@ def run_seventeenlands_game_data(
     Inputs: raw_path (one CSV, or None for every game_data CSV),
         output_root (None, or a scratch root for parity runs).
     Output: none.
-    Side effects: writes per-CSV outputs and the family deck box.
+    Side effects: writes per-CSV outputs. No deck box of its own: the
+        canonical box (extraction_stage.py) already has every deck
+        these metrics' deck_uuid outputs would need.
     Exceptions: see _run_seventeenlands_family.
 
     Example:
@@ -1375,9 +1377,7 @@ def run_seventeenlands_game_data(
             family_dir=SeventeenLandsDownloader.DEFAULT_RAW_DATA_DIR / "game_data",
             metric_specs=_GAME_DATA_METRICS,
             scanning=ChunkScanning(_scan_game_data_csv, frame_of=None),
-            deck_box_output_path=Path(
-                "data/metrics/seventeenlands/game_data/deck_box.db"
-            ),
+            deck_box_output_path=None,
         ),
         raw_path,
         output_root,
