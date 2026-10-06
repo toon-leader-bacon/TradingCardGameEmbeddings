@@ -51,6 +51,7 @@ class OpeningBuyRateMetric:
     DEFAULT_OUTPUT_PATH: ClassVar[Path] = Path(
         "data/metrics/isotropic/opening_buy_rate.parquet"
     )
+    LABEL_COLUMN: ClassVar[str] = "opening_buy_rate"
 
     def __init__(
         self,
@@ -129,7 +130,7 @@ class OpeningBuyRateMetric:
         result = [
             {
                 "nocab_uuid": str(card_uuid),
-                "opening_buy_rate": self._opening_count.get(card_uuid, 0) / total,
+                self.LABEL_COLUMN: self._opening_count.get(card_uuid, 0) / total,
                 "sample_count": total,
             }
             for card_uuid, total in self._total_count.items()

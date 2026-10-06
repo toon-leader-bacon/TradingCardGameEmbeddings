@@ -2,10 +2,12 @@
 cardvault_fabtcg binder's "typebox" and "textbox" strings.
 
 The binder has no class/talent keys: a typebox reads "<talents>
-<classes> <type> - <subtypes>" ("Light Warrior Action - Attack"), see
-../cardvault_fabtcg/card_mask_metrics.py. The rule, checked against the
-published FaB deck box (only 242 of 129,845 deck card slots, 0.19%,
-break it, mostly name-resolution noise in the box):
+<classes> <type> - <subtypes>" ("Light Warrior Action - Attack") -
+parsed by ../cardvault_fabtcg/typebox.py, shared with
+../cardvault_fabtcg/card_mask_metrics.py's own typebox-based metrics.
+The rule, checked against the published FaB deck box (only 242 of
+129,845 deck card slots, 0.19%, break it, mostly name-resolution noise
+in the box):
 
   - every talent on the card must be one of the hero's (an Elemental
     hero also has Earth, Ice and Lightning);
@@ -19,6 +21,10 @@ Generic cards name no class or talent, so they are legal for every hero.
 
 import re
 
+from src.data_refinement.metrics.cardvault_fabtcg.typebox import (
+    typebox_head,
+    typebox_words,
+)
 from src.schema.card import GenericCard
 
 _CLASSES = frozenset(
@@ -60,9 +66,6 @@ _ELEMENTAL_TALENTS = frozenset({"Earth", "Ice", "Lightning"})
 _REVERED = "Revered"
 _REVILED = "Reviled"
 _HERO_TYPE = "Hero"
-# typebox words are space separated; split cards join faces with "||"
-# and hybrids name two classes with " / "
-_TYPEBOX_WORD_SEPARATOR = re.compile(r"[\s|/]+")
 _SPECIALIZATION = re.compile(r"\*\*(?:Legendary )?([^*]+?) Specialization\*\*")
 
 
@@ -111,8 +114,7 @@ def _typebox_words(card: GenericCard) -> frozenset[str]:
     Inputs: card. Output: frozenset[str], empty without a typebox.
     Side effects: none. Exceptions: none.
     """
-    typebox = str(card.raw_content.get("typebox", ""))
-    return frozenset(_TYPEBOX_WORD_SEPARATOR.split(typebox.split(" - ")[0])) - {""}
+    return typebox_words(str(card.raw_content.get("typebox", "")))
 
 
 def _hero_supertypes(hero: GenericCard) -> frozenset[str]:
@@ -140,7 +142,7 @@ def _classes_fit(
     """
     if not card_classes:
         return True
-    if " / " in str(card.raw_content.get("typebox", "")).split(" - ")[0]:
+    if " / " in typebox_head(str(card.raw_content.get("typebox", ""))):
         return bool(card_classes & hero_words)
     return card_classes <= hero_words
 
