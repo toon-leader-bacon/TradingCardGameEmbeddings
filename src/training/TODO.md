@@ -467,6 +467,21 @@ a median of ~200 tokens and FaB to ~570.
 
 ## F. Housekeeping
 
+- [ ] **Split `run_config.py` (913 lines) and `dojo_catalog.py` (895
+  lines) into smaller files.** Neither violates a specific size
+  heuristic badly today (no individual function is oversized, and the
+  `_MOD_PARSERS`/`DOJO_CATALOG` dispatch-table style already avoids a
+  long if/elif chain, which PRINCIPLES.md §5 wants), but per §3 (file
+  organization) each file mixes a large flat literal/table with
+  meaningful parsing/building logic, and is a candidate to move its
+  private helpers (`run_config.py`'s `ConfigSection`/`_parse_*` family;
+  `dojo_catalog.py`'s `_recipe_for_*` builders) into sibling
+  implementation files, leaving the catalog/public API in a slimmer
+  top-level file. Most of the bulk is irreducible data (one catalog
+  line per dojo), so this is lower-priority than the line count alone
+  suggests. Flagged during a 2026-10-05 project-wide cleanup scan, not
+  yet fixed. (`src/training/run_config.py`, `src/training/dojo_catalog.py`)
+
 - [x] **Fix or remove stale files** (2026-09-26): `scripts/smoke_test.py`
   and `src/training/demo_training_loop.py` deleted; `src/README.md`
   updated.

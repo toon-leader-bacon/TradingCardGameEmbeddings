@@ -56,7 +56,7 @@ the published `data/final/decks/` location or to a
 `DeckExtractionStage`. `metrics/sts_gg/` uses a second, entirely
 separate `DeckBox` instance this way: private to that container, saved
 under `data/metrics/sts_gg/` instead, and keyed by a content-derived
-id (`create_if_absent()` + `metrics/deck_ids.py`'s
+id (`create_if_absent()` + `../deck_ids.py`'s
 `deck_uuid_from_cards()`) rather than this container's
 `uuid5(namespace, run_id)` scheme — see
 [`../metrics/sts_gg/README.md`](../metrics/sts_gg/README.md)'s "Deck

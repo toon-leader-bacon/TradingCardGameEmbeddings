@@ -21,7 +21,7 @@ from src.dojos.generic.single_card_fixed_classification.dojo import (
 from src.dojos.generic.single_card_fixed_classification.loss_spec import (
     MASKED_VECTOR_REGRESSION_LOSS_SPEC,
 )
-from src.dojos.isotropic.renamed_column_data_constructor import (
+from src.dojos.generic.renamed_column_data_constructor import (
     RenamedColumnDataConstructor,
 )
 from src.schema.holdout import HoldoutSpec

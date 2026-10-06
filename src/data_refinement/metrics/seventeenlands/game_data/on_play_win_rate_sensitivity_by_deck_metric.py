@@ -5,11 +5,13 @@ P(won | on_play) - P(won | on_draw), aggregated across every game
 sharing an identical deck.
 
 A vectorized Metric[GameDataChunk] (see game_data/README.md).
-Per chunk it stores the chunk's distinct decks in the shared
-DeckBox (store_chunk_decks()), counts each distinct deck's four
-on_play_win_counts tallies over its rows in one pass, and adds them to a
-running per-deck_uuid total. A CountTableMetric (../sliced_metric.py):
-each partition holds those four counts per deck_uuid.
+Per chunk it counts each distinct deck's four on_play_win_counts tallies
+over its rows in one pass, and adds them to a running per-deck_uuid
+total - no DeckBox of its own: deck_uuids use the canonical DeckBox's
+deck_uuid_from_cards() identity (see game_deck_label_metric.py's KNOWN
+GAP on box coverage). A CountTableMetric
+(../sliced_metric.py): each partition holds those four counts per
+deck_uuid.
 
 ACCUMULATION, NOT STREAMING: unlike game_deck_label_metric.py's
 GameDeckLabelMetric family, this metric's label needs every game with
@@ -29,18 +31,12 @@ import numpy as np
 import numpy.typing as npt
 import pyarrow as pa
 
-from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.seventeenlands.count_table import (
     write_count_table,
 )
-from src.data_refinement.metrics.seventeenlands.chunk_decks import (
-    store_chunk_decks,
-)
+from src.data_refinement.metrics.seventeenlands.chunk_decks import ChunkDecks
 from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
-)
-from src.data_refinement.metrics.seventeenlands.chunk_decks import (
-    ChunkDecks,
 )
 from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_counts import (
     COUNT_COLUMNS,
@@ -72,25 +68,20 @@ class OnPlayWinRateSensitivityByDeckMetric:
     def __init__(
         self,
         version_metadata: MetricVersionMetadata,
-        deck_box: DeckBox,
         output_path: Path,
     ) -> None:
         """Start a metric with no tallies.
 
         Inputs:
             version_metadata: the CardBinder version this run reads;
-                stamped onto the output with requires_deck_box=True.
-            deck_box: the metrics-private DeckBox every deck this
-                metric sees is written into - shared with every other
-                deck-input metric in the same scan pass. Never the
-                published deck_box/ box.
+                stamped onto the output with requires_deck_box=True (a
+                reader of deck_uuid needs the canonical DeckBox).
             output_path: this CSV's partition path
                 (SeventeenLandsPartition.path()).
         Output: none (constructor).
         Side effects: none (no I/O until accumulate()/finalize()).
         Exceptions: none.
         """
-        self._deck_box = deck_box
         self._version_metadata = dataclasses.replace(
             version_metadata, requires_deck_box=True
         )
@@ -98,24 +89,21 @@ class OnPlayWinRateSensitivityByDeckMetric:
         self._tallies: dict[UUID, npt.NDArray[np.int64]] = {}
 
     def accumulate(self, chunk: GameDataChunk) -> None:
-        """Store the chunk's decks and add each deck's games and wins on
-        each side of on_play to its running total.
+        """Add each deck's games and wins on each side of on_play to its
+        running total.
 
         Inputs: chunk.
         Output: none.
-        Side effects: store_chunk_decks(chunk.decks, self._deck_box); updates the
-            per-deck tallies.
-        Exceptions: DeckBox's batch-wide errors.
+        Side effects: updates the per-deck tallies.
+        Exceptions: none.
 
         Example:
             >>> metric = OnPlayWinRateSensitivityByDeckMetric(
-            ...     version_metadata, deck_box, partition_path
+            ...     version_metadata, partition_path
             ... )
             >>> metric.accumulate(chunk)
             >>> metric.finalize()
         """
-        store_chunk_decks(chunk.decks, self._deck_box)
-
         # Each distinct deck's four tallies over this chunk's rows
         masks = on_play_row_masks(chunk.won, chunk.on_play)
         per_deck = _count_per_deck(masks, chunk.decks)

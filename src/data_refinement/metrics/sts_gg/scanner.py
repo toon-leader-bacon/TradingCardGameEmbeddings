@@ -20,10 +20,12 @@ own docstring Example for what the calling driver does around it.
 
 import json
 import logging
+from functools import partial
 from pathlib import Path
 
 from tqdm import tqdm
 
+from src.data_refinement.metrics.isolated_call import call_isolated
 from src.data_refinement.metrics.metric import Metric
 
 _logger = logging.getLogger(__name__)
@@ -79,63 +81,14 @@ def scan_runs_jsonl(raw_path: Path, metrics: list[Metric[dict]]) -> None:
             # Feed this row to every metric, isolating one metric's
             # accumulate() failure from the rest of the list.
             for metric in metrics:
-                _accumulate_isolated(metric, row)
+                call_isolated(
+                    _logger,
+                    metric,
+                    "accumulate() on one row",
+                    partial(metric.accumulate, row),
+                )
 
     # Finalize every metric, isolating one metric's finalize()
     # failure from the rest of the list.
     for metric in metrics:
-        _finalize_isolated(metric)
-
-
-def _accumulate_isolated(metric: Metric[dict], row: dict) -> None:
-    """Call metric.accumulate(row), logging (not raising) on failure.
-
-    Private helper - single consumer is scan_runs_jsonl(). Isolating
-    this per call is what lets one bad metric in the list not corrupt
-    another metric's otherwise-fine scan.
-
-    Inputs:
-        metric: the Metric[dict] to drive.
-        row: one parsed JSON line to feed it.
-    Output: none.
-    Side effects: whatever metric.accumulate() does on success; on
-        failure, emits one logging.exception() call instead of
-        propagating.
-    Exceptions: none - every exception from metric.accumulate() is
-        caught and logged here.
-    """
-    try:
-        metric.accumulate(row)
-    except Exception:
-        _logger.exception(
-            "scan_runs_jsonl: %r raised from accumulate() on one row - "
-            "skipping just that row for this metric, continuing the scan "
-            "for every other metric",
-            metric,
-        )
-
-
-def _finalize_isolated(metric: Metric[dict]) -> None:
-    """Call metric.finalize(), logging (not raising) on failure.
-
-    Private helper - single consumer is scan_runs_jsonl(). Mirrors
-    _accumulate_isolated()'s isolation for the finalize phase.
-
-    Inputs:
-        metric: the Metric[dict] to finalize.
-    Output: none.
-    Side effects: whatever metric.finalize() does on success; on
-        failure, emits one logging.exception() call instead of
-        propagating.
-    Exceptions: none - every exception from metric.finalize() is
-        caught and logged here.
-    """
-    try:
-        metric.finalize()
-    except Exception:
-        _logger.exception(
-            "scan_runs_jsonl: %r raised from finalize() - its output may "
-            "be missing or incomplete, but every other metric still "
-            "finalizes normally",
-            metric,
-        )
+        call_isolated(_logger, metric, "finalize()", metric.finalize)

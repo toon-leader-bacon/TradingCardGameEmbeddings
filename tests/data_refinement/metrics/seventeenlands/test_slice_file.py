@@ -35,27 +35,25 @@ from src.data_refinement.metrics.version_metadata import (
     read_version_metadata,
     schema_with_version_metadata,
 )
-from src.data_retrieval.seventeenlands.refs import DataType, Expansion, format_code
+from src.data_retrieval.seventeenlands.refs import DataType, Expansion, FormatCode
 from src.schema.game_id import GameId
 
 VERSION = MetricVersionMetadata(game=GameId.MTG, card_binder_version="v1")
-KTK_SEALED = (Expansion.KTK, format_code.Sealed)
-MSH_PREMIER = (Expansion.MSH, format_code.PremierDraft)
-PREMIER_ONLY = SeventeenLandsSlice(formats=frozenset({format_code.PremierDraft}))
+KTK_SEALED = (Expansion.KTK, FormatCode.Sealed)
+MSH_PREMIER = (Expansion.MSH, FormatCode.PremierDraft)
+PREMIER_ONLY = SeventeenLandsSlice(formats=frozenset({FormatCode.PremierDraft}))
 # A whole-second mtime: every filesystem stores it exactly
 _SENTINEL_NS = 1_000_000_000 * 1_000_000_000
 
 
-def _partition_path(
-    root: Path, stem: str, where: tuple[Expansion, format_code]
-) -> Path:
+def _partition_path(root: Path, stem: str, where: tuple[Expansion, FormatCode]) -> Path:
     expansion, fmt = where
     return SeventeenLandsPartition(DataType.GAME, stem, expansion, fmt).path(root)
 
 
 def _write_tutor(
     root: Path,
-    where: tuple[Expansion, format_code],
+    where: tuple[Expansion, FormatCode],
     rows: dict[str, tuple[float, float]],
     version: MetricVersionMetadata = VERSION,
 ) -> Path:
@@ -73,7 +71,7 @@ def _write_tutor(
 
 
 def _write_deck_wins(
-    root: Path, where: tuple[Expansion, format_code], decks: list[str]
+    root: Path, where: tuple[Expansion, FormatCode], decks: list[str]
 ) -> Path:
     """One DeckWinPredictionMetric partition, one won game per deck."""
     path = _partition_path(root, DeckWinPredictionMetric.OUTPUT_STEM, where)

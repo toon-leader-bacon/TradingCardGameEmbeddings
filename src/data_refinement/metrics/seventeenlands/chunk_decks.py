@@ -6,18 +6,23 @@ is every distinct deck in a chunk plus each row's index into them.
 build_chunk_decks identifies every row's constructed deck once per
 chunk, for each family's chunk parser.
 
-A row's deck is its present deck_<name> columns (count > 0), one card
-uuid per present column in header order, exactly the list the row
-implementation built per row. Rows are grouped by that present-column
-pattern first, so each pattern is hashed with
-deck_ids.deck_uuid_from_cards() once per chunk, not once per row per
-metric. Two patterns can hash to one deck (two header columns naming
-one card), so patterns are then merged by deck id, keeping the earliest
-row's deck: the deck the row implementation stored first.
+A row's deck is the FULL multiset of its deck_<name> columns: each
+present column (count > 0) contributes deck_zone.counts[row, column]
+copies of that column's card_uuid, in header order - the same
+full-copy-count expansion
+deck_box/seventeenlands_game_data/extraction_stage.py's
+_card_nocab_uuids_for_row() does for the canonical DeckBox, so two rows
+that differ only in copy counts hash to different deck ids. Rows are
+grouped by that per-column count pattern first (not merely which
+columns are present - see _group_rows_by_pattern()'s own docstring for
+why presence alone is no longer a safe coarsening), so each pattern is
+hashed with deck_ids.deck_uuid_from_cards() once per chunk, not once
+per row per metric. Two patterns can hash to one deck (two header
+columns naming one card, or - now that grouping is by count - any
+other coincidence that still produces the same multiset), so patterns
+are then merged by deck id, keeping the earliest row's deck: the deck
+the row implementation stored first.
 
-store_chunk_decks() writes a chunk's decks into the family DeckBox; it
-lives here rather than on ChunkDecks so the chunk data module stays
-free of the storage layer.
 """
 
 from dataclasses import dataclass
@@ -27,7 +32,7 @@ import numpy as np
 import numpy.typing as npt
 
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.data_refinement.metrics.deck_ids import deck_uuid_from_cards
+from src.data_refinement.deck_ids import deck_uuid_from_cards
 from src.data_refinement.metrics.seventeenlands.zone_counts import ZoneCounts
 from src.schema.card import GenericDeck
 from src.schema.game_id import GameId
@@ -54,9 +59,9 @@ class ChunkDecks:
     played.
 
     decks: one GenericDeck per distinct deck id, in order of first row.
-        Its id is deck_ids.deck_uuid_from_cards over the row's present
-        deck columns (a card in two columns appears twice), so ids are
-        the row implementation's exactly. Its name and card order are
+        Its id is deck_ids.deck_uuid_from_cards over the row's full
+        copy-count multiset, the canonical DeckBox's id for the same
+        decklist. Its name and card order are
         its first row's ("<family_label> <draft_id>/<match>/<game> deck",
         e.g. "game_data ..." or "replay_data ...").
     row_deck: shape (rows,); row i played decks[row_deck[i]].
@@ -116,14 +121,14 @@ def build_chunk_decks(
         >>> decks = build_chunk_decks(zone, keys, GameId.MTG, "game_data")
         >>> decks.decks[decks.row_deck[0]]  # row 0's deck
     """
-    present = deck_zone.present()
-
-    # Group rows by present-column pattern, in order of first row
-    first_rows, row_pattern = _group_rows_by_pattern(present)
+    # Group rows by full copy-count pattern, in order of first row (see
+    # _group_rows_by_pattern()'s own docstring for why count, not mere
+    # presence, is the safe coarsening once decks are multisets)
+    first_rows, row_pattern = _group_rows_by_pattern(deck_zone.counts)
 
     # One GenericDeck per pattern, named after its first row's game
     pattern_decks = [
-        _deck_for_row(deck_zone, present, keys, first_row, source_game, family_label)
+        _deck_for_row(deck_zone, keys, first_row, source_game, family_label)
         for first_row in first_rows
     ]
 
@@ -134,7 +139,8 @@ def build_chunk_decks(
 
 def store_chunk_decks(decks: ChunkDecks, deck_box: DeckBox) -> None:
     """Store every deck of a chunk in deck_box, once per deck. A deck
-    already in the box keeps its stored entry.
+    already in the box keeps its stored entry. Used by replay_data's
+    combat aggression metric, whose family keeps a private box.
 
     Inputs: decks (a chunk's), deck_box (the family's metrics-private
         box).
@@ -150,28 +156,34 @@ def store_chunk_decks(decks: ChunkDecks, deck_box: DeckBox) -> None:
 
 
 def _group_rows_by_pattern(
-    present: npt.NDArray[np.bool_],
+    counts: npt.NDArray[np.int16],
 ) -> tuple[npt.NDArray[np.intp], npt.NDArray[np.intp]]:
-    """Group present's rows by identical boolean pattern.
+    """Group counts's rows by identical per-column copy-count pattern.
 
-    Inputs: present, shape (rows, columns).
+    Grouping by mere column PRESENCE (count > 0) is no longer a safe
+    coarsening now that a row's deck is the full copy-count multiset
+    (see module docstring): two rows can share a present-column pattern
+    while differing in copy counts (e.g. one copy of a card vs. two),
+    and those hash to different deck ids. Grouping by the full count
+    pattern instead keeps every row that pre-groups together on a path
+    to the SAME hash, so no two rows with different multisets are ever
+    merged before _merge_by_deck_id() runs.
+
+    Inputs: counts, shape (rows, columns).
     Output: (first_rows, row_group): first_rows[g] is group g's first
         row index, ascending; row_group[i] is row i's group.
     Side effects: none. Exceptions: none.
     """
-    rows = present.shape[0]
+    rows = counts.shape[0]
     if rows == 0:
         return np.zeros(0, np.intp), np.zeros(0, np.intp)
 
-    # Pack each row's pattern into bytes, so np.unique compares rows
-    # cheaply; a zone with no columns packs to one constant byte
-    packed = (
-        np.packbits(present, axis=1)
-        if present.shape[1]
-        else np.zeros((rows, 1), np.uint8)
-    )
+    # A zone with no columns gives every row one constant pattern;
+    # np.unique compares rows directly (not packed - a count pattern
+    # isn't boolean, so packbits doesn't apply here)
+    comparable = counts if counts.shape[1] else np.zeros((rows, 1), np.int16)
     _, first_rows, inverse = np.unique(
-        packed, axis=0, return_index=True, return_inverse=True
+        comparable, axis=0, return_index=True, return_inverse=True
     )
 
     # np.unique orders groups by pattern; reorder them by first row
@@ -209,22 +221,34 @@ def _merge_by_deck_id(
 
 def _deck_for_row(
     deck_zone: ZoneCounts,
-    present: npt.NDArray[np.bool_],
     keys: GameKeys,
     row: int,
     source_game: GameId,
     family_label: str,
 ) -> GenericDeck:
-    """The GenericDeck row plays: one card uuid per present column, in
-    header order, named after row's game.
+    """The GenericDeck row plays: the full copy-count multiset over
+    deck_zone's columns, in header order, named after row's game.
 
-    Inputs: deck_zone, present (deck_zone.present()), keys, row,
-        source_game, family_label (the name's prefix).
+    Each present column (deck_zone.counts[row, column] > 0) contributes
+    that many copies of its card_uuid - not merely one per present
+    column - so the result is row's genuine full decklist, matching
+    deck_box/seventeenlands_game_data/extraction_stage.py's
+    _card_nocab_uuids_for_row() expansion.
+
+    Inputs: deck_zone, keys, row, source_game, family_label (the name's
+        prefix).
     Output: GenericDeck with id deck_uuid_from_cards(its cards).
     Side effects: none. Exceptions: none.
+
+    Example:
+        >>> _deck_for_row(deck_zone, keys, 0, GameId.MTG, "game_data").card_nocab_uuids
+        [owlbear, owlbear]  # two copies of Owlbear, none of anything else
     """
+    row_counts = deck_zone.counts[row]
     card_nocab_uuids = [
-        deck_zone.card_uuids[column] for column in np.flatnonzero(present[row])
+        card_uuid
+        for column, card_uuid in enumerate(deck_zone.card_uuids)
+        for _ in range(int(row_counts[column]))
     ]
     return GenericDeck(
         nocab_uuid=deck_uuid_from_cards(card_nocab_uuids),

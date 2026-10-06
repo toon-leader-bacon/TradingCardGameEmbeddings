@@ -1,13 +1,16 @@
 # TODO (metrics)
 
-- [x] **Make the 17lands outputs consumable by dojos** (2026-10-02).
-  game_data writes partitioned count tables and row streams, and its
-  dojos train on slice files (`seventeenlands/README.md`, "Slices").
-  draft_data and replay_data still write their old per-CSV shapes and
-  need the same conversion; the game_data outputs on disk predate it
-  and need a rerun.
-- [ ] **Cache `CardBinder.version_for`.** It takes about 3 s and every
-  17lands metric constructor calls it, once per CSV.
+- [x] **Make the 17lands outputs consumable by dojos** (2026-10-03).
+  All three families write partitioned count tables and row streams, and
+  their dojos train on slice files (`seventeenlands/README.md`,
+  "Partitions and slices"). Every family was rerun in that layout
+  2026-10-04; the 26 dojos have catalog keys.
+- [x] **Cache `CardBinder.version_for`.** Fixed 2026-10-06:
+  `CardBinder` now memoizes it per `source_game` in `self._version_cache`,
+  cleared on every mutation (`_upsert_card()`, `delete()`), so a cached
+  value is always fresh as of the binder's current content.
+  `CardLookup`/`VisibleCardLookup` forward to it unchanged, so every
+  caller benefits.
 - [x] **Unwrap or re-download the 19 tar-wrapped 17lands "CSV" files**
   (AFR, KHM, MID, STX, VOW; listed in `plans/archive/seventeenlands_metrics_run.md`).
   Done by the 2026-10-02 re-download: none of the 303 raw CSVs is a tar
@@ -98,10 +101,20 @@
   box and never writes it, and `run_play_gwent` no longer saves the box.
 - [ ] **FaB deck box keys cards by name.** A name printed in several pitches
   maps to one arbitrary printing, so FaB inclusion rates are per name.
-- [ ] **Move `RenamedColumnDataConstructor`** from `dojos/isotropic/` to
-  `dojos/generic/data_constructors/`: it now has three users.
-- [ ] **Deduplicate FaB class/typebox parsing** between
-  `metrics/cardvault_fabtcg/` and `metrics/fabtcg_decklists/`.
+- [x] **Move `RenamedColumnDataConstructor`** out of `dojos/isotropic/`
+  (2026-10-05): moved to `dojos/generic/` directly (a sibling of
+  `data_constructor.py`, not `data_constructors/` - it wraps any
+  constructor rather than mapping to one metric family, see its own
+  module docstring). It now has three users: isotropic, fabtcg_decklists
+  and play_gwent.
+- [x] **Deduplicate FaB class/typebox parsing** between
+  `metrics/cardvault_fabtcg/` and `metrics/fabtcg_decklists/`. Fixed
+  2026-10-06: the shared primitive (splitting a typebox string into its
+  head/words - not the class/type vocabularies each file applies on top,
+  which differ in purpose and membership) now lives in
+  `metrics/cardvault_fabtcg/typebox.py`;
+  `card_mask_metrics.py` and `fabtcg_decklists/hero_legality.py` both
+  import it instead of each keeping their own copy.
 - [ ] **StS2 per-floor metrics (B2).** The spire_codex + sts2runs run
   records carry per-floor `card_choices`, shop purchases, removals,
   upgrades and rest-site choices, none used yet. Top candidates: card

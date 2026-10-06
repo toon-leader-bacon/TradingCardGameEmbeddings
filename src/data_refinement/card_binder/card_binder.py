@@ -73,6 +73,7 @@ class CardBinder:
         self._cards_by_uuid: dict[UUID, GenericCard] = {}
         self._uuids_by_name: dict[tuple[GameId, str], set[UUID]] = {}
         self._alias_ledger = AliasLedger()
+        self._version_cache: dict[GameId, str] = {}
 
     # region CRUD by UUID
 
@@ -206,11 +207,12 @@ class CardBinder:
             nocab_uuid: identity of the card to remove. MUST already
                 be stored.
         Output: none.
-        Side effects: mutates this binder's in-memory indices. Does
-            NOT remove any AliasLedger entries pointing at nocab_uuid
-            — those become dangling (resolve to a uuid get_by_uuid()
-            no longer returns a card for). Acceptable for now; revisit
-            if a real caller needs alias cleanup on delete.
+        Side effects: mutates this binder's in-memory indices and clears
+            self._version_cache. Does NOT remove any AliasLedger entries
+            pointing at nocab_uuid — those become dangling (resolve to a
+            uuid get_by_uuid() no longer returns a card for). Acceptable
+            for now; revisit if a real caller needs alias cleanup on
+            delete.
         Exceptions: raises KeyError if nocab_uuid isn't stored.
 
         Example:
@@ -221,6 +223,7 @@ class CardBinder:
         if nocab_uuid not in self._cards_by_uuid:
             raise KeyError(f"delete: {nocab_uuid} is not stored")
 
+        self._version_cache.clear()
         card = self._cards_by_uuid.pop(nocab_uuid)
         name_key = (card.source_game, card.name)
         self._uuids_by_name[name_key].discard(nocab_uuid)
@@ -428,11 +431,14 @@ class CardBinder:
         """A content hash over every currently-held source_game card.
 
         Derived, not stored - a pure function of this binder's current
-        in-memory content, recomputed on every call (and so also fresh
-        on every load()). Deliberately excludes provenance (in
-        particular provenance.fetched_at, which changes on every
-        re-ingest even when content doesn't) - only (nocab_uuid, name,
-        raw_content) feed the hash, the same fields
+        in-memory content. Cached per source_game (self._version_cache)
+        since every mutation path (_upsert_card(), delete()) invalidates
+        the whole cache, so a cached value is always fresh as of this
+        binder's current content - recomputed only on first call after
+        construction/load() or after a mutation. Deliberately excludes
+        provenance (in particular provenance.fetched_at, which changes on
+        every re-ingest even when content doesn't) - only (nocab_uuid,
+        name, raw_content) feed the hash, the same fields
         merge_strategies.keep_incoming_if_content_differs already
         treats as "content" for its own no-op-re-ingest check. Two
         CardBinder instances holding the same cards always agree on
@@ -444,7 +450,8 @@ class CardBinder:
             cards yet still produces a fixed digest (of an empty
             sequence), not an error - a fresh, not-yet-ingested game is
             a real, meaningful "version" of its own.
-        Side effects: none.
+        Side effects: populates self._version_cache[source_game] on a
+            cache miss.
         Exceptions: none.
 
         Example:
@@ -452,6 +459,10 @@ class CardBinder:
             >>> binder.version_for(GameId.GWENT)
             '3f2b1c...'
         """
+        cached = self._version_cache.get(source_game)
+        if cached is not None:
+            return cached
+
         cards = sorted(self.all_cards(source_game), key=lambda card: card.nocab_uuid)
         digest = hashlib.sha256()
         for card in cards:
@@ -466,7 +477,9 @@ class CardBinder:
                 ).encode("utf-8")
             )
             digest.update(b"\n")
-        return digest.hexdigest()
+        version = digest.hexdigest()
+        self._version_cache[source_game] = version
+        return version
 
     def ensure_unknown_card(self, source_game: GameId) -> GenericCard:
         """Look up (or lazily create) this game's sentinel "Unknown" card.
@@ -753,9 +766,12 @@ class CardBinder:
         Inputs:
             card: the card to store as canonical for its nocab_uuid.
         Output: none.
-        Side effects: mutates this binder's uuid and name indices.
+        Side effects: mutates this binder's uuid and name indices;
+            clears self._version_cache (this card's content may have
+            changed, invalidating any cached version_for() result).
         Exceptions: none.
         """
+        self._version_cache.clear()
         old_card = self._cards_by_uuid.get(card.nocab_uuid)
         old_name_key = (
             (old_card.source_game, old_card.name) if old_card is not None else None

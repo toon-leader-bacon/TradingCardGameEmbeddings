@@ -56,6 +56,7 @@ class PileExhaustionRateMetric:
     DEFAULT_OUTPUT_PATH: ClassVar[Path] = Path(
         "data/metrics/isotropic/pile_exhaustion_rate.parquet"
     )
+    LABEL_COLUMN: ClassVar[str] = "pile_exhaustion_rate"
 
     def __init__(
         self,
@@ -138,7 +139,7 @@ class PileExhaustionRateMetric:
         result = [
             {
                 "nocab_uuid": str(card_uuid),
-                "pile_exhaustion_rate": self._exhausted_count.get(card_uuid, 0) / total,
+                self.LABEL_COLUMN: self._exhausted_count.get(card_uuid, 0) / total,
                 "sample_count": total,
             }
             for card_uuid, total in self._total_count.items()

@@ -134,7 +134,9 @@ rows never straddle TRAIN and TEST.
   groups). Its kingdom and partial-deck metrics key rows by
   `kingdom_uuid`/`partial_deck_uuid`, so `isotropic/` wraps
   `DeckLabelDataConstructor` in a column-renaming Decorator
-  (`renamed_column_data_constructor.py`). Its two-group and "which
+  (`generic/renamed_column_data_constructor.py` - reused by
+  `fabtcg_decklists/` and `play_gwent/` too, so it lives in `generic/`
+  rather than here). Its two-group and "which
   card(s)" metrics use `isotropic/`'s own constructors: a `CardGroup`
   Strategy (`card_groups.py`) reads each group from a row column (a
   DeckBox group, optionally distinct or with extra cards such as the

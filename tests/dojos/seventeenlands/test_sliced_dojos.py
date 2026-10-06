@@ -19,7 +19,7 @@ from src.data_refinement.metrics.seventeenlands.partition import (
     SeventeenLandsPartition,
 )
 from src.data_refinement.metrics.version_metadata import MetricVersionMetadata
-from src.data_retrieval.seventeenlands.refs import DataType, Expansion, format_code
+from src.data_retrieval.seventeenlands.refs import DataType, Expansion, FormatCode
 from src.dojos.seventeenlands.game_data.tutor_target_rate_dojo import (
     TutorTargetRateDojo,
 )
@@ -31,7 +31,7 @@ from src.schema.holdout import HoldoutSpec
 pytestmark = pytest.mark.usefixtures("uncalibrated_generic_dojos")
 
 _VERSION = MetricVersionMetadata(game=GameId.MTG, card_binder_version="v1")
-_SEALED = SeventeenLandsSlice(formats=frozenset({format_code.Sealed}))
+_SEALED = SeventeenLandsSlice(formats=frozenset({FormatCode.Sealed}))
 
 
 @pytest.fixture
@@ -39,7 +39,7 @@ def partitions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Two TutorTargetRateMetric partitions under ./data/metrics, with
     tmp_path as the working directory."""
     monkeypatch.chdir(tmp_path)
-    for fmt in (format_code.Sealed, format_code.TradDraft):
+    for fmt in (FormatCode.Sealed, FormatCode.TradDraft):
         partition = SeventeenLandsPartition(
             DataType.GAME, TutorTargetRateMetric.OUTPUT_STEM, Expansion.KTK, fmt
         )

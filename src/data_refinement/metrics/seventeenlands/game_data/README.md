@@ -13,7 +13,7 @@ already populated for `GameId.MTG` (see
 The scan is chunked and typed. `scan_game_csv` streams a CSV in pyarrow
 record batches. `GameDataChunkParser` turns each batch into one
 `GameDataChunk` (numpy arrays, plus each row's deck identified once),
-and every metric's `accumulate()` receives that chunk. All eleven
+and every metric's `accumulate()` receives that chunk. All twelve
 metrics are vectorized `Metric[GameDataChunk]`s: none loops over rows in
 Python.
 
@@ -40,17 +40,27 @@ Python.
     events) and `decks`. It checks at construction that every zone is
     present and every per-row field has the same row count.
 - `../chunk_decks.py` (shared with replay_data) — `build_chunk_decks(
-  deck_zone, keys, source_game, family_label)` and
-  `store_chunk_decks(decks, deck_box)`. A row's deck is one card
-  uuid per present `deck_<name>` column, in header order. Rows are
-  grouped by present-column pattern; each pattern is hashed once with
-  `deck_ids.deck_uuid_from_cards()`. Patterns with the same id (two
-  columns naming one card) share the earliest row's deck. A deck is
+  deck_zone, keys, source_game, family_label)`. A row's deck is the FULL copy-count multiset over `deck_<name>`
+  columns: each present column contributes
+  `deck_zone.counts[row, column]` copies of its card uuid, in header
+  order (matching
+  `deck_box/seventeenlands_game_data/extraction_stage.py`'s own
+  full-multiset expansion), not merely one uuid per present column.
+  Rows are grouped by that full count pattern (presence alone is not a
+  safe pre-grouping key once copy counts matter); each pattern is
+  hashed once with `deck_ids.deck_uuid_from_cards()`. Patterns with the
+  same id (two columns naming one card, or any other coincidence
+  producing the same multiset) share the earliest row's deck. A deck is
   named after its first row's game (`<family_label> <draft_id>/<match>/
-  <game> deck`, here `game_data`). `store_chunk_decks` calls `create_if_absent` once per deck;
-  each deck-input metric calls it itself, so a deck recurs (a cheap
-  lookup) once per such metric, and each metric's deck writes stay
-  inside its own failure isolation.
+  <game> deck`, here `game_data`). Deck identity is hashed the same way as the canonical
+  `DeckBox` builder (`deck_box/seventeenlands_game_data/
+  extraction_stage.py`), so a deck id means the same decklist on both
+  sides. **Known gap:** the canonical box stores one deck per draft (its
+  canonical game), while these ids are per game. A game played with a
+  later build or after sideboarding has no box entry: on
+  KTK.TradSealed, 257 of 297 drafts play more than one decklist and only
+  51% of game rows' decks are in the box. The deck dojos skip rows whose
+  deck is missing.
 - `game_data_chunk_parser.py` — `GameDataChunkParser.from_header(header,
   card_binder, source_game)`, the only place that knows the CSV's
   column names. Card matching is `GameCardColumns.from_header()`'s.
@@ -143,8 +153,13 @@ per key, and the label is computed only when a slice is built
 - `on_play_win_rate_sensitivity_by_deck_metric.py` —
   `OnPlayWinRateSensitivityByDeckMetric`: the four on-play counts per
   `deck_uuid`, counted per chunk with `np.bincount` over `row_deck`.
-  Takes the family `deck_box` (`store_chunk_decks` per chunk) and stamps
-  its output `requires_deck_box=True`.
+  Stamps its output `requires_deck_box=True`.
+- `deck_occurrence_count_metric.py` — `DeckOccurrenceCountMetric`: per
+  `deck_uuid`, `draft_count`, the number of DISTINCT `draft_id`s in the
+  CSV that played it (not game rows: a draft plays 3-7 games, usually
+  with one deck). A draft lives in one CSV, so a slice's sum is exact;
+  the label `occurrence_count` is that sum. It enriches the canonical
+  box's one-entry-per-decklist with popularity, for weighted sampling.
 
 ### Row streams (deck-input metrics)
 
@@ -152,9 +167,8 @@ per key, and the label is computed only when a slice is built
   abstract, streaming; a `RowStreamMetric`): one output row per game,
   `draft_id`, `match_number`, `game_number`, `deck_uuid` and one label,
   written per chunk with `ParquetBuilder.write_columns()`. Takes
-  `(version_metadata, deck_box, output_path)`, stores every chunk's
-  decks with `store_chunk_decks` (a deck already in the box keeps its
-  stored entry), and stamps its output `requires_deck_box=True`.
+  `(version_metadata, output_path)` and stamps its output
+  `requires_deck_box=True`.
   Subclasses fix `LABEL_COLUMN`/`LABEL_TYPE`/`OUTPUT_STEM` and implement
   `_labels(chunk)`.
 - `game_deck_label_metrics.py` — its three concretes:
@@ -185,9 +199,14 @@ metric is built from the run's `MetricVersionMetadata` (the binder
 version, hashed once per run).
 
 The driver (`scripts/run_metrics.py`) owns everything shared:
-- it reads each CSV's header once and builds its parser;
-- it passes one metrics-private `DeckBox` to every deck-input metric,
-  so identical decks dedupe, and saves it after the last CSV.
+- it reads each CSV's header once and builds its parser.
+
+This family has no deck box of its own (`deck_box_output_path=None`):
+every deck-input metric only needs a `deck_uuid` for its output row,
+which it already gets from the chunk's own `ChunkDecks`
+(`chunk.decks.row_deck_uuids()`), so none of them ever read a `DeckBox`
+back. The canonical box that resolves those ids to card lists is built
+separately, by `deck_box/seventeenlands_game_data/extraction_stage.py`.
 
 A game's identifier is the composite `(draft_id: str, match_number:
 int, game_number: int)`, written as three output columns: no single raw
@@ -201,8 +220,8 @@ flowchart LR
     parser[GameDataChunkParser] -->|parse once| chunk[GameDataChunk<br/>zones, scalars, keys, rank, decks]
     scanner --> parser
     chunk --> card[per-card count tables<br/>CardColumnTallies]
-    chunk --> deck[deck-input metrics]
-    deck -->|store_chunk_decks| box[(family DeckBox)]
+    chunk --> deck[deck-input metrics<br/>deck_uuid per row]
+    deck -.->|same deck ids| box[(canonical MTG DeckBox)]
 ```
 
 Per chunk, every metric works on whole arrays: per-column tallies are
@@ -225,7 +244,8 @@ PYTHONPATH=. python scripts/run_metrics.py --source seventeenlands_game_data \
 
 Each metric writes its partition,
 `data/metrics/seventeenlands/game_data/<OUTPUT_STEM>/<SET>/<Format>.parquet`.
-The family deck box is `data/metrics/seventeenlands/game_data/deck_box.db`.
+This family has no deck box of its own; deck dojos read the canonical
+`data/final/decks/mtg.db`.
 Dojos build their slice files from the partitions on first use.
 
 Parity check: write the outputs to a scratch root with `--output-root`,

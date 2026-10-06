@@ -17,10 +17,13 @@ repeats typebox, pitch, color, cost, power and defense for the other
 face, so the masked field would still be readable there.
 """
 
-import re
 from pathlib import Path
 from typing import ClassVar
 
+from src.data_refinement.metrics.cardvault_fabtcg.typebox import (
+    typebox_head,
+    typebox_words,
+)
 from src.data_refinement.metrics.generic.masked_field_metric import (
     OTHER_LABEL,
     MaskedFieldMetric,
@@ -73,9 +76,6 @@ _CARD_TYPES_BY_PRIORITY = (
     "Token",
 )
 
-# typebox words are space separated; a few cards join two with "||" or " / "
-_TYPEBOX_WORD_SEPARATOR = re.compile(r"[\s|/]+")
-
 
 def _is_single_faced(card: GenericCard) -> bool:
     """Whether card has no back_face (whose fields would leak the answer).
@@ -83,15 +83,6 @@ def _is_single_faced(card: GenericCard) -> bool:
     Inputs: card. Output: bool. Side effects: none. Exceptions: none.
     """
     return "back_face" not in card.raw_content
-
-
-def _typebox_head(typebox: str) -> str:
-    """The typebox before its " - " subtypes: talent, class and type.
-
-    Inputs: typebox (str). Output: str. Side effects: none.
-    Exceptions: none.
-    """
-    return typebox.split(" - ")[0]
 
 
 class PitchMaskMetric(MaskedFieldMetric):
@@ -181,8 +172,7 @@ class ClassMaskMetric(MaskedFieldMetric):
         return _is_single_faced(card) and "typebox" in card.raw_content
 
     def _label_for_card(self, card: GenericCard) -> str:
-        head = _typebox_head(self._raw_field_value(card))
-        classes = set(_TYPEBOX_WORD_SEPARATOR.split(head)) & (
+        classes = typebox_words(self._raw_field_value(card)) & (
             set(_CLASSES) | _RARE_CLASSES
         )
         if not classes:
@@ -207,8 +197,9 @@ class CardTypeMaskMetric(MaskedFieldMetric):
         return _is_single_faced(card) and "typebox" in card.raw_content
 
     def _label_for_card(self, card: GenericCard) -> str:
-        head = _typebox_head(self._raw_field_value(card))
-        words = _TYPEBOX_WORD_SEPARATOR.split(head)
+        raw_value = self._raw_field_value(card)
+        head = typebox_head(raw_value)
+        words = typebox_words(raw_value)
         for card_type in _CARD_TYPES_BY_PRIORITY:
             found = card_type in head if " " in card_type else card_type in words
             if found:

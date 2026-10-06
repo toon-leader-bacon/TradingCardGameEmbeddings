@@ -40,6 +40,7 @@ class FullDeckWinPredictionMetric:
     Satisfies the Metric[dict] Protocol (../../metric.py) structurally.
     """
 
+    LABEL_COLUMN: ClassVar[str] = "won"
     DEFAULT_OUTPUT_PATH: ClassVar[Path] = Path(
         "data/metrics/isotropic/full_deck_win_prediction.parquet"
     )

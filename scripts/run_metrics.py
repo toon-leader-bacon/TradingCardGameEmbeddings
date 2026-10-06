@@ -62,7 +62,7 @@ from src.data_refinement.metrics.seventeenlands.chunk_scanner import (
     UnsupportedCsvLayout,
 )
 from src.data_refinement.metrics.seventeenlands.deck_box_path import (
-    seventeenlands_deck_box_path,
+    REPLAY_DATA_DECK_BOX_PATH,
 )
 from src.data_refinement.metrics.seventeenlands.partition import (
     METRICS_ROOT,
@@ -326,6 +326,9 @@ from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_rate_delta
 )
 from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_rate_sensitivity_by_deck_metric import (  # noqa: E501
     OnPlayWinRateSensitivityByDeckMetric,
+)
+from src.data_refinement.metrics.seventeenlands.game_data.deck_occurrence_count_metric import (  # noqa: E501
+    DeckOccurrenceCountMetric,
 )
 from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk_parser import (
     GameDataChunkParser,
@@ -858,7 +861,7 @@ def _partition_path(
 
 def _parse_expansion_format(
     csv_path: Path,
-) -> tuple[refs.Expansion, refs.format_code]:
+) -> tuple[refs.Expansion, refs.FormatCode]:
     """ "<Expansion>.<EventType>.csv" -> (expansion, format_code) - the
     naming convention every 17lands raw CSV in this project follows.
 
@@ -870,7 +873,7 @@ def _parse_expansion_format(
     expansion, separator, format_name = csv_path.stem.partition(".")
     if not separator:
         raise ValueError(f"{csv_path.name} is not <Expansion>.<EventType>.csv")
-    return refs.Expansion(expansion), refs.format_code(format_name)
+    return refs.Expansion(expansion), refs.FormatCode(format_name)
 
 
 class ChunkMetricClass(Protocol):
@@ -969,10 +972,11 @@ _GAME_DATA_METRICS: tuple[SeventeenLandsMetricSpec, ...] = (
     ChunkMetricSpec(GameLengthAssociationMetric),
     ChunkMetricSpec(OnPlayWinRateDeltaMetric),
     ChunkMetricSpec(GameTutorTargetRateMetric),
-    DeckBoxChunkMetricSpec(DeckWinPredictionMetric),
-    DeckBoxChunkMetricSpec(DeckGameLengthPredictionMetric),
-    DeckBoxChunkMetricSpec(DeckRankTierPredictionMetric),
-    DeckBoxChunkMetricSpec(OnPlayWinRateSensitivityByDeckMetric),
+    ChunkMetricSpec(DeckWinPredictionMetric),
+    ChunkMetricSpec(DeckGameLengthPredictionMetric),
+    ChunkMetricSpec(DeckRankTierPredictionMetric),
+    ChunkMetricSpec(OnPlayWinRateSensitivityByDeckMetric),
+    ChunkMetricSpec(DeckOccurrenceCountMetric),
     ChunkMetricSpec(TutorChoiceRateMetric),
 )
 
@@ -1000,7 +1004,7 @@ class _CsvMetricContext:
 
     version_metadata: MetricVersionMetadata
     expansion: refs.Expansion
-    format_code: refs.format_code
+    format_code: refs.FormatCode
     output_root: Path | None
     deck_box: DeckBox | None
 
@@ -1328,7 +1332,9 @@ def run_seventeenlands_game_data(
     Inputs: raw_path (one CSV, or None for every game_data CSV),
         output_root (None, or a scratch root for parity runs).
     Output: none.
-    Side effects: writes per-CSV outputs and the family deck box.
+    Side effects: writes per-CSV outputs. No deck box of its own:
+        deck_uuid outputs use the canonical box's identity
+        (extraction_stage.py); see game_data/README.md for its coverage.
     Exceptions: see _run_seventeenlands_family.
 
     Example:
@@ -1343,7 +1349,7 @@ def run_seventeenlands_game_data(
             family_dir=SeventeenLandsDownloader.DEFAULT_RAW_DATA_DIR / "game_data",
             metric_specs=_GAME_DATA_METRICS,
             scan_for_csv=_GAME_DATA_SCAN,
-            deck_box_output_path=seventeenlands_deck_box_path(refs.DataType.GAME),
+            deck_box_output_path=None,
         ),
         raw_path,
         output_root,
@@ -1371,7 +1377,7 @@ def run_seventeenlands_replay_data(
             family_dir=SeventeenLandsDownloader.DEFAULT_RAW_DATA_DIR / "replay_data",
             metric_specs=_REPLAY_DATA_METRICS,
             scan_for_csv=_REPLAY_DATA_SCAN,
-            deck_box_output_path=seventeenlands_deck_box_path(refs.DataType.REPLAY),
+            deck_box_output_path=REPLAY_DATA_DECK_BOX_PATH,
         ),
         raw_path,
         output_root,

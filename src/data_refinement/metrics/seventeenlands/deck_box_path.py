@@ -1,34 +1,11 @@
-"""Where a 17lands family's private DeckBox lives.
+"""Where replay_data's metrics-private DeckBox lives.
 
-scripts/run_metrics.py's game_data and replay_data runs write it; their
-deck-level dojos read it back (each row's deck_uuid points into it).
-draft_data has no deck box.
+scripts/run_metrics.py's replay_data run writes it (combat aggression
+profile stores each game's deck there); that metric's dojo reads it back.
+game_data has no private box: its deck dojos read the canonical MTG box
+(data/final/decks/mtg.db). draft_data has no decks.
 """
 
 from pathlib import Path
 
-from src.data_refinement.metrics.seventeenlands.partition import (
-    METRICS_ROOT,
-    SOURCE_DIRECTORY,
-)
-from src.data_retrieval.seventeenlands.refs import DataType
-
-DECK_BOX_FILE_NAME = "deck_box.db"
-
-
-def seventeenlands_deck_box_path(
-    family: DataType, metrics_root: Path = METRICS_ROOT
-) -> Path:
-    """The family's deck box: <metrics_root>/seventeenlands/<family>/deck_box.db.
-
-    Inputs: family (GAME or REPLAY), metrics_root.
-    Output: Path. Side effects: none.
-    Exceptions: ValueError for DataType.DRAFT, which has no deck box.
-
-    Example:
-        >>> seventeenlands_deck_box_path(DataType.GAME)
-        Path('data/metrics/seventeenlands/game_data/deck_box.db')
-    """
-    if family is DataType.DRAFT:
-        raise ValueError("draft_data has no deck box")
-    return metrics_root / SOURCE_DIRECTORY / family.value / DECK_BOX_FILE_NAME
+REPLAY_DATA_DECK_BOX_PATH = Path("data/metrics/seventeenlands/replay_data/deck_box.db")

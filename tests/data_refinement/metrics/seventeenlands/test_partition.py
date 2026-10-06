@@ -8,10 +8,10 @@ from src.data_refinement.metrics.seventeenlands.partition import (
     SeventeenLandsPartition,
     find_partitions,
 )
-from src.data_retrieval.seventeenlands.refs import DataType, Expansion, format_code
+from src.data_retrieval.seventeenlands.refs import DataType, Expansion, FormatCode
 
 _KTK_TRAD = SeventeenLandsPartition(
-    DataType.GAME, "drawn_win_rate", Expansion.KTK, format_code.TradDraft
+    DataType.GAME, "drawn_win_rate", Expansion.KTK, FormatCode.TradDraft
 )
 
 
@@ -31,7 +31,7 @@ def test_from_path_inverts_path(tmp_path: Path) -> None:
 
 def test_from_path_reads_a_set_with_punctuation(tmp_path: Path) -> None:
     cube = SeventeenLandsPartition(
-        DataType.DRAFT, "card_take_rate", Expansion.Powered_Cube, format_code.Sealed
+        DataType.DRAFT, "card_take_rate", Expansion.Powered_Cube, FormatCode.Sealed
     )
 
     assert SeventeenLandsPartition.from_path(cube.path(tmp_path)) == cube
@@ -55,16 +55,16 @@ def test_from_path_rejects_other_shapes(path: str) -> None:
 @pytest.mark.parametrize("stem", ["", "slices", "a.b", "a/b"])
 def test_rejects_a_stem_that_cannot_be_a_metric_directory(stem: str) -> None:
     with pytest.raises(ValueError, match="not a valid metric stem"):
-        SeventeenLandsPartition(DataType.GAME, stem, Expansion.KTK, format_code.Sealed)
+        SeventeenLandsPartition(DataType.GAME, stem, Expansion.KTK, FormatCode.Sealed)
 
 
 def test_find_partitions_lists_every_file_sorted(tmp_path: Path) -> None:
     partitions = [
         SeventeenLandsPartition(DataType.GAME, "m", expansion, fmt)
         for expansion, fmt in [
-            (Expansion.MSH, format_code.PremierDraft),
-            (Expansion.KTK, format_code.TradDraft),
-            (Expansion.KTK, format_code.Sealed),
+            (Expansion.MSH, FormatCode.PremierDraft),
+            (Expansion.KTK, FormatCode.TradDraft),
+            (Expansion.KTK, FormatCode.Sealed),
         ]
     ]
     for partition in partitions:
@@ -74,9 +74,9 @@ def test_find_partitions_lists_every_file_sorted(tmp_path: Path) -> None:
     found = find_partitions(DataType.GAME, "m", tmp_path)
 
     assert [(p.expansion, p.format) for p in found] == [
-        (Expansion.KTK, format_code.Sealed),
-        (Expansion.KTK, format_code.TradDraft),
-        (Expansion.MSH, format_code.PremierDraft),
+        (Expansion.KTK, FormatCode.Sealed),
+        (Expansion.KTK, FormatCode.TradDraft),
+        (Expansion.MSH, FormatCode.PremierDraft),
     ]
 
 

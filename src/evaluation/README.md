@@ -29,6 +29,13 @@ sharing it only with small data classes or trivial helpers.
   mode: eight categorical colors in their validated order, surface, text,
   gridline and axis grays). Each chart's style composes it:
   `FigureStyle` (projection scatter) and `CurveStyle` (learning curves).
+- [chart_canvas.py](chart_canvas.py): `ChartCanvas`, the matplotlib
+  scaffolding every renderer shares on top of a `ChartTheme` - a blank
+  Figure sized and colored from the style, an outside legend in the
+  project's fixed position, and the PNG save. `ProjectionRenderer` and
+  `CurveRenderer` each subclass it, keeping their own drawing semantics
+  (scatter, lines) and blank-axes setup, which differ enough (ticks,
+  gridlines, spines) to stay apart.
 - [card_row.py](card_row.py): `CardRow` (`nocab_uuid`, `source_game`),
   the key the embedding table, labels and analyses all share.
 - [select_corpus.py](select_corpus.py): `CorpusSpec` (games, optional `TierFilter`) and

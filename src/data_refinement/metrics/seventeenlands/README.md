@@ -14,10 +14,10 @@ Every family scans its CSVs in typed chunks, sharing:
   `UnsupportedCsvLayout` for a CSV layout its family deliberately does
   not read; `scripts/run_metrics.py` logs that CSV as `CSV SKIPPED`,
   not as a failure.
-- `deck_box_path.py` - `seventeenlands_deck_box_path(family)`: the
-  game_data and replay_data private deck box,
-  `<family>/deck_box.db`, written by `run_metrics.py` and read by the
-  deck-level dojos.
+- `deck_box_path.py` - `REPLAY_DATA_DECK_BOX_PATH`: replay_data's
+  private deck box, written by `run_metrics.py` and read by its deck
+  dojo. game_data's deck ids are the canonical MTG box's
+  (`data/final/decks/mtg.db`), so game_data keeps no box.
 - `batch_columns.py` - typed numpy columns from a batch; card counts
   read as float32 and narrowed to int16.
 - `zone_counts.py` - `ZoneCounts`: one card-column family's per-row
@@ -34,7 +34,8 @@ Every family scans its CSVs in typed chunks, sharing:
   `match_number`, `game_number`), `ChunkDecks` and
   `build_chunk_decks(deck_zone, keys, source_game, family_label)`: each
   row's deck, identified once per distinct card pattern, and
-  `store_chunk_decks()` to add them to a family deck box. Used by
+  `store_chunk_decks()` to add them to a family deck box (only
+  replay_data keeps one). Used by
   game_data and replay_data.
 
 ## Partitions and slices

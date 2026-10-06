@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.data_retrieval.seventeenlands.refs import DataType, Expansion, format_code
+from src.data_retrieval.seventeenlands.refs import DataType, Expansion, FormatCode
 
 METRICS_ROOT = Path("data/metrics")
 SOURCE_DIRECTORY = "seventeenlands"
@@ -41,7 +41,7 @@ class SeventeenLandsPartition:
     family: DataType
     metric_stem: str
     expansion: Expansion
-    format: format_code
+    format: FormatCode
 
     def __post_init__(self) -> None:
         """Reject a stem that can't be a metric directory.
@@ -65,7 +65,7 @@ class SeventeenLandsPartition:
 
         Example:
             >>> SeventeenLandsPartition(
-            ...     DataType.GAME, "drawn_win_rate", Expansion.KTK, format_code.TradDraft
+            ...     DataType.GAME, "drawn_win_rate", Expansion.KTK, FormatCode.TradDraft
             ... ).path()
             PosixPath('data/metrics/seventeenlands/game_data/drawn_win_rate/KTK/TradDraft.parquet')
         """
@@ -107,7 +107,7 @@ class SeventeenLandsPartition:
             family=DataType(family_name),
             metric_stem=metric_stem,
             expansion=Expansion(expansion_code),
-            format=format_code(path.stem),
+            format=FormatCode(path.stem),
         )
 
 

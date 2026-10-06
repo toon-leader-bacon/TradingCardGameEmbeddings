@@ -160,14 +160,19 @@ def test_parse_identifies_each_rows_deck(tmp_path: Path) -> None:
         [
             row(won=True, owlbear_deck=2),
             row(won=True, morningstar_deck=1),
-            row(won=True, owlbear_deck=4, game_number=2),
+            row(won=True, owlbear_deck=2, game_number=2),
         ],
     )
 
     chunk = parse_one(csv_path, parser_for(binder))
 
+    # Rows 0 and 2 share the same two-copy-Owlbear deck (same copy
+    # count, not merely the same present columns).
     assert chunk.decks.row_deck.tolist() == [0, 1, 0]
-    assert chunk.decks.decks[0].card_nocab_uuids == [uuid_for(binder, OWLBEAR)]
+    assert chunk.decks.decks[0].card_nocab_uuids == [
+        uuid_for(binder, OWLBEAR),
+        uuid_for(binder, OWLBEAR),
+    ]
 
 
 def test_an_older_export_without_match_number_reads_it_as_zero(

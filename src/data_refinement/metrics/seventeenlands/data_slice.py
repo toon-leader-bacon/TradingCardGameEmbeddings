@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from src.data_refinement.metrics.seventeenlands.partition import (
     SeventeenLandsPartition,
 )
-from src.data_retrieval.seventeenlands.refs import Expansion, format_code
+from src.data_retrieval.seventeenlands.refs import Expansion, FormatCode
 
 ALL_SLICE_NAME = "all"
 
@@ -33,7 +33,7 @@ class SeventeenLandsSlice:
     """
 
     expansions: frozenset[Expansion] | None = None
-    formats: frozenset[format_code] | None = None
+    formats: frozenset[FormatCode] | None = None
 
     def __post_init__(self) -> None:
         """Reject an empty filter.
@@ -57,7 +57,7 @@ class SeventeenLandsSlice:
         Side effects: none. Exceptions: none.
 
         Example:
-            >>> SeventeenLandsSlice(formats=frozenset({format_code.PremierDraft})).name
+            >>> SeventeenLandsSlice(formats=frozenset({FormatCode.PremierDraft})).name
             'formats-PremierDraft'
         """
         parts: list[str] = []

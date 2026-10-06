@@ -1,11 +1,16 @@
 """RenamedColumnDataConstructor - a Decorator that lets a generic
 DataConstructor read a metric whose uuid column has a different name.
 
-The isotropic deck-level metrics key their rows by what the row's card
-group is (kingdom_uuid, partial_deck_uuid), while
-DeckLabelDataConstructor reads a fixed "deck_uuid" column. This wrapper
-renames the chunk's columns before delegating, so the generic constructor
-is reused unchanged. It is the only place the column names are mapped.
+Lives in dojos/generic/ (not under any one game's dojo package) since
+it wraps any DataConstructor - it has no metric-family-specific logic
+of its own, unlike data_constructors/, where each class maps to one
+metric family. Originally written for isotropic's deck-level metrics,
+which key their rows by what the row's card group is (kingdom_uuid,
+partial_deck_uuid) while DeckLabelDataConstructor reads a fixed
+"deck_uuid" column; fabtcg_decklists and play_gwent's own
+card_inclusion_dojos.py now reuse it too. This wrapper renames the
+chunk's columns before delegating, so the generic constructor is
+reused unchanged. It is the only place the column names are mapped.
 
 If DeckLabelDataConstructor grows a deck_uuid_column argument (as
 CardAverageDataConstructor has uuid_column), this module can be deleted.

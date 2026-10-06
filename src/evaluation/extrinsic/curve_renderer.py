@@ -25,6 +25,7 @@ from typing import Callable, Literal, Mapping, Sequence
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
+from src.evaluation.chart_canvas import ChartCanvas
 from src.evaluation.chart_theme import ChartTheme
 from src.training.recording.run_listener import RoundRow
 
@@ -102,10 +103,13 @@ class CurveStyle:
         return len(self.theme.categorical)
 
 
-class CurveRenderer:
+class CurveRenderer(ChartCanvas[CurveStyle]):
     """Draws learning-curve charts in one read-only style. Stateless apart
     from that style, so one instance can be shared (e.g. as a default
     argument).
+
+    Line-specific: everything here. The blank-figure/legend/save
+    scaffolding this shares with ProjectionRenderer is ChartCanvas.
 
     Inputs (constructor): style (CurveStyle; the reference palette by
         default).
@@ -114,13 +118,7 @@ class CurveRenderer:
     def __init__(self, style: CurveStyle = CurveStyle()) -> None:
         """Inputs: style. Output: none (constructor). Side effects: none.
         Exceptions: none."""
-        self._style = style
-
-    @property
-    def style(self) -> CurveStyle:
-        """Read-only: the style fixed at construction. Inputs: none.
-        Output: CurveStyle. Side effects: none. Exceptions: none."""
-        return self._style
+        super().__init__(style)
 
     def draw_dojo_curves(
         self,
@@ -211,11 +209,7 @@ class CurveRenderer:
         color, top/right spines hidden. Side effects: none. Exceptions:
         none."""
         theme = self._style.theme
-        figure = Figure(
-            figsize=self._style.figure_size,
-            facecolor=theme.surface,
-            layout="constrained",
-        )
+        figure = self._new_figure(self._style.figure_size)
         axes = figure.subplots()
         axes.set_facecolor(theme.surface)
         axes.set_title(title, color=theme.text_primary, loc="left")
@@ -319,21 +313,7 @@ class CurveRenderer:
         """Inputs: axes with labeled lines. Output: None. Side effects: adds
         a frameless legend outside the plot area, text in text_secondary.
         Exceptions: none."""
-        axes.legend(
-            loc="upper left",
-            bbox_to_anchor=(1.02, 1.0),
-            borderaxespad=0.0,
-            frameon=False,
-            labelcolor=self._style.theme.text_secondary,
-        )
-
-    def _save(self, figure: Figure, path: Path) -> Path:
-        """Inputs: a finished figure, its path. Output: path. Side effects:
-        writes the PNG at the theme's dpi on its surface. Exceptions:
-        OSError."""
-        theme = self._style.theme
-        figure.savefig(path, dpi=theme.dpi, facecolor=theme.surface)
-        return path
+        self._outside_legend(axes)
 
 
 def _chart_title(dojo: str, encoders: list[str]) -> str:

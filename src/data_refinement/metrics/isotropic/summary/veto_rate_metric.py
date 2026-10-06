@@ -63,6 +63,7 @@ class VetoRateMetric:
     DEFAULT_OUTPUT_PATH: ClassVar[Path] = Path(
         "data/metrics/isotropic/veto_rate.parquet"
     )
+    LABEL_COLUMN: ClassVar[str] = "veto_rate"
 
     def __init__(
         self,
@@ -147,7 +148,7 @@ class VetoRateMetric:
         result = [
             {
                 "nocab_uuid": str(card_uuid),
-                "veto_rate": self._veto_count.get(card_uuid, 0) / total,
+                self.LABEL_COLUMN: self._veto_count.get(card_uuid, 0) / total,
                 "sample_count": total,
             }
             for card_uuid, total in self._total_count.items()

@@ -27,6 +27,14 @@ so one cell serves every metric family with the same shape.
 - `data_constructors/` - the concrete constructors, one module each
   (see the table below). `row_values.py` holds the shared helpers that
   turn one raw row value into a typed label or card(s).
+- `renamed_column_data_constructor.py` - `RenamedColumnDataConstructor`,
+  a Decorator that renames a chunk's columns before delegating to any
+  other `DataConstructor` - for a metric whose group-uuid column isn't
+  named `deck_uuid` (isotropic's kingdom/partial-deck metrics) or whose
+  label columns need remapping (`fabtcg_decklists`/`play_gwent`'s
+  `card_inclusion_dojos.py`). Lives here rather than in
+  `data_constructors/` since it wraps any constructor rather than
+  mapping to one metric family.
 - `paired_metric_dojos.py` - base classes for per-metric wrappers that
   only name their paired metric: `CardAverageMetricDojo`,
   `DeckLabelMetricDojo`, the three masked-field bases

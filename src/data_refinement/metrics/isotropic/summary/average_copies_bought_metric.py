@@ -41,6 +41,7 @@ class AverageCopiesBoughtMetric:
     DEFAULT_OUTPUT_PATH: ClassVar[Path] = Path(
         "data/metrics/isotropic/average_copies_bought.parquet"
     )
+    LABEL_COLUMN: ClassVar[str] = "average_copies_bought"
 
     def __init__(
         self,
@@ -115,7 +116,7 @@ class AverageCopiesBoughtMetric:
         result = [
             {
                 "nocab_uuid": str(card_uuid),
-                "average_copies_bought": self._copies_sum[card_uuid] / count,
+                self.LABEL_COLUMN: self._copies_sum[card_uuid] / count,
                 "sample_count": count,
             }
             for card_uuid, count in self._deck_count.items()

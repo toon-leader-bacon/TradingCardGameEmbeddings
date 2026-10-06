@@ -48,6 +48,7 @@ class TurnCountAssociationMetric:
     DEFAULT_OUTPUT_PATH: ClassVar[Path] = Path(
         "data/metrics/isotropic/turn_count_association.parquet"
     )
+    LABEL_COLUMN: ClassVar[str] = "turn_count_delta"
 
     def __init__(
         self,
@@ -146,7 +147,7 @@ class TurnCountAssociationMetric:
         result = [
             {
                 "nocab_uuid": str(card_uuid),
-                "turn_count_delta": self._turns_sum[card_uuid] / count - baseline,
+                self.LABEL_COLUMN: self._turns_sum[card_uuid] / count - baseline,
                 "sample_count": count,
             }
             for card_uuid, count in self._game_count.items()

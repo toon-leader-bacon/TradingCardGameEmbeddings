@@ -1,5 +1,14 @@
 """Content-addressed id schemes shared across every metrics/<source>
-container.
+container, and (for a source whose DeckBox extraction stage needs the
+same deck to hash to the same id - e.g. seventeenlands_game_data's
+canonical box and its metrics agreeing on identity) deck_box/<source>
+too.
+
+Lives directly under data_refinement/, a sibling of card_binder/,
+deck_box/ and metrics/, rather than inside metrics/ itself: both
+metrics and deck_box depend on it, and neither should depend on the
+other just to reach this hashing (see ../README.md's own Containers
+section).
 
 The design this implements (see metrics/README.md): a metric whose training input is a whole deck
 mints this module's deck_uuid_from_cards() rather than embedding the

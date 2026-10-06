@@ -19,7 +19,7 @@ from src.data_refinement.metrics.seventeenlands.game_data.game_card_average_metr
 from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk_parser import (
     GameDataChunkParser,
 )
-from src.data_retrieval.seventeenlands.refs import DataType, Expansion, format_code
+from src.data_retrieval.seventeenlands.refs import DataType, Expansion, FormatCode
 from tests.data_refinement.metrics.seventeenlands.game_data._chunk_fixtures import (
     HEADER,
     VERSION,
@@ -38,6 +38,23 @@ def script() -> ModuleType:
     return module
 
 
+class _FakeDeckBoxChunkMetric:
+    """A chunk metric class that also takes the family deck box: built
+    from (version_metadata, deck_box, output_path)."""
+
+    OUTPUT_STEM = "fake_deck_box"
+
+    def __init__(self, version_metadata, deck_box, output_path) -> None:
+        self._deck_box = deck_box
+        self.output_path = output_path
+
+    def accumulate(self, chunk) -> None:
+        return
+
+    def finalize(self) -> Path:
+        return Path("unused")
+
+
 def _family(script: ModuleType, specs: tuple, deck_box_path: Path | None):
     return script._SeventeenLandsFamily(
         name="test_family",
@@ -53,7 +70,7 @@ def _context(script: ModuleType, deck_box: DeckBox | None) -> object:
     return script._CsvMetricContext(
         version_metadata=VERSION,
         expansion=Expansion.KTK,
-        format_code=format_code.TradDraft,
+        format_code=FormatCode.TradDraft,
         output_root=Path("scratch"),
         deck_box=deck_box,
     )
@@ -87,7 +104,7 @@ def test_an_output_root_re_roots_the_partition_path(script: ModuleType) -> None:
 def test_csv_names_parse_into_set_and_format(script: ModuleType) -> None:
     assert script._parse_expansion_format(Path("x/Cube_-_Powered.Sealed.csv")) == (
         Expansion.Powered_Cube,
-        format_code.Sealed,
+        FormatCode.Sealed,
     )
 
 
@@ -120,12 +137,13 @@ def test_a_family_without_deck_box_metrics_needs_no_deck_box_path(
     script: ModuleType,
 ) -> None:
     script._check_family_specs(_family(script, script._DRAFT_DATA_METRICS, None))
+    script._check_family_specs(_family(script, script._GAME_DATA_METRICS, None))
 
 
 def test_a_deck_box_metric_without_a_deck_box_path_is_rejected(
     script: ModuleType,
 ) -> None:
-    family = _family(script, script._GAME_DATA_METRICS, None)
+    family = _family(script, script._REPLAY_DATA_METRICS, None)
 
     with pytest.raises(ValueError, match="no deck box path"):
         script._check_family_specs(family)
@@ -134,7 +152,7 @@ def test_a_deck_box_metric_without_a_deck_box_path_is_rejected(
 def test_metrics_are_built_in_spec_order(script: ModuleType) -> None:
     specs = (
         script.ChunkMetricSpec(script.WinRateWhenInDeckMetric),
-        script.DeckBoxChunkMetricSpec(script.DeckWinPredictionMetric),
+        script.DeckBoxChunkMetricSpec(script.CombatAggressionProfileMetric),
     )
     family = _family(script, specs, Path("box.db"))
 
@@ -142,7 +160,7 @@ def test_metrics_are_built_in_spec_order(script: ModuleType) -> None:
 
     assert [type(metric) for metric in metrics] == [
         script.WinRateWhenInDeckMetric,
-        script.DeckWinPredictionMetric,
+        script.CombatAggressionProfileMetric,
     ]
 
 
@@ -150,18 +168,18 @@ def test_a_deck_box_chunk_metric_gets_the_family_box(
     script: ModuleType, tmp_path: Path
 ) -> None:
     context = _context(script, deck_box=DeckBox())
-    spec = script.DeckBoxChunkMetricSpec(script.OnPlayWinRateSensitivityByDeckMetric)
+    spec = script.DeckBoxChunkMetricSpec(_FakeDeckBoxChunkMetric)
 
     metric = script._build_chunk_metric(spec, context, tmp_path / "out.parquet")
 
-    assert isinstance(metric, script.OnPlayWinRateSensitivityByDeckMetric)
+    assert isinstance(metric, _FakeDeckBoxChunkMetric)
     assert metric._deck_box is context.deck_box
 
 
 def test_a_deck_box_chunk_metric_without_a_box_is_rejected(
     script: ModuleType,
 ) -> None:
-    spec = script.DeckBoxChunkMetricSpec(script.DeckWinPredictionMetric)
+    spec = script.DeckBoxChunkMetricSpec(_FakeDeckBoxChunkMetric)
 
     with pytest.raises(ValueError, match="needs the family DeckBox"):
         script._build_chunk_metric(

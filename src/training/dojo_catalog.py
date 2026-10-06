@@ -34,7 +34,7 @@ from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.isotropic.deck_box_path import ISOTROPIC_DECK_BOX_PATH
 from src.data_refinement.metrics.seventeenlands.deck_box_path import (
-    seventeenlands_deck_box_path,
+    REPLAY_DATA_DECK_BOX_PATH,
 )
 from src.data_refinement.metrics.sts2_runs import card_average_metrics as sts2_cards
 from src.data_refinement.metrics.sts2_runs import deck_label_metrics as sts2_decks
@@ -116,7 +116,6 @@ from src.dojos.play_gwent.deck_card_mask_dojos import LeaderMaskedFromDeckDojo
 from src.dojos.play_gwent.deck_label_dojos import GuideVotesDojo
 from src.dojos.sts_gg import deck_label_dojos as sts_decks
 from src.schema.game_id import GameId
-from src.data_retrieval.seventeenlands.refs import DataType
 from src.schema.holdout import HoldoutSpec
 
 # Contrastive dojos keep their deck split index here (see DeckBoxDealer)
@@ -499,17 +498,17 @@ def _recipe_for_seventeenlands_card(dojo_class: CardDojoConstructor) -> CardDojo
     return CardDojoRecipe(GameId.MTG, dojo_class)
 
 
-def _recipe_for_seventeenlands_deck(
-    family: DataType, dojo_class: DeckDojoConstructor
+def _recipe_for_seventeenlands_replay_deck(
+    dojo_class: DeckDojoConstructor,
 ) -> DeckDojoRecipe:
-    """A 17lands deck-level dojo class over its family's private deck
-    box, trained on the all-sets, all-formats slice.
+    """A replay_data deck-level dojo class over replay_data's private
+    deck box, trained on the all-sets, all-formats slice. (game_data deck
+    dojos read the canonical MTG box: _recipe_for_final_deck_box.)
 
-    Inputs: family (GAME or REPLAY, the families with a deck box),
-        dojo_class. Output: DeckDojoRecipe. Side effects: none.
+    Inputs: dojo_class. Output: DeckDojoRecipe. Side effects: none.
     Exceptions: none.
     """
-    return DeckDojoRecipe(GameId.MTG, dojo_class, seventeenlands_deck_box_path(family))
+    return DeckDojoRecipe(GameId.MTG, dojo_class, REPLAY_DATA_DECK_BOX_PATH)
 
 
 # Keys are "<metric source>.<metric file stem>"; add a line to onboard a dojo
@@ -833,7 +832,8 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     ),
     "play_gwent.guide_votes": _recipe_for_final_deck_box(GameId.GWENT, GuideVotesDojo),
     # 17lands: each key trains on its metric's all-sets, all-formats slice
-    # (data/metrics/seventeenlands/<family>/slices/<stem>.all.parquet)
+    # (data/metrics/seventeenlands/<family>/slices/<stem>.all.parquet);
+    # game_data deck rows point into the canonical MTG deck box
     "seventeenlands_draft_data.card_take_rate": _recipe_for_seventeenlands_card(
         draft_tally.CardTakeRateDojo
     ),
@@ -873,23 +873,17 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     "seventeenlands_game_data.tutor_choice_rate": _recipe_for_seventeenlands_card(
         TutorChoiceRateDojo
     ),
-    "seventeenlands_game_data.deck_win_prediction": _recipe_for_seventeenlands_deck(
-        DataType.GAME, game_decks.DeckWinPredictionDojo
+    "seventeenlands_game_data.deck_win_prediction": _recipe_for_final_deck_box(
+        GameId.MTG, game_decks.DeckWinPredictionDojo
     ),
     "seventeenlands_game_data.deck_game_length_prediction": (
-        _recipe_for_seventeenlands_deck(
-            DataType.GAME, game_decks.DeckGameLengthPredictionDojo
-        )
+        _recipe_for_final_deck_box(GameId.MTG, game_decks.DeckGameLengthPredictionDojo)
     ),
     "seventeenlands_game_data.deck_rank_tier_prediction": (
-        _recipe_for_seventeenlands_deck(
-            DataType.GAME, game_decks.DeckRankTierPredictionDojo
-        )
+        _recipe_for_final_deck_box(GameId.MTG, game_decks.DeckRankTierPredictionDojo)
     ),
     "seventeenlands_game_data.on_play_win_rate_sensitivity_by_deck": (
-        _recipe_for_seventeenlands_deck(
-            DataType.GAME, OnPlayWinRateSensitivityByDeckDojo
-        )
+        _recipe_for_final_deck_box(GameId.MTG, OnPlayWinRateSensitivityByDeckDojo)
     ),
     "seventeenlands_replay_data.average_turn_cast": _recipe_for_seventeenlands_card(
         AverageTurnCastDojo
@@ -913,7 +907,7 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
         _recipe_for_seventeenlands_card(replay_combat.CombatDamagePushThroughRateDojo)
     ),
     "seventeenlands_replay_data.combat_aggression_profile": (
-        _recipe_for_seventeenlands_deck(DataType.REPLAY, CombatAggressionProfileDojo)
+        _recipe_for_seventeenlands_replay_deck(CombatAggressionProfileDojo)
     ),
     "seventeenlands_replay_data.attacker_blocker_combat_outcome": (
         _recipe_for_seventeenlands_card(AttackerBlockerCombatOutcomeDojo)

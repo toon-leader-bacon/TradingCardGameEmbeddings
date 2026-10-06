@@ -26,11 +26,13 @@ entry points' own per-row iterator.
 
 import logging
 import tarfile
+from functools import partial
 from pathlib import Path
-from typing import Iterator, TypeVar
+from typing import Iterator
 
 from tqdm import tqdm
 
+from src.data_refinement.metrics.isolated_call import call_isolated
 from src.data_refinement.metrics.isotropic.games.game_log_parser import (
     GameLog,
     parse_game_log,
@@ -42,8 +44,6 @@ from src.data_refinement.metrics.isotropic.games.header_parser import (
 from src.data_refinement.metrics.metric import Metric
 
 _logger = logging.getLogger(__name__)
-
-_RawRowT = TypeVar("_RawRowT")
 
 
 def scan_isotropic_game_log_archives(
@@ -98,10 +98,15 @@ def scan_isotropic_game_log_archives(
     for archive_path in archive_paths:
         for header in _iter_game_headers(archive_path):
             for metric in metrics:
-                _accumulate_isolated(metric, header)
+                call_isolated(
+                    _logger,
+                    metric,
+                    "accumulate() on one row",
+                    partial(metric.accumulate, header),
+                )
 
     for metric in metrics:
-        _finalize_isolated(metric)
+        call_isolated(_logger, metric, "finalize()", metric.finalize)
 
 
 def scan_isotropic_game_logs_archives(
@@ -144,10 +149,15 @@ def scan_isotropic_game_logs_archives(
     for archive_path in archive_paths:
         for game_log in _iter_game_logs(archive_path):
             for metric in metrics:
-                _accumulate_isolated(metric, game_log)
+                call_isolated(
+                    _logger,
+                    metric,
+                    "accumulate() on one row",
+                    partial(metric.accumulate, game_log),
+                )
 
     for metric in metrics:
-        _finalize_isolated(metric)
+        call_isolated(_logger, metric, "finalize()", metric.finalize)
 
 
 def _iter_archive_members(archive_path: Path) -> Iterator[tuple[str, str]]:
@@ -252,10 +262,13 @@ def _parse_header_member_isolated(
     Private helper - single consumer is _iter_game_headers(). This is
     what makes good on parse_game_header()'s own docstring promise that
     "a caller driving many files (../scanner.py) is expected to
-    isolate" a per-file parse exception - the _accumulate_isolated()/
-    _finalize_isolated() shape, one level earlier in the pipeline
-    (structural parse failures happen before any metric ever sees a
-    row, unlike an accumulate()/finalize() failure).
+    isolate" a per-file parse exception. Kept as a direct try/except
+    (not call_isolated(), which only reports success/failure and
+    discards a callable's return value) - this function's whole job is
+    to return parse_game_header()'s parsed value, so forcing it through
+    call_isolated() would need a closure capturing the result in an
+    outer variable just to get it back out, trading directness for a
+    centralization that doesn't actually fit this shape.
 
     Inputs:
         member_name: the archive member's own name, for the log
@@ -289,7 +302,9 @@ def _parse_log_member_isolated(member_name: str, html_text: str) -> GameLog | No
 
     Private helper - single consumer is _iter_game_logs(). Mirrors
     _parse_header_member_isolated()'s own isolation contract exactly,
-    for parse_game_log() instead of parse_game_header().
+    for parse_game_log() instead of parse_game_header() - including
+    staying a direct try/except for the same reason (see that
+    function's docstring).
 
     Inputs:
         member_name: the archive member's own name, for the log
@@ -313,65 +328,3 @@ def _parse_log_member_isolated(member_name: str, html_text: str) -> GameLog | No
             member_name,
         )
         return None
-
-
-def _accumulate_isolated(metric: Metric[_RawRowT], row: _RawRowT) -> None:
-    """Call metric.accumulate(row), logging (not raising) on failure.
-
-    Private helper - shared by both scan_isotropic_game_log_archives()
-    (row: GameHeader) and scan_isotropic_game_logs_archives() (row:
-    GameLog) - generic over the raw row type since this isolation
-    contract has nothing type-specific in it, unlike
-    _parse_header_member_isolated()/_parse_log_member_isolated() above
-    (which genuinely differ by which parse function they call). Mirrors
-    ../summary/scanner.py's own _accumulate_isolated() - kept as this
-    scanner's own copy rather than a shared cross-scanner helper,
-    matching this project's existing convention of one scanner per
-    raw-source shape.
-
-    Inputs:
-        metric: the Metric[_RawRowT] to drive.
-        row: one parsed row (GameHeader or GameLog) to feed it.
-    Output: none.
-    Side effects: whatever metric.accumulate() does on success; on
-        failure, emits one logging.exception() call instead of
-        propagating.
-    Exceptions: none - every exception from metric.accumulate() is
-        caught and logged here.
-    """
-    try:
-        metric.accumulate(row)
-    except Exception:
-        _logger.exception(
-            "isotropic games/ scanner: %r raised from accumulate() on one "
-            "row - skipping just that row for this metric, continuing the "
-            "scan for every other metric",
-            metric,
-        )
-
-
-def _finalize_isolated(metric: Metric[_RawRowT]) -> None:
-    """Call metric.finalize(), logging (not raising) on failure.
-
-    Private helper - shared by both entry points, same reasoning as
-    _accumulate_isolated() above. Mirrors _accumulate_isolated()'s
-    isolation for the finalize phase.
-
-    Inputs:
-        metric: the Metric[_RawRowT] to finalize.
-    Output: none.
-    Side effects: whatever metric.finalize() does on success; on
-        failure, emits one logging.exception() call instead of
-        propagating.
-    Exceptions: none - every exception from metric.finalize() is
-        caught and logged here.
-    """
-    try:
-        metric.finalize()
-    except Exception:
-        _logger.exception(
-            "isotropic games/ scanner: %r raised from finalize() - its "
-            "output may be missing or incomplete, but every other metric "
-            "still finalizes normally",
-            metric,
-        )
