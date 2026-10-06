@@ -459,6 +459,18 @@ class TestVersionFor:
 
         assert binder.version_for(GameId.MTG) != before
 
+    def test_changes_when_a_card_is_deleted(self) -> None:
+        # Regression test for the version_for() cache (self._version_cache):
+        # delete() must invalidate it like every other mutation does.
+        card = _card("Bolt", "src-1", {"a": 1})
+        binder = CardBinder()
+        binder.create(card)
+        before = binder.version_for(GameId.MTG)
+
+        binder.delete(card.nocab_uuid)
+
+        assert binder.version_for(GameId.MTG) != before
+
 
 class TestLoad:
     def test_empty_list_returns_usable_empty_binder(self) -> None:

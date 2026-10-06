@@ -5,9 +5,13 @@ convention) paired with a single scalar label from that same game.
 
 A vectorized Metric[GameDataChunk] (see game_data/README.md).
 Each chunk already carries every row's deck (ChunkDecks,
-identified once by the parser), so accumulate() stores the chunk's
-distinct decks in the shared DeckBox and writes one output row per game
-for the whole chunk at once.
+identified once by the parser), so accumulate() writes one output row
+per game for the whole chunk at once, using chunk.decks.row_deck_uuids()
+for each row's deck_uuid - no DeckBox of its own. The canonical
+DeckBox (src/data_refinement/deck_box/seventeenlands_game_data/
+extraction_stage.py) already holds every deck this metric would ever
+see, under the same deck_uuid_from_cards() identity, so this metric has
+nothing to store.
 
 Three of round 1's multi-card metrics (game_deck_label_metrics.py's
 DeckWinPredictionMetric, DeckGameLengthPredictionMetric,
@@ -18,14 +22,15 @@ shared step; a subclass only fixes LABEL_COLUMN/LABEL_TYPE/
 DEFAULT_OUTPUT_PATH and implements _labels().
 
 on_play_win_rate_sensitivity_by_deck_metric.py's
-OnPlayWinRateSensitivityByDeckMetric also stores the chunk's decks, but
-is accumulation, not streaming (its label needs every game sharing a
-deck), so it does not subclass this class; the step they share,
-storing the decks, is chunk_decks.store_chunk_decks().
+OnPlayWinRateSensitivityByDeckMetric is accumulation, not streaming
+(its label needs every game sharing a deck), so it does not subclass
+this class.
 
-deck_box IS REQUIRED (no default) here: every subclass genuinely needs
-one, and every metric in this container that has no use for a deck box
-simply doesn't declare the parameter at all.
+requires_deck_box=True is still stamped on the output schema: a deck_uuid
+output column is only useful to a downstream reader (the training-side
+dojo, src/dojos/generic/generic_dojo.py) that can resolve it back to
+card lists via SOME DeckBox - the canonical one. This metric itself no
+longer depends on any box.
 
 PER-GAME IDENTIFIER: game_data has no single unique-id column - this
 container's settled composite is (draft_id: str, match_number: int,
@@ -43,11 +48,7 @@ import numpy as np
 import numpy.typing as npt
 import pyarrow as pa
 
-from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.parquet_builder import ParquetBuilder
-from src.data_refinement.metrics.seventeenlands.game_data.chunk_decks import (
-    store_chunk_decks,
-)
 from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
 )
@@ -72,19 +73,15 @@ class GameDeckLabelMetric(ABC):
     def __init__(
         self,
         version_metadata: MetricVersionMetadata,
-        deck_box: DeckBox,
         output_path: Path | None = None,
     ) -> None:
         """Open the output for streaming.
 
         Inputs:
             version_metadata: the CardBinder version this run reads;
-                stamped onto the output with requires_deck_box=True.
-            deck_box: the metrics-private DeckBox every deck this
-                metric sees is written into - shared with every other
-                deck-input metric in the same scan pass, so identical
-                decks dedupe against each other. Never the published
-                deck_box/ box.
+                stamped onto the output with requires_deck_box=True
+                (a downstream reader of deck_uuid still needs some
+                DeckBox - see module docstring).
             output_path: overrides DEFAULT_OUTPUT_PATH when given.
         Output: none (constructor).
         Side effects: creates output_path's parent directories if
@@ -95,7 +92,6 @@ class GameDeckLabelMetric(ABC):
         Exceptions: whatever ParquetBuilder raises on failure to open
             output_path for writing.
         """
-        self._deck_box = deck_box
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
         output_schema = schema_with_version_metadata(
             pa.schema(
@@ -113,27 +109,22 @@ class GameDeckLabelMetric(ABC):
         self._writer = ParquetBuilder(self._output_path, output_schema)
 
     def accumulate(self, chunk: GameDataChunk) -> None:
-        """Store the chunk's decks and write one output row per game.
+        """Write one output row per game.
 
         Inputs: chunk.
         Output: none.
-        Side effects: store_chunk_decks(chunk.decks, self._deck_box) (a deck
-            already in the box, from this or another metric sharing it,
-            is left as stored); writes len(chunk) rows - draft_id,
-            match_number, game_number, deck_uuid and the label - to the
-            open ParquetBuilder.
-        Exceptions: implementation-defined by _labels(); DeckBox's
-            batch-wide errors.
+        Side effects: writes len(chunk) rows - draft_id, match_number,
+            game_number, deck_uuid and the label - to the open
+            ParquetBuilder.
+        Exceptions: implementation-defined by _labels().
 
         Example:
-            >>> metric = DeckWinPredictionMetric(version_metadata, deck_box)
+            >>> metric = DeckWinPredictionMetric(version_metadata)
             >>> metric.accumulate(chunk)
             >>> metric.finalize()
         """
         labels = self._labels(chunk)
 
-        # Every distinct deck once, then every game's row at once
-        store_chunk_decks(chunk.decks, self._deck_box)
         self._writer.write_columns(
             {
                 "draft_id": chunk.keys.draft_id,
@@ -149,10 +140,7 @@ class GameDeckLabelMetric(ABC):
 
         A true no-op relative to data - every row this instance will
         ever write was already handed over by accumulate(). Idempotent:
-        a second call is a no-op. Does NOT save self._deck_box - that's
-        the calling driver's own responsibility, since the box is
-        shared across metrics and only the driver knows when every
-        metric sharing it is done.
+        a second call is a no-op.
 
         Inputs: none.
         Output: self._output_path.

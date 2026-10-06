@@ -322,6 +322,43 @@ class ReplayCardColumns:
             if (count := row[column_name]) == count and count
         ]
 
+    def cast_uuids_for_turn(
+        self, row: dict, actor: Literal["user", "oppo"], turn: int
+    ) -> list[UUID]:
+        """Every card matched out of this half-turn's creatures_cast
+        union non_creatures_cast cell.
+
+        Centralizes the creatures_cast/non_creatures_cast-cell lookup
+        shared by average_turn_cast_metric.py's AverageTurnCastMetric
+        and turns_to_game_end_after_cast_metric.py's
+        TurnsToGameEndAfterCastMetric (PRINCIPLES.md section 2 dedup) -
+        returns the richer list form (order-preserving, duplicates
+        possible), since a set can always be derived from a list via
+        set(...) but not vice versa; a caller needing deduplication
+        does that itself at the call site.
+
+        Inputs:
+            row: one replay_data CSV row, dict-like.
+            actor: which half-turn - "user" or "oppo".
+            turn: that actor's own turn-number counter.
+        Output: every matched card in creatures_cast union
+            non_creatures_cast for this half-turn, in creatures_cast-
+            then-non_creatures_cast order. Empty list if neither cell
+            names a card.
+        Side effects: none.
+        Exceptions: none expected.
+
+        Example:
+            >>> replay_columns.cast_uuids_for_turn(row, "user", 3)
+        """
+        creatures = self.arena_uuids(
+            row[ReplayCardColumns.turn_column(actor, turn, "creatures_cast")]
+        )
+        non_creatures = self.arena_uuids(
+            row[ReplayCardColumns.turn_column(actor, turn, "non_creatures_cast")]
+        )
+        return creatures + non_creatures
+
     @property
     def unmatched_names(self) -> list[str]:
         """Every distinct name uuid_for_name() has returned None for so

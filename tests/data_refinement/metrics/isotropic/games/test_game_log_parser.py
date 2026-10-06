@@ -1,7 +1,9 @@
-from src.data_refinement.metrics.isotropic.games.game_log_parser import (
+from src.data_refinement.metrics.isotropic.games._continuation_line_parsers import (
     CardQuantity,
     _line_belongs_to_owner,
     _parse_card_quantity_list,
+)
+from src.data_refinement.metrics.isotropic.games.game_log_parser import (
     _parse_turn_block,
     _parse_turn_header,
     parse_game_log,

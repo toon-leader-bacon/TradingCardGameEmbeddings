@@ -7,8 +7,10 @@ data_refinement's job).
 Best-effort, collect-and-continue: one ref failing (network error
 during download, corrupt gzip during extraction) does not abort the
 rest of a batch — every ref's outcome is recorded in
-DownloadBatchResult, same convention as HearthstoneJsonDownloader's
-BuildDownloadOutcome. See refs.py's module docstring for how refs are
+DownloadBatchResult as a FileDownloadSuccess/FileDownloadFailure, same
+convention as HearthstoneJsonDownloader's
+BuildDownloadSuccess/BuildDownloadFailure union. See refs.py's module
+docstring for how refs are
 produced (LandingPageParser, SeventeenLandsFileRef.from_known(), or
 known_files.list_known_refs()) — download() falls back to the last of
 those when given no refs (or an empty refs list).
@@ -52,15 +54,21 @@ _TAR_MAGIC = b"ustar"
 
 
 @dataclass(frozen=True)
-class DownloadOutcome:
-    """The result of downloading one SeventeenLandsFileRef.
+class FileDownloadSuccess:
+    """One SeventeenLandsFileRef that's present on disk — either just
+    downloaded, or already there from a prior run (see download()'s
+    resumability note).
 
-    Exactly one of path/error is meaningful per outcome (path set on
-    success, error set on failure) — see SeventeenLandsDownloader
-    docstrings for which. Not expressed as a discriminated union here;
-    flagged to the human as a possible future tightening, consistent
-    with BuildDownloadOutcome's Success/Failure union in
-    hearthstonejson/downloader.py.
+    Discriminated union with FileDownloadFailure below (PRINCIPLES.md
+    "illegal states unrepresentable" — same idiom as
+    HearthstoneJsonDownloader's BuildDownloadSuccess/Failure union in
+    hearthstonejson/downloader.py): a success simply has no error field
+    to (mis)populate, rather than this class and FileDownloadFailure
+    sharing two independently-nullable path/error fields where only one
+    combination per outcome is ever actually valid. `error` is exposed
+    as a property, always None, purely so existing call sites can still
+    read outcome.error without an isinstance/match check first — same
+    convention as FileDownloadFailure.path below.
 
     Inputs: none (data holder).
     Output: n/a.
@@ -69,8 +77,38 @@ class DownloadOutcome:
     """
 
     ref: SeventeenLandsFileRef
-    path: Path | None  # None if this ref failed
-    error: Exception | None  # None if this ref succeeded
+    path: Path
+
+    @property
+    def error(self) -> None:
+        return None
+
+
+@dataclass(frozen=True)
+class FileDownloadFailure:
+    """One SeventeenLandsFileRef that could not be downloaded.
+
+    See FileDownloadSuccess above for the discriminated-union
+    rationale. `path` is exposed as a property, always None, for the
+    same read-compatibility reason `error` is on FileDownloadSuccess.
+
+    Inputs: none (data holder).
+    Output: n/a.
+    Side effects: none.
+    Exceptions: none.
+    """
+
+    ref: SeventeenLandsFileRef
+    error: Exception
+
+    @property
+    def path(self) -> None:
+        return None
+
+
+# Exactly one of "this ref succeeded" or "this ref failed", never both,
+# never neither — see FileDownloadSuccess's docstring.
+DownloadOutcome = FileDownloadSuccess | FileDownloadFailure
 
 
 @dataclass(frozen=True)
@@ -190,18 +228,16 @@ class SeventeenLandsDownloader(Downloader):
         for ref in tqdm(filtered_refs, desc="17Lands files", unit="file"):
             destination_path = self._destination_path(ref)
             if destination_path.exists():
-                outcomes.append(
-                    DownloadOutcome(ref=ref, path=destination_path, error=None)
-                )
+                outcomes.append(FileDownloadSuccess(ref=ref, path=destination_path))
                 continue
 
             try:
                 path = self.download_one(ref)
             except Exception as error:
                 tqdm.write(f"17Lands file {ref.url} failed: {error}")
-                outcomes.append(DownloadOutcome(ref=ref, path=None, error=error))
+                outcomes.append(FileDownloadFailure(ref=ref, error=error))
             else:
-                outcomes.append(DownloadOutcome(ref=ref, path=path, error=None))
+                outcomes.append(FileDownloadSuccess(ref=ref, path=path))
 
         return DownloadBatchResult(outcomes=outcomes)
 

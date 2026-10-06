@@ -20,7 +20,7 @@ old card's rate includes years a newer card did not exist for.
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, NamedTuple
 
 import pyarrow as pa
 
@@ -45,6 +45,44 @@ _OUTPUT_DIRECTORY = Path("data/metrics/play_gwent")
 
 # A pooled rate over fewer legal decks than this is too noisy to train on
 MIN_LEGAL_DECKS = 20
+
+
+class _CardInclusionRateRow(NamedTuple):
+    """CardInclusionRateMetric._label_values()'s own shape - one field
+    per column its _label_fields() lists, in the same order. Field
+    names match those column names exactly, so as_dict() needs no
+    renaming."""
+
+    inclusion_rate: float
+    legal_deck_count: int
+    included_deck_count: int
+
+    def as_dict(self) -> dict[str, Any]:
+        """{column: value} for ParquetBuilder.write_row() - the one
+        place this typed row is ever turned back into a dict.
+        Inputs: none. Output: dict[str, Any]. Side effects: none.
+        Exceptions: none."""
+        return self._asdict()
+
+
+class _FactionConditionedInclusionRow(NamedTuple):
+    """FactionConditionedInclusionMetric._label_values()'s own shape -
+    one field per column its _label_fields() lists, in the same order.
+    Field names match those column names exactly, so as_dict() needs no
+    renaming."""
+
+    inclusion_rate_by_faction: list[float | None]
+    legal_deck_count_by_faction: list[int]
+
+    def as_dict(self) -> dict[str, Any]:
+        """{column: value} for ParquetBuilder.write_row() - the one
+        place this typed row is ever turned back into a dict.
+        Inputs: none. Output: dict[str, Any]. Side effects: none.
+        Exceptions: none."""
+        return self._asdict()
+
+
+_LabelValues = _CardInclusionRateRow | _FactionConditionedInclusionRow
 
 
 class _FactionInclusionMetric(ABC):
@@ -115,7 +153,9 @@ class _FactionInclusionMetric(ABC):
         for card in self._tally.included_cards(self._card_lookup):
             label_values = self._label_values(self._tally.legal_inclusions(card))
             if label_values is not None:
-                writer.write_row({"nocab_uuid": str(card.nocab_uuid), **label_values})
+                writer.write_row(
+                    {"nocab_uuid": str(card.nocab_uuid), **label_values.as_dict()}
+                )
         writer.close()
         return self._output_path
 
@@ -129,13 +169,11 @@ class _FactionInclusionMetric(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def _label_values(
-        self, inclusions: list[FactionInclusion]
-    ) -> dict[str, Any] | None:
+    def _label_values(self, inclusions: list[FactionInclusion]) -> _LabelValues | None:
         """One card's label columns, or None to write no row.
 
         Inputs: inclusions (the card's counts per legal faction).
-        Output: {column: value} for _label_fields(), or None.
+        Output: the typed row matching _label_fields(), or None.
         Side effects: none. Exceptions: none.
         """
         raise NotImplementedError
@@ -160,16 +198,16 @@ class CardInclusionRateMetric(_FactionInclusionMetric):
 
     def _label_values(
         self, inclusions: list[FactionInclusion]
-    ) -> dict[str, Any] | None:
+    ) -> _CardInclusionRateRow | None:
         legal = sum(inclusion.legal_deck_count for inclusion in inclusions)
         if legal < MIN_LEGAL_DECKS:
             return None
         included = sum(inclusion.included_deck_count for inclusion in inclusions)
-        return {
-            self.LABEL_COLUMN: included / legal,
-            "legal_deck_count": legal,
-            "included_deck_count": included,
-        }
+        return _CardInclusionRateRow(
+            inclusion_rate=included / legal,
+            legal_deck_count=legal,
+            included_deck_count=included,
+        )
 
 
 class FactionConditionedInclusionMetric(_FactionInclusionMetric):
@@ -196,7 +234,7 @@ class FactionConditionedInclusionMetric(_FactionInclusionMetric):
 
     def _label_values(
         self, inclusions: list[FactionInclusion]
-    ) -> dict[str, Any] | None:
+    ) -> _FactionConditionedInclusionRow | None:
         by_faction = {inclusion.faction: inclusion for inclusion in inclusions}
         counts = [
             by_faction[name].legal_deck_count if name in by_faction else 0
@@ -208,7 +246,7 @@ class FactionConditionedInclusionMetric(_FactionInclusionMetric):
             by_faction[name].included_deck_count / count if count else None
             for name, count in zip(GWENT_FACTIONS, counts)
         ]
-        return {
-            "inclusion_rate_by_faction": rates,
-            "legal_deck_count_by_faction": counts,
-        }
+        return _FactionConditionedInclusionRow(
+            inclusion_rate_by_faction=rates,
+            legal_deck_count_by_faction=counts,
+        )

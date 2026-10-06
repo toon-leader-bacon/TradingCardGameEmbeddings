@@ -21,9 +21,8 @@ whose deck entries lack "floor_added_to_deck": 7 of 50k runs in page
 scan.
 
 FAILURE ISOLATION: one metric's accumulate()/finalize() failure is
-logged and never stops the others (same contract as ../sts_gg/scanner.py;
-these small helpers are duplicated per container, like every other
-metrics scanner here).
+logged and never stops the others, via the shared call_isolated()
+helper (../isolated_call.py).
 
 The 868 runs present in both sources are scored twice (they are two
 different decks in the deck box too); that is 0.05% of the runs.
@@ -34,6 +33,7 @@ import logging
 from collections import Counter
 from dataclasses import dataclass
 from enum import Enum
+from functools import partial
 from pathlib import Path
 from typing import Sequence
 
@@ -44,6 +44,7 @@ from src.data_refinement.deck_box.spire_codex_runs.extraction_stage import (
 from src.data_refinement.deck_box.sts2runs.extraction_stage import (
     Sts2RunsDeckExtractionStage,
 )
+from src.data_refinement.metrics.isolated_call import call_isolated
 from src.data_refinement.metrics.metric import Metric
 from src.data_refinement.metrics.sts2_runs.run_parser import Sts2RunParser
 from src.data_refinement.metrics.sts2_runs.run_record import RunOutcome, Sts2Run
@@ -128,10 +129,15 @@ def scan_sts2_runs(
                     continue
                 scored += 1
                 for metric in metrics:
-                    _accumulate_isolated(metric, verdict)
+                    call_isolated(
+                        _logger,
+                        metric,
+                        f"accumulate() on run {verdict.run_id}",
+                        partial(metric.accumulate, verdict),
+                    )
 
     for metric in metrics:
-        _finalize_isolated(metric)
+        call_isolated(_logger, metric, "finalize()", metric.finalize)
     tally = ScanTally(scored, excluded)
     _logger.info("scan_sts2_runs: %s", tally.as_dict())
     return tally
@@ -199,27 +205,3 @@ def _scored_or_excluded(
         )
         return RunExclusion.MALFORMED
     return scored_run(run)
-
-
-def _accumulate_isolated(metric: Metric[Sts2Run], run: Sts2Run) -> None:
-    """metric.accumulate(run), logging instead of raising on failure.
-    Inputs: metric, run. Output: none. Side effects: the metric's own;
-    logs an exception. Exceptions: none."""
-    try:
-        metric.accumulate(run)
-    except Exception:
-        _logger.exception(
-            "scan_sts2_runs: %r failed on run %s; skipping that run for it",
-            metric,
-            run.run_id,
-        )
-
-
-def _finalize_isolated(metric: Metric[Sts2Run]) -> None:
-    """metric.finalize(), logging instead of raising on failure.
-    Inputs: metric. Output: none. Side effects: the metric's own; logs an
-    exception. Exceptions: none."""
-    try:
-        metric.finalize()
-    except Exception:
-        _logger.exception("scan_sts2_runs: %r failed to finalize", metric)

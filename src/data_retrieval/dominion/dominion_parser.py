@@ -219,16 +219,21 @@ def load_game(driver1, driver2, game_id, name1, swap):
     return log, provinces, maybe_provinces
 
 
-driver1 = create_driver()
-driver2 = create_driver()
+def main() -> None:
+    driver1 = create_driver()
+    driver2 = create_driver()
 
-login(driver1, sys.argv[1])
-login(driver2, sys.argv[2])
+    login(driver1, sys.argv[1])
+    login(driver2, sys.argv[2])
 
-for game_id in sys.argv[3:]:
-    with open(f"{game_id}.log", "w") as f:
-        log, complete, provinces = load_game(
-            driver1, driver2, game_id, sys.argv[1], False
-        )
-        print(log, file=f)
-        print(complete, provinces, file=f)
+    for game_id in sys.argv[3:]:
+        with open(f"{game_id}.log", "w") as f:
+            log, complete, provinces = load_game(
+                driver1, driver2, game_id, sys.argv[1], False
+            )
+            print(log, file=f)
+            print(complete, provinces, file=f)
+
+
+if __name__ == "__main__":
+    main()

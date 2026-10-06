@@ -63,7 +63,7 @@ import csv
 import io
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import ClassVar, Iterable
+from typing import ClassVar, Iterable, Iterator
 from uuid import UUID, uuid4
 
 from tqdm import tqdm
@@ -123,6 +123,42 @@ _RARITY_BY_RESTRICTIVENESS = (
 )
 
 
+def _scan_csv_rows_with_progress(raw_path: Path, desc: str) -> Iterator[dict]:
+    """Yield every row of raw_path's CSV, driving a byte-sized tqdm bar.
+
+    Private helper — shared by ingest()'s two passes, which differ only
+    in their row filter and which per-row method they call. Opened in
+    binary + wrapped in TextIOWrapper ourselves (rather than
+    open(..., "r") directly) so we can track raw_bytes.tell() - the
+    TextIOWrapper csv.DictReader actually iterates disables .tell() once
+    next() has been called on it (OSError: "telling position disabled by
+    next() call"), but the underlying binary buffer has no such
+    restriction.
+
+    Inputs:
+        raw_path: CSV file to scan.
+        desc: the tqdm bar's description.
+    Output: Iterator[dict], one per CSV row (csv.DictReader's shape).
+    Side effects: reads raw_path; prints one tqdm progress bar to
+        stderr, sized against raw_path's byte size (not its row count,
+        which isn't known up front without a separate full read).
+    Exceptions: whatever csv.DictReader raises on a malformed file.
+    """
+    with open(raw_path, "rb") as raw_bytes, tqdm(
+        total=raw_path.stat().st_size,
+        unit="B",
+        unit_scale=True,
+        desc=desc,
+    ) as progress:
+        with io.TextIOWrapper(raw_bytes, encoding="utf-8") as raw_file:
+            bytes_read = 0
+            for row in csv.DictReader(raw_file):
+                position = raw_bytes.tell()
+                progress.update(position - bytes_read)
+                bytes_read = position
+                yield row
+
+
 class CardVaultFabtcgCardIngestionStage:
     """Translates a cardvault.fabtcg.com public_card_data.csv file directly into binder.
 
@@ -179,54 +215,27 @@ class CardVaultFabtcgCardIngestionStage:
             ... )
         """
         changed_uuids = []
-        total_bytes = raw_path.stat().st_size
         rarities = self._least_restrictive_rarities(raw_path)
 
         # Pass 1: English rows only — all content creation/merging happens here.
-        # Opened in binary + wrapped in TextIOWrapper ourselves (rather than
-        # open(..., "r") directly) so we can track raw_bytes.tell() - the
-        # TextIOWrapper csv.DictReader actually iterates disables .tell()
-        # once next() has been called on it (OSError: "telling position
-        # disabled by next() call"), but the underlying binary buffer has
-        # no such restriction.
-        with open(raw_path, "rb") as raw_bytes, tqdm(
-            total=total_bytes,
-            unit="B",
-            unit_scale=True,
-            desc=f"cardvault_fabtcg ingest (pass 1/2): {raw_path.name}",
-        ) as progress:
-            with io.TextIOWrapper(raw_bytes, encoding="utf-8") as raw_file:
-                bytes_read = 0
-                for row in csv.DictReader(raw_file):
-                    position = raw_bytes.tell()
-                    progress.update(position - bytes_read)
-                    bytes_read = position
-
-                    if row["print_language"] != _ENGLISH_PRINT_LANGUAGE:
-                        continue
-                    result = self._ingest_content_row(
-                        row, binder, rarities.get(row["card_id"], "")
-                    )
-                    if result is not None:
-                        changed_uuids.append(result)
+        for row in _scan_csv_rows_with_progress(
+            raw_path, f"cardvault_fabtcg ingest (pass 1/2): {raw_path.name}"
+        ):
+            if row["print_language"] != _ENGLISH_PRINT_LANGUAGE:
+                continue
+            result = self._ingest_content_row(
+                row, binder, rarities.get(row["card_id"], "")
+            )
+            if result is not None:
+                changed_uuids.append(result)
 
         # Pass 2: every other language — alias-only, no content changes.
-        with open(raw_path, "rb") as raw_bytes, tqdm(
-            total=total_bytes,
-            unit="B",
-            unit_scale=True,
-            desc=f"cardvault_fabtcg ingest (pass 2/2): {raw_path.name}",
-        ) as progress:
-            with io.TextIOWrapper(raw_bytes, encoding="utf-8") as raw_file:
-                bytes_read = 0
-                for row in csv.DictReader(raw_file):
-                    position = raw_bytes.tell()
-                    progress.update(position - bytes_read)
-                    bytes_read = position
-
-                    if row["print_language"] == _ENGLISH_PRINT_LANGUAGE:
-                        continue
-                    self._register_print_alias(row, binder)
+        for row in _scan_csv_rows_with_progress(
+            raw_path, f"cardvault_fabtcg ingest (pass 2/2): {raw_path.name}"
+        ):
+            if row["print_language"] == _ENGLISH_PRINT_LANGUAGE:
+                continue
+            self._register_print_alias(row, binder)
 
         return changed_uuids
 

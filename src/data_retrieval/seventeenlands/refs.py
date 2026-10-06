@@ -80,7 +80,7 @@ class Expansion(str, Enum):
     KHM = "KHM"
 
 
-class format_code(str, Enum):
+class FormatCode(str, Enum):
     PremierDraft = "PremierDraft"
     TradDraft = "TradDraft"
     PickTwoDraft = "PickTwoDraft"

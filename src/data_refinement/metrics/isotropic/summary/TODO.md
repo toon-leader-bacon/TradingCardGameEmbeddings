@@ -19,9 +19,12 @@ Found while writing the isotropic dojos (2026-09-30).
 - [ ] **WinningDeckMaskedCardMetric.LABEL_VALUES is too wide.** It lists
   807 names, but only 162 ever appear as labels. Restrict it to the names
   that occur.
-- [ ] **Expose LABEL_COLUMN ClassVars.** The card-rate metrics have none,
-  which is why src/dojos/isotropic has its own IsotropicCardRateDojo base
-  instead of reusing CardAverageMetricDojo.
+- [x] **Expose LABEL_COLUMN ClassVars.** Fixed 2026-10-06: the five
+  card-rate metrics (AverageCopiesBoughtMetric, TurnCountAssociationMetric,
+  VetoRateMetric, OpeningBuyRateMetric, PileExhaustionRateMetric) now carry
+  a `LABEL_COLUMN: ClassVar[str]`, so `src/dojos/isotropic/card_rate_dojos.py`'s
+  wrappers subclass `CardAverageMetricDojo` directly, naming only `METRIC`;
+  the old `IsotropicCardRateDojo` base is gone.
 - [ ] **Name the deck reference column deck_uuid.** Several metrics use
   kingdom_uuid / partial_deck_uuid, which needed
   RenamedColumnDataConstructor in the dojos. The alternative is a

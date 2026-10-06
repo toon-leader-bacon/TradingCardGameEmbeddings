@@ -3,4 +3,5 @@ flake8
 mypy
 types-requests
 types-tqdm
+types-PyYAML
 pandas-stubs

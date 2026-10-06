@@ -2,7 +2,7 @@ import pandas as pd
 import pytest
 
 from src.dojos.generic.data_constructors import DeckLabelDataConstructor
-from src.dojos.isotropic.renamed_column_data_constructor import (
+from src.dojos.generic.renamed_column_data_constructor import (
     RenamedColumnDataConstructor,
 )
 from tests.dojos.isotropic._fixtures import binder_and_group

@@ -45,42 +45,88 @@ this stage stays read-only (CardLookup, never a full CardBinder) and
 does NOT create that card lazily; a missing sentinel raises
 RuntimeError.
 
-ONE DECK PER DRAFT: each game_data row is one game, and a draft plays
-3-7 games with the same or nearly the same deck (only sideboard swaps
-differ). Storing one deck per game multiplied the box ~5x (~28M decks)
-and let 17lands dominate every deck-based dojo, so deck identity is
-uuid5(_DECK_NAMESPACE, draft_id). A draft_id is assumed globally
-unique across every game_data CSV in this directory (17Lands' own
-convention) — this stage never folds the source file's
+ONE DECK PER DRAFT, CONTENT-ADDRESSED: each game_data row is one game,
+and a draft plays 3-7 games with the same or nearly the same deck
+(only sideboard swaps differ). Storing one deck per game multiplied
+the box ~5x (~28M decks) and let 17lands dominate every deck-based
+dojo, so this stage stores at most one deck per draft. That deck's
+identity is deck_uuid_from_cards() (see
+src/data_refinement/deck_ids.py) over the draft's canonical
+game's fully-resolved card multiset — a CONTENT hash, not a function
+of draft_id — so two different drafts that build the exact same
+40-card deck collapse into ONE stored GenericDeck, letting the box
+naturally deduplicate across drafts (this is deliberate: the box is
+meant to hold unique decklists for external publication, train/test
+splits over decks must not leak a decklist shared by two drafts across
+the split, and per-draft/per-game popularity is tracked by a separate
+metric instead of by storage duplication). A draft_id is assumed
+globally unique across every game_data CSV in this directory (17Lands'
+own convention) — this stage never folds the source file's
 expansion/format into the hashed identity, only into the stored
 deck's human-readable name.
 
-CANONICAL GAME: the deck stored for a draft is the one from its lowest
-(build_index, match_number, game_number), its _GameKey, which
-provenance.source_id records as
+CANONICAL GAME: the game whose cards are hashed for a draft is the one
+from its lowest (build_index, match_number, game_number), its
+_GameKey, which provenance.source_id records as
 f"{draft_id}:{build_index}:{match_number}:{game_number}". build_index
 is 17Lands' deck-build counter (0 = the deck as first built, +1 per
-rebuild or sideboard change), so the stored deck is the draft's earliest
-played build (~30% of drafts have no build-0 game on record).
-CONFIRMED against the live files: all 133 carry build_index,
+rebuild or sideboard change), so the hashed deck is the draft's
+earliest played build (~30% of drafts have no build-0 game on
+record). CONFIRMED against the live files: all 133 carry build_index,
 but the 10 older tar-wrapped ones (see TAR-WRAPPED FILES) have no
 match_number column and number games per match, so a draft there has
 several game_number == 1 rows; match_number counts as 0 for those
 files. Rows that still tie share a build_index, i.e. the same
-decklist, so which one wins doesn't matter. Choosing by key rather
-than by "first row read" keeps the result independent of row order
-and keeps re-runs IDEMPOTENT, same convention as every sibling stage:
-box.get_by_uuid() first; box.create() for a new draft; for a stored
-draft, a row with a higher key is a no-op, a row with a lower key
-replaces the stored deck, and a row with the same key replaces it only
-when the resolved Counter(card_nocab_uuids) actually changed (e.g.
-after the binder learns a card).
+decklist, so which one wins doesn't matter.
+
+TWO-PHASE EXTRACTION, because content-addressed identity breaks the
+old single-pass "look up by a draft-derived key" trick: the final
+deck_uuid depends on the RESOLVED CARD LIST of whichever game turns
+out to be canonical, which isn't known until every row of a draft has
+been seen — so a row can no longer be looked up against "what's
+currently stored for this draft" by a deterministic draft-derived key
+(there isn't one anymore). _extract_csv() instead runs two phases per
+file:
+    1. Streaming accumulation (_accumulate_best_games(), still one
+       pass over the CSV, still chunked, never the whole file in
+       memory): for every row, compute its _GameKey and, only when
+       that key improves on this draft's best key seen so far in this
+       file, resolve the row's card multiset and keep
+       (game_key, card_nocab_uuids, expansion, event_type) as that
+       draft's new best — a dict keyed by draft_id, bounded by one
+       file's distinct draft count (see ONE DECK PER DRAFT's own
+       global-uniqueness assumption — this dict never needs to span
+       files or process runs on that same assumption).
+    2. Resolution/write (_write_best_games()), after the whole file
+       has streamed: for each accumulated draft, hash its best game's
+       card multiset into a deck_uuid and box.create_if_absent() the
+       resulting GenericDeck — content-derived identity makes
+       create_if_absent() the correct, naturally idempotent call (no
+       more create()-vs-replace() branching): a draft whose resolved
+       deck matches one already stored, from this draft or a
+       different one, is just a no-op recurrence. This also makes
+       crash-retry trivially safe — a retried file recomputes the
+       identical accumulation from scratch and resubmits the same
+       create_if_absent() calls, which no-op against anything already
+       durably stored.
+
+changed_uuids CONTRACT: because drafts no longer map 1:1 to stored
+uuids (two drafts can legitimately target the same deck_uuid),
+extract()/_extract_csv() return every deck_uuid that this call's
+create_if_absent() calls actually targeted — whether that call stored
+a genuinely new deck or merely recurred, no-op, against one already
+present — across every processed file, each uuid listed once. A
+deck_uuid that several drafts (or several extract() calls) all
+resolve to still appears only once.
 
 FRESH BOX REQUIRED AFTER AN IDENTITY CHANGE: an mtg.db written under
-this stage's earlier per-game identity (namespace a3d8f1c2-...) must be
-deleted before re-running. Those deck ids never match the per-draft
-ones, so a re-run would add per-draft decks next to the stale per-game
-ones and save() would stamp the mixed box as current.
+either of this stage's earlier identity schemes — the original
+per-game namespace (a3d8f1c2-...) or the later per-draft namespace
+(163ae839-...) — must be deleted before re-running under this
+content-addressed scheme. None of those ids match deck_uuid_from_cards()
+output, so a re-run would add content-addressed decks next to the
+stale per-game/per-draft ones and save() would stamp the mixed box as
+current.
 
 TAR-WRAPPED FILES, CONFIRMED against the live files: 10 of the 133
 game_data CSVs (every AFR/KHM/MID/STX/VOW format) are not plain CSV on
@@ -103,6 +149,9 @@ chunksize, mirroring
 src/data_refinement/metrics/seventeenlands/game_data/scanner.py's
 scan_game_csv()) — the full-file-in-memory approach that function's own
 docstring warns against is never used here either, tar-wrapped or not.
+The per-draft accumulation dict (see TWO-PHASE EXTRACTION) is the only
+state held past a single chunk, and it holds one resolved card
+multiset per distinct draft_id in the file, not per row.
 
 DIRECTORY HANDLING: raw_path may be a single CSV file or a directory of
 them (see extraction.py's own documented flexibility) — DEFAULT_RAW_PATH
@@ -111,135 +160,59 @@ whole directory. A directory's *.csv files are processed in sorted
 order, each contributing independently to the one returned
 changed_uuids list.
 
-PROVENANCE: each created/replaced deck carries a Provenance
+PROVENANCE: each created/recurred deck carries a Provenance
 (DataSource.SEVENTEENLANDS_GAME_DATA,
 source_id=f"{draft_id}:{build_index}:{match_number}:{game_number}" of
-the canonical game, fetched_at=now) — not SCRYFALL (that's each card's own data
-source, used only for card matching). Written on every create() and
-replace(), and read back to find the stored deck's _GameKey (see
-CANONICAL GAME above).
+the canonical game, fetched_at=now) — not SCRYFALL (that's each card's
+own data source, used only for card matching). On a create_if_absent()
+recurrence the ALREADY-STORED provenance wins (create_if_absent()'s own
+documented contract — the existing entry is returned unconditionally,
+never overwritten), so a deck's stored provenance records whichever
+draft/game first wrote it, not necessarily the one being processed now.
 """
 
-import logging
-import tarfile
-from collections import Counter
-from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import IO, ClassVar, Iterable, Iterator, NamedTuple
-from uuid import UUID, uuid5
+from typing import ClassVar, NamedTuple
+from uuid import UUID
 
 import pandas as pd
 from tqdm import tqdm
 
-from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.card_binder.card_lookup import (
-    CardLookup,
-    uuid_for_name_or_front_face,
-)
+from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.deck_box.seventeenlands_game_data._card_columns import (
+    _deck_column_index,
+)
+from src.data_refinement.deck_box.seventeenlands_game_data._game_key import _GameKey
+from src.data_refinement.deck_box.seventeenlands_game_data._tar_aware_csv_stream import (
+    _open_stream,
+)
+from src.data_refinement.deck_ids import deck_uuid_from_cards
 from src.data_retrieval.seventeenlands.downloader import SeventeenLandsDownloader
 from src.schema.card import GenericDeck, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 
-_logger = logging.getLogger(__name__)
-
-_DECK_COLUMN_PREFIX = "deck_"
-
 # I/O-efficiency knob only (see scan_game_csv()'s own chunk_size
-# parameter for precedent) - never changes what _extract_row() sees,
-# still one row at a time.
+# parameter for precedent) - never changes what _accumulate_best_games()
+# sees, still one row at a time.
 _CHUNK_SIZE = 100_000
 
-# POSIX ustar header layout: the "ustar" magic sits at byte offset 257
-# of every 512-byte tar header - same constant SeventeenLandsDownloader
-# now checks at download time (see module docstring's TAR-WRAPPED FILES
-# section for why this is re-checked here rather than assumed fixed).
-_TAR_MAGIC_OFFSET = 257
-_TAR_MAGIC = b"ustar"
 
-# Fixed, arbitrary — never regenerate. Namespace for this stage's
-# deterministic per-draft_id deck uuids (see module docstring's ONE
-# DECK PER DRAFT section). Deliberately distinct from every other uuid5
-# namespace in this codebase, including this stage's own earlier
-# per-game namespace (a3d8f1c2-...), so no per-game deck id can
-# collide with a per-draft one.
-_DECK_NAMESPACE = UUID("163ae839-092d-4a55-88ff-782edffc99f6")
+class _BestGame(NamedTuple):
+    """One draft's best-known (lowest _GameKey) game, mid-accumulation.
 
-
-class _GameKey(NamedTuple):
-    """One game's position within its draft; the lowest one is canonical.
-
-    Field order is the comparison order: NamedTuple compares as a tuple,
-    so build_index decides first, then match_number, then game_number
-    (see module docstring's CANONICAL GAME section). Owns both
-    directions of the provenance.source_id round trip (source_id_for()
-    and from_provenance()), so the written and parsed formats can't
-    drift.
+    Held in extract()'s per-file accumulation dict (see module
+    docstring's TWO-PHASE EXTRACTION section) — just enough to write
+    this draft's deck once the whole file has streamed, without
+    retaining the raw row.
     """
 
-    build_index: int
-    match_number: int
-    game_number: int
-
-    @staticmethod
-    def from_row(row: dict) -> "_GameKey":
-        """Parse one game_data row's build_index/match_number/game_number.
-
-        Inputs:
-            row: one game_data CSV row, dict-like. pandas may hand the
-                numbers over as floats (e.g. 1.0) when a chunk holds a
-                NaN; int() normalizes them. match_number counts as 0
-                when the row has no such key, which (since pandas gives
-                every row every header column) means the whole file
-                lacks the column - see module docstring's CANONICAL
-                GAME section.
-        Output: that row's _GameKey.
-        Side effects: none.
-        Exceptions: raises KeyError if build_index or game_number is
-            missing, and ValueError if any present value is NaN.
-        """
-        return _GameKey(
-            int(row["build_index"]),
-            int(row.get("match_number", 0)),
-            int(row["game_number"]),
-        )
-
-    def source_id_for(self, draft_id: str) -> str:
-        """Format the provenance.source_id that from_provenance() parses.
-
-        Inputs:
-            draft_id: the game's draft_id.
-        Output: f"{draft_id}:{build_index}:{match_number}:{game_number}",
-            e.g. "d1:0:1:2".
-        Side effects: none.
-        Exceptions: none.
-        """
-        return f"{draft_id}:{self.build_index}:{self.match_number}:{self.game_number}"
-
-    @staticmethod
-    def from_provenance(provenance: Provenance | None) -> "_GameKey | None":
-        """Parse the game key a stored deck's provenance.source_id records.
-
-        Inputs:
-            provenance: a stored deck's provenance, whose source_id is
-                f"{draft_id}:{build_index}:{match_number}:{game_number}".
-        Output: that game's _GameKey, or None when provenance is None
-            or source_id doesn't have that shape (a deck this stage
-            didn't write). Callers treat None as "replace it".
-        Side effects: none.
-        Exceptions: none.
-        """
-        if provenance is None:
-            return None
-        # rsplit: the three numbers are always the last three fields,
-        # even if a draft_id ever contained a colon.
-        fields = provenance.source_id.rsplit(":", 3)
-        numbers = fields[1:]
-        if len(fields) != 4 or not all(number.isdigit() for number in numbers):
-            return None
-        return _GameKey(*(int(number) for number in numbers))
+    game_key: _GameKey
+    card_nocab_uuids: list[UUID]
+    expansion: str
+    event_type: str
 
 
 class SeventeenLandsGameDataDeckExtractionStage:
@@ -257,7 +230,7 @@ class SeventeenLandsGameDataDeckExtractionStage:
     def extract(
         self, raw_path: Path | None, box: DeckBox, card_lookup: CardLookup
     ) -> list[UUID]:
-        """Parse every game_data CSV under raw_path, creating/updating decks on box.
+        """Parse every game_data CSV under raw_path, creating/recurring decks on box.
 
         One _extract_csv() call per CSV file — no additional logic
         beyond calling that (in sorted order, when raw_path is a
@@ -273,13 +246,14 @@ class SeventeenLandsGameDataDeckExtractionStage:
             card_lookup: must already have self.SOURCE_GAME's Unknown
                 sentinel card seeded (see module docstring's
                 PRECONDITION).
-        Output: nocab_uuid of every draft whose deck this call created
-            or replaced, across every processed file, each listed once.
-            Drafts whose stored deck was left unchanged are NOT
-            included.
+        Output: every deck_uuid this call's box.create_if_absent()
+            calls targeted, across every processed file, each listed
+            once — see module docstring's changed_uuids CONTRACT
+            section (this includes no-op recurrences against an
+            already-stored deck, not only genuinely new decks).
         Side effects: reads every processed CSV (streamed, never fully
             in memory — see module docstring's STREAMING section);
-            creates/updates decks directly on box; emits one
+            creates decks on box (via create_if_absent()); emits one
             logging.error() per column name that falls back to the
             Unknown sentinel; prints one tqdm progress bar per file to
             stderr.
@@ -305,47 +279,57 @@ class SeventeenLandsGameDataDeckExtractionStage:
         # module docstring) and its own tqdm progress bar.
         for csv_path in csv_paths:
             changed_uuids.extend(self._extract_csv(csv_path, box, card_lookup))
-        # A draft is written twice when a lower-keyed game of it arrives
-        # after its deck was stored; report it once.
+        # A deck_uuid can recur across files (two drafts in different
+        # files sharing a decklist, or the same draft split across
+        # files) - report it once (see module docstring's
+        # changed_uuids CONTRACT section).
         return list(dict.fromkeys(changed_uuids))
 
     def _extract_csv(
         self, csv_path: Path, box: DeckBox, card_lookup: CardLookup
     ) -> list[UUID]:
-        """Stream one game_data CSV (plain or tar-wrapped), creating/updating decks on box.
+        """Stream one game_data CSV (plain or tar-wrapped), creating/recurring decks on box.
 
         Private helper — single consumer is extract(). Opens csv_path
         exactly once via _open_stream() (tar-aware): reads the header
         first (to build this file's own deck column index), seeks back
         to the start, then re-reads the same stream in chunks for the
         real pass — see _open_stream()'s own docstring for why this
-        works uniformly for a tar-wrapped member and a plain file.
+        works uniformly for a tar-wrapped member and a plain file. Runs
+        the two phases in module docstring's TWO-PHASE EXTRACTION
+        section: _accumulate_best_games() over the whole streamed file,
+        then _write_best_games() once, after the stream is exhausted.
 
         Inputs:
             csv_path: one game_data CSV file.
-            box: the DeckBox to read from and write to.
+            box: the DeckBox to write decks onto.
             card_lookup: used to resolve every deck_<name> column (see
                 _deck_column_index()).
-        Output: deck_uuid for every row that created or replaced a
-            deck, in this file alone (a draft may appear twice; extract()
-            dedupes).
-        Side effects: reads csv_path; creates/updates decks on box;
-            prints one tqdm progress bar to stderr, sized against this
-            file's own content length (the tar member's size, when
-            tar-wrapped — not the compressed/wrapped file's own size on
-            disk).
+        Output: deck_uuid for every draft in this file whose best game
+            was written via box.create_if_absent(), in this file alone
+            (two drafts may produce the same deck_uuid; extract()
+            dedupes across files, and this method itself only ever
+            calls create_if_absent() once per distinct draft_id, so no
+            within-file dedup is needed here).
+        Side effects: reads csv_path; creates decks on box (via
+            create_if_absent()); prints one tqdm progress bar to
+            stderr, sized against this file's own content length (the
+            tar member's size, when tar-wrapped — not the
+            compressed/wrapped file's own size on disk).
         Exceptions: raises if csv_path isn't parsable as CSV (or
             tar-wrapped CSV), or a row is missing
             draft_id/build_index/game_number. Whatever
-            _extract_row()/_deck_column_index() raise propagates.
+            _accumulate_best_games()/_deck_column_index() raise
+            propagates.
         """
-        changed_uuids: list[UUID] = []
-
-        with self._open_stream(csv_path) as (binary_stream, total_bytes):
+        with _open_stream(csv_path) as (binary_stream, total_bytes):
             header_columns = pd.read_csv(binary_stream, nrows=0).columns
             binary_stream.seek(0)
-            deck_columns = self._deck_column_index(header_columns, card_lookup)
+            deck_columns = _deck_column_index(
+                header_columns, card_lookup, self.SOURCE_GAME
+            )
 
+            best_games: dict[str, _BestGame] = {}
             with tqdm(
                 total=total_bytes,
                 unit="B",
@@ -358,177 +342,120 @@ class SeventeenLandsGameDataDeckExtractionStage:
                     progress.update(position - bytes_read)
                     bytes_read = position
 
-                    # Hand every row to _extract_row() one at a time
-                    # (never the whole chunk at once).
+                    # Hand every row to _accumulate_best_games() one at
+                    # a time (never the whole chunk at once).
                     for row in chunk.to_dict(orient="records"):
-                        result = self._extract_row(row, box, card_lookup, deck_columns)
-                        if result is not None:
-                            changed_uuids.append(result)
+                        self._accumulate_best_games(row, deck_columns, best_games)
 
-        return changed_uuids
+        return self._write_best_games(best_games, box)
 
-    def _extract_row(
+    def _accumulate_best_games(
         self,
         row: dict,
-        box: DeckBox,
-        card_lookup: CardLookup,
         deck_columns: list[tuple[str, UUID]],
-    ) -> UUID | None:
-        """Create, replace, or skip one game_data row's draft deck on box.
+        best_games: dict[str, _BestGame],
+    ) -> None:
+        """Update best_games in place with row, if row's game is this draft's best yet.
 
-        Private helper — single consumer is _extract_csv(). THIS METHOD
-        IS WHERE IDEMPOTENCY HAPPENS: deck_uuid is a pure function of
-        row["draft_id"] (see module docstring's ONE DECK PER DRAFT
-        section), and which game's deck is kept is a pure function of
-        the rows' _GameKeys (see CANONICAL GAME), so re-processing the
-        same rows always converges on the same stored deck.
+        Private helper — single consumer is _extract_csv(), called once
+        per streamed row (see module docstring's TWO-PHASE EXTRACTION
+        section, phase 1). A row's card multiset is only resolved when
+        its _GameKey actually improves on what's already accumulated
+        for this draft_id — a worse-keyed row is dropped after a cheap
+        _GameKey comparison, never paying for card resolution.
 
         Inputs:
             row: one game_data CSV row, dict-like — carrying at least
-                draft_id/build_index/game_number/expansion/event_type (and
-                match_number in files that have it),
-                plus this file's deck_<name> columns.
-            box: the DeckBox to read from and write to.
-            card_lookup: used to resolve unresolved deck_<name> columns'
-                Unknown-sentinel fallback (see
-                _card_nocab_uuids_for_row()'s own docstring — the
-                columns themselves are already resolved into
-                deck_columns by the time this method runs).
+                draft_id/build_index/game_number/expansion/event_type
+                (and match_number in files that have it), plus this
+                file's deck_<name> columns.
             deck_columns: this CSV's own deck_<name> column index (see
                 _deck_column_index()).
-        Output: deck_uuid if this call created or replaced the draft's
-            deck; None if this row was a later game of an already-stored
-            draft, or the stored canonical game with an identical
-            resolved card list.
-        Side effects: creates or replaces at most one deck on box, with
-            a freshly-computed Provenance (see module docstring's
-            PROVENANCE section).
+            best_games: this file's accumulation dict so far, keyed by
+                draft_id — MUTATED in place: gains a new entry for a
+                draft_id not yet seen, or has its entry replaced when
+                row's _GameKey is strictly lower than the stored one.
+                A tying or higher key leaves the existing entry
+                untouched (ties share a build_index, i.e. the same
+                decklist per module docstring's CANONICAL GAME section,
+                so which tied row wins doesn't matter).
+        Output: none (mutates best_games).
+        Side effects: none beyond mutating best_games. Resolving row's
+            card list may emit one logging.error() per unresolved
+            column name, via _card_nocab_uuids_for_row().
         Exceptions: raises KeyError if row is missing
             draft_id/build_index/game_number, and ValueError if
             any key number is NaN (see _GameKey.from_row()).
-            Whatever _card_nocab_uuids_for_row() raises propagates.
         """
         # str(): pandas may infer a non-string dtype for a chunk's
-        # draft_id column, and uuid5() needs a str.
+        # draft_id column.
         draft_id = str(row["draft_id"])
         game_key = _GameKey.from_row(row)
-        deck_uuid = self._deck_uuid(draft_id)
 
-        existing = box.get_by_uuid(deck_uuid)
-        stored_key = _GameKey.from_provenance(existing.provenance) if existing else None
-        if stored_key is not None and game_key > stored_key:
-            # A later game of a draft whose canonical deck is stored.
-            return None
+        existing = best_games.get(draft_id)
+        if existing is not None and game_key >= existing.game_key:
+            return
 
         card_nocab_uuids = self._card_nocab_uuids_for_row(row, deck_columns)
-        # card_nocab_uuids is a multiset - compare copy counts via
-        # Counter, never list/set equality (same reasoning as every
-        # sibling stage's own _extract_row/_extract_run).
-        if (
-            existing is not None
-            and game_key == stored_key
-            and Counter(existing.card_nocab_uuids) == Counter(card_nocab_uuids)
-        ):
-            # Re-seen canonical game, identical resolved multiset.
-            return None
-
-        deck = GenericDeck(
-            nocab_uuid=deck_uuid,
-            source_game=self.SOURCE_GAME,
-            name=self._deck_name(row),
+        best_games[draft_id] = _BestGame(
+            game_key=game_key,
             card_nocab_uuids=card_nocab_uuids,
-            provenance=Provenance(
-                data_source=DataSource.SEVENTEENLANDS_GAME_DATA,
-                source_id=game_key.source_id_for(draft_id),
-                fetched_at=datetime.now(timezone.utc),
-            ),
+            expansion=str(row["expansion"]),
+            event_type=str(row["event_type"]),
         )
-        if existing is None:
-            box.create(deck)
-        else:
-            # A lower-keyed game, or the same game with changed cards.
-            box.replace(deck_uuid, deck)
-        return deck_uuid
 
-    def _deck_column_index(
-        self, header_columns: Iterable[str], card_lookup: CardLookup
-    ) -> list[tuple[str, UUID]]:
-        """Match every "deck_<name>" column in header_columns to a nocab_uuid.
+    def _write_best_games(
+        self, best_games: dict[str, _BestGame], box: DeckBox
+    ) -> list[UUID]:
+        """Hash and store every accumulated draft's best game (phase 2).
 
-        Private helper — single consumer is _extract_csv(). Every
-        distinct <name> is resolved at most once per call (a local
-        cache), via _card_uuid_for_name().
+        Private helper — single consumer is _extract_csv(), called once
+        per file after the whole file has streamed (see module
+        docstring's TWO-PHASE EXTRACTION section, phase 2).
 
         Inputs:
-            header_columns: this CSV's own header (e.g.
-                pandas.read_csv(path, nrows=0).columns) — every column,
-                not just deck_-prefixed ones; non-matching columns are
-                ignored.
-            card_lookup: registry each distinct <name> is resolved
-                against.
-        Output: every "deck_<name>" column paired with its resolved (or
-            Unknown-sentinel-substituted — see module docstring's
-            UNRESOLVED CARDS section) nocab_uuid, in header_columns' own
-            order.
-        Side effects: emits one logging.error() per distinct
-            unresolved <name> (via _card_uuid_for_name()).
-        Exceptions: raises RuntimeError if self.SOURCE_GAME's Unknown
-            sentinel card isn't found on card_lookup.
+            best_games: this file's full accumulation dict, keyed by
+                draft_id, as built by repeated _accumulate_best_games()
+                calls.
+            box: the DeckBox to write decks onto.
+        Output: deck_uuid for every draft_id in best_games, in
+            best_games' own iteration order (a draft_id's deck_uuid is
+            always included, whether box.create_if_absent() stored it
+            fresh or found it already present — see module docstring's
+            changed_uuids CONTRACT section).
+        Side effects: one box.create_if_absent() call per draft_id in
+            best_games.
+        Exceptions: whatever box.create_if_absent() raises propagates
+            (see DeckBox's own module docstring's BATCHED COMMITS
+            section).
         """
-        name_cache: dict[str, UUID] = {}
-        deck_columns: list[tuple[str, UUID]] = []
-        for column in header_columns:
-            if not column.startswith(_DECK_COLUMN_PREFIX):
-                continue
-            name = column[len(_DECK_COLUMN_PREFIX) :]
-            if name not in name_cache:
-                name_cache[name] = self._card_uuid_for_name(name, card_lookup)
-            deck_columns.append((column, name_cache[name]))
-        return deck_columns
-
-    def _card_uuid_for_name(self, name: str, card_lookup: CardLookup) -> UUID:
-        """Resolve one bare card name to a nocab_uuid, falling back to Unknown.
-
-        Private helper — single consumer is _deck_column_index().
-        uuid_for_name_or_front_face(), then the Unknown sentinel — see
-        module docstring's CARD MATCHING and UNRESOLVED CARDS sections.
-
-        Inputs:
-            name: one deck_<name> column's bare <name> suffix.
-            card_lookup: registry to resolve name against.
-        Output: the matching nocab_uuid, or (on a miss) the Unknown
-            sentinel's nocab_uuid.
-        Side effects: emits one logging.error() call on a miss.
-        Exceptions: raises RuntimeError if even the Unknown sentinel
-            isn't found on card_lookup.
-        """
-        card_uuid = uuid_for_name_or_front_face(card_lookup, self.SOURCE_GAME, name)
-        if card_uuid is not None:
-            return card_uuid
-
-        _logger.error(
-            "SeventeenLandsGameDataDeckExtractionStage: unresolved card name "
-            "%r — substituting the Unknown sentinel card",
-            name,
-        )
-        unknown_card = card_lookup.get_by_name_single(
-            self.SOURCE_GAME, CardBinder.UNKNOWN_CARD_NAME, strict=False
-        )
-        if unknown_card is None:
-            raise RuntimeError(
-                f"SeventeenLandsGameDataDeckExtractionStage: {self.SOURCE_GAME!r}'s "
-                "Unknown sentinel card is not seeded — call "
-                "CardBinder.ensure_unknown_card() before extract()"
+        written_uuids: list[UUID] = []
+        for draft_id, best_game in best_games.items():
+            deck_uuid = deck_uuid_from_cards(best_game.card_nocab_uuids)
+            deck = GenericDeck(
+                nocab_uuid=deck_uuid,
+                source_game=self.SOURCE_GAME,
+                name=self._deck_name(
+                    best_game.expansion, best_game.event_type, draft_id
+                ),
+                card_nocab_uuids=best_game.card_nocab_uuids,
+                provenance=Provenance(
+                    data_source=DataSource.SEVENTEENLANDS_GAME_DATA,
+                    source_id=best_game.game_key.source_id_for(draft_id),
+                    fetched_at=datetime.now(timezone.utc),
+                ),
             )
-        return unknown_card.nocab_uuid
+            box.create_if_absent(deck)
+            written_uuids.append(deck_uuid)
+        return written_uuids
 
     def _card_nocab_uuids_for_row(
         self, row: dict, deck_columns: list[tuple[str, UUID]]
     ) -> list[UUID]:
         """Expand one row's deck_<name> copy counts into a full card multiset.
 
-        Private helper — single consumer is _extract_row(). THIS IS
-        WHERE THE "FULL DECK LIST" HAPPENS: unlike
+        Private helper — single consumer is _accumulate_best_games().
+        THIS IS WHERE THE "FULL DECK LIST" HAPPENS: unlike
         the game_data metrics' ZoneCounts.present() (which samples
         presence once per qualifying card for that sibling container's
         per-card metrics), this method appends card_uuid once per unit of
@@ -542,7 +469,8 @@ class SeventeenLandsGameDataDeckExtractionStage:
         Output: card_nocab_uuids — every deck_columns entry whose
             row[column_name] is a positive count, repeated that many
             times; a zero/NaN count contributes nothing. Order is not
-            meaningful (see GenericDeck's own multiset docstring).
+            meaningful (see GenericDeck's own multiset docstring) —
+            deck_uuid_from_cards() sorts before hashing.
         Side effects: none.
         Exceptions: raises KeyError if a column in deck_columns is
             missing from row.
@@ -554,120 +482,21 @@ class SeventeenLandsGameDataDeckExtractionStage:
                 card_nocab_uuids.extend([card_uuid] * int(count))
         return card_nocab_uuids
 
-    def _deck_name(self, row: dict) -> str:
-        """Build one row's human-readable GenericDeck.name.
+    def _deck_name(self, expansion: str, event_type: str, draft_id: str) -> str:
+        """Build one draft's human-readable GenericDeck.name.
 
-        Private helper — single consumer is _extract_row(). Descriptive
-        only — never part of this stage's hashed identity (see module
-        docstring's ONE DECK PER DRAFT section).
-
-        Inputs:
-            row: one game_data CSV row, dict-like — carrying at least
-                expansion/event_type/draft_id.
-        Output: e.g. "17lands game_data MSH.PremierDraft <draft_id>
-            deck".
-        Side effects: none.
-        Exceptions: raises KeyError if row is missing any of the fields
-            named above.
-        """
-        return (
-            f"17lands game_data {row['expansion']}.{row['event_type']} "
-            f"{row['draft_id']} deck"
-        )
-
-    @staticmethod
-    def _deck_uuid(draft_id: str) -> UUID:
-        """Compute the deterministic nocab_uuid for one draft's deck.
-
-        Private helper — single consumer is _extract_row(). uuid5 (not
-        uuid4): the same draft_id must always produce the same uuid,
-        across every extract() call, so every game of a draft targets
-        one stored deck (see module docstring's ONE DECK PER DRAFT
+        Private helper — single consumer is _write_best_games().
+        Descriptive only — never part of this stage's hashed identity
+        (see module docstring's ONE DECK PER DRAFT, CONTENT-ADDRESSED
         section).
 
         Inputs:
-            draft_id: this row's own draft_id.
-        Output: a uuid unique to (this fixed namespace, draft_id) —
-            stable forever for a given draft_id.
+            expansion: the draft's best game's expansion code.
+            event_type: the draft's best game's event_type.
+            draft_id: the draft's own draft_id.
+        Output: e.g. "17lands game_data MSH.PremierDraft <draft_id>
+            deck".
         Side effects: none.
         Exceptions: none.
         """
-        return uuid5(_DECK_NAMESPACE, draft_id)
-
-    @staticmethod
-    def _is_tar_wrapped(csv_path: Path) -> bool:
-        """Detect whether csv_path is actually a tar archive on disk.
-
-        Private helper — single consumer is _open_stream(). Peeks the
-        first 512 bytes and checks for the ustar magic at its known
-        offset — same technique and constants
-        SeventeenLandsDownloader.download_one() now uses at download
-        time (see module docstring's TAR-WRAPPED FILES section).
-
-        Inputs:
-            csv_path: path to check.
-        Output: True if csv_path's first 512 bytes carry a ustar tar
-            header; False otherwise (a plain CSV).
-        Side effects: none — reads only the first 512 bytes.
-        Exceptions: none expected.
-        """
-        with open(csv_path, "rb") as probe_file:
-            header = probe_file.read(512)
-        return header[_TAR_MAGIC_OFFSET : _TAR_MAGIC_OFFSET + len(_TAR_MAGIC)] == (
-            _TAR_MAGIC
-        )
-
-    @contextmanager
-    def _open_stream(self, csv_path: Path) -> Iterator[tuple[IO[bytes], int]]:
-        """Open csv_path for repeated binary reads, tar-wrapped or not.
-
-        Private helper — single consumer is _extract_csv(). Dispatches
-        on _is_tar_wrapped(): for a tar-wrapped file, opens it via
-        tarfile.open(csv_path, mode="r") (random-access mode — the
-        on-disk quirk here is already-decompressed, so this is a plain
-        seekable file, unlike download_one()'s in-flight gzip stream)
-        and yields its one member's extractfile() stream (which itself
-        supports .seek()/.tell() since the underlying tar file does);
-        for a plain file, yields a standard open(csv_path, "rb"). Both
-        branches yield a stream _extract_csv() reads TWICE — once via
-        pandas for the header (nrows=0), then seek(0) back to the
-        start for the real chunked pass — so the returned stream must
-        support seek(0) either way.
-
-        Inputs:
-            csv_path: the file to open.
-        Output (yielded): (stream, total_bytes) — stream is the binary
-            handle to read; total_bytes is the CSV content's own byte
-            length (the tar member's declared size when tar-wrapped,
-            not csv_path's on-disk size, which for a tar-wrapped file
-            includes header/padding overhead).
-        Side effects: opens csv_path (and, when tar-wrapped, the
-            TarFile it belongs to); both are closed on context exit.
-        Exceptions: raises ValueError if csv_path is tar-wrapped but
-            its tar has no members, or its first member isn't a regular
-            file (mirrors
-            SeventeenLandsDownloader._extract_tar_member()'s own
-            guards).
-
-        Example:
-            >>> with self._open_stream(csv_path) as (stream, total_bytes):
-            ...     header = pd.read_csv(stream, nrows=0).columns
-            ...     stream.seek(0)
-        """
-        if self._is_tar_wrapped(csv_path):
-            with tarfile.open(csv_path, mode="r") as tar:
-                member = tar.next()
-                if member is None:
-                    raise ValueError(
-                        f"_open_stream: {csv_path} is tar-wrapped but has no members"
-                    )
-                member_file = tar.extractfile(member)
-                if member_file is None:
-                    raise ValueError(
-                        f"_open_stream: {csv_path}'s first member "
-                        f"{member.name!r} isn't a regular file"
-                    )
-                yield member_file, member.size
-        else:
-            with open(csv_path, "rb") as csv_file:
-                yield csv_file, csv_path.stat().st_size
+        return f"17lands game_data {expansion}.{event_type} {draft_id} deck"

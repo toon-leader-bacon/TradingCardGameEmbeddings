@@ -21,6 +21,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
+from src.evaluation.chart_canvas import ChartCanvas
 from src.evaluation.chart_theme import REFERENCE_CATEGORICAL, ChartTheme
 
 _OTHER = "Other"
@@ -80,13 +81,16 @@ class FigureStyle:
         return len(self.series)
 
 
-class ProjectionRenderer:
+class ProjectionRenderer(ChartCanvas[FigureStyle]):
     """Draws a projection's overview and per-label panels in one style.
 
     Stateless apart from its read-only style, so one instance (e.g. a
     default argument) can be shared safely. The overview's fold is labeled
     "Other"; a real label of that name would share the legend text (the
     fold is still told apart from it by position, not by name).
+
+    Scatter-specific: everything here. The blank-figure/legend/save
+    scaffolding this shares with CurveRenderer is ChartCanvas.
 
     Inputs (constructor): style (FigureStyle; the reference palette by
         default).
@@ -95,13 +99,7 @@ class ProjectionRenderer:
     def __init__(self, style: FigureStyle = FigureStyle()) -> None:
         """Inputs: style. Output: none (constructor). Side effects: none.
         Exceptions: none."""
-        self._style = style
-
-    @property
-    def style(self) -> FigureStyle:
-        """Read-only: the style fixed at construction. Inputs: none.
-        Output: FigureStyle. Side effects: none. Exceptions: none."""
-        return self._style
+        super().__init__(style)
 
     def draw_overview(
         self,
@@ -215,9 +213,7 @@ class ProjectionRenderer:
         style = self._style
         # A single plot gets room for its outside legend; panels grow per cell
         size = (max(6.5, _PANEL_INCHES * columns), max(5.0, _PANEL_INCHES * rows))
-        figure = Figure(
-            figsize=size, facecolor=style.theme.surface, layout="constrained"
-        )
+        figure = self._new_figure(size)
         axes_grid = figure.subplots(
             rows, columns, squeeze=False, sharex=True, sharey=True
         )
@@ -259,16 +255,7 @@ class ProjectionRenderer:
         if fold_drawn:
             handles = handles[1:] + handles[:1]
             texts = texts[1:] + texts[:1]
-        axes.legend(
-            handles,
-            texts,
-            loc="upper left",
-            bbox_to_anchor=(1.02, 1.0),
-            borderaxespad=0.0,
-            frameon=False,
-            markerscale=3.0,
-            labelcolor=self._style.theme.text_secondary,
-        )
+        self._outside_legend(axes, handles, texts, markerscale=3.0)
 
     def _grid_shape(self, panel_count: int) -> tuple[int, int]:
         """Inputs: panel_count (>= 1). Output: (rows, columns), at most
@@ -278,11 +265,3 @@ class ProjectionRenderer:
             raise ValueError(f"need at least one panel, got {panel_count}")
         columns = min(self._style.max_panel_columns, math.ceil(math.sqrt(panel_count)))
         return math.ceil(panel_count / columns), columns
-
-    def _save(self, figure: Figure, path: Path) -> Path:
-        """Inputs: a finished figure, its path. Output: path. Side effects:
-        writes the PNG at the theme's dpi on its surface. Exceptions:
-        OSError."""
-        theme = self._style.theme
-        figure.savefig(path, dpi=theme.dpi, facecolor=theme.surface)
-        return path

@@ -60,6 +60,6 @@ class TestIsotropicCardRateDojos:
     def test_default_output_path_is_the_metrics_own(
         self, dojo_cls, label_column, output_stem
     ) -> None:
-        assert dojo_cls.OUTPUT_PATH == Path(
+        assert dojo_cls.METRIC.DEFAULT_OUTPUT_PATH == Path(
             f"data/metrics/isotropic/{output_stem}.parquet"
         )

@@ -52,9 +52,14 @@ an extensible metric engine over raw rows, not a client for what
   `_KNOWN_VALID_TRIPLES` snapshot of every combination 17Lands has
   actually published.
 - `downloader.py` — `SeventeenLandsDownloader(Downloader)`,
-  `DownloadOutcome` (`ref`, `path: Path | None`, `error: Exception |
-  None` — exactly one of `path`/`error` is meaningful per outcome), and
-  `DownloadBatchResult` (`outcomes: list[DownloadOutcome]`). Fits the
+  `DownloadOutcome` (`FileDownloadSuccess | FileDownloadFailure` — a
+  discriminated union, each holding only the fields valid for that
+  outcome: `FileDownloadSuccess(ref, path)`,
+  `FileDownloadFailure(ref, error)`; each also exposes the other's
+  field name as a property always returning `None`, so existing
+  `outcome.path`/`outcome.error` reads keep working without an
+  `isinstance` check), and `DownloadBatchResult` (`outcomes:
+  list[DownloadOutcome]`). Fits the
   shared `Downloader` base class
   (`src/data_retrieval/downloader.py`) the same way
   `HearthstoneJsonDownloader` does: `phase_1()`/`phase_2()` cover the
@@ -105,8 +110,8 @@ flowchart TD
     D -- no --> E["rate_limiter paces the request\n+ download_to_file(ref.url, tmp .csv.gz)"]
     E --> F["gzip-decompress to\nraw_data_dir/<data_type>/<expansion>.<format_code>.csv"]
     F --> G{"succeeded?"}
-    G -- yes --> H["DownloadOutcome(ref, path, error=None)"]
-    G -- no --> I["DownloadOutcome(ref, path=None, error)"]
+    G -- yes --> H["FileDownloadSuccess(ref, path)"]
+    G -- no --> I["FileDownloadFailure(ref, error)"]
     H --> J["DownloadBatchResult(outcomes)"]
     I --> J
 ```

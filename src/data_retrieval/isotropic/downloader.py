@@ -56,7 +56,11 @@ from typing import ClassVar, NamedTuple
 
 from tqdm import tqdm
 
-from src.data_retrieval.download_utils import download_to_file, download_to_string
+from src.data_retrieval.download_utils import (
+    download_to_file,
+    download_to_string,
+    read_manifest,
+)
 from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.rate_limiter import RateLimiter
 
@@ -174,6 +178,21 @@ class IsotropicGameLogDownloader(Downloader):
         raw_data_dir, skipping any already recorded in
         downloads_manifest.txt.
 
+        Uses download_utils.read_manifest() for the "which ids are
+        already done" read — the same shape as STSGGRunDownloader/
+        PlayGwentDownloader/PitchstackDeckDownloader's phase_2 methods.
+        It does NOT use download_utils.append_with_manifest() for the
+        write side, though: that helper's contract is "append one data
+        row to a shared data file, then its id to the manifest," for
+        sources where every item's payload is one more line in one
+        shared JSONL file. Here, each archived file's "data" is its own
+        standalone tarball, already written in full by download_to_file()
+        above — there's no shared data file to append a line to. Same
+        one-file-per-item reasoning FabtcgDecklistDownloader.phase_2
+        documents for why it skips both helpers; this method still
+        benefits from read_manifest() since, unlike fabtcg's
+        file-existence check, it does use a real manifest file.
+
         Inputs: none (uses self.raw_data_dir, self.rate_limiter —
             reads raw_data_dir/archived_files.jsonl, written by
             phase_1()).
@@ -207,15 +226,7 @@ class IsotropicGameLogDownloader(Downloader):
         ]
 
         manifest_path = self.raw_data_dir / "downloads_manifest.txt"
-        already_downloaded = (
-            {
-                line
-                for line in manifest_path.read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            }
-            if manifest_path.exists()
-            else set()
-        )
+        already_downloaded = read_manifest(manifest_path)
 
         for archived_file in tqdm(
             archived_files, desc="isotropic downloads", unit="file"

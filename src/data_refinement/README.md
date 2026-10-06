@@ -22,6 +22,14 @@ next.
   each turning that source into (training input, label) parquet files
   a dojo reads. Output: `data/metrics/<source>/`.
 
+[`deck_ids.py`](deck_ids.py) is the one file living directly here
+rather than in a container above: `deck_uuid_from_cards()`, the
+content-addressed deck-id hashing both `deck_box` (a source's
+extraction stage) and `metrics` (that same source's metrics) need to
+agree on, so a deck gets the same id on both sides. Kept a sibling of
+both rather than inside either, so neither depends on the other just
+to reach it.
+
 ## How it works
 
 ```mermaid

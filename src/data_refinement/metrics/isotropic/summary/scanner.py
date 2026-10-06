@@ -17,11 +17,13 @@ Metric[dict] instances.
 import json
 import logging
 import tarfile
+from functools import partial
 from pathlib import Path
 from typing import Iterator
 
 from tqdm import tqdm
 
+from src.data_refinement.metrics.isolated_call import call_isolated
 from src.data_refinement.metrics.metric import Metric
 
 _logger = logging.getLogger(__name__)
@@ -78,10 +80,15 @@ def scan_isotropic_summary_archives(
     for archive_path in archive_paths:
         for row in iter_summary_rows(archive_path):
             for metric in metrics:
-                _accumulate_isolated(metric, row)
+                call_isolated(
+                    _logger,
+                    metric,
+                    "accumulate() on one row",
+                    partial(metric.accumulate, row),
+                )
 
     for metric in metrics:
-        _finalize_isolated(metric)
+        call_isolated(_logger, metric, "finalize()", metric.finalize)
 
 
 def iter_summary_rows(archive_path: Path) -> Iterator[dict]:
@@ -120,59 +127,3 @@ def iter_summary_rows(archive_path: Path) -> Iterator[dict]:
                 if not line.strip():
                     continue
                 yield json.loads(line)
-
-
-def _accumulate_isolated(metric: Metric[dict], row: dict) -> None:
-    """Call metric.accumulate(row), logging (not raising) on failure.
-
-    Private helper - single consumer is scan_isotropic_summary_archives().
-    Identical isolation contract to ../../sts_gg/scanner.py's own
-    _accumulate_isolated() - kept as isotropic's own copy rather than a
-    shared cross-container helper, matching this project's existing
-    convention of one scanner per raw-source shape.
-
-    Inputs:
-        metric: the Metric[dict] to drive.
-        row: one parsed JSON game row to feed it.
-    Output: none.
-    Side effects: whatever metric.accumulate() does on success; on
-        failure, emits one logging.exception() call instead of
-        propagating.
-    Exceptions: none - every exception from metric.accumulate() is
-        caught and logged here.
-    """
-    try:
-        metric.accumulate(row)
-    except Exception:
-        _logger.exception(
-            "scan_isotropic_summary_archives: %r raised from accumulate() "
-            "on one row - skipping just that row for this metric, "
-            "continuing the scan for every other metric",
-            metric,
-        )
-
-
-def _finalize_isolated(metric: Metric[dict]) -> None:
-    """Call metric.finalize(), logging (not raising) on failure.
-
-    Private helper - single consumer is scan_isotropic_summary_archives().
-    Mirrors _accumulate_isolated()'s isolation for the finalize phase.
-
-    Inputs:
-        metric: the Metric[dict] to finalize.
-    Output: none.
-    Side effects: whatever metric.finalize() does on success; on
-        failure, emits one logging.exception() call instead of
-        propagating.
-    Exceptions: none - every exception from metric.finalize() is
-        caught and logged here.
-    """
-    try:
-        metric.finalize()
-    except Exception:
-        _logger.exception(
-            "scan_isotropic_summary_archives: %r raised from finalize() - "
-            "its output may be missing or incomplete, but every other "
-            "metric still finalizes normally",
-            metric,
-        )
