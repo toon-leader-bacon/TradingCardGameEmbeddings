@@ -5,6 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from src.data_refinement.metrics.seventeenlands.chunk_scanner import (
+    UnsupportedCsvLayout,
+)
 from src.data_refinement.metrics.seventeenlands.replay_data.replay_data_chunk import (
     UNMATCHED,
     Actor,
@@ -165,3 +168,14 @@ def test_each_row_identifies_its_deck(tmp_path: Path) -> None:
 
     assert len(chunk.decks.decks) == 2
     assert chunk.decks.decks[0].name.startswith("replay_data draft1/1/1")
+
+
+def test_the_afr_stx_layout_is_an_unsupported_layout() -> None:
+    header = [
+        "game_index" if column == "game_number" else column
+        for column in HEADER
+        if column != "match_number"
+    ]
+
+    with pytest.raises(UnsupportedCsvLayout, match="AFR/STX layout"):
+        parser_for(binder_with_cards(), header)

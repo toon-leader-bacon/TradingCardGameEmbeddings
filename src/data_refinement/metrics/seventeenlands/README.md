@@ -10,7 +10,14 @@ Every family scans its CSVs in typed chunks, sharing:
 - `chunk_scanner.py` - the `ChunkParser` Protocol and
   `scan_chunked_csv()`: one read pass per CSV, each pyarrow batch parsed
   once and handed to every metric, failures isolated per (metric,
-  chunk) and logged as `METRIC FAILURE` lines.
+  chunk) and logged as `METRIC FAILURE` lines. A parser factory raises
+  `UnsupportedCsvLayout` for a CSV layout its family deliberately does
+  not read; `scripts/run_metrics.py` logs that CSV as `CSV SKIPPED`,
+  not as a failure.
+- `deck_box_path.py` - `seventeenlands_deck_box_path(family)`: the
+  game_data and replay_data private deck box,
+  `<family>/deck_box.db`, written by `run_metrics.py` and read by the
+  deck-level dojos.
 - `batch_columns.py` - typed numpy columns from a batch; card counts
   read as float32 and narrowed to int16.
 - `zone_counts.py` - `ZoneCounts`: one card-column family's per-row

@@ -33,6 +33,9 @@ from typing import Mapping, Protocol, Sequence
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.isotropic.deck_box_path import ISOTROPIC_DECK_BOX_PATH
+from src.data_refinement.metrics.seventeenlands.deck_box_path import (
+    seventeenlands_deck_box_path,
+)
 from src.data_refinement.metrics.sts2_runs import card_average_metrics as sts2_cards
 from src.data_refinement.metrics.sts2_runs import deck_label_metrics as sts2_decks
 from src.data_refinement.metrics.sts_gg.deck_box_path import STS_GG_DECK_BOX_PATH
@@ -55,6 +58,53 @@ from src.dojos.fabtcg_decklists import deck_card_mask_dojos as fabtcg_decks
 from src.dojos.hearthstonejson import card_mask_dojos as hearthstone_masks
 from src.dojos.pokemon_tcg import card_mask_dojos as pokemon_masks
 from src.dojos.scryfall import card_mask_dojos as scryfall_masks
+from src.dojos.seventeenlands.draft_data import pack_card_tally_dojos as draft_tally
+from src.dojos.seventeenlands.draft_data.pack_to_pick_choice_set_dojo import (
+    PackToPickChoiceSetDojo,
+)
+from src.dojos.seventeenlands.draft_data.pick_number_decay_curve_dojo import (
+    PickNumberDecayCurveDojo,
+)
+from src.dojos.seventeenlands.draft_data.pool_conditioned_pick_dojo import (
+    PoolConditionedPickDojo,
+)
+from src.dojos.seventeenlands.game_data import game_card_average_dojos as game_cards
+from src.dojos.seventeenlands.game_data import game_deck_label_dojos as game_decks
+from src.dojos.seventeenlands.game_data.game_length_association_dojo import (
+    GameLengthAssociationDojo,
+)
+from src.dojos.seventeenlands.game_data.on_play_win_rate_delta_dojo import (
+    OnPlayWinRateDeltaDojo,
+)
+from src.dojos.seventeenlands.game_data.on_play_win_rate_sensitivity_by_deck_dojo import (  # noqa: E501
+    OnPlayWinRateSensitivityByDeckDojo,
+)
+from src.dojos.seventeenlands.game_data.tutor_choice_rate_dojo import (
+    TutorChoiceRateDojo,
+)
+from src.dojos.seventeenlands.game_data.tutor_target_rate_dojo import (
+    TutorTargetRateDojo as GameTutorTargetRateDojo,
+)
+from src.dojos.seventeenlands.replay_data import (
+    replay_turn_event_rate_dojos as replay_combat,
+)
+from src.dojos.seventeenlands.replay_data.attacker_blocker_combat_outcome_dojo import (  # noqa: E501
+    AttackerBlockerCombatOutcomeDojo,
+)
+from src.dojos.seventeenlands.replay_data.average_turn_cast_dojo import (
+    AverageTurnCastDojo,
+)
+from src.dojos.seventeenlands.replay_data.cast_rate_dojo import CastRateDojo
+from src.dojos.seventeenlands.replay_data.combat_aggression_profile_dojo import (
+    CombatAggressionProfileDojo,
+)
+from src.dojos.seventeenlands.replay_data.discard_rate_dojo import DiscardRateDojo
+from src.dojos.seventeenlands.replay_data.turns_to_game_end_after_cast_dojo import (
+    TurnsToGameEndAfterCastDojo,
+)
+from src.dojos.seventeenlands.replay_data.tutor_target_rate_dojo import (
+    TutorTargetRateDojo as ReplayTutorTargetRateDojo,
+)
 from src.dojos.spire_codex import card_mask_dojos as sts2_masks
 from src.dojos import isotropic
 from src.dojos.sts_gg import card_average_dojos as sts_cards
@@ -66,6 +116,7 @@ from src.dojos.play_gwent.deck_card_mask_dojos import LeaderMaskedFromDeckDojo
 from src.dojos.play_gwent.deck_label_dojos import GuideVotesDojo
 from src.dojos.sts_gg import deck_label_dojos as sts_decks
 from src.schema.game_id import GameId
+from src.data_retrieval.seventeenlands.refs import DataType
 from src.schema.holdout import HoldoutSpec
 
 # Contrastive dojos keep their deck split index here (see DeckBoxDealer)
@@ -438,6 +489,29 @@ def _recipe_for_isotropic_deck(dojo_class: DeckDojoConstructor) -> DeckDojoRecip
     return DeckDojoRecipe(GameId.DOMINION, dojo_class, ISOTROPIC_DECK_BOX_PATH)
 
 
+def _recipe_for_seventeenlands_card(dojo_class: CardDojoConstructor) -> CardDojoRecipe:
+    """A 17lands dojo class that needs no deck box, trained on its
+    metric's all-sets, all-formats slice (the dojo's default data_slice).
+
+    Inputs: dojo_class. Output: CardDojoRecipe. Side effects: none.
+    Exceptions: none.
+    """
+    return CardDojoRecipe(GameId.MTG, dojo_class)
+
+
+def _recipe_for_seventeenlands_deck(
+    family: DataType, dojo_class: DeckDojoConstructor
+) -> DeckDojoRecipe:
+    """A 17lands deck-level dojo class over its family's private deck
+    box, trained on the all-sets, all-formats slice.
+
+    Inputs: family (GAME or REPLAY, the families with a deck box),
+        dojo_class. Output: DeckDojoRecipe. Side effects: none.
+    Exceptions: none.
+    """
+    return DeckDojoRecipe(GameId.MTG, dojo_class, seventeenlands_deck_box_path(family))
+
+
 # Keys are "<metric source>.<metric file stem>"; add a line to onboard a dojo
 DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     "gwent_one.armor_mask": _recipe_for_gwent_one(gwent_one.ArmorMaskDojo),
@@ -758,6 +832,92 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
         GameId.GWENT, gwent_inclusion.FactionConditionedInclusionDojo
     ),
     "play_gwent.guide_votes": _recipe_for_final_deck_box(GameId.GWENT, GuideVotesDojo),
+    # 17lands: each key trains on its metric's all-sets, all-formats slice
+    # (data/metrics/seventeenlands/<family>/slices/<stem>.all.parquet)
+    "seventeenlands_draft_data.card_take_rate": _recipe_for_seventeenlands_card(
+        draft_tally.CardTakeRateDojo
+    ),
+    "seventeenlands_draft_data.first_pick_rate": _recipe_for_seventeenlands_card(
+        draft_tally.FirstPickRateDojo
+    ),
+    "seventeenlands_draft_data.rank_stratified_take_rate": (
+        _recipe_for_seventeenlands_card(draft_tally.RankStratifiedTakeRateDojo)
+    ),
+    "seventeenlands_draft_data.pick_number_decay_curve": (
+        _recipe_for_seventeenlands_card(PickNumberDecayCurveDojo)
+    ),
+    "seventeenlands_draft_data.pack_to_pick_choice_set": (
+        _recipe_for_seventeenlands_card(PackToPickChoiceSetDojo)
+    ),
+    "seventeenlands_draft_data.pool_conditioned_pick": (
+        _recipe_for_seventeenlands_card(PoolConditionedPickDojo)
+    ),
+    "seventeenlands_game_data.win_rate_when_in_deck": (
+        _recipe_for_seventeenlands_card(game_cards.WinRateWhenInDeckDojo)
+    ),
+    "seventeenlands_game_data.opening_hand_win_rate": (
+        _recipe_for_seventeenlands_card(game_cards.OpeningHandWinRateDojo)
+    ),
+    "seventeenlands_game_data.drawn_win_rate": _recipe_for_seventeenlands_card(
+        game_cards.DrawnWinRateDojo
+    ),
+    "seventeenlands_game_data.game_length_association": (
+        _recipe_for_seventeenlands_card(GameLengthAssociationDojo)
+    ),
+    "seventeenlands_game_data.on_play_win_rate_delta": (
+        _recipe_for_seventeenlands_card(OnPlayWinRateDeltaDojo)
+    ),
+    "seventeenlands_game_data.tutor_target_rate": _recipe_for_seventeenlands_card(
+        GameTutorTargetRateDojo
+    ),
+    "seventeenlands_game_data.tutor_choice_rate": _recipe_for_seventeenlands_card(
+        TutorChoiceRateDojo
+    ),
+    "seventeenlands_game_data.deck_win_prediction": _recipe_for_seventeenlands_deck(
+        DataType.GAME, game_decks.DeckWinPredictionDojo
+    ),
+    "seventeenlands_game_data.deck_game_length_prediction": (
+        _recipe_for_seventeenlands_deck(
+            DataType.GAME, game_decks.DeckGameLengthPredictionDojo
+        )
+    ),
+    "seventeenlands_game_data.deck_rank_tier_prediction": (
+        _recipe_for_seventeenlands_deck(
+            DataType.GAME, game_decks.DeckRankTierPredictionDojo
+        )
+    ),
+    "seventeenlands_game_data.on_play_win_rate_sensitivity_by_deck": (
+        _recipe_for_seventeenlands_deck(
+            DataType.GAME, OnPlayWinRateSensitivityByDeckDojo
+        )
+    ),
+    "seventeenlands_replay_data.average_turn_cast": _recipe_for_seventeenlands_card(
+        AverageTurnCastDojo
+    ),
+    "seventeenlands_replay_data.cast_rate": _recipe_for_seventeenlands_card(
+        CastRateDojo
+    ),
+    "seventeenlands_replay_data.turns_to_game_end_after_cast": (
+        _recipe_for_seventeenlands_card(TurnsToGameEndAfterCastDojo)
+    ),
+    "seventeenlands_replay_data.discard_rate": _recipe_for_seventeenlands_card(
+        DiscardRateDojo
+    ),
+    "seventeenlands_replay_data.tutor_target_rate": _recipe_for_seventeenlands_card(
+        ReplayTutorTargetRateDojo
+    ),
+    "seventeenlands_replay_data.combat_kill_involvement_rate": (
+        _recipe_for_seventeenlands_card(replay_combat.CombatKillInvolvementRateDojo)
+    ),
+    "seventeenlands_replay_data.combat_damage_push_through_rate": (
+        _recipe_for_seventeenlands_card(replay_combat.CombatDamagePushThroughRateDojo)
+    ),
+    "seventeenlands_replay_data.combat_aggression_profile": (
+        _recipe_for_seventeenlands_deck(DataType.REPLAY, CombatAggressionProfileDojo)
+    ),
+    "seventeenlands_replay_data.attacker_blocker_combat_outcome": (
+        _recipe_for_seventeenlands_card(AttackerBlockerCombatOutcomeDojo)
+    ),
     "contrastive.gwent": _recipe_for_contrastive(GameId.GWENT),
     "contrastive.flesh_and_blood": _recipe_for_contrastive(GameId.FLESH_AND_BLOOD),
     "contrastive.slay_the_spire_2": _recipe_for_contrastive(GameId.SLAY_THE_SPIRE_2),
@@ -776,7 +936,8 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
 # card dojo (thinning changes the answer set); an option-selection dojo's
 # options group (the label indexes it), so a MultiCardOptionSelection dojo
 # (options are its whole input) is never listed; a kingdom or single-card
-# group (fixed game context, not a deck).
+# group (fixed game context, not a deck); a group whose label depends on
+# exactly which cards it holds (17lands attacker/blocker combat outcome).
 DECK_MOD_GROUPS: Mapping[str, frozenset[int]] = {
     "sts_gg.ascension_prediction": frozenset({0}),
     "sts_gg.character_prediction": frozenset({0}),
@@ -795,6 +956,14 @@ DECK_MOD_GROUPS: Mapping[str, frozenset[int]] = {
     "isotropic.mid_game_deck_pair_winner": frozenset({0, 1}),
     # [options, partial deck]: the options group (0) is never thinned
     "isotropic.mid_game_next_buy": frozenset({1}),
+    # 17lands game decks: 40-card limited decks; no label tracks deck size
+    "seventeenlands_game_data.deck_win_prediction": frozenset({0}),
+    "seventeenlands_game_data.deck_game_length_prediction": frozenset({0}),
+    "seventeenlands_game_data.deck_rank_tier_prediction": frozenset({0}),
+    "seventeenlands_game_data.on_play_win_rate_sensitivity_by_deck": frozenset({0}),
+    "seventeenlands_replay_data.combat_aggression_profile": frozenset({0}),
+    # [pack options, pool so far]: the pool only
+    "seventeenlands_draft_data.pool_conditioned_pick": frozenset({1}),
 }
 
 

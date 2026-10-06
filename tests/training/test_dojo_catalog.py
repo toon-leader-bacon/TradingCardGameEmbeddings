@@ -48,6 +48,22 @@ from src.data_refinement.metrics.isotropic.summary.full_deck_win_prediction_metr
 from src.data_refinement.metrics.play_gwent.leader_masked_from_deck_metric import (
     LeaderMaskedFromDeckMetric,
 )
+from src.data_refinement.metrics.seventeenlands.draft_data.pack_to_pick_choice_set_metric import (  # noqa: E501
+    PackToPickChoiceSetMetric,
+)
+from src.data_refinement.metrics.seventeenlands.draft_data.pick_number_decay_curve_metric import (  # noqa: E501
+    PickNumberDecayCurveMetric,
+)
+from src.data_refinement.metrics.seventeenlands.draft_data.pool_conditioned_pick_metric import (  # noqa: E501
+    PoolConditionedPickMetric,
+)
+from src.data_refinement.metrics.seventeenlands.game_data.game_deck_label_metrics import (  # noqa: E501
+    DeckRankTierPredictionMetric,
+    DeckWinPredictionMetric,
+)
+from src.data_refinement.metrics.seventeenlands.replay_data.attacker_blocker_combat_outcome_metric import (  # noqa: E501
+    AttackerBlockerCombatOutcomeMetric,
+)
 from src.data_refinement.metrics.sts2_runs import card_average_metrics as sts2_cards
 from src.data_refinement.metrics.sts2_runs import deck_label_metrics as sts2_decks
 from src.data_refinement.metrics.sts_gg.deck_label_metrics import (
@@ -59,6 +75,22 @@ from src.dojos import isotropic
 from src.dojos.dominiontabs.cost_regression_dojo import CostRegressionDojo
 from src.dojos.dominiontabs.masked_field_dojos import SetMaskDojo
 from src.dojos.play_gwent.deck_card_mask_dojos import LeaderMaskedFromDeckDojo
+from src.dojos.seventeenlands.draft_data.pack_to_pick_choice_set_dojo import (
+    PackToPickChoiceSetDojo,
+)
+from src.dojos.seventeenlands.draft_data.pick_number_decay_curve_dojo import (
+    PickNumberDecayCurveDojo,
+)
+from src.dojos.seventeenlands.draft_data.pool_conditioned_pick_dojo import (
+    PoolConditionedPickDojo,
+)
+from src.dojos.seventeenlands.game_data.game_deck_label_dojos import (
+    DeckRankTierPredictionDojo,
+    DeckWinPredictionDojo,
+)
+from src.dojos.seventeenlands.replay_data.attacker_blocker_combat_outcome_dojo import (  # noqa: E501
+    AttackerBlockerCombatOutcomeDojo,
+)
 from src.dojos.sts_gg import deck_label_dojos
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
@@ -125,6 +157,12 @@ _INLINE_METRICS: dict[Any, Any] = {
     isotropic.FullDeckWinPredictionDojo: FullDeckWinPredictionMetric,
     isotropic.KingdomEndingTypeDojo: KingdomEndingTypeMetric,
     isotropic.WinningDeckMaskedCardDojo: WinningDeckMaskedCardMetric,
+    PackToPickChoiceSetDojo: PackToPickChoiceSetMetric,
+    PickNumberDecayCurveDojo: PickNumberDecayCurveMetric,
+    PoolConditionedPickDojo: PoolConditionedPickMetric,
+    DeckWinPredictionDojo: DeckWinPredictionMetric,
+    DeckRankTierPredictionDojo: DeckRankTierPredictionMetric,
+    AttackerBlockerCombatOutcomeDojo: AttackerBlockerCombatOutcomeMetric,
 }
 
 
@@ -143,6 +181,13 @@ def _metric_output_path_of(dojo_class: Any) -> Path:
         return dojo_class.OUTPUT_PATH
     metric = _INLINE_METRICS.get(dojo_class) or dojo_class.METRIC
     return metric.DEFAULT_OUTPUT_PATH
+
+
+def _sliced_metric_of(dojo_class: Any) -> Any:
+    """The 17lands metric a dojo class trains on (one with a FAMILY), or
+    None for any other dojo class."""
+    metric = _INLINE_METRICS.get(dojo_class) or getattr(dojo_class, "METRIC", None)
+    return metric if hasattr(metric, "FAMILY") else None
 
 
 def _context(shelf: CardShelf) -> DojoBuildContext:
@@ -210,6 +255,12 @@ class TestCatalog:
         # a key cannot silently point at a different metric
         recipe = DOJO_CATALOG[key]
         assert isinstance(recipe, (CardDojoRecipe, DeckDojoRecipe))
+        sliced_metric = _sliced_metric_of(recipe.dojo_class)
+        if sliced_metric is not None:
+            # A 17lands dojo reads a slice file, not one metric output
+            family = sliced_metric.FAMILY.value
+            assert key == f"seventeenlands_{family}.{sliced_metric.OUTPUT_STEM}"
+            return
         metric_path = recipe.metric_output or _metric_output_path_of(recipe.dojo_class)
         assert key == f"{metric_path.parent.name}.{metric_path.stem}"
 
@@ -453,6 +504,8 @@ class TestDeckModOptIn:
             "isotropic.winning_deck_count",
             "final_decks.held_out_card_gwent",
             "isotropic.kingdom_opening_buy_prediction",
+            "seventeenlands_draft_data.pack_to_pick_choice_set",
+            "seventeenlands_replay_data.attacker_blocker_combat_outcome",
         ],
     )
     def test_count_and_answer_set_dojos_are_never_listed(self, name: str) -> None:

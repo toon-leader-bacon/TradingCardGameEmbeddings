@@ -32,6 +32,9 @@ from src.data_refinement.metrics.seventeenlands.batch_columns import (
     read_column,
     read_zone_counts,
 )
+from src.data_refinement.metrics.seventeenlands.chunk_scanner import (
+    UnsupportedCsvLayout,
+)
 from src.data_refinement.metrics.seventeenlands.chunk_decks import (
     GameKeys,
     build_chunk_decks,
@@ -55,6 +58,10 @@ _SCALAR_TYPES: dict[str, pa.DataType] = {
     "game_number": pa.int64(),
     "num_turns": pa.int32(),
 }
+# Only the oldest exports (AFR, STX) have this column (today's is
+# game_number). That layout also has no deck_ columns and no
+# match_number, so neither the deck metrics nor GameKeys can be built.
+_OLD_LAYOUT_COLUMN = "game_index"
 _DECK_FAMILY_LABEL = "replay_data"
 # One per-half-turn field column: f"{actor}_turn_{N}_{field}"
 _FIELD_COLUMN_PATTERN = re.compile(
@@ -164,11 +171,18 @@ class ReplayDataChunkParser:
             for source_game, with Arena aliases), source_game.
         Output: a ReplayDataChunkParser.
         Side effects: none (no I/O).
-        Exceptions: ValueError if a column in _SCALAR_TYPES is missing.
+        Exceptions: UnsupportedCsvLayout for the AFR/STX layout (no deck
+            columns, no match_number); otherwise ValueError if a column
+            in _SCALAR_TYPES is missing.
 
         Example:
             >>> ReplayDataChunkParser.from_header(header, binder, GameId.MTG)
         """
+        if _OLD_LAYOUT_COLUMN in header:
+            raise UnsupportedCsvLayout(
+                "replay_data CSV has the AFR/STX layout (game_index, no deck "
+                "columns, no match_number), which the metrics cannot read"
+            )
         missing = [column for column in _SCALAR_TYPES if column not in header]
         if missing:
             raise ValueError(f"replay_data CSV header lacks scalar columns {missing}")

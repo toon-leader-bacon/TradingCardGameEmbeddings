@@ -47,6 +47,7 @@ import sys
 import traceback
 from pathlib import Path
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Callable, Protocol, Sequence
 
 from src.data_refinement.card_binder.card_binder import CardBinder
@@ -57,6 +58,12 @@ from src.data_refinement.deck_box.sts_gg.extraction_stage import (
 from src.data_refinement.metrics.generic.corpus_scan_metric import CorpusScanMetric
 from src.data_refinement.metrics.metric import Metric
 from src.data_refinement.metrics.version_metadata import MetricVersionMetadata
+from src.data_refinement.metrics.seventeenlands.chunk_scanner import (
+    UnsupportedCsvLayout,
+)
+from src.data_refinement.metrics.seventeenlands.deck_box_path import (
+    seventeenlands_deck_box_path,
+)
 from src.data_refinement.metrics.seventeenlands.partition import (
     METRICS_ROOT,
     SeventeenLandsPartition,
@@ -1070,7 +1077,9 @@ def _run_seventeenlands_family(
         writes every metric's per-CSV output; saves the deck box, even
         when a CSV failed. A CSV whose scan raises is logged (a "CSV
         FAILURE" line with its traceback) and skipped; the rest still
-        run, and the run ends with one line per failed CSV.
+        run, and the run ends with one line per failed CSV. A CSV in a
+        layout the family does not read is logged as "CSV SKIPPED" and
+        is not a failure.
     Exceptions: ValueError from _check_family_specs; SystemExit if no
         CSV is found, or (after every CSV and the deck box save) if any
         CSV failed.
@@ -1099,11 +1108,10 @@ def _run_seventeenlands_family(
 
     # Each CSV: one failing file is logged and skipped, never fatal
     run = _FamilyRun(family, binder, version_metadata, deck_box, output_root)
-    failed_csvs: list[Path] = []
+    outcomes: dict[Path, CsvScanOutcome] = {}
     try:
         for csv_path in csv_paths:
-            if not _scan_one_csv(run, csv_path):
-                failed_csvs.append(csv_path)
+            outcomes[csv_path] = _scan_one_csv(run, csv_path)
     finally:
         # Save the box whatever happened: written partitions point into it
         if deck_box_path is not None:
@@ -1112,10 +1120,33 @@ def _run_seventeenlands_family(
                 deck_box_path, GameId.MTG, version_metadata.card_binder_version
             )
 
+    failed_csvs = _print_outcome_summary(outcomes)
     if failed_csvs:
-        for csv_path in failed_csvs:
-            print(f"CSV FAILURE summary: {csv_path}")
         raise SystemExit(f"{len(failed_csvs)} of {len(csv_paths)} CSVs failed")
+
+
+def _print_outcome_summary(outcomes: dict[Path, "CsvScanOutcome"]) -> list[Path]:
+    """Print one summary line per skipped, then per failed, CSV.
+
+    Inputs: outcomes (each scanned CSV's outcome, in scan order).
+    Output: the failed CSVs, in scan order.
+    Side effects: prints to stdout. Exceptions: none.
+    """
+    skipped = [p for p, o in outcomes.items() if o is CsvScanOutcome.SKIPPED]
+    failed = [p for p, o in outcomes.items() if o is CsvScanOutcome.FAILED]
+    for csv_path in skipped:
+        print(f"CSV SKIPPED summary: {csv_path}")
+    for csv_path in failed:
+        print(f"CSV FAILURE summary: {csv_path}")
+    return failed
+
+
+class CsvScanOutcome(Enum):
+    """How one CSV's scan in a family run ended."""
+
+    SCANNED = "scanned"
+    SKIPPED = "skipped"  # a layout the family does not read
+    FAILED = "failed"
 
 
 @dataclass(frozen=True)
@@ -1136,19 +1167,24 @@ class _FamilyRun:
     output_root: Path | None
 
 
-def _scan_one_csv(run: _FamilyRun, csv_path: Path) -> bool:
-    """Scan one CSV: build its metrics and its parser from its header,
+def _scan_one_csv(run: _FamilyRun, csv_path: Path) -> CsvScanOutcome:
+    """Scan one CSV: build its parser and its metrics from its header,
     then run every metric over it.
 
     Inputs: run, csv_path.
-    Output: True if the CSV scanned; False if anything raised (logged
-        with its traceback, as a "CSV FAILURE" line).
+    Output: SCANNED; SKIPPED if the parser rejects the CSV's layout as
+        unsupported (logged as a "CSV SKIPPED" line, nothing written);
+        FAILED if anything else raised (logged with its traceback, as a
+        "CSV FAILURE" line).
     Side effects: writes the CSV's partitions; adds decks to deck_box.
     Exceptions: none (every exception is caught and logged).
     """
     try:
         expansion, format_code = _parse_expansion_format(csv_path)
         header = _read_header(csv_path)
+        # The parser first: an unsupported layout is skipped before any
+        # metric is built
+        scan = run.family.scan_for_csv(header, run.binder)
         context = _CsvMetricContext(
             version_metadata=run.version_metadata,
             expansion=expansion,
@@ -1157,17 +1193,19 @@ def _scan_one_csv(run: _FamilyRun, csv_path: Path) -> bool:
             deck_box=run.deck_box,
         )
         metrics = _namespaced_metrics(run.family, context)
-        scan = run.family.scan_for_csv(header, run.binder)
 
         print(
             f"=== {run.family.name}: {csv_path} ({expansion.value}.{format_code.value}) ==="
         )
         scan(csv_path, metrics)
         print(f"wrote {len(metrics)} metric outputs")
-        return True
+        return CsvScanOutcome.SCANNED
+    except UnsupportedCsvLayout as layout:
+        print(f"CSV SKIPPED {csv_path}: {layout}")
+        return CsvScanOutcome.SKIPPED
     except Exception:  # one bad CSV must not end a multi-hour family run
         print(f"CSV FAILURE {csv_path}:\n{traceback.format_exc()}")
-        return False
+        return CsvScanOutcome.FAILED
 
 
 def _read_header(csv_path: Path) -> tuple[str, ...]:
@@ -1305,9 +1343,7 @@ def run_seventeenlands_game_data(
             family_dir=SeventeenLandsDownloader.DEFAULT_RAW_DATA_DIR / "game_data",
             metric_specs=_GAME_DATA_METRICS,
             scan_for_csv=_GAME_DATA_SCAN,
-            deck_box_output_path=Path(
-                "data/metrics/seventeenlands/game_data/deck_box.db"
-            ),
+            deck_box_output_path=seventeenlands_deck_box_path(refs.DataType.GAME),
         ),
         raw_path,
         output_root,
@@ -1335,9 +1371,7 @@ def run_seventeenlands_replay_data(
             family_dir=SeventeenLandsDownloader.DEFAULT_RAW_DATA_DIR / "replay_data",
             metric_specs=_REPLAY_DATA_METRICS,
             scan_for_csv=_REPLAY_DATA_SCAN,
-            deck_box_output_path=Path(
-                "data/metrics/seventeenlands/replay_data/deck_box.db"
-            ),
+            deck_box_output_path=seventeenlands_deck_box_path(refs.DataType.REPLAY),
         ),
         raw_path,
         output_root,

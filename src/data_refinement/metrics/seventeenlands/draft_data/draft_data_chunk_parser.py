@@ -31,15 +31,18 @@ from src.data_refinement.metrics.seventeenlands.batch_columns import (
 )
 from src.schema.game_id import GameId
 
-# Every scalar column a DraftDataChunk is built from, with its read type.
-# A string column reads an empty cell as "" (an unranked event's rank).
+# Every scalar column a DraftDataChunk is built from, with its read type
 _SCALAR_TYPES: Mapping[str, pa.DataType] = {
     "draft_id": pa.string(),
     "pack_number": pa.int64(),
     "pick_number": pa.int64(),
     "pick": pa.string(),
-    "rank": pa.string(),
 }
+# The drafter's rank, by layout: "rank" today, "user_rank" in older
+# exports (MID, VOW), none at all in the oldest (AFR, STX). The first one
+# present is read; a CSV with neither reads every row as unranked ("").
+# A string column reads an empty cell as "" (an unranked event's rank).
+_RANK_COLUMNS: tuple[str, ...] = ("rank", "user_rank")
 # PickTwo formats only: the second card taken
 _SECOND_PICK_COLUMN = "pick_2"
 
@@ -70,6 +73,9 @@ class DraftDataChunkParser:
             np.int32,
         )
         self._has_second_pick = _SECOND_PICK_COLUMN in header
+        self._rank_column = next(
+            (column for column in _RANK_COLUMNS if column in header), None
+        )
 
     @classmethod
     def from_header(
@@ -94,7 +100,8 @@ class DraftDataChunkParser:
 
     def needed_columns(self) -> list[str]:
         """The columns the scanner must read: matched pack and pool
-        columns, the scalars, and pick_2 where present.
+        columns, the scalars, and the rank and pick_2 columns where
+        present.
 
         Inputs: none. Output: list[str], header order.
         Side effects: none. Exceptions: none.
@@ -106,11 +113,14 @@ class DraftDataChunkParser:
         wanted.update(column for column, _ in self._draft_columns.pool_columns)
         wanted.update(_SCALAR_TYPES)
         wanted.add(_SECOND_PICK_COLUMN)
+        if self._rank_column is not None:
+            wanted.add(self._rank_column)
         return [column for column in self._header if column in wanted]
 
     def column_types(self) -> dict[str, pa.DataType]:
         """Read types: every card column as float32 (some exports write
-        "1.0"), each scalar as _SCALAR_TYPES says, pick_2 as a string.
+        "1.0"), each scalar as _SCALAR_TYPES says, the rank column and
+        pick_2 as strings.
 
         Inputs: none. Output: dict column -> pyarrow type.
         Side effects: none. Exceptions: none.
@@ -119,6 +129,8 @@ class DraftDataChunkParser:
             >>> pyarrow.csv.ConvertOptions(column_types=parser.column_types())
         """
         result: dict[str, pa.DataType] = dict(_SCALAR_TYPES)
+        if self._rank_column is not None:
+            result[self._rank_column] = pa.string()
         if self._has_second_pick:
             result[_SECOND_PICK_COLUMN] = pa.string()
         for columns in (
@@ -157,8 +169,22 @@ class DraftDataChunkParser:
             draft_id=read_column(batch, "draft_id", np.object_),
             pack_number=read_column(batch, "pack_number", np.int64),
             pick_number=read_column(batch, "pick_number", np.int64),
-            rank=read_column(batch, "rank", np.object_),
+            rank=self._ranks(batch),
         )
+
+    def _ranks(self, batch: pa.RecordBatch) -> npt.NDArray[np.object_]:
+        """Each row's rank: the rank column's cells, or "" (unranked)
+        for every row when the CSV has no rank column.
+
+        Inputs: batch. Output: object array of str, shape (rows,).
+        Side effects: none.
+        Exceptions: ValueError naming the column and row if the rank
+            column holds a null.
+        """
+        if self._rank_column is None:
+            return np.full(batch.num_rows, "", np.object_)
+        raise_on_null(batch, self._rank_column)
+        return read_column(batch, self._rank_column, np.object_)
 
     def _picks(self, batch: pa.RecordBatch) -> DraftPicks:
         """Each row's pick(s), coded against the pack code table.

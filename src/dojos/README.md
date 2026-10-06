@@ -123,7 +123,7 @@ rows never straddle TRAIN and TEST.
   `sts_gg/`, `seventeenlands/{draft_data,game_data,replay_data}/`,
   `isotropic/`, `final_decks/`, `scryfall/`, `pokemon_tcg/`, `cardvault_fabtcg/`,
   `hearthstonejson/`, `spire_codex/`, `fabtcg_decklists/`: one thin generic-cell subclass per metric (see
-  `generic/README.md`'s "Per-metric wrappers"). The 17lands game_data
+  `generic/README.md`'s "Per-metric wrappers"). The 17lands
   wrappers take a `data_slice` (sets and formats) and train on that
   slice's file (`seventeenlands/sliced_dojos.py`; see
   `../data_refinement/metrics/seventeenlands/README.md`, "Partitions and

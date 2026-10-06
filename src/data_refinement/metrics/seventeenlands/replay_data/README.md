@@ -67,7 +67,9 @@ streams. No metric splits a cell or visits a row in Python.
   card in every chunk. Deck counts are read as float32 and narrowed to
   int16 by `../batch_columns.py`. A missing scalar column (`draft_id`,
   `match_number`, `game_number`, `num_turns`) fails the CSV; a null
-  scalar raises naming the column and row.
+  scalar raises naming the column and row. The oldest layout (AFR, STX:
+  `game_index`, no `deck_` columns, no `match_number`) raises
+  `UnsupportedCsvLayout`, so the run skips those CSVs.
 - `replay_card_columns.py` — `ReplayCardColumns`: every matched
   `deck_`/`sideboard_` column as `(column, uuid)` pairs, plus
   `uuid_for_name(name)` and `uuid_for_arena_id(arena_id)`, each cached

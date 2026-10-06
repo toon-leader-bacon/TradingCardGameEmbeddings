@@ -47,6 +47,9 @@ streams.
   exports write `1.0`) and narrowed to int16 by `../batch_columns.py`.
   Each distinct pick name is matched once per chunk. A missing scalar
   column fails the CSV; a null scalar raises naming the column and row.
+  The rank is read from `rank`, else `user_rank` (older exports, MID
+  and VOW); a CSV with neither (AFR, STX) reads every row as unranked
+  (`""`).
 - `pack_pool_columns.py` — `DraftCardColumns`: every matched
   `pack_card_`/`pool_` column as `(column, uuid)` pairs, plus
   `uuid_for_name(name)` (cached) and `unmatched_names`.

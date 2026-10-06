@@ -175,3 +175,24 @@ def test_a_chunk_with_mismatched_row_counts_is_rejected(tmp_path: Path) -> None:
             pick_number=chunk.pick_number,
             rank=chunk.rank,
         )
+
+
+def test_a_user_rank_column_is_read_as_the_rank(tmp_path: Path) -> None:
+    header = ["user_rank" if c == "rank" else c for c in HEADER]
+    rows = [{**row(OWLBEAR, owlbear=1), "user_rank": "platinum"}]
+
+    chunk = _parse(tmp_path, rows, header)
+
+    assert chunk.rank.tolist() == ["platinum"]
+    assert "user_rank" in parser_for(_BINDER, header).needed_columns()
+
+
+def test_a_csv_without_a_rank_column_reads_every_row_as_unranked(
+    tmp_path: Path,
+) -> None:
+    header = [c for c in HEADER if c != "rank"]
+
+    chunk = _parse(tmp_path, [row(OWLBEAR, owlbear=1), row(BOLT, owlbear=1)], header)
+
+    assert chunk.rank.tolist() == ["", ""]
+    assert "rank" not in parser_for(_BINDER, header).column_types()

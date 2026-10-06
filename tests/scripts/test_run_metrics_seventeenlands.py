@@ -1,5 +1,6 @@
 """Tests for scripts/run_metrics.py's seventeenlands driver helpers:
-output re-rooting, the family spec check, and metric construction."""
+output re-rooting, the family spec check, metric construction and
+per-CSV scan outcomes."""
 
 import importlib.util
 from pathlib import Path
@@ -9,6 +10,9 @@ from unittest.mock import Mock
 import pytest
 
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.metrics.seventeenlands.chunk_scanner import (
+    UnsupportedCsvLayout,
+)
 from src.data_refinement.metrics.seventeenlands.game_data.game_card_average_metrics import (
     WinRateWhenInDeckMetric,
 )
@@ -188,3 +192,28 @@ def test_an_empty_csv_has_no_header(script: ModuleType, tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="empty"):
         script._read_header(csv_path)
+
+
+def _scan_outcome(script: ModuleType, tmp_path: Path, scan_error: Exception) -> object:
+    csv_path = tmp_path / "AFR.PremierDraft.csv"
+    csv_path.write_text("a,b\n1,2\n", encoding="utf-8")
+    family = _family(script, (), None)
+    family.scan_for_csv.side_effect = scan_error
+    run = script._FamilyRun(family, binder_with_cards([]), VERSION, None, tmp_path)
+    return script._scan_one_csv(run, csv_path)
+
+
+def test_an_unsupported_layout_is_skipped_not_failed(
+    script: ModuleType, tmp_path: Path
+) -> None:
+    outcome = _scan_outcome(script, tmp_path, UnsupportedCsvLayout("2021 layout"))
+
+    assert outcome is script.CsvScanOutcome.SKIPPED
+
+
+def test_any_other_header_error_is_a_failure(
+    script: ModuleType, tmp_path: Path
+) -> None:
+    outcome = _scan_outcome(script, tmp_path, ValueError("lacks scalar columns"))
+
+    assert outcome is script.CsvScanOutcome.FAILED

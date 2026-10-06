@@ -57,7 +57,9 @@ Top level:
   can name, keyed `"<metric source>.<metric stem>"` (e.g.
   `gwent_one.color_mask`). The key becomes the dojo's `name`, so same-stem
   metrics from different games cannot collide. `build_dojos()` loads each
-  game's binder (and deck box) once, through a `CardShelf`. Contrastive
+  game's binder (and deck box) once, through a `CardShelf`. The 17lands
+  keys (`seventeenlands_<family>.<stem>`) each train on their metric's
+  all-sets, all-formats slice file. Contrastive
   entries (`contrastive.gwent`, `contrastive.flesh_and_blood`,
   `contrastive.slay_the_spire_2`) read the game's final deck box directly
   (positives: two cards from the same deck; split index under

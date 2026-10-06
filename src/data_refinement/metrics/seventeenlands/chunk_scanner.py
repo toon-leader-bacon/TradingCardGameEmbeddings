@@ -37,6 +37,13 @@ _logger = logging.getLogger(__name__)
 DEFAULT_BLOCK_SIZE = 64 << 20  # bytes of CSV per record batch
 
 
+class UnsupportedCsvLayout(ValueError):
+    """Raised by a ChunkParser factory for a CSV whose column layout its
+    family deliberately does not read (an older 17lands export missing
+    what the metrics need). The driver skips such a CSV rather than
+    counting it as a failure; any other ValueError is a failure."""
+
+
 class ChunkParser(Protocol[ChunkT_co]):
     """One CSV's column layout, turning each record batch into one
     typed chunk (GameDataChunkParser, DraftDataChunkParser)."""
