@@ -182,6 +182,22 @@ class TestMakeSplits:
             pq.ParquetFile(split_file).schema_arrow
 
 
+class TestSplitPath:
+    def test_names_each_splits_file_under_the_output_directory(
+        self, tmp_path: Path
+    ) -> None:
+        source = tmp_path / "source.parquet"
+        _write_source(source, num_rows=10)
+        fm = FileManagerParquet(source, tmp_path / "out", output_file_prefix="x")
+        fm.make_splits()
+
+        for split in (Split.TRAIN, Split.TEST, Split.VALIDATION):
+            path = fm.split_path(split)
+            assert path.parent == tmp_path / "out"
+            assert path.exists()
+        assert len({fm.split_path(split) for split in Split}) == 3
+
+
 class TestSplitsExist:
     def test_false_before_make_splits(self, tmp_path: Path) -> None:
         source = tmp_path / "source.parquet"

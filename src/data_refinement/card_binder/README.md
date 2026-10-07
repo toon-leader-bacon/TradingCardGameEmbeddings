@@ -272,6 +272,11 @@ good worked examples. Measure a stage with `scripts/report_card_content.py
   `uuid_for_name_or_front_face()`.
 - `visible_card_lookup.py` — `VisibleCardLookup`, a `CardLookup` that
   hides cards a `HoldoutSpec` keeps out of a given split.
+- `multi_game_card_lookup.py` — `MultiGameCardLookup`, a `CardLookup` over
+  one already-loaded lookup per game (Composite). A dojo that trains on
+  several games' cards reads through it, so no game's cards are held
+  twice; a call for a game it lacks is a miss, except `version_for`,
+  which raises.
 - `alias_ledger.py` — `AliasLedger`, described above.
 - `ingestion.py` — `CardIngestionStage`, the Strategy Protocol every
   source stage implements: `ingest(self, raw_path, binder) -> list[UUID]`

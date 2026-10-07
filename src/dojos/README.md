@@ -104,6 +104,12 @@ rows never straddle TRAIN and TEST.
   label indexes it). A run config's `mods:` attaches them, after the dojo's
   own task mods (`GenericDojo.append_mods`); `mods:` replaces the dojo's
   default augmentations, so list those too to keep them.
+  `per_game_mod.py` holds `PerGameMod`, which applies the `ModPipeline`
+  of each datum's card's game (a game with no entry passes through); the
+  inner mods run whenever it does, so its own `train_only` decides the
+  splits. It reports the inner mods' tallies through `Mod.child_tallies()`,
+  which `ModPipeline.mod_tallies` lists under the mod's key
+  (`1:PerGameMod/gwent/0:ShuffleKeysMod`).
   `MASK_TOKEN` (`mod.py`) is the one mask string every masking mod writes,
   and `ModTally` lives there too (`Mod.tally` is None for mods that keep
   none). `mod_specs.py` holds `ModSpec`s: frozen, shareable recipes, one
@@ -118,6 +124,24 @@ rows never straddle TRAIN and TEST.
   `DeckBoxDealer` does the same for a `DeckBox`: a seeded, exact-ratio
   split assignment kept in its own small SQLite index, and fixed-size
   deck samples per split read straight from SQLite.
+  `GameBalancedChunkReader` reads one split file as a pass of rows drawn
+  evenly across the values of a column (a game), optionally dropping rows
+  first (`keep_row`); a dojo returns it from `GenericDojo._chunks` to
+  change what it trains on.
+- **`cross_game/`** - `RarityTierDojo`: one head over the shared
+  rarity ladder (`TIER_1`..`TIER_4` and `SPECIAL`), trained on the cards of
+  six games at once. It reads a `MultiGameCardLookup`
+  (`../data_refinement/card_binder/`) and the cross-game rarity metric
+  (`../data_refinement/metrics/cross_game/README.md`), whose file carries
+  a binder version per game (`GenericDojo` checks each). What it masks
+  differs per game, so the mask is a `PerGameMod` over each game's
+  translator `masked_paths()` (every split); the catalog's per-game
+  augmentations are one train-only `PerGameMod` too. TRAIN rows are drawn
+  evenly across games (and the OTHER rows dropped first), through
+  `GenericDojo._chunks`, for training and for the loss calibration alike,
+  so TRAIN passes are random; TEST and VALIDATION are read in file order.
+  Its `RarityTierDataConstructor` drops OTHER rows. Catalog key
+  `cross_game.rarity_tier`, built by `MultiGameCardDojoRecipe`.
 - **`contrastive/`** - `ContrastiveDojo`, below.
 - **Per-source wrappers** - `gwent_one/`, `dominiontabs/`, `play_gwent/`,
   `sts_gg/`, `seventeenlands/{draft_data,game_data,replay_data}/`,

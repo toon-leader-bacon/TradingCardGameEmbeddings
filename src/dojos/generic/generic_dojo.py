@@ -14,13 +14,18 @@ import time
 from pathlib import Path
 from typing import Any, Iterable, Iterator, List, Mapping, Sequence
 
+import pandas as pd
 import torch
 from torch import nn
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.card_binder.visible_card_lookup import VisibleCardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.data_refinement.metrics.version_metadata import metadata_from_schema
+from src.data_refinement.metrics.version_metadata import (
+    MultiGameVersionMetadata,
+    metadata_from_schema,
+    multi_game_versions_from_schema,
+)
 from src.dojos.batch import Batch
 from src.dojos.budgeted_batching import group_by_budget
 from src.dojos.dojo import BatchBudget, DojoBatch
@@ -39,7 +44,7 @@ from src.schema.type_hints import BatchedModelOutput, TrainingDatum
 _logger = logging.getLogger(__name__)
 
 # Rows converted to examples at a time; independent of the batch budget.
-_ROWS_PER_CHUNK = 256
+ROWS_PER_CHUNK = 256
 
 # Most TRAIN rows the calibration pass converts to examples: an evenly
 # strided sample across the whole TRAIN file (not a prefix - make_splits
@@ -164,8 +169,9 @@ class GenericDojo:
         """Yield one split's examples as Batches within `budget`.
 
         Inputs: split (Split), budget (BatchBudget), max_examples (int |
-            None): keep only the first N examples in the split file's fixed
-            order, so a capped pass is deterministic.
+            None): keep only the first N examples in _chunks() order (the
+            split file's fixed order unless a subclass overrides _chunks), so
+            a capped pass is deterministic when _chunks is.
         Output: iterator of Batch, each costing at most budget.max_cost.
         Side effects: reads the split's parquet file.
         Exceptions: ValueError if one example alone exceeds the budget;
@@ -290,10 +296,10 @@ class GenericDojo:
     def _examples(
         self, split: Split, max_examples: int | None
     ) -> Iterator[TrainingDatum]:
-        """Stream a split's examples in file order, modded and truncated."""
+        """Stream a split's examples in _chunks() order, modded and truncated."""
         lookup = self._lookups[split]
         emitted = 0
-        for chunk in self.file_manager.reader_for(split, _ROWS_PER_CHUNK):
+        for chunk in self._chunks(split):
             data: List[TrainingDatum] = self.data_constructor.build(chunk, lookup)
             data = self.data_mod_pipeline.apply(data, is_training=split == Split.TRAIN)
             for datum in data:
@@ -301,6 +307,20 @@ class GenericDojo:
                     return
                 emitted += 1
                 yield datum
+
+    def _chunks(self, split: Split) -> Iterable[pd.DataFrame]:
+        """A split's rows as DataFrame chunks, in the order examples are
+        built and the loss calibrated. The seam a dojo overrides to change
+        what it trains on (the cross-game dojo draws TRAIN rows evenly
+        across games); the default is the split file in file order.
+
+        Inputs: split. Output: an iterable of DataFrames (each at most
+            ROWS_PER_CHUNK rows) of the rows this dojo trains or evaluates on
+            - by default exactly the split file's rows.
+        Side effects: reads the split file.
+        Exceptions: FileNotFoundError if the split files are missing.
+        """
+        return self.file_manager.reader_for(split, ROWS_PER_CHUNK)
 
     def _calibration_sample(self) -> List[TrainingDatum]:
         """An evenly strided, unmodded sample of the TRAIN split's examples.
@@ -328,7 +348,7 @@ class GenericDojo:
 
         # Keep every stride-th row, counting rows across chunk boundaries
         rows_before_chunk = 0
-        for chunk in self.file_manager.reader_for(Split.TRAIN, _ROWS_PER_CHUNK):
+        for chunk in self._chunks(Split.TRAIN):
             first_kept = -rows_before_chunk % stride
             kept_rows = chunk.iloc[first_kept::stride]
             rows_before_chunk += len(chunk)
@@ -368,6 +388,36 @@ class GenericDojo:
         )
         return result
 
+    def _check_multi_game_versions(
+        self,
+        path_to_training_data: Path,
+        card_lookup: CardLookup,
+        stamp: MultiGameVersionMetadata,
+    ) -> None:
+        """Raise if any game's recorded CardBinder version differs from
+        card_lookup's current one.
+
+        Private helper - single caller is _check_metric_version, for a
+        multi-game metric file (no deck box involved).
+
+        Inputs: the metric path (for the message), card_lookup, the file's
+            MultiGameVersionMetadata.
+        Output: none.
+        Side effects: none.
+        Exceptions: ValueError naming the first stale game, with the same
+            "regenerate this metric" wording as the single-game check;
+            whatever card_lookup.version_for raises for an unknown game.
+        """
+        for game, recorded_version in stamp.card_binder_versions.items():
+            actual_version = card_lookup.version_for(game)
+            if actual_version != recorded_version:
+                raise ValueError(
+                    f"{self.name}: {path_to_training_data} was built from "
+                    f"CardBinder version {recorded_version!r} for {game}, but "
+                    f"the current one is {actual_version!r} - regenerate "
+                    "this metric"
+                )
+
     def _check_metric_version(
         self,
         path_to_training_data: Path,
@@ -396,6 +446,14 @@ class GenericDojo:
                 "%s: skipping metric version check for %s (strict_version_check=False)",
                 self.name,
                 path_to_training_data,
+            )
+            return
+
+        # A multi-game metric file carries one binder version per game
+        multi_game = multi_game_versions_from_schema(self.file_manager.schema)
+        if multi_game is not None:
+            self._check_multi_game_versions(
+                path_to_training_data, card_lookup, multi_game
             )
             return
 

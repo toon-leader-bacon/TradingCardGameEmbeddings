@@ -18,10 +18,11 @@ are what a training config can name.
   deck source.
 - **Metrics:** 150 classes, 148 with a dojo
   (`docs/metric_dojo_inventory.csv`).
-- **Catalog:** 123 keys. Each passed `run_training.py --check` on real
-  data when added (2026-09-30 to 10-01).
-- **Not trainable yet:** all 26 17lands dojos. Their outputs are per-CSV
-  and unmerged, so no catalog key exists for them.
+- **Catalog:** 151 keys. The first 123 each passed `run_training.py
+  --check` on real data when added (2026-09-30 to 10-01);
+  `sts_gg.card_character_prediction` and `cross_game.rarity_tier` passed
+  on 2026-10-07. The 26 17lands keys were added 10-06; the four MTG deck
+  keys wait on the multiset deck box and metric rebuild.
 
 ## Raw data was re-downloaded on 2026-10-02
 
@@ -73,7 +74,10 @@ Cross-source:
 - **`cross_game` rarity tier:** `RarityTierMetric` labels MTG,
   Hearthstone, Gwent, FaB and StS2 cards on a shared four-step ladder
   (Pokemon follows once its binder stores rarity; Dominion has none). One
-  parquet for all games; the dojo and catalog key are not built yet.
+  parquet for all games, trained by `RarityTierDojo` (key
+  `cross_game.rarity_tier`, one head, TRAIN drawn evenly across games).
+  MTG's rarity is still one arbitrary printing's until the Scryfall
+  ingestion change (`plans/cross_game_rarity.md`).
 - **`contrastive`:** one deck-contrastive key per deck-box game. 6 keys,
   no metric needed.
 

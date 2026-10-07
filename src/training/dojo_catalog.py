@@ -31,7 +31,12 @@ from pathlib import Path
 from typing import Mapping, Protocol, Sequence
 
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.card_lookup import CardLookup
+from src.data_refinement.card_binder.multi_game_card_lookup import MultiGameCardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.metrics.cross_game.rarity.translator_tables import (
+    RARITY_TRANSLATORS,
+)
 from src.data_refinement.metrics.isotropic.deck_box_path import ISOTROPIC_DECK_BOX_PATH
 from src.data_refinement.metrics.seventeenlands.deck_box_path import (
     REPLAY_DATA_DECK_BOX_PATH,
@@ -49,6 +54,7 @@ from src.dojos.contrastive.staple_subsampling import (
 from src.dojos.dojo import Dojo
 from src.dojos.file_managers.deck_box_dealer import DeckBoxDealer
 from src.dojos.final_decks import held_out_card_dojos as final_decks
+from src.dojos.cross_game.rarity_tier_dojo import RarityTierDojo
 from src.dojos.dominiontabs.cost_regression_dojo import CostRegressionDojo
 from src.dojos.dominiontabs.masked_field_dojos import SetMaskDojo, TypeMaskDojo
 from src.dojos.gwent_one import masked_field_dojos as gwent_one
@@ -113,6 +119,7 @@ from src.dojos.sts_gg.card_character_prediction_dojo import (
 )
 from src.dojos.generic.generic_dojo import GenericDojo
 from src.dojos.mods.mod_pipeline import ModPipeline
+from src.dojos.mods.per_game_mod import PerGameMod
 from src.dojos.mods.mod_specs import DeckModSpec, ModSpec
 from src.dojos.play_gwent import card_inclusion_dojos as gwent_inclusion
 from src.dojos.play_gwent.deck_card_mask_dojos import LeaderMaskedFromDeckDojo
@@ -190,6 +197,20 @@ class CardShelf:
                 )
             self._card_binders[game] = CardBinder.load([path])
         return self._card_binders[game]
+
+    def card_lookup(self, games: Sequence[GameId]) -> MultiGameCardLookup:
+        """One CardLookup over games' binders, sharing the ones already
+        loaded (no merged copy of any game's cards).
+
+        Inputs: games (non-empty). Output: MultiGameCardLookup.
+        Side effects: loads any game's binder not yet loaded.
+        Exceptions: FileNotFoundError as card_binder; ValueError if games
+            is empty.
+
+        Example:
+            >>> CardShelf().card_lookup([GameId.GWENT, GameId.MTG])
+        """
+        return MultiGameCardLookup({game: self.card_binder(game) for game in games})
 
     def deck_box(self, path: Path) -> DeckBox:
         """The DeckBox at path, loaded on first request.
@@ -269,6 +290,59 @@ class CardDojoRecipe:
             rng_seed=context.rng_seed,
         )
         return _with_augmentations(dojo, name, self.game, context)
+
+
+class MultiGameCardDojoConstructor(Protocol):
+    """A dojo class built from one CardLookup spanning several games (the
+    cross-game rarity dojo)."""
+
+    def __call__(
+        self,
+        card_lookup: CardLookup,
+        holdout: HoldoutSpec,
+        card_embedding_size: int,
+        *,
+        path_to_training_data: Path | None = None,
+        name: str | None = None,
+        rng_seed: int | None = None,
+    ) -> GenericDojo: ...
+
+
+@dataclass(frozen=True)
+class MultiGameCardDojoRecipe:
+    """A dojo over the cards of several games, through one
+    MultiGameCardLookup. Augmentations are each game's own defaults, run
+    per card by a PerGameMod; a mod_overrides entry for the dojo replaces
+    them for every game."""
+
+    games: tuple[GameId, ...]
+    dojo_class: MultiGameCardDojoConstructor
+
+    def build(self, name: str, context: DojoBuildContext) -> Dojo:
+        """See DojoRecipe.build.
+
+        Inputs: name, context.
+        Output: the dojo, with a PerGameMod of every game's augmentations
+            appended after its own task mods.
+        Side effects: loads each game's binder through context.shelf; may
+            write split files.
+        Exceptions: as DojoRecipe.build.
+        """
+        dojo = self.dojo_class(
+            context.shelf.card_lookup(self.games),
+            context.holdout,
+            context.card_embedding_size,
+            name=name,
+            rng_seed=context.rng_seed,
+        )
+
+        # One augmentation pipeline per game, dispatched by each card's game
+        pipelines = {
+            game: _augmentation_pipeline(name, game, context) for game in self.games
+        }
+        if any(pipeline.mods for pipeline in pipelines.values()):
+            dojo.append_mods([PerGameMod(pipelines, train_only=True)])
+        return dojo
 
 
 @dataclass(frozen=True)
@@ -677,6 +751,10 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
         GameId.GWENT,
         LeaderMaskedFromDeckDojo,
         DeckBox.default_output_path(GameId.GWENT),
+    ),
+    # One rarity ladder shared by six games, trained with one head
+    "cross_game.rarity_tier": MultiGameCardDojoRecipe(
+        tuple(RARITY_TRANSLATORS), RarityTierDojo
     ),
     # sts_gg lists winning runs only, so its win, card_win_rate,
     # card_win_rate_at_act2 and killed_by labels are constant and have no
