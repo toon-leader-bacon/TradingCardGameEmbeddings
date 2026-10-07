@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from src.data_refinement.metrics.isolated_call import FAILURE_MARKER
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+from src.data_refinement.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
 )
 from src.data_refinement.metrics.seventeenlands.game_data.scanner import scan_game_csv

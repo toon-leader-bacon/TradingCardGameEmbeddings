@@ -13,10 +13,10 @@ from src.data_refinement.metrics.seventeenlands.game_data.game_card_average_metr
     OpeningHandWinRateMetric,
     WinRateWhenInDeckMetric,
 )
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+from src.data_refinement.seventeenlands.game_data.game_data_chunk import (
     GameZone,
-    ZoneCounts,
 )
+from src.data_refinement.seventeenlands.zone_counts import ZoneCounts
 from src.data_refinement.metrics.version_metadata import read_version_metadata
 from tests.data_refinement.metrics.seventeenlands.game_data._chunk_fixtures import (
     MORNINGSTAR,
@@ -24,6 +24,7 @@ from tests.data_refinement.metrics.seventeenlands.game_data._chunk_fixtures impo
     VERSION,
     binder_with_cards,
     chunk_with_zones,
+    read_finished,
     row,
     scan_into_frame,
     uuid_for,
@@ -158,7 +159,7 @@ def test_two_columns_naming_one_card_both_count(tmp_path: Path) -> None:
     )
 
     metric.accumulate(chunk_with_zones({GameZone.DECK: deck}, won=[True, False]))
-    df = pd.read_parquet(metric.finalize()).set_index("nocab_uuid")
+    df = read_finished(metric).set_index("nocab_uuid")
 
     # The row implementation counted each matching column once per game
     assert df.loc[str(owlbear_uuid), "sample_count"] == 3

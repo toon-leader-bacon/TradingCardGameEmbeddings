@@ -285,6 +285,17 @@ class FileManagerParquet:
             raise ValueError(f"Unsupported split: {split}")
         return self.shuffle_split_index(_SPLIT_INDEX[split], batch_size)
 
+    def split_path(self, split: Split) -> Path:
+        """Where one split's parquet file lives (it may not exist yet).
+
+        Inputs: split. Output: Path. Side effects: none. Exceptions: none.
+
+        Example:
+            >>> manager.split_path(Split.TRAIN)
+            PosixPath('data/splits/rarity_tier_train.parquet')
+        """
+        return self._split_path(_SPLIT_INDEX[split])
+
     def _split_path(self, split_index: int) -> Path:
         return (
             self.output_directory

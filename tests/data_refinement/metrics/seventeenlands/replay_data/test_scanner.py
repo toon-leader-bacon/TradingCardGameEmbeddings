@@ -1,102 +1,78 @@
-"""Tests for scanner.py's scan_replay_csv() - the same isolation
-contract as draft_data/game_data's own scanner tests.
-"""
+"""Tests for scanner.py's scan_replay_csv(): every metric sees every
+chunk, every metric is finalized, and one metric's failure is isolated
+and logged loudly (the shared chunk_scanner contract)."""
 
+import logging
 from pathlib import Path
 
-import pandas as pd
+import pytest
 
+from src.data_refinement.metrics.isolated_call import FAILURE_MARKER
+from src.data_refinement.metrics.seventeenlands.replay_data.replay_data_chunk import (
+    ReplayDataChunk,
+)
 from src.data_refinement.metrics.seventeenlands.replay_data.scanner import (
     scan_replay_csv,
+)
+from tests.data_refinement.metrics.seventeenlands.replay_data._replay_fixtures import (
+    binder_with_cards,
+    parser_for,
+    row,
+    write_csv,
 )
 
 
 class _RecordingMetric:
-    """A trivial Metric[dict] that records every row/finalize call it
-    sees, for asserting scan_replay_csv()'s driving contract."""
+    """Records the row count of every chunk it sees, and its finalize."""
 
     def __init__(self) -> None:
-        self.rows: list[dict] = []
+        self.chunk_rows: list[int] = []
         self.finalized = False
 
-    def accumulate(self, row: dict) -> None:
-        self.rows.append(row)
+    def accumulate(self, chunk: ReplayDataChunk) -> None:
+        self.chunk_rows.append(len(chunk))
 
     def finalize(self) -> Path:
         self.finalized = True
         return Path("unused.parquet")
 
 
-class _RaisingAccumulateMetric:
-    def __init__(self) -> None:
-        self.finalized = False
-
-    def accumulate(self, row: dict) -> None:
+class _RaisingAccumulateMetric(_RecordingMetric):
+    def accumulate(self, chunk: ReplayDataChunk) -> None:
         raise ValueError("boom - accumulate")
 
-    def finalize(self) -> Path:
-        self.finalized = True
-        return Path("unused.parquet")
+
+def _scan(tmp_path: Path, metrics: list, rows: int = 40) -> None:
+    csv_path = write_csv(
+        tmp_path / "PIO.TradSealed.csv",
+        [row(owlbear_deck=1, game_number=i) for i in range(rows)],
+    )
+    scan_replay_csv(csv_path, metrics, parser_for(binder_with_cards()), 2048)
 
 
-class _RaisingFinalizeMetric:
-    def accumulate(self, row: dict) -> None:
-        pass
+def test_every_metric_sees_every_row_in_chunks(tmp_path: Path) -> None:
+    first, second = _RecordingMetric(), _RecordingMetric()
 
-    def finalize(self) -> Path:
-        raise ValueError("boom - finalize")
+    _scan(tmp_path, [first, second])
 
-
-def _write_csv(path: Path, rows: list[dict]) -> None:
-    pd.DataFrame(rows).to_csv(path, index=False)
-
-
-def test_every_metric_receives_every_row_one_at_a_time(tmp_path: Path) -> None:
-    csv_path = tmp_path / "replay_data.csv"
-    _write_csv(csv_path, [{"won": True}, {"won": False}])
-    metric = _RecordingMetric()
-
-    scan_replay_csv(csv_path, [metric])
-
-    assert len(metric.rows) == 2
-    assert metric.rows[0]["won"] is True
-    assert metric.rows[1]["won"] is False
+    assert sum(first.chunk_rows) == 40
+    assert len(first.chunk_rows) > 1  # a small block size gives several chunks
+    assert first.chunk_rows == second.chunk_rows
+    assert first.finalized and second.finalized
 
 
-def test_one_metrics_accumulate_failure_is_isolated_from_the_others(
-    tmp_path: Path,
+def test_an_accumulate_failure_is_isolated_and_logged_loudly(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    csv_path = tmp_path / "replay_data.csv"
-    _write_csv(csv_path, [{"won": True}])
-    raising_metric = _RaisingAccumulateMetric()
-    healthy_metric = _RecordingMetric()
+    healthy, broken = _RecordingMetric(), _RaisingAccumulateMetric()
 
-    scan_replay_csv(csv_path, [raising_metric, healthy_metric])
+    with caplog.at_level(logging.ERROR):
+        _scan(tmp_path, [broken, healthy])
 
-    assert len(healthy_metric.rows) == 1
-    assert raising_metric.finalized is True
-
-
-def test_one_metrics_finalize_failure_is_isolated_from_the_others(
-    tmp_path: Path,
-) -> None:
-    csv_path = tmp_path / "replay_data.csv"
-    _write_csv(csv_path, [{"won": True}])
-    raising_metric = _RaisingFinalizeMetric()
-    healthy_metric = _RecordingMetric()
-
-    scan_replay_csv(csv_path, [raising_metric, healthy_metric])
-
-    assert healthy_metric.finalized is True
-
-
-def test_every_metric_is_finalized_after_the_full_scan(tmp_path: Path) -> None:
-    csv_path = tmp_path / "replay_data.csv"
-    _write_csv(csv_path, [{"won": True}])
-    first_metric = _RecordingMetric()
-    second_metric = _RecordingMetric()
-
-    scan_replay_csv(csv_path, [first_metric, second_metric])
-
-    assert first_metric.finalized is True
-    assert second_metric.finalized is True
+    assert sum(healthy.chunk_rows) == 40
+    assert broken.finalized
+    assert any(
+        FAILURE_MARKER in r.getMessage()
+        and "PIO.TradSealed.csv chunk 0" in r.getMessage()
+        for r in caplog.records
+    )

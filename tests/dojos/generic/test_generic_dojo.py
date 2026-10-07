@@ -586,7 +586,7 @@ class TestCalibration:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(generic_dojo_module, "_CALIBRATION_SAMPLE_CAP", 10)
-        monkeypatch.setattr(generic_dojo_module, "_ROWS_PER_CHUNK", 7)  # crosses
+        monkeypatch.setattr(generic_dojo_module, "ROWS_PER_CHUNK", 7)  # crosses
         calibration = _RecordingCalibration()
         dojo = _calibrated_dojo(
             tmp_path, calibration, [float(i) for i in range(100)], [_card("a")]

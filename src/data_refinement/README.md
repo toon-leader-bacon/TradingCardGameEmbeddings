@@ -21,6 +21,10 @@ next.
 - **[`metrics/`](metrics/README.md)** - one directory per raw source,
   each turning that source into (training input, label) parquet files
   a dojo reads. Output: `data/metrics/<source>/`.
+- **[`seventeenlands/`](seventeenlands/README.md)** - the 17lands CSV
+  chunk parser and deck identity, shared by `deck_box`'s 17lands
+  extraction stage and the 17lands metrics, so both store and reference
+  the same decks. Imports neither.
 
 [`deck_ids.py`](deck_ids.py) is the one file living directly here
 rather than in a container above: `deck_uuid_from_cards()`, the

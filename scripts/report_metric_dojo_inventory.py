@@ -3,10 +3,13 @@ class that writes a parquet output, and the dojo(s) that read it.
 
 A dojo is paired with a metric when the dojo class names that metric in
 its own body (every per-metric wrapper reads its paired metric's
-DEFAULT_OUTPUT_PATH/LABEL_COLUMN ClassVars, directly or via METRIC), or
+DEFAULT_OUTPUT_PATH/LABEL_COLUMN ClassVars, directly or via METRIC, or
+passes it to seventeenlands_training_path), or
 when a src/training/dojo_catalog.py recipe points the dojo class at that
 metric's output (metric_output, e.g. the sts2_runs keys). A metric with
-no dojo gets one row with an empty dojo column. Needs no data on disk.
+no dojo gets one row with an empty dojo column. A 17lands sliced metric
+(OUTPUT_STEM instead of DEFAULT_OUTPUT_PATH) is listed with its "all"
+slice file as its output. Needs no data on disk.
 
 Usage (from the project root):
 
@@ -25,6 +28,15 @@ from dataclasses import dataclass
 from typing import cast
 from pathlib import Path
 
+from src.data_refinement.metrics.seventeenlands.data_slice import (
+    SeventeenLandsSlice,
+)
+from src.data_refinement.metrics.seventeenlands.slice_file import (
+    SeventeenLandsSliceFile,
+)
+from src.data_refinement.metrics.seventeenlands.sliced_metric import (
+    SlicedMetricClass,
+)
 from src.dojos.generic.generic_dojo import GenericDojo
 
 _METRICS_ROOT = Path("src/data_refinement/metrics")
@@ -45,15 +57,24 @@ def _module_name(path: Path) -> str:
 
 
 def _metric_classes() -> list[type]:
-    """Every class defined under metrics/ with a Path DEFAULT_OUTPUT_PATH."""
+    """Every class defined under metrics/ with a Path DEFAULT_OUTPUT_PATH,
+    or (a 17lands sliced metric) a str OUTPUT_STEM."""
     metrics: list[type] = []
     for path in sorted(_METRICS_ROOT.rglob("*.py")):
         module = importlib.import_module(_module_name(path))
         for _, cls in inspect.getmembers(module, inspect.isclass):
+            if cls.__module__ != module.__name__:
+                continue
             output = getattr(cls, "DEFAULT_OUTPUT_PATH", None)
-            if cls.__module__ == module.__name__ and isinstance(output, Path):
+            if isinstance(output, Path) or _is_sliced(cls):
                 metrics.append(cls)
     return metrics
+
+
+def _is_sliced(cls: type) -> bool:
+    """Whether cls is a concrete 17lands sliced metric (a str OUTPUT_STEM;
+    the abstract bases only annotate it)."""
+    return isinstance(getattr(cls, "OUTPUT_STEM", None), str)
 
 
 def _dojo_classes(metric_classes: list[type]) -> list[_DojoClass]:
@@ -120,9 +141,18 @@ def _catalog_dojo_classes(metric_classes: list[type]) -> list[_DojoClass]:
 
 def _paired_metric_names(class_node: ast.ClassDef) -> set[str]:
     """Names a dojo class reads its training file from: X in
-    `X.DEFAULT_OUTPUT_PATH`, or in `METRIC = X` (paired_metric_dojos)."""
+    `X.DEFAULT_OUTPUT_PATH`, in `METRIC = X` (paired_metric_dojos), or in
+    `seventeenlands_training_path(X, ...)`."""
     names: set[str] = set()
     for node in ast.walk(class_node):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "seventeenlands_training_path"
+            and node.args
+            and isinstance(node.args[0], ast.Name)
+        ):
+            names.add(node.args[0].id)
         if (
             isinstance(node, ast.Attribute)
             and node.attr == "DEFAULT_OUTPUT_PATH"
@@ -139,6 +169,11 @@ def _paired_metric_names(class_node: ast.ClassDef) -> set[str]:
 
 
 def _output_path(metric: type) -> Path:
+    """metric's output: its DEFAULT_OUTPUT_PATH, or a sliced metric's
+    "all" slice file."""
+    if _is_sliced(metric):
+        sliced = cast(SlicedMetricClass, metric)
+        return SeventeenLandsSliceFile(sliced).path_for(SeventeenLandsSlice())
     return Path(getattr(metric, "DEFAULT_OUTPUT_PATH"))
 
 

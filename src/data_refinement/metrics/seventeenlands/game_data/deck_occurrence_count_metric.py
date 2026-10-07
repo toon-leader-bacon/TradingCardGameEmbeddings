@@ -1,29 +1,23 @@
-"""DeckOccurrenceCountMetric - how many distinct drafts chose each deck
-this family has seen.
+"""DeckOccurrenceCountMetric - how many distinct drafts chose each deck.
 
-A vectorized Metric[GameDataChunk] (see game_data/README.md). Per
-chunk it adds each row's draft_id to the running per-deck_uuid set of
-distinct drafts seen so far - no DeckBox of its own. The canonical
-DeckBox (src/data_refinement/deck_box/seventeenlands_game_data/
-extraction_stage.py) already holds every deck this metric would ever
-see, under the same deck_uuid_from_cards() identity.
+Enriches the canonical DeckBox (src/data_refinement/deck_box/
+seventeenlands_game_data/), which holds each decklist once, with its
+popularity: a later sampler can weight decks by it. No DeckBox of its
+own; deck_uuids use the canonical box's deck_uuid_from_cards() identity
+(extraction uses the same parser, so each id is a stored deck).
 
-ACCUMULATION, NOT STREAMING: like
-on_play_win_rate_sensitivity_by_deck_metric.py's
-OnPlayWinRateSensitivityByDeckMetric, this metric's output needs every
-game across the whole scan (a deck's occurrence count can only grow as
-more chunks/CSVs arrive), so it does NOT subclass
-game_deck_label_metric.py's GameDeckLabelMetric, which writes one row
-per game as soon as accumulate() sees it.
+A vectorized Metric[GameDataChunk] (see game_data/README.md) and a
+CountTableMetric (../sliced_metric.py): each partition holds, per
+deck_uuid, the number of distinct draft_ids in that CSV that played it.
+A draft lives in exactly one CSV (one set and format), so summing the
+partitions of a slice counts each draft once: the slice's count is exact.
 
 WHY DISTINCT draft_id, NOT ROW COUNT: a single draft plays 3-7 games
 (see game_deck_label_metric.py's module docstring's PER-GAME
-IDENTIFIER section and ChunkDecks/GameKeys), all sharing one deck
-(modulo sideboard swaps the row implementation doesn't distinguish -
-see chunk_decks.py). Counting rows would inflate a deck's popularity
-by however many games each of its drafts happened to play; counting
-distinct draft_ids answers the actual question this metric exists for
-("how many drafts played this exact decklist") instead.
+IDENTIFIER section), usually all with one deck. Counting rows would
+inflate a deck's popularity by however many games each of its drafts
+happened to play; counting distinct draft_ids answers "how many drafts
+played this exact decklist" instead.
 """
 
 import dataclasses
@@ -31,112 +25,125 @@ from pathlib import Path
 from typing import ClassVar
 from uuid import UUID
 
+import numpy as np
+import pandas as pd
 import pyarrow as pa
 
-from src.data_refinement.metrics.parquet_builder import ParquetBuilder
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+from src.data_refinement.metrics.seventeenlands.count_table import (
+    SAMPLE_COUNT_COLUMN,
+    write_count_table,
+)
+from src.data_refinement.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
 )
-from src.data_refinement.metrics.version_metadata import (
-    MetricVersionMetadata,
-    schema_with_version_metadata,
-)
+from src.data_refinement.metrics.version_metadata import MetricVersionMetadata
+from src.data_retrieval.seventeenlands.refs import DataType
 
-_DEFAULT_OUTPUT_PATH = Path(
-    "data/metrics/seventeenlands/game_data/deck_occurrence_count.parquet"
-)
-
-_OUTPUT_SCHEMA = pa.schema(
-    [
-        ("deck_uuid", pa.string()),
-        ("occurrence_count", pa.int64()),
-    ]
-)
+_COUNT_COLUMN = "draft_count"
 
 
 class DeckOccurrenceCountMetric:
-    """Deck -> the number of distinct drafts that chose it, across the
-    whole scan.
+    """Deck -> the number of distinct drafts that played it.
 
-    Satisfies the Metric[GameDataChunk] Protocol (../../metric.py)
-    structurally.
+    Satisfies the Metric[GameDataChunk] Protocol (../../metric.py) and
+    CountTableMetric (../sliced_metric.py) structurally.
     """
 
-    DEFAULT_OUTPUT_PATH: ClassVar[Path] = _DEFAULT_OUTPUT_PATH
+    FAMILY: ClassVar[DataType] = DataType.GAME
+    OUTPUT_STEM: ClassVar[str] = "deck_occurrence_count"
+    LABEL_COLUMN: ClassVar[str] = "occurrence_count"
+    LABEL_VERSION: ClassVar[int] = 1
+    KEY_COLUMNS: ClassVar[tuple[str, ...]] = ("deck_uuid",)
+    COUNT_COLUMNS: ClassVar[tuple[str, ...]] = (_COUNT_COLUMN,)
+    HAS_BASELINE: ClassVar[bool] = False
 
     def __init__(
         self,
         version_metadata: MetricVersionMetadata,
-        output_path: Path | None = None,
+        output_path: Path,
     ) -> None:
         """Start a metric with no decks seen yet.
 
         Inputs:
             version_metadata: the CardBinder version this run reads;
-                stamped onto the output with requires_deck_box=True
-                (a downstream reader of deck_uuid still needs some
-                DeckBox - see module docstring).
-            output_path: overrides DEFAULT_OUTPUT_PATH when given.
+                stamped onto the output with requires_deck_box=True (a
+                reader of deck_uuid needs the canonical DeckBox).
+            output_path: this CSV's partition path
+                (SeventeenLandsPartition.path()).
         Output: none (constructor).
-        Side effects: none (no I/O until accumulate()/finalize()).
+        Side effects: none (no I/O until finalize()).
         Exceptions: none.
         """
-        self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
+        self._output_path = output_path
         self._version_metadata = dataclasses.replace(
             version_metadata, requires_deck_box=True
         )
         self._draft_ids_by_deck: dict[UUID, set[str]] = {}
 
     def accumulate(self, chunk: GameDataChunk) -> None:
-        """Add each row's draft_id to its deck's running set of distinct
-        drafts.
+        """Add each row's draft_id to its deck's set of distinct drafts.
 
         Inputs: chunk.
         Output: none.
         Side effects: grows the per-deck_uuid draft_id sets held in
-            memory for the lifetime of this instance.
+            memory for the lifetime of this instance (one Python step per
+            distinct (deck, draft) pair in the chunk, not per row).
         Exceptions: none.
 
         Example:
-            >>> metric = DeckOccurrenceCountMetric(version_metadata)
+            >>> metric = DeckOccurrenceCountMetric(version_metadata, partition_path)
             >>> metric.accumulate(chunk)
             >>> metric.finalize()
         """
-        deck_uuids = chunk.decks.row_deck_uuids()
-        draft_ids = chunk.keys.draft_id
-        for deck_uuid, draft_id in zip(deck_uuids, draft_ids):
-            drafts = self._draft_ids_by_deck.setdefault(UUID(str(deck_uuid)), set())
-            drafts.add(str(draft_id))
+        # Distinct (deck, draft) pairs first: a draft's games mostly share
+        # a deck, so far fewer pairs than rows reach the Python loop
+        pairs = pd.DataFrame(
+            {"deck": chunk.decks.row_deck, "draft_id": chunk.keys.draft_id}
+        ).drop_duplicates()
+        for deck_index, draft_id in zip(pairs["deck"], pairs["draft_id"]):
+            deck_uuid = chunk.decks.decks[deck_index].nocab_uuid
+            self._draft_ids_by_deck.setdefault(deck_uuid, set()).add(str(draft_id))
 
     def finalize(self) -> Path:
-        """Write one output row per distinct deck_uuid seen, with its
-        occurrence_count, and close the writer.
+        """Write this partition's per-deck distinct-draft counts.
 
         Inputs: none (uses accumulated state).
         Output: self._output_path.
-        Side effects: creates self._output_path's parent directories if
-            missing; opens, writes and closes a ParquetBuilder at
-            self._output_path (a parquet file with columns deck_uuid:
-            str, occurrence_count: int64 - one row per deck seen at
-            least once, in first-seen order).
-        Exceptions: whatever ParquetBuilder raises on failure to open or
-            write self._output_path.
+        Side effects: writes self._output_path via write_count_table:
+            deck_uuid and draft_count (int64), one row per deck seen.
+        Exceptions: whatever the parquet write raises.
 
         Example:
             >>> metric.finalize()
-            PosixPath('data/metrics/seventeenlands/game_data/deck_occurrence_count.parquet')
+            Path('data/metrics/seventeenlands/game_data/deck_occurrence_count/KTK/TradDraft.parquet')
         """
-        output_schema = schema_with_version_metadata(
-            _OUTPUT_SCHEMA, self._version_metadata
+        deck_uuids = [str(deck_uuid) for deck_uuid in self._draft_ids_by_deck]
+        counts = np.array(
+            [len(drafts) for drafts in self._draft_ids_by_deck.values()], np.int64
         )
-        self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        writer = ParquetBuilder(self._output_path, output_schema)
-        for deck_uuid, draft_ids in self._draft_ids_by_deck.items():
-            writer.write_row(
-                {
-                    "deck_uuid": str(deck_uuid),
-                    "occurrence_count": len(draft_ids),
-                }
-            )
-        writer.close()
-        return self._output_path
+        return write_count_table(
+            self._output_path,
+            type(self),
+            {"deck_uuid": deck_uuids},
+            {_COUNT_COLUMN: counts},
+            self._version_metadata,
+        )
+
+    @classmethod
+    def output_from_counts(
+        cls, summed: pa.Table, baseline: pa.Table | None
+    ) -> pa.Table:
+        """See CountTableMetric.output_from_counts(): the label is the
+        summed distinct-draft count, which is also the sample count.
+
+        Inputs: summed (deck_uuid + draft_count), baseline (None).
+        Output: deck_uuid, occurrence_count (int64), sample_count (int64).
+        Side effects: none. Exceptions: none.
+
+        Example:
+            >>> DeckOccurrenceCountMetric.output_from_counts(summed, None)
+        """
+        counts = summed.column(_COUNT_COLUMN)
+        result = summed.select(list(cls.KEY_COLUMNS))
+        result = result.append_column(cls.LABEL_COLUMN, counts)
+        return result.append_column(SAMPLE_COUNT_COLUMN, counts)

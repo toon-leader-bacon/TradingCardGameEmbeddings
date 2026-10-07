@@ -11,19 +11,24 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.csv as pa_csv
+import pyarrow.parquet as pq
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.metric import Metric
-from src.data_refinement.metrics.seventeenlands.game_data.chunk_decks import (
+from src.data_refinement.metrics.seventeenlands.slice_file import finished_count_table
+from src.data_refinement.metrics.seventeenlands.sliced_metric import is_count_table
+from src.data_refinement.seventeenlands.chunk_decks import (
     build_chunk_decks,
 )
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+from src.data_refinement.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
-    GameKeys,
     GameZone,
-    ZoneCounts,
 )
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk_parser import (
+from src.data_refinement.seventeenlands.chunk_decks import (
+    GameKeys,
+)
+from src.data_refinement.seventeenlands.zone_counts import ZoneCounts
+from src.data_refinement.seventeenlands.game_data.game_data_chunk_parser import (
     GameDataChunkParser,
 )
 from src.data_refinement.metrics.seventeenlands.game_data.scanner import scan_game_csv
@@ -176,7 +181,9 @@ def chunk_with_zones(
         num_turns=np.full(rows, 8, np.int32),
         keys=keys,
         rank=np.full(rows, "", object),
-        decks=build_chunk_decks(all_zones[GameZone.DECK], keys, GameId.MTG),
+        decks=build_chunk_decks(
+            all_zones[GameZone.DECK], keys, GameId.MTG, "game_data"
+        ),
     )
 
 
@@ -189,8 +196,21 @@ def scan_into_frame(
     index: str | None = "nocab_uuid",
 ) -> pd.DataFrame:
     """Write rows, scan them through metric, and return its output,
-    indexed by index (None: unindexed)."""
+    indexed by index (None: unindexed). A count-table metric's output is
+    its finished (labelled) table, as a one-partition slice would give."""
     csv_path = write_csv(tmp_path / "games.csv", rows)
     scan_game_csv(csv_path, [metric], parser_for(binder), block_size=block_size)
-    frame = pd.read_parquet(metric.finalize())
+    frame = read_finished(metric)
     return frame if index is None else frame.set_index(index)
+
+
+def read_finished(metric: Metric[GameDataChunk]) -> pd.DataFrame:
+    """Finalize metric and read its output: a count table's finished
+    (labelled) table, as a one-partition slice gives it, else the file
+    as written."""
+    output_path = metric.finalize()
+    metric_class = type(metric)
+    if is_count_table(metric_class):
+        table = finished_count_table(metric_class, [pq.read_table(output_path)])
+        return table.to_pandas()
+    return pd.read_parquet(output_path)

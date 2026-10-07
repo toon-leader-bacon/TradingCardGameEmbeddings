@@ -6,10 +6,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+from src.data_refinement.seventeenlands.game_data.game_data_chunk import (
     GameZone,
-    ZoneCounts,
 )
+from src.data_refinement.seventeenlands.zone_counts import ZoneCounts
 from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_rate_delta_metric import (
     OnPlayWinRateDeltaMetric,
 )
@@ -19,6 +19,7 @@ from tests.data_refinement.metrics.seventeenlands.game_data._chunk_fixtures impo
     VERSION,
     binder_with_cards,
     chunk_with_zones,
+    read_finished,
     row,
     scan_into_frame,
     uuid_for,
@@ -105,7 +106,7 @@ def test_two_columns_naming_one_card_both_count(tmp_path: Path) -> None:
 
     metric.accumulate(chunk_with_zones({GameZone.DECK: deck}, won=[True]))
 
-    df = pd.read_parquet(metric.finalize()).set_index("nocab_uuid")
+    df = read_finished(metric).set_index("nocab_uuid")
     assert df.loc[str(card), "sample_count"] == 2
 
 

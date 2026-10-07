@@ -1,20 +1,19 @@
 """Wrapper over GameLengthAssociationMetric
 (src/data_refinement/metrics/seventeenlands/game_data/game_length_association_metric.py).
 
-A CardAverageMetricDojo (../../generic/paired_metric_dojos.py): this
-metric shares the card-average output row shape
-(nocab_uuid/LABEL_COLUMN/sample_count) even though it overrides
-finalize() to subtract a format-wide baseline.
+A SeventeenLandsCardLabelDojo (../sliced_dojos.py): it only names its
+metric; the slice file supplies nocab_uuid, LABEL_COLUMN and
+sample_count.
 """
 
 from src.data_refinement.metrics.seventeenlands.game_data.game_length_association_metric import (
     GameLengthAssociationMetric,
 )
-from src.dojos.generic.paired_metric_dojos import CardAverageMetricDojo
+from src.dojos.seventeenlands.sliced_dojos import SeventeenLandsCardLabelDojo
 
 
-class GameLengthAssociationDojo(CardAverageMetricDojo):
-    """Card -> predicted (own average num_turns - format-wide average)
+class GameLengthAssociationDojo(SeventeenLandsCardLabelDojo):
+    """Card -> predicted (own average num_turns - the slice's average)
     (GameLengthAssociationMetric)."""
 
     METRIC = GameLengthAssociationMetric

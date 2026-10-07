@@ -18,10 +18,11 @@ are what a training config can name.
   deck source.
 - **Metrics:** 150 classes, 148 with a dojo
   (`docs/metric_dojo_inventory.csv`).
-- **Catalog:** 123 keys. Each passed `run_training.py --check` on real
-  data when added (2026-09-30 to 10-01).
-- **Not trainable yet:** all 26 17lands dojos. Their outputs are per-CSV
-  and unmerged, so no catalog key exists for them.
+- **Catalog:** 151 keys. The first 123 each passed `run_training.py
+  --check` on real data when added (2026-09-30 to 10-01);
+  `sts_gg.card_character_prediction` and `cross_game.rarity_tier` passed
+  on 2026-10-07. The 26 17lands keys were added 10-06; the four MTG deck
+  keys wait on the multiset deck box and metric rebuild.
 
 ## Raw data was re-downloaded on 2026-10-02
 
@@ -46,7 +47,7 @@ game's deck box, metrics and splits. The refresh order is in the plan.
 | Source (retrieval) | Game | Card binder | Deck box | Metrics | Keys |
 | --- | --- | --- | --- | --- | --- |
 | `scryfall` | MTG | ✅ `ScryfallCardIngestionStage` | n/a (cards only) | 🟨 6 single-card masks (cmc, type, rarity, colors, power, toughness) | 6 |
-| `seventeenlands` › `game_data` | MTG | (scryfall) | ✅ `seventeenlands_game_data` → `mtg.db`, 4.8M decks (one per draft), 0.71% Unknown slots | 🟨 11 built, all with dojos, all vectorized (chunk scan, slices 1-2). Partial run: 76 set/format dirs, no PremierDraft | 0 (outputs not merged) |
+| `seventeenlands` › `game_data` | MTG | (scryfall) | ✅ `seventeenlands_game_data` → `mtg.db`: every distinct decklist any game played (multiset hash; rebuild pending 2026-10-06, count TBD) | 🟨 11 built, all with dojos, all vectorized (chunk scan, slices 1-2). Partial run: 76 set/format dirs, no PremierDraft | 0 (outputs not merged) |
 | `seventeenlands` › `draft_data` | MTG | (scryfall) | n/a (picks, not decks) | 🟨 6 built with dojos. Only one shakeout file run (OM1) | 0 |
 | `seventeenlands` › `replay_data` | MTG | (scryfall) | n/a (same games as game_data) | 🟨 9 built with dojos. Only one shakeout file run (PIO; Arena ids miss the binder) | 0 |
 | `pokemon_tcg` | Pokemon | ✅ `PokemonTcgCardIngestionStage` | ✅ `pokemon_tcg` → `pokemon.db`, 188 theme decks (prefabs, low value) | 🟨 5 single-card masks (HP, types, stage, retreat cost, weakness) | 5 |
@@ -55,7 +56,7 @@ game's deck box, metrics and splits. The refresh order is in the plan.
 | `play_gwent` | Gwent | (gwent_one) | ✅ `play_gwent` → `gwent.db`, 60k guide decks | 🟨 4: leader masked from deck, card inclusion rate, faction-conditioned inclusion, guide votes. All four only read the published box | 4 |
 | `spire_codex` (cards) | StS2 | ✅ `SpireCodexCardIngestionStage` | n/a | 🟨 4 single-card masks (cost, type, rarity, color) | 4 |
 | `spire_codex` (runs) + `sts2runs` | StS2 | (spire_codex) | ✅ `spire_codex_runs` (subclasses the sts2runs stage) + `sts2runs` → `slay_the_spire_2.db`, ~2.76M decks incl. abandoned runs | 🟩 23 in `metrics/sts2_runs/` over 1.36M scored runs, with losses. Per-floor metrics (B2) not built | 23 |
-| `sts_gg` | StS2 | (spire_codex) | ✅ `sts_gg` (1,004 decks, into the same box) | 🟩 24 built with dojos. Wins only (a leaderboard), so the 4 win/killed-by labels are constant and have no key; `sts2_runs` covers them. `card_character_prediction` has a dojo but no key | 19 |
+| `sts_gg` | StS2 | (spire_codex) | ✅ `sts_gg` (1,004 decks, into the same box) | 🟩 24 built with dojos. Wins only (a leaderboard), so the 4 win/killed-by labels are constant and have no key; `sts2_runs` covers them. `card_character_prediction` has a key (2026-10-07) | 20 |
 | `cardvault_fabtcg` | FaB | ✅ `CardVaultFabtcgCardIngestionStage` | n/a (cards only) | 🟨 6 single-card masks (pitch, cost, power, defense, class, type) | 6 |
 | `fabtcg_decklists` | FaB | (cardvault_fabtcg) | ✅ `fabtcg_decklists` → `flesh_and_blood.db`, 4,161 decks (cards keyed by name) | 🟨 3: hero masked from deck, card inclusion rate, hero-conditioned inclusion. Pitch-curve shape not built | 3 |
 | `pitchstack` | FaB | (cardvault_fabtcg) | ❌ Blocked: `decks.jsonl` (1,686 decks) has metadata only; card lists need the unimplemented `/cards` endpoint | 🟥 brainstorm only | 0 |
@@ -70,6 +71,13 @@ Cross-source:
   box (Pokemon, FaB, Gwent, Dominion, StS2, MTG): pick the held-out
   card from 8 candidates. 6 keys, outputs on disk. Splits are by deck, so
   a deck's several held-out rows never straddle TRAIN and TEST.
+- **`cross_game` rarity tier:** `RarityTierMetric` labels MTG,
+  Hearthstone, Gwent, FaB and StS2 cards on a shared four-step ladder
+  (Pokemon follows once its binder stores rarity; Dominion has none). One
+  parquet for all games, trained by `RarityTierDojo` (key
+  `cross_game.rarity_tier`, one head, TRAIN drawn evenly across games).
+  MTG's rarity is still one arbitrary printing's until the Scryfall
+  ingestion change (`plans/cross_game_rarity.md`).
 - **`contrastive`:** one deck-contrastive key per deck-box game. 6 keys,
   no metric needed.
 

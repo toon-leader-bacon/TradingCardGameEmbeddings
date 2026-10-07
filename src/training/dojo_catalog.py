@@ -31,8 +31,16 @@ from pathlib import Path
 from typing import Mapping, Protocol, Sequence
 
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.card_lookup import CardLookup
+from src.data_refinement.card_binder.multi_game_card_lookup import MultiGameCardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.metrics.cross_game.rarity.translator_tables import (
+    RARITY_TRANSLATORS,
+)
 from src.data_refinement.metrics.isotropic.deck_box_path import ISOTROPIC_DECK_BOX_PATH
+from src.data_refinement.metrics.seventeenlands.deck_box_path import (
+    REPLAY_DATA_DECK_BOX_PATH,
+)
 from src.data_refinement.metrics.sts2_runs import card_average_metrics as sts2_cards
 from src.data_refinement.metrics.sts2_runs import deck_label_metrics as sts2_decks
 from src.data_refinement.metrics.sts_gg.deck_box_path import STS_GG_DECK_BOX_PATH
@@ -46,6 +54,7 @@ from src.dojos.contrastive.staple_subsampling import (
 from src.dojos.dojo import Dojo
 from src.dojos.file_managers.deck_box_dealer import DeckBoxDealer
 from src.dojos.final_decks import held_out_card_dojos as final_decks
+from src.dojos.cross_game.rarity_tier_dojo import RarityTierDojo
 from src.dojos.dominiontabs.cost_regression_dojo import CostRegressionDojo
 from src.dojos.dominiontabs.masked_field_dojos import SetMaskDojo, TypeMaskDojo
 from src.dojos.gwent_one import masked_field_dojos as gwent_one
@@ -55,11 +64,62 @@ from src.dojos.fabtcg_decklists import deck_card_mask_dojos as fabtcg_decks
 from src.dojos.hearthstonejson import card_mask_dojos as hearthstone_masks
 from src.dojos.pokemon_tcg import card_mask_dojos as pokemon_masks
 from src.dojos.scryfall import card_mask_dojos as scryfall_masks
+from src.dojos.seventeenlands.draft_data import pack_card_tally_dojos as draft_tally
+from src.dojos.seventeenlands.draft_data.pack_to_pick_choice_set_dojo import (
+    PackToPickChoiceSetDojo,
+)
+from src.dojos.seventeenlands.draft_data.pick_number_decay_curve_dojo import (
+    PickNumberDecayCurveDojo,
+)
+from src.dojos.seventeenlands.draft_data.pool_conditioned_pick_dojo import (
+    PoolConditionedPickDojo,
+)
+from src.dojos.seventeenlands.game_data import game_card_average_dojos as game_cards
+from src.dojos.seventeenlands.game_data import game_deck_label_dojos as game_decks
+from src.dojos.seventeenlands.game_data.game_length_association_dojo import (
+    GameLengthAssociationDojo,
+)
+from src.dojos.seventeenlands.game_data.on_play_win_rate_delta_dojo import (
+    OnPlayWinRateDeltaDojo,
+)
+from src.dojos.seventeenlands.game_data.on_play_win_rate_sensitivity_by_deck_dojo import (  # noqa: E501
+    OnPlayWinRateSensitivityByDeckDojo,
+)
+from src.dojos.seventeenlands.game_data.tutor_choice_rate_dojo import (
+    TutorChoiceRateDojo,
+)
+from src.dojos.seventeenlands.game_data.tutor_target_rate_dojo import (
+    TutorTargetRateDojo as GameTutorTargetRateDojo,
+)
+from src.dojos.seventeenlands.replay_data import (
+    replay_turn_event_rate_dojos as replay_combat,
+)
+from src.dojos.seventeenlands.replay_data.attacker_blocker_combat_outcome_dojo import (  # noqa: E501
+    AttackerBlockerCombatOutcomeDojo,
+)
+from src.dojos.seventeenlands.replay_data.average_turn_cast_dojo import (
+    AverageTurnCastDojo,
+)
+from src.dojos.seventeenlands.replay_data.cast_rate_dojo import CastRateDojo
+from src.dojos.seventeenlands.replay_data.combat_aggression_profile_dojo import (
+    CombatAggressionProfileDojo,
+)
+from src.dojos.seventeenlands.replay_data.discard_rate_dojo import DiscardRateDojo
+from src.dojos.seventeenlands.replay_data.turns_to_game_end_after_cast_dojo import (
+    TurnsToGameEndAfterCastDojo,
+)
+from src.dojos.seventeenlands.replay_data.tutor_target_rate_dojo import (
+    TutorTargetRateDojo as ReplayTutorTargetRateDojo,
+)
 from src.dojos.spire_codex import card_mask_dojos as sts2_masks
 from src.dojos import isotropic
 from src.dojos.sts_gg import card_average_dojos as sts_cards
+from src.dojos.sts_gg.card_character_prediction_dojo import (
+    CardCharacterPredictionDojo,
+)
 from src.dojos.generic.generic_dojo import GenericDojo
 from src.dojos.mods.mod_pipeline import ModPipeline
+from src.dojos.mods.per_game_mod import PerGameMod
 from src.dojos.mods.mod_specs import DeckModSpec, ModSpec
 from src.dojos.play_gwent import card_inclusion_dojos as gwent_inclusion
 from src.dojos.play_gwent.deck_card_mask_dojos import LeaderMaskedFromDeckDojo
@@ -137,6 +197,20 @@ class CardShelf:
                 )
             self._card_binders[game] = CardBinder.load([path])
         return self._card_binders[game]
+
+    def card_lookup(self, games: Sequence[GameId]) -> MultiGameCardLookup:
+        """One CardLookup over games' binders, sharing the ones already
+        loaded (no merged copy of any game's cards).
+
+        Inputs: games (non-empty). Output: MultiGameCardLookup.
+        Side effects: loads any game's binder not yet loaded.
+        Exceptions: FileNotFoundError as card_binder; ValueError if games
+            is empty.
+
+        Example:
+            >>> CardShelf().card_lookup([GameId.GWENT, GameId.MTG])
+        """
+        return MultiGameCardLookup({game: self.card_binder(game) for game in games})
 
     def deck_box(self, path: Path) -> DeckBox:
         """The DeckBox at path, loaded on first request.
@@ -216,6 +290,59 @@ class CardDojoRecipe:
             rng_seed=context.rng_seed,
         )
         return _with_augmentations(dojo, name, self.game, context)
+
+
+class MultiGameCardDojoConstructor(Protocol):
+    """A dojo class built from one CardLookup spanning several games (the
+    cross-game rarity dojo)."""
+
+    def __call__(
+        self,
+        card_lookup: CardLookup,
+        holdout: HoldoutSpec,
+        card_embedding_size: int,
+        *,
+        path_to_training_data: Path | None = None,
+        name: str | None = None,
+        rng_seed: int | None = None,
+    ) -> GenericDojo: ...
+
+
+@dataclass(frozen=True)
+class MultiGameCardDojoRecipe:
+    """A dojo over the cards of several games, through one
+    MultiGameCardLookup. Augmentations are each game's own defaults, run
+    per card by a PerGameMod; a mod_overrides entry for the dojo replaces
+    them for every game."""
+
+    games: tuple[GameId, ...]
+    dojo_class: MultiGameCardDojoConstructor
+
+    def build(self, name: str, context: DojoBuildContext) -> Dojo:
+        """See DojoRecipe.build.
+
+        Inputs: name, context.
+        Output: the dojo, with a PerGameMod of every game's augmentations
+            appended after its own task mods.
+        Side effects: loads each game's binder through context.shelf; may
+            write split files.
+        Exceptions: as DojoRecipe.build.
+        """
+        dojo = self.dojo_class(
+            context.shelf.card_lookup(self.games),
+            context.holdout,
+            context.card_embedding_size,
+            name=name,
+            rng_seed=context.rng_seed,
+        )
+
+        # One augmentation pipeline per game, dispatched by each card's game
+        pipelines = {
+            game: _augmentation_pipeline(name, game, context) for game in self.games
+        }
+        if any(pipeline.mods for pipeline in pipelines.values()):
+            dojo.append_mods([PerGameMod(pipelines, train_only=True)])
+        return dojo
 
 
 @dataclass(frozen=True)
@@ -438,6 +565,29 @@ def _recipe_for_isotropic_deck(dojo_class: DeckDojoConstructor) -> DeckDojoRecip
     return DeckDojoRecipe(GameId.DOMINION, dojo_class, ISOTROPIC_DECK_BOX_PATH)
 
 
+def _recipe_for_seventeenlands_card(dojo_class: CardDojoConstructor) -> CardDojoRecipe:
+    """A 17lands dojo class that needs no deck box, trained on its
+    metric's all-sets, all-formats slice (the dojo's default data_slice).
+
+    Inputs: dojo_class. Output: CardDojoRecipe. Side effects: none.
+    Exceptions: none.
+    """
+    return CardDojoRecipe(GameId.MTG, dojo_class)
+
+
+def _recipe_for_seventeenlands_replay_deck(
+    dojo_class: DeckDojoConstructor,
+) -> DeckDojoRecipe:
+    """A replay_data deck-level dojo class over replay_data's private
+    deck box, trained on the all-sets, all-formats slice. (game_data deck
+    dojos read the canonical MTG box: _recipe_for_final_deck_box.)
+
+    Inputs: dojo_class. Output: DeckDojoRecipe. Side effects: none.
+    Exceptions: none.
+    """
+    return DeckDojoRecipe(GameId.MTG, dojo_class, REPLAY_DATA_DECK_BOX_PATH)
+
+
 # Keys are "<metric source>.<metric file stem>"; add a line to onboard a dojo
 DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     "gwent_one.armor_mask": _recipe_for_gwent_one(gwent_one.ArmorMaskDojo),
@@ -602,10 +752,17 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
         LeaderMaskedFromDeckDojo,
         DeckBox.default_output_path(GameId.GWENT),
     ),
+    # One rarity ladder shared by six games, trained with one head
+    "cross_game.rarity_tier": MultiGameCardDojoRecipe(
+        tuple(RARITY_TRANSLATORS), RarityTierDojo
+    ),
     # sts_gg lists winning runs only, so its win, card_win_rate,
     # card_win_rate_at_act2 and killed_by labels are constant and have no
     # key here (see metrics/sts_gg/deck_label_metrics.py's WINS ONLY note)
     "sts_gg.ascension_prediction": _recipe_for_sts_deck(sts_decks.DeckAscensionDojo),
+    "sts_gg.card_character_prediction": _recipe_for_sts_card(
+        CardCharacterPredictionDojo
+    ),
     "sts_gg.card_deck_size": _recipe_for_sts_card(sts_cards.CardDeckSizeDojo),
     "sts_gg.card_elites_killed": _recipe_for_sts_card(sts_cards.CardElitesKilledDojo),
     "sts_gg.card_floors_cleared": _recipe_for_sts_card(sts_cards.CardFloorsClearedDojo),
@@ -758,6 +915,87 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
         GameId.GWENT, gwent_inclusion.FactionConditionedInclusionDojo
     ),
     "play_gwent.guide_votes": _recipe_for_final_deck_box(GameId.GWENT, GuideVotesDojo),
+    # 17lands: each key trains on its metric's all-sets, all-formats slice
+    # (data/metrics/seventeenlands/<family>/slices/<stem>.all.parquet);
+    # game_data deck rows point into the canonical MTG deck box
+    "seventeenlands_draft_data.card_take_rate": _recipe_for_seventeenlands_card(
+        draft_tally.CardTakeRateDojo
+    ),
+    "seventeenlands_draft_data.first_pick_rate": _recipe_for_seventeenlands_card(
+        draft_tally.FirstPickRateDojo
+    ),
+    "seventeenlands_draft_data.rank_stratified_take_rate": (
+        _recipe_for_seventeenlands_card(draft_tally.RankStratifiedTakeRateDojo)
+    ),
+    "seventeenlands_draft_data.pick_number_decay_curve": (
+        _recipe_for_seventeenlands_card(PickNumberDecayCurveDojo)
+    ),
+    "seventeenlands_draft_data.pack_to_pick_choice_set": (
+        _recipe_for_seventeenlands_card(PackToPickChoiceSetDojo)
+    ),
+    "seventeenlands_draft_data.pool_conditioned_pick": (
+        _recipe_for_seventeenlands_card(PoolConditionedPickDojo)
+    ),
+    "seventeenlands_game_data.win_rate_when_in_deck": (
+        _recipe_for_seventeenlands_card(game_cards.WinRateWhenInDeckDojo)
+    ),
+    "seventeenlands_game_data.opening_hand_win_rate": (
+        _recipe_for_seventeenlands_card(game_cards.OpeningHandWinRateDojo)
+    ),
+    "seventeenlands_game_data.drawn_win_rate": _recipe_for_seventeenlands_card(
+        game_cards.DrawnWinRateDojo
+    ),
+    "seventeenlands_game_data.game_length_association": (
+        _recipe_for_seventeenlands_card(GameLengthAssociationDojo)
+    ),
+    "seventeenlands_game_data.on_play_win_rate_delta": (
+        _recipe_for_seventeenlands_card(OnPlayWinRateDeltaDojo)
+    ),
+    "seventeenlands_game_data.tutor_target_rate": _recipe_for_seventeenlands_card(
+        GameTutorTargetRateDojo
+    ),
+    "seventeenlands_game_data.tutor_choice_rate": _recipe_for_seventeenlands_card(
+        TutorChoiceRateDojo
+    ),
+    "seventeenlands_game_data.deck_win_prediction": _recipe_for_final_deck_box(
+        GameId.MTG, game_decks.DeckWinPredictionDojo
+    ),
+    "seventeenlands_game_data.deck_game_length_prediction": (
+        _recipe_for_final_deck_box(GameId.MTG, game_decks.DeckGameLengthPredictionDojo)
+    ),
+    "seventeenlands_game_data.deck_rank_tier_prediction": (
+        _recipe_for_final_deck_box(GameId.MTG, game_decks.DeckRankTierPredictionDojo)
+    ),
+    "seventeenlands_game_data.on_play_win_rate_sensitivity_by_deck": (
+        _recipe_for_final_deck_box(GameId.MTG, OnPlayWinRateSensitivityByDeckDojo)
+    ),
+    "seventeenlands_replay_data.average_turn_cast": _recipe_for_seventeenlands_card(
+        AverageTurnCastDojo
+    ),
+    "seventeenlands_replay_data.cast_rate": _recipe_for_seventeenlands_card(
+        CastRateDojo
+    ),
+    "seventeenlands_replay_data.turns_to_game_end_after_cast": (
+        _recipe_for_seventeenlands_card(TurnsToGameEndAfterCastDojo)
+    ),
+    "seventeenlands_replay_data.discard_rate": _recipe_for_seventeenlands_card(
+        DiscardRateDojo
+    ),
+    "seventeenlands_replay_data.tutor_target_rate": _recipe_for_seventeenlands_card(
+        ReplayTutorTargetRateDojo
+    ),
+    "seventeenlands_replay_data.combat_kill_involvement_rate": (
+        _recipe_for_seventeenlands_card(replay_combat.CombatKillInvolvementRateDojo)
+    ),
+    "seventeenlands_replay_data.combat_damage_push_through_rate": (
+        _recipe_for_seventeenlands_card(replay_combat.CombatDamagePushThroughRateDojo)
+    ),
+    "seventeenlands_replay_data.combat_aggression_profile": (
+        _recipe_for_seventeenlands_replay_deck(CombatAggressionProfileDojo)
+    ),
+    "seventeenlands_replay_data.attacker_blocker_combat_outcome": (
+        _recipe_for_seventeenlands_card(AttackerBlockerCombatOutcomeDojo)
+    ),
     "contrastive.gwent": _recipe_for_contrastive(GameId.GWENT),
     "contrastive.flesh_and_blood": _recipe_for_contrastive(GameId.FLESH_AND_BLOOD),
     "contrastive.slay_the_spire_2": _recipe_for_contrastive(GameId.SLAY_THE_SPIRE_2),
@@ -776,7 +1014,8 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
 # card dojo (thinning changes the answer set); an option-selection dojo's
 # options group (the label indexes it), so a MultiCardOptionSelection dojo
 # (options are its whole input) is never listed; a kingdom or single-card
-# group (fixed game context, not a deck).
+# group (fixed game context, not a deck); a group whose label depends on
+# exactly which cards it holds (17lands attacker/blocker combat outcome).
 DECK_MOD_GROUPS: Mapping[str, frozenset[int]] = {
     "sts_gg.ascension_prediction": frozenset({0}),
     "sts_gg.character_prediction": frozenset({0}),
@@ -795,6 +1034,14 @@ DECK_MOD_GROUPS: Mapping[str, frozenset[int]] = {
     "isotropic.mid_game_deck_pair_winner": frozenset({0, 1}),
     # [options, partial deck]: the options group (0) is never thinned
     "isotropic.mid_game_next_buy": frozenset({1}),
+    # 17lands game decks: 40-card limited decks; no label tracks deck size
+    "seventeenlands_game_data.deck_win_prediction": frozenset({0}),
+    "seventeenlands_game_data.deck_game_length_prediction": frozenset({0}),
+    "seventeenlands_game_data.deck_rank_tier_prediction": frozenset({0}),
+    "seventeenlands_game_data.on_play_win_rate_sensitivity_by_deck": frozenset({0}),
+    "seventeenlands_replay_data.combat_aggression_profile": frozenset({0}),
+    # [pack options, pool so far]: the pool only
+    "seventeenlands_draft_data.pool_conditioned_pick": frozenset({1}),
 }
 
 

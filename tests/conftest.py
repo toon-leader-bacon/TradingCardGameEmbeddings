@@ -1,6 +1,9 @@
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
+from src.dojos.generic.dojo_config import SPLIT_DIRECTORY_ENV_VAR
 
 
 @pytest.fixture(autouse=True)
@@ -21,3 +24,21 @@ def _no_real_sleep():
     """
     with patch("time.sleep"):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _isolated_split_directory(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """Point DojoConfig's default split directory at a fresh temp
+    directory, so a test that builds a dojo without an output_directory
+    never writes into (or reuses files from) the real data/splits/.
+
+    Inputs: none.
+    Output: the temp directory.
+    Side effects: sets $NOCAB_SPLIT_DIRECTORY for one test.
+    Exceptions: none.
+    """
+    directory = tmp_path_factory.mktemp("splits")
+    monkeypatch.setenv(SPLIT_DIRECTORY_ENV_VAR, str(directory))
+    return directory

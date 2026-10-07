@@ -1,48 +1,38 @@
 """CombatAggressionProfileMetric - BRAINSTORM.md's "Full Deck ->
 Combat-Aggression-Profile Prediction": given the user's full
-deck_<name> list, predict an aggregate combat-tempo scalar derived from
-this same game's per-turn columns - the average len(creatures_attacked)
-per user half-turn that had any attack at all.
+deck_<name> list, predict a combat-tempo scalar from this same game's
+half-turns: the average number of matched attackers per user half-turn
+that had any (matched) attack, 0.0 for a game without one.
 
-Streaming - one row already carries a complete example. Structurally a
-GameDeckLabelMetric-style class (deck identification + hashing +
-DeckBox write + one output row), except the label isn't already
-sitting on the row - it's computed via this class's own turn loop.
-Given that one real difference, this duplicates GameDeckLabelMetric's
-deck-handling steps directly rather than subclassing across the
-draft_data/game_data/replay_data sibling-container boundary
-(PRINCIPLES.md section 3's cross-cousin-directory caution) - mirroring
-how game_data.OnPlayWinRateSensitivityByDeckMetric already made the
-same call against its own accumulation/streaming split.
-
-deck_box is a required constructor parameter (genuinely used) -
-following the "required only where used" convention every metric in
-this container otherwise follows.
+A vectorized Metric[ReplayDataChunk] and a RowStreamMetric
+(../sliced_metric.py): one output row per game, its deck referenced by
+deck_uuid. Each chunk's decks are identified once by the parser
+(ChunkDecks, src/data_refinement/seventeenlands/chunk_decks.py) and
+stored in the family DeckBox with _store_chunk_decks(); the output is
+stamped requires_deck_box=True.
 """
 
+import dataclasses
 from pathlib import Path
-from typing import ClassVar, Iterable
-from uuid import UUID
+from typing import ClassVar, Literal
 
+import numpy as np
+import numpy.typing as npt
 import pyarrow as pa
 
-from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
-from src.data_refinement.deck_ids import deck_uuid_from_cards
 from src.data_refinement.metrics.parquet_builder import ParquetBuilder
-from src.data_refinement.metrics.seventeenlands.replay_data.replay_card_columns import (
-    ReplayCardColumns,
+from src.data_refinement.seventeenlands.chunk_decks import ChunkDecks
+from src.data_refinement.metrics.seventeenlands.replay_data.replay_data_chunk import (
+    Actor,
+    ReplayDataChunk,
+    ReplayField,
 )
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     schema_with_version_metadata,
 )
-from src.schema.card import GenericDeck
-from src.schema.game_id import GameId
-
-_DEFAULT_OUTPUT_PATH = Path(
-    "data/metrics/seventeenlands/replay_data/combat_aggression_profile.parquet"
-)
+from src.data_retrieval.seventeenlands.refs import DataType
 
 _OUTPUT_SCHEMA = pa.schema(
     [
@@ -56,199 +46,118 @@ _OUTPUT_SCHEMA = pa.schema(
 
 
 class CombatAggressionProfileMetric:
-    """One game's constructed (user) deck -> (deck_uuid, average
-    attackers-per-attacking-turn), one row per game, written as soon as
-    accumulate() sees it.
+    """Deck -> average attackers per attacking user half-turn.
 
-    Satisfies the Metric[dict] Protocol (../../metric.py) structurally.
+    Satisfies the Metric[ReplayDataChunk] Protocol (../../metric.py) and
+    RowStreamMetric (../sliced_metric.py) structurally.
     """
 
-    DEFAULT_OUTPUT_PATH: ClassVar[Path] = _DEFAULT_OUTPUT_PATH
+    FAMILY: ClassVar[DataType] = DataType.REPLAY
+    OUTPUT_STEM: ClassVar[str] = "combat_aggression_profile"
+    LABEL_COLUMN: ClassVar[str] = "combat_aggression_profile"
+    IS_ROW_STREAM: ClassVar[Literal[True]] = True
 
     def __init__(
         self,
-        card_binder: CardBinder,
-        header: Iterable[str],
-        source_game: GameId,
+        version_metadata: MetricVersionMetadata,
         deck_box: DeckBox,
-        output_path: Path | None = None,
+        output_path: Path,
     ) -> None:
-        """
+        """Open the output for streaming.
+
         Inputs:
-            card_binder: registry to match this CSV's deck_<name>
-                column suffixes against - assumed already fully
-                populated for source_game. Never queried directly by
-                this class - only through the ReplayCardColumns this
-                constructor builds from it.
-            header: this CSV's column names (e.g.
-                pandas.read_csv(path, nrows=0).columns) - parsed once,
-                here, into this instance's own ReplayCardColumns.
-            source_game: which game's cards header names are matched
-                against.
-            deck_box: the metrics-private DeckBox every deck this
-                metric sees is written into - shared with any other
-                metric in the same scan pass that also takes a
-                deck_box, so identical decks dedupe against each other.
-            output_path: overrides DEFAULT_OUTPUT_PATH when given.
+            version_metadata: the CardBinder version this run reads;
+                stamped onto the output with requires_deck_box=True.
+            deck_box: the metrics-private family DeckBox every deck is
+                written into (never the published box).
+            output_path: this CSV's partition path.
         Output: none (constructor).
-        Side effects: creates output_path's parent directories if
-            missing; opens output_path for writing (truncating any
-            existing file) via a ParquetBuilder held open for the
-            lifetime of this instance - callers MUST call finalize()
-            when done, or the file is left incomplete.
-        Exceptions: whatever ParquetBuilder raises on failure to open
-            output_path for writing.
+        Side effects: creates output_path's parent directories; opens
+            output_path for writing through a ParquetBuilder held open
+            until finalize().
+        Exceptions: whatever ParquetBuilder raises opening output_path.
         """
-        self._replay_columns = ReplayCardColumns.from_header(
-            header, card_binder, source_game
-        )
-        self._source_game = source_game
         self._deck_box = deck_box
-        self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
-        self._output_schema = schema_with_version_metadata(
+        self._output_path = output_path
+        schema = schema_with_version_metadata(
             _OUTPUT_SCHEMA,
-            MetricVersionMetadata(
-                game=source_game,
-                card_binder_version=card_binder.version_for(source_game),
-                requires_deck_box=True,
-            ),
+            dataclasses.replace(version_metadata, requires_deck_box=True),
         )
-        self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._writer = ParquetBuilder(self._output_path, self._output_schema)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._writer = ParquetBuilder(output_path, schema)
 
-    def accumulate(self, row: dict) -> None:
-        """Convert one game_data row into a single output row and
-        buffer it for writing.
+    def accumulate(self, chunk: ReplayDataChunk) -> None:
+        """Store the chunk's decks and write one row per game.
 
-        Inputs:
-            row: one replay_data CSV row, dict-like - carrying at least
-                draft_id/match_number/game_number and this row's
-                deck_<name>/per-turn creatures_attacked columns.
+        Inputs: chunk.
         Output: none.
-        Side effects: buffers exactly one row into the open
-            ParquetBuilder (flushed to disk automatically once its
-            batch size is reached, or by finalize()). Writes this
-            row's deck into self._deck_box via create_if_absent().
-        Exceptions: implementation-defined (expected: none for a
-            well-formed row - see ../scanner.py's isolation contract).
+        Side effects: _store_chunk_decks(chunk.decks, deck box); writes
+            the chunk's rows to the open ParquetBuilder.
+        Exceptions: DeckBox's batch-wide errors.
 
         Example:
-            >>> metric = CombatAggressionProfileMetric(card_binder, header, GameId.MTG, deck_box)
-            >>> metric.accumulate(row)
+            >>> metric = CombatAggressionProfileMetric(version_metadata, box, path)
+            >>> metric.accumulate(chunk)
             >>> metric.finalize()
         """
-        card_nocab_uuids = self._replay_columns.present_uuids(
-            row, self._replay_columns.deck_columns
+        _store_chunk_decks(chunk.decks, self._deck_box)
+        self._writer.write_columns(
+            {
+                "draft_id": chunk.keys.draft_id,
+                "match_number": chunk.keys.match_number,
+                "game_number": chunk.keys.game_number,
+                "deck_uuid": chunk.decks.row_deck_uuids(),
+                "combat_aggression_profile": _aggression_profiles(chunk),
+            }
         )
-        deck_uuid = deck_uuid_from_cards(card_nocab_uuids)
-        self._deck_box.create_if_absent(
-            self._deck_for_row(row, deck_uuid, card_nocab_uuids)
-        )
-
-        profile = self._aggression_profile(row)
-        output_row = self._output_row(row, deck_uuid, profile)
-        self._writer.write_row(output_row)
 
     def finalize(self) -> Path:
-        """Flush any buffered rows and close the underlying writer.
-
-        A true no-op relative to data - every row this instance will
-        ever write was already buffered by accumulate(). Idempotent: a
-        second call is a no-op. Does NOT save self._deck_box - that's
-        the calling driver's own responsibility.
+        """Flush and close the writer. Idempotent. Does not save the
+        deck box (the driver does).
 
         Inputs: none.
         Output: self._output_path.
-        Side effects: closes the ParquetBuilder opened in __init__, if
-            not already closed (flushing any rows still buffered).
+        Side effects: closes the ParquetBuilder.
         Exceptions: whatever ParquetBuilder.close() raises.
 
         Example:
             >>> metric.finalize()
-            PosixPath('data/metrics/seventeenlands/replay_data/combat_aggression_profile.parquet')
+            PosixPath('data/metrics/seventeenlands/replay_data/combat_aggression_profile/PIO/TradSealed.parquet')
         """
         self._writer.close()
         return self._output_path
 
-    def _deck_for_row(
-        self, row: dict, deck_uuid: UUID, card_nocab_uuids: list[UUID]
-    ) -> GenericDeck:
-        """Build the GenericDeck this row's deck_<name> multiset
-        represents, for writing into self._deck_box.
 
-        Private helper - single consumer is accumulate(). Same shape as
-        game_data.GameDeckLabelMetric._deck_for_row().
+def _aggression_profiles(chunk: ReplayDataChunk) -> npt.NDArray[np.float64]:
+    """Per row, the mean matched-attacker count over the user's half-turns
+    with at least one matched attacker; 0.0 for a row without one.
 
-        Inputs:
-            row: one replay_data CSV row, dict-like.
-            deck_uuid: this deck's already-hashed identity.
-            card_nocab_uuids: this row's already-matched deck_<name>
-                present cards.
-        Output: a GenericDeck (src/schema/card.py) named e.g.
-            f"replay_data {row['draft_id']}/{row['match_number']}/
-            {row['game_number']} deck", with source_game and
-            card_nocab_uuids set.
-        Side effects: none.
-        Exceptions: none expected.
-        """
-        return GenericDeck(
-            nocab_uuid=deck_uuid,
-            source_game=self._source_game,
-            name=(
-                f"replay_data {row['draft_id']}/{row['match_number']}/"
-                f"{row['game_number']} deck"
-            ),
-            card_nocab_uuids=card_nocab_uuids,
-        )
+    Inputs: chunk. Output: float64 array (rows,).
+    Side effects: none. Exceptions: none.
+    """
+    attackers = (
+        chunk.events[ReplayField.CREATURES_ATTACKED].matched().for_actor(Actor.USER)
+    )
+    half_turns, per_half_turn = np.unique(attackers.half_turn_ids(), return_counts=True)
+    rows, _, _ = attackers.split_half_turn_ids(half_turns)
 
-    def _aggression_profile(self, row: dict) -> float:
-        """Average len(creatures_attacked) per user half-turn that had
-        any attack at all, on this row.
+    # Mean over each row's attacking half-turns; 0.0 where it had none
+    attack_sum = np.bincount(rows, weights=per_half_turn, minlength=len(chunk))
+    attack_turns = np.bincount(rows, minlength=len(chunk))
+    result = np.zeros(len(chunk), np.float64)
+    np.divide(attack_sum, attack_turns, out=result, where=attack_turns > 0)
+    return result
 
-        Private helper - single consumer is accumulate().
 
-        Inputs:
-            row: one replay_data CSV row, dict-like.
-        Output: the average count of attacking creatures per
-            user_turn_N with a non-empty creatures_attacked, across
-            every N in self._replay_columns.user_turn_numbers. 0.0 if
-            the user never attacked.
-        Side effects: none.
-        Exceptions: none expected.
-        """
-        attacker_counts = []
-        for turn in self._replay_columns.user_turn_numbers:
-            attackers = self._replay_columns.arena_uuids(
-                row[ReplayCardColumns.turn_column("user", turn, "creatures_attacked")]
-            )
-            if attackers:
-                attacker_counts.append(len(attackers))
+def _store_chunk_decks(decks: ChunkDecks, deck_box: DeckBox) -> None:
+    """Store every deck of a chunk in replay_data's private deck_box,
+    once per deck. A deck already in the box keeps its stored entry.
 
-        if not attacker_counts:
-            return 0.0
-        return sum(attacker_counts) / len(attacker_counts)
-
-    def _output_row(self, row: dict, deck_uuid: UUID, profile: float) -> dict:
-        """Build one output row dict matching _OUTPUT_SCHEMA's columns.
-
-        Private helper - single consumer is accumulate().
-
-        Inputs:
-            row: the same row accumulate() received.
-            deck_uuid: this row's already-hashed deck identity.
-            profile: this row's already-computed
-                _aggression_profile(row).
-        Output: a dict keyed by every _OUTPUT_SCHEMA column name:
-            draft_id/match_number/game_number read straight off row,
-            deck_uuid stringified, profile under
-            "combat_aggression_profile".
-        Side effects: none.
-        Exceptions: none expected.
-        """
-        return {
-            "draft_id": row["draft_id"],
-            "match_number": row["match_number"],
-            "game_number": row["game_number"],
-            "deck_uuid": str(deck_uuid),
-            "combat_aggression_profile": profile,
-        }
+    Inputs: decks (a chunk's), deck_box (the family's metrics-private
+        box).
+    Output: none.
+    Side effects: deck_box.create_if_absent() once per deck.
+    Exceptions: DeckBox's batch-wide errors (see deck_box.py).
+    """
+    for deck in decks.decks:
+        deck_box.create_if_absent(deck)

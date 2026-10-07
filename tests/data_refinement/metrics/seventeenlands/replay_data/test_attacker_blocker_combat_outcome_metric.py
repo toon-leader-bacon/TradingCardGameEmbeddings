@@ -1,163 +1,110 @@
 """Tests for attacker_blocker_combat_outcome_metric.py's
-AttackerBlockerCombatOutcomeMetric - the fan-out-over-turns streaming
-shape (one row per qualifying half-turn, not per game).
-"""
+AttackerBlockerCombatOutcomeMetric."""
 
-from datetime import datetime, timezone
 from pathlib import Path
-from uuid import uuid4
 
-import pyarrow.parquet as pq
-
-from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.seventeenlands.replay_data.attacker_blocker_combat_outcome_metric import (  # noqa: E501
     AttackerBlockerCombatOutcomeMetric,
 )
-from src.schema.card import GenericCard, Provenance
-from src.schema.data_source import DataSource
-from src.schema.game_id import GameId
-
-_HEADER = [
-    "draft_id",
-    "match_number",
-    "game_number",
-    "user_turn_1_creatures_attacked",
-    "user_turn_1_creatures_blocking",
-    "user_turn_1_user_creatures_killed_combat",
-    "user_turn_1_oppo_creatures_killed_combat",
-    "user_turn_2_creatures_attacked",
-    "user_turn_2_creatures_blocking",
-    "user_turn_2_user_creatures_killed_combat",
-    "user_turn_2_oppo_creatures_killed_combat",
-    "oppo_turn_1_creatures_attacked",
-    "oppo_turn_1_creatures_blocking",
-    "oppo_turn_1_user_creatures_killed_combat",
-    "oppo_turn_1_oppo_creatures_killed_combat",
-]
-
-_NA_ROW: dict = {column: float("nan") for column in _HEADER}
-_NA_ROW.update({"draft_id": "draft1", "match_number": 0, "game_number": 0})
+from src.data_refinement.metrics.seventeenlands.replay_data.replay_data_chunk import (
+    Actor,
+    ReplayField,
+)
+from tests.data_refinement.metrics.seventeenlands.replay_data._replay_fixtures import (
+    MORNINGSTAR,
+    MORNINGSTAR_ID,
+    OWLBEAR,
+    OWLBEAR_ID,
+    UNKNOWN_ID,
+    VERSION,
+    binder_with_cards,
+    field_column,
+    row,
+    scan_into_frame,
+    uuid_for,
+)
 
 
-def _make_card(name: str) -> GenericCard:
-    return GenericCard(
-        nocab_uuid=uuid4(),
-        source_game=GameId.MTG,
-        name=name,
-        raw_content={},
-        provenance=Provenance(
-            data_source=DataSource.SCRYFALL,
-            source_id=name,
-            fetched_at=datetime.now(timezone.utc),
+def _scan(tmp_path: Path, binder, rows: list[dict]):
+    metric = AttackerBlockerCombatOutcomeMetric(VERSION, tmp_path / "out.parquet")
+    return scan_into_frame(tmp_path, binder, rows, metric, index=None)
+
+
+def _cell(actor: Actor, turn: int, field: ReplayField) -> str:
+    return field_column(actor, turn, field)
+
+
+def test_one_row_per_attacking_half_turn_with_its_groups(tmp_path: Path) -> None:
+    binder = binder_with_cards()
+    cells = {
+        _cell(Actor.USER, 1, ReplayField.CREATURES_ATTACKED): (
+            f"{MORNINGSTAR_ID}|{UNKNOWN_ID}|{OWLBEAR_ID}"
         ),
+        _cell(Actor.USER, 1, ReplayField.CREATURES_BLOCKING): OWLBEAR_ID,
+    }
+
+    frame = _scan(tmp_path, binder, [row(cells)])
+
+    owlbear, morningstar = (str(uuid_for(binder, n)) for n in (OWLBEAR, MORNINGSTAR))
+    (output,) = frame.to_dict("records")
+    assert output["actor"] == "user"
+    assert output["turn"] == 1
+    assert list(output["attacker_uuids"]) == [morningstar, owlbear]
+    assert list(output["blocker_uuids"]) == [owlbear]
+    assert output["net_kill_delta"] == 0
+
+
+def test_half_turns_come_in_row_then_user_then_turn_order(tmp_path: Path) -> None:
+    binder = binder_with_cards()
+    first = {
+        _cell(Actor.OPPO, 1, ReplayField.CREATURES_ATTACKED): OWLBEAR_ID,
+        _cell(Actor.USER, 2, ReplayField.CREATURES_ATTACKED): OWLBEAR_ID,
+        _cell(Actor.USER, 1, ReplayField.CREATURES_ATTACKED): OWLBEAR_ID,
+    }
+    second = {_cell(Actor.USER, 1, ReplayField.CREATURES_ATTACKED): OWLBEAR_ID}
+
+    frame = _scan(
+        tmp_path, binder, [row(first, game_number=1), row(second, game_number=2)]
     )
 
-
-def _binder_with_owlbear(arena_id: str) -> CardBinder:
-    binder = CardBinder()
-    card = _make_card("Owlbear")
-    binder.create(card)
-    binder.register_alias(GameId.MTG, DataSource.ARENA, arena_id, card.nocab_uuid)
-    return binder
-
-
-def test_writes_one_row_per_half_turn_with_an_attacker(tmp_path: Path) -> None:
-    binder = _binder_with_owlbear("1")
-    metric = AttackerBlockerCombatOutcomeMetric(
-        binder, _HEADER, GameId.MTG, output_path=tmp_path / "out.parquet"
-    )
-    row = dict(_NA_ROW)
-    row["user_turn_1_creatures_attacked"] = "1"
-
-    metric.accumulate(row)
-    metric.finalize()
-
-    table = pq.read_table(tmp_path / "out.parquet")
-    assert table.num_rows == 1
+    assert list(zip(frame["game_number"], frame["actor"], frame["turn"])) == [
+        (1, "user", 1),
+        (1, "user", 2),
+        (1, "oppo", 1),
+        (2, "user", 1),
+    ]
+    assert frame["blocker_uuids"].map(list).tolist() == [[], [], [], []]
 
 
-def test_half_turn_with_no_attacker_writes_no_row(tmp_path: Path) -> None:
-    binder = _binder_with_owlbear("1")
-    metric = AttackerBlockerCombatOutcomeMetric(
-        binder, _HEADER, GameId.MTG, output_path=tmp_path / "out.parquet"
-    )
-    row = dict(_NA_ROW)
-    row["user_turn_1_creatures_blocking"] = "1"  # blocked, never attacked
+def test_net_kill_delta_is_defender_losses_minus_attacker_losses(
+    tmp_path: Path,
+) -> None:
+    binder = binder_with_cards()
+    user_attack = {
+        _cell(Actor.USER, 1, ReplayField.CREATURES_ATTACKED): OWLBEAR_ID,
+        _cell(Actor.USER, 1, ReplayField.OPPO_CREATURES_KILLED_COMBAT): (
+            f"{OWLBEAR_ID}|{MORNINGSTAR_ID}"
+        ),
+        _cell(Actor.USER, 1, ReplayField.USER_CREATURES_KILLED_COMBAT): OWLBEAR_ID,
+    }
+    oppo_attack = {
+        _cell(Actor.OPPO, 1, ReplayField.CREATURES_ATTACKED): OWLBEAR_ID,
+        _cell(Actor.OPPO, 1, ReplayField.USER_CREATURES_KILLED_COMBAT): OWLBEAR_ID,
+        _cell(Actor.OPPO, 1, ReplayField.OPPO_CREATURES_KILLED_COMBAT): (
+            f"{OWLBEAR_ID}|{MORNINGSTAR_ID}|{UNKNOWN_ID}"
+        ),
+    }
 
-    metric.accumulate(row)
-    metric.finalize()
+    frame = _scan(tmp_path, binder, [row(user_attack), row(oppo_attack)])
 
-    table = pq.read_table(tmp_path / "out.parquet")
-    assert table.num_rows == 0
-
-
-def test_a_game_with_no_attacks_at_all_writes_zero_rows(tmp_path: Path) -> None:
-    binder = _binder_with_owlbear("1")
-    metric = AttackerBlockerCombatOutcomeMetric(
-        binder, _HEADER, GameId.MTG, output_path=tmp_path / "out.parquet"
-    )
-
-    metric.accumulate(dict(_NA_ROW))
-    metric.finalize()
-
-    table = pq.read_table(tmp_path / "out.parquet")
-    assert table.num_rows == 0
+    assert frame["net_kill_delta"].tolist() == [2 - 1, 1 - 2]
 
 
-def test_both_actors_half_turns_can_each_produce_a_row(tmp_path: Path) -> None:
-    binder = _binder_with_owlbear("1")
-    metric = AttackerBlockerCombatOutcomeMetric(
-        binder, _HEADER, GameId.MTG, output_path=tmp_path / "out.parquet"
-    )
-    row = dict(_NA_ROW)
-    row["user_turn_1_creatures_attacked"] = "1"
-    row["oppo_turn_1_creatures_attacked"] = "1"
+def test_a_half_turn_with_only_unmatched_attackers_is_skipped(
+    tmp_path: Path,
+) -> None:
+    cells = {_cell(Actor.USER, 1, ReplayField.CREATURES_ATTACKED): UNKNOWN_ID}
 
-    metric.accumulate(row)
-    metric.finalize()
+    frame = _scan(tmp_path, binder_with_cards(), [row(cells)])
 
-    table = pq.read_table(tmp_path / "out.parquet")
-    assert table.num_rows == 2
-    actors = {r["actor"] for r in table.to_pylist()}
-    assert actors == {"user", "oppo"}
-
-
-def test_output_row_carries_actor_and_turn_identifiers(tmp_path: Path) -> None:
-    binder = _binder_with_owlbear("1")
-    metric = AttackerBlockerCombatOutcomeMetric(
-        binder, _HEADER, GameId.MTG, output_path=tmp_path / "out.parquet"
-    )
-    row = dict(_NA_ROW)
-    row["user_turn_2_creatures_attacked"] = "1"
-
-    metric.accumulate(row)
-    metric.finalize()
-
-    output_row = pq.read_table(tmp_path / "out.parquet").to_pylist()[0]
-    assert output_row["draft_id"] == "draft1"
-    assert output_row["match_number"] == 0
-    assert output_row["game_number"] == 0
-    assert output_row["actor"] == "user"
-    assert output_row["turn"] == 2
-
-
-def test_net_kill_delta_is_attacker_favorable_positive(tmp_path: Path) -> None:
-    binder = _binder_with_owlbear("1")
-    metric = AttackerBlockerCombatOutcomeMetric(
-        binder, _HEADER, GameId.MTG, output_path=tmp_path / "out.parquet"
-    )
-    row = dict(_NA_ROW)
-    row["user_turn_1_creatures_attacked"] = "1"
-    row["user_turn_1_oppo_creatures_killed_combat"] = "1"  # defender (oppo) lost one
-
-    metric.accumulate(row)
-    metric.finalize()
-
-    output_row = pq.read_table(tmp_path / "out.parquet").to_pylist()[0]
-    assert output_row["net_kill_delta"] == 1
-
-
-def test_never_writes_a_deck_uuid_or_takes_a_deck_box() -> None:
-    """This metric's identity is (draft_id, match_number, game_number,
-    actor, turn), never a deck_uuid - see module docstring."""
-    assert "deck_box" not in AttackerBlockerCombatOutcomeMetric.__init__.__annotations__
+    assert frame.empty

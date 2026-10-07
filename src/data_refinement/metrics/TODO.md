@@ -1,21 +1,10 @@
 # TODO (metrics)
 
-- [ ] **Make the 17lands outputs consumable by dojos** (2026-09-30).
-  A partial run exists: game_data for 76 set/format directories; draft and
-  replay only one shakeout file each. See
-  `plans/archive/seventeenlands_metrics_run.md`.
-  - Outputs are written per raw file, at
-    `data/metrics/seventeenlands/<family>/<SET>/<Format>/<stem>.parquet`.
-    But each dojo reads its metric's single DEFAULT_OUTPUT_PATH, which
-    does not exist.
-  - Proposed: a merge step per (family, metric) that writes to
-    DEFAULT_OUTPUT_PATH:
-    - stack the streaming files (deck and pool rows); they share the
-      family deck box;
-    - recombine card averages weighted by `sample_count`, keeping a set
-      column;
-    - subsample tutor_target_pool (151.8M rows).
-  - Alternative: one catalog key per set and format (hundreds of keys).
+- [x] **Make the 17lands outputs consumable by dojos** (2026-10-03).
+  All three families write partitioned count tables and row streams, and
+  their dojos train on slice files (`seventeenlands/README.md`,
+  "Partitions and slices"). Every family was rerun in that layout
+  2026-10-04; the 26 dojos have catalog keys.
 - [x] **Cache `CardBinder.version_for`.** Fixed 2026-10-06:
   `CardBinder` now memoizes it per `source_game` in `self._version_cache`,
   cleared on every mutation (`_upsert_card()`, `delete()`), so a cached

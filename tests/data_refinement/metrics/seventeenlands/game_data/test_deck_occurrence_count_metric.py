@@ -1,15 +1,18 @@
 """Tests for deck_occurrence_count_metric.py's DeckOccurrenceCountMetric,
-driven through scan_game_csv as a real run drives it."""
+driven through scan_game_csv as a real run drives it and read back as a
+one-partition slice's finished table."""
 
 from pathlib import Path
 
 import pandas as pd
+import pyarrow.parquet as pq
 
 from src.data_refinement.deck_ids import deck_uuid_from_cards
 from src.data_refinement.metrics.seventeenlands.game_data.deck_occurrence_count_metric import (  # noqa: E501
     DeckOccurrenceCountMetric,
 )
 from src.data_refinement.metrics.seventeenlands.game_data.scanner import scan_game_csv
+from src.data_refinement.metrics.seventeenlands.slice_file import finished_count_table
 from src.data_refinement.metrics.version_metadata import read_version_metadata
 from tests.data_refinement.metrics.seventeenlands.game_data._chunk_fixtures import (
     MORNINGSTAR,
@@ -18,6 +21,7 @@ from tests.data_refinement.metrics.seventeenlands.game_data._chunk_fixtures impo
     binder_with_cards,
     parser_for,
     row,
+    scan_into_frame,
     uuid_for,
     write_csv,
 )
@@ -26,11 +30,11 @@ _BINDER = binder_with_cards([OWLBEAR, MORNINGSTAR])
 
 
 def _scan(tmp_path: Path, rows: list[dict], block_size: int = 1 << 20) -> pd.DataFrame:
-    """Scan rows through the metric; its output indexed by deck_uuid."""
-    metric = DeckOccurrenceCountMetric(VERSION, output_path=tmp_path / "out.parquet")
-    csv_path = write_csv(tmp_path / "games.csv", rows)
-    scan_game_csv(csv_path, [metric], parser_for(_BINDER), block_size=block_size)
-    return pd.read_parquet(metric.finalize()).set_index("deck_uuid")
+    """Scan rows through the metric; its finished output by deck_uuid."""
+    metric = DeckOccurrenceCountMetric(VERSION, tmp_path / "out.parquet")
+    return scan_into_frame(
+        tmp_path, _BINDER, rows, metric, block_size=block_size, index="deck_uuid"
+    )
 
 
 def test_multiple_games_of_one_draft_count_once(tmp_path: Path) -> None:
@@ -115,7 +119,7 @@ def test_identical_decks_across_games_share_one_deck_uuid(
 
 
 def test_requires_deck_box_is_stamped_on_the_output(tmp_path: Path) -> None:
-    metric = DeckOccurrenceCountMetric(VERSION, output_path=tmp_path / "out.parquet")
+    metric = DeckOccurrenceCountMetric(VERSION, tmp_path / "out.parquet")
     csv_path = write_csv(tmp_path / "games.csv", [row(won=True, owlbear_deck=4)])
     scan_game_csv(csv_path, [metric], parser_for(_BINDER))
     output_path = metric.finalize()
@@ -123,3 +127,37 @@ def test_requires_deck_box_is_stamped_on_the_output(tmp_path: Path) -> None:
     metadata = read_version_metadata(output_path)
     assert metadata is not None
     assert metadata.requires_deck_box is True
+
+
+def test_partitions_sum_into_a_slice(tmp_path: Path) -> None:
+    # A draft lives in one CSV, so per-partition counts add up exactly
+    tables = []
+    for name, draft_ids in (("a", ["d1", "d2"]), ("b", ["d3"])):
+        metric = DeckOccurrenceCountMetric(VERSION, tmp_path / f"{name}.parquet")
+        rows = [row(won=True, owlbear_deck=4, draft_id=d) for d in draft_ids]
+        csv_path = write_csv(tmp_path / f"{name}.csv", rows)
+        scan_game_csv(csv_path, [metric], parser_for(_BINDER))
+        tables.append(pq.read_table(metric.finalize()))
+
+    finished = finished_count_table(DeckOccurrenceCountMetric, tables).to_pandas()
+
+    assert finished["occurrence_count"].tolist() == [3]
+    assert finished["sample_count"].tolist() == [3]
+
+
+def test_a_sideboarded_draft_counts_once_for_each_decklist_it_played(
+    tmp_path: Path,
+) -> None:
+    df = _scan(
+        tmp_path,
+        [
+            row(won=True, owlbear_deck=4, draft_id="d1", game_number=1),
+            row(won=False, owlbear_deck=3, draft_id="d1", game_number=2),
+            row(won=True, owlbear_deck=4, draft_id="d1", game_number=3),
+        ],
+    )
+
+    owlbear_x4 = str(deck_uuid_from_cards([uuid_for(_BINDER, OWLBEAR)] * 4))
+    owlbear_x3 = str(deck_uuid_from_cards([uuid_for(_BINDER, OWLBEAR)] * 3))
+    assert df.loc[owlbear_x4, "occurrence_count"] == 1
+    assert df.loc[owlbear_x3, "occurrence_count"] == 1

@@ -1,88 +1,72 @@
 """Concrete PackCardTallyMetric (pack_card_tally_metric.py) subclasses:
-three of round 1's four single-card metrics from
-src/data_refinement/metrics/seventeenlands/draft_data/BRAINSTORM.md's
-"Human Review Short List"; draft_data/README.md has the key-shape
-rationale behind each.
+the three take rates.
 
-PickNumberDecayCurveMetric (this list's fourth single-card metric) also
-subclasses PackCardTallyMetric, but lives in its own file
-(pick_number_decay_curve_metric.py) since its finalize() is overridden
-entirely - see that module's docstring.
+Each sets only OUTPUT_STEM and KEY_COLUMNS (its stratification), plus,
+where needed, which rows are eligible.
 """
 
-from pathlib import Path
 from typing import ClassVar
-from uuid import UUID
 
+import numpy as np
+import numpy.typing as npt
+
+from src.data_refinement.metrics.seventeenlands.draft_data.draft_data_chunk import (
+    DraftDataChunk,
+)
 from src.data_refinement.metrics.seventeenlands.draft_data.pack_card_tally_metric import (
     PackCardTallyMetric,
 )
-
-_DEFAULT_OUTPUT_DIR = Path("data/metrics/seventeenlands/draft_data")
 
 
 class CardTakeRateMetric(PackCardTallyMetric):
     """P(picked | in pack, pick_number, pack_number) - BRAINSTORM.md's
     single-card metric #1 (Card Take Rate)."""
 
-    KEY_COLUMNS: ClassVar[tuple[str, ...]] = ("pack_number", "pick_number")
-    DEFAULT_OUTPUT_PATH = _DEFAULT_OUTPUT_DIR / "card_take_rate.parquet"
-
-    def _tally_key(self, row: dict, card_uuid: UUID) -> tuple:
-        """See PackCardTallyMetric._tally_key(). Key = (card_uuid,
-        row["pack_number"], row["pick_number"])."""
-        return (card_uuid, row["pack_number"], row["pick_number"])
+    OUTPUT_STEM: ClassVar[str] = "card_take_rate"
+    KEY_COLUMNS: ClassVar[tuple[str, ...]] = (
+        "nocab_uuid",
+        "pack_number",
+        "pick_number",
+    )
 
 
 class FirstPickRateMetric(PackCardTallyMetric):
-    """P(pick == card | pack_number == 0, pick_number == 0, card in
-    pack) - BRAINSTORM.md's single-card metric #4 (First-Pick Rate /
-    P1P1 Take Rate).
+    """P(picked | pack_number == 0, pick_number == 0, in pack) -
+    BRAINSTORM.md's single-card metric #4 (First-Pick Rate).
 
-    KEY_COLUMNS is empty - _is_eligible_row()'s restriction to pack 0 /
-    pick 0 already does all of this metric's conditioning, so its key
-    is the card alone.
+    Keyed by the card alone: the eligibility restriction to pack 0 /
+    pick 0 does all of the conditioning.
     """
 
-    KEY_COLUMNS: ClassVar[tuple[str, ...]] = ()
-    DEFAULT_OUTPUT_PATH = _DEFAULT_OUTPUT_DIR / "first_pick_rate.parquet"
+    OUTPUT_STEM: ClassVar[str] = "first_pick_rate"
+    KEY_COLUMNS: ClassVar[tuple[str, ...]] = ("nocab_uuid",)
 
-    def _is_eligible_row(self, row: dict) -> bool:
-        """See PackCardTallyMetric._is_eligible_row(). True only when
-        row["pack_number"] == 0 and row["pick_number"] == 0."""
-        return row["pack_number"] == 0 and row["pick_number"] == 0
+    def _eligible_rows(self, chunk: DraftDataChunk) -> npt.NDArray[np.bool_]:
+        """See PackCardTallyMetric._eligible_rows(): pack 0, pick 0 only.
 
-    def _tally_key(self, row: dict, card_uuid: UUID) -> tuple:
-        """See PackCardTallyMetric._tally_key(). Key = (card_uuid,) -
-        no extra dimensions, see class docstring."""
-        return (card_uuid,)
+        Inputs: chunk. Output: bool array (rows,).
+        Side effects: none. Exceptions: none.
+        """
+        return (chunk.pack_number == 0) & (chunk.pick_number == 0)
 
 
 class RankStratifiedTakeRateMetric(PackCardTallyMetric):
-    """Card Take Rate, additionally stratified by rank bucket -
-    BRAINSTORM.md's single-card metric #6 (Rank-Stratified Take Rate).
+    """Card Take Rate, also stratified by rank - BRAINSTORM.md's
+    single-card metric #6 (Rank-Stratified Take Rate)."""
 
-    KEY_COLUMNS below keeps pack_number/pick_number alongside rank. A
-    (card, rank)-only key (dropping pack_number/pick_number) is the
-    documented alternative if this proves too sparse in practice.
-    """
+    OUTPUT_STEM: ClassVar[str] = "rank_stratified_take_rate"
+    KEY_COLUMNS: ClassVar[tuple[str, ...]] = (
+        "nocab_uuid",
+        "pack_number",
+        "pick_number",
+        "rank",
+    )
 
-    KEY_COLUMNS: ClassVar[tuple[str, ...]] = ("pack_number", "pick_number", "rank")
-    DEFAULT_OUTPUT_PATH = _DEFAULT_OUTPUT_DIR / "rank_stratified_take_rate.parquet"
+    def _eligible_rows(self, chunk: DraftDataChunk) -> npt.NDArray[np.bool_]:
+        """See PackCardTallyMetric._eligible_rows(): ranked rows only (a
+        Trad/Sealed row's rank is "", which has no stratum).
 
-    def _is_eligible_row(self, row: dict) -> bool:
-        """See PackCardTallyMetric._is_eligible_row(). True only when
-        row["rank"] is a non-empty string.
-
-        A rankless row (every Trad/Sealed event, and a few Premier
-        rows) has no stratum to tally into; its NaN rank would also key
-        a fresh tally per row (NaN != NaN), writing one sample_count=1
-        output row per pack option instead of an aggregate.
+        Inputs: chunk. Output: bool array (rows,).
+        Side effects: none. Exceptions: none.
         """
-        rank = row["rank"]
-        return isinstance(rank, str) and rank != ""
-
-    def _tally_key(self, row: dict, card_uuid: UUID) -> tuple:
-        """See PackCardTallyMetric._tally_key(). Key = (card_uuid,
-        row["pack_number"], row["pick_number"], row["rank"])."""
-        return (card_uuid, row["pack_number"], row["pick_number"], row["rank"])
+        return chunk.rank != ""

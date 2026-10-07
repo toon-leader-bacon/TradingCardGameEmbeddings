@@ -104,9 +104,10 @@ implementation yet). Implemented today:
   `DeckCardMaskMetric` consumer) and two card inclusion-rate metrics
   over fabtcg.com tournament decklists, reading the published FaB deck
   box read-only. See [`fabtcg_decklists/README.md`](fabtcg_decklists/README.md).
-- **`seventeenlands/`** - `Metric[dict]` metrics over 17lands' MTG
-  draft/game/replay data exports; `draft_data/`, `game_data/`, and
-  `replay_data/` are all implemented today. See
+- **`seventeenlands/`** - vectorized chunk metrics over 17lands' MTG
+  draft/game/replay data exports (`draft_data/`, `game_data/`,
+  `replay_data/`), each writing one partition per CSV that dojos read
+  as slices. See
   [`seventeenlands/README.md`](seventeenlands/README.md).
 - **`dominiontabs/`** - three single-card metrics over Dominion card
   data: `CostRegressionMetric` (this project's first
@@ -125,6 +126,10 @@ implementation yet). Implemented today:
   card names against `dominiontabs`' `CardBinder`; this project's
   second `DeckCardMaskMetric` consumer, after `play_gwent/`. See
   [`isotropic/summary/README.md`](isotropic/summary/README.md).
+- **`cross_game/`** - metrics whose rows span games. `rarity/` labels
+  every card of six games with a shared four-step `RarityTier`, written
+  as one parquet stamped with a binder version per game. See
+  [`cross_game/README.md`](cross_game/README.md).
 - **`final_decks/`** - one `HeldOutDeckCardMetric` per published deck
   box (Pokemon, FaB, Gwent, Dominion, StS2, MTG), reading
   `data/final/decks/<game>.db` directly. See

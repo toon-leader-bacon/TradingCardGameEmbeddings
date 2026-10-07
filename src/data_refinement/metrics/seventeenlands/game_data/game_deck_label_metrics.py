@@ -10,7 +10,6 @@ game sharing an identical deck (see
 on_play_win_rate_sensitivity_by_deck_metric.py's own module docstring).
 """
 
-from pathlib import Path
 from typing import ClassVar
 
 import numpy as np
@@ -18,14 +17,12 @@ import numpy.typing as npt
 import pyarrow as pa
 
 from src.data_refinement.metrics.generic.masked_field_metric import OTHER_LABEL
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+from src.data_refinement.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
 )
 from src.data_refinement.metrics.seventeenlands.game_data.game_deck_label_metric import (
     GameDeckLabelMetric,
 )
-
-_DEFAULT_OUTPUT_DIR = Path("data/metrics/seventeenlands/game_data")
 
 
 class DeckWinPredictionMetric(GameDeckLabelMetric):
@@ -34,7 +31,7 @@ class DeckWinPredictionMetric(GameDeckLabelMetric):
 
     LABEL_COLUMN: ClassVar[str] = "won"
     LABEL_TYPE: ClassVar[pa.DataType] = pa.bool_()
-    DEFAULT_OUTPUT_PATH = _DEFAULT_OUTPUT_DIR / "deck_win_prediction.parquet"
+    OUTPUT_STEM: ClassVar[str] = "deck_win_prediction"
 
     def _labels(self, chunk: GameDataChunk) -> npt.NDArray[np.bool_]:
         """See GameDeckLabelMetric._labels(). chunk.won."""
@@ -47,7 +44,7 @@ class DeckGameLengthPredictionMetric(GameDeckLabelMetric):
 
     LABEL_COLUMN: ClassVar[str] = "num_turns"
     LABEL_TYPE: ClassVar[pa.DataType] = pa.int64()
-    DEFAULT_OUTPUT_PATH = _DEFAULT_OUTPUT_DIR / "deck_game_length_prediction.parquet"
+    OUTPUT_STEM: ClassVar[str] = "deck_game_length_prediction"
 
     def _labels(self, chunk: GameDataChunk) -> npt.NDArray[np.int64]:
         """See GameDeckLabelMetric._labels(). chunk.num_turns as int64."""
@@ -68,7 +65,7 @@ class DeckRankTierPredictionMetric(GameDeckLabelMetric):
 
     LABEL_COLUMN: ClassVar[str] = "rank"
     LABEL_TYPE: ClassVar[pa.DataType] = pa.string()
-    DEFAULT_OUTPUT_PATH = _DEFAULT_OUTPUT_DIR / "deck_rank_tier_prediction.parquet"
+    OUTPUT_STEM: ClassVar[str] = "deck_rank_tier_prediction"
     LABEL_VALUES: ClassVar[tuple[str, ...]] = (
         "bronze",
         "silver",

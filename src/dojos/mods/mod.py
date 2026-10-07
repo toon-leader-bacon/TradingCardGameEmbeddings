@@ -77,6 +77,16 @@ class Mod(ABC):
     @abstractmethod
     def apply_single(self, data: TrainingDatum) -> TrainingDatum: ...
 
+    def child_tallies(self) -> dict[str, ModTally]:
+        """Tallies of mods this mod holds inside itself (a PerGameMod's
+        per-game mods), keyed so ModPipeline.mod_tallies can report them
+        under this mod's own key. Default: none.
+
+        Inputs: none. Output: dict[str, ModTally] (the live objects).
+        Side effects: none. Exceptions: none.
+        """
+        return {}
+
     def apply(self, data: List[TrainingDatum]) -> List[TrainingDatum]:
         """apply_single on each datum, in order; data is unchanged.
         Override only for a mod that works across data (e.g. mixing two

@@ -1,11 +1,10 @@
 """call_isolated - the one "run this metric step, log and swallow any
 failure" helper, so one metric's bug never stops a scan for the others.
 
-Shared by the 17lands chunk scanners and RowwiseMetric
-(see seventeenlands/game_data/README.md). The older per-source scanners
-(sts_gg, play_gwent, isotropic, sts2_runs, and the draft and replay
-row scanners) still carry their own copies of this try/log body; they
-can move onto this helper as they are next touched.
+Shared by the 17lands chunk scanners (see seventeenlands/README.md).
+The older per-source scanners (sts_gg, play_gwent, isotropic,
+sts2_runs) still carry their own copies of this try/log body; they can
+move onto this helper as they are next touched.
 """
 
 import logging

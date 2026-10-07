@@ -1,43 +1,21 @@
-"""Header-derived card index for one 17lands replay_data CSV.
+"""Header-derived card index for one 17lands replay_data CSV (see
+replay_data/README.md). Built once per CSV by its ReplayDataChunkParser.
 
-The one genuinely new columns-index shape in this seventeenlands
-family (see replay_data/README.md):
-replay_data exposes cards through TWO independent mechanisms, not one.
+replay_data names cards two ways:
 
-1. Name-suffixed header columns - deck_<name>/sideboard_<name> ONLY
-   (replay_data has no opening_hand_<name> family the way game_data
-   does - opening_hand is a single Arena-ID-list column instead, see
-   below). Parsed once at construction and matched with
-   card_lookup.uuid_for_name_or_front_face(), the same policy
-   GameCardColumns and DraftCardColumns use.
-2. Arena-ID pipe-delimited cells - every per-turn event column
-   (creatures_cast, creatures_attacked, ...), plus
-   opening_hand/candidate_hand_N/eot_{side}_*_in_play. These can't be
-   matched at header-parse time (the ids inside a cell vary row to
-   row) - matching happens per row, per cell, through a separate
-   cache keyed by the Arena id string itself via
-   uuid_for_arena_id()/arena_uuids().
-
-DTYPE TRAP (verified against the real replay CSVs): a per-turn Arena-ID
-column where every populated cell in a pandas.read_csv chunk happens
-to hold exactly one id (no "|" ever needed) is inferred as float64,
-not string - e.g. row["user_turn_1_creatures_cast"] can arrive as the
-Python float 104936.0, never the string "104936". Meanwhile
-ScryfallCardIngestionStage._extract_aliases() registers each Arena
-alias as str(row["arena_id"]) on a parsed JSON int - i.e. the ledger's
-stored key is "104936", never "104936.0". arena_uuids()/
-uuid_for_arena_id() MUST normalize every token (whether it arrives as
-a bare float/int or as one "|"-split string piece) via
-str(int(float(token))) before querying card_binder - this is a
-correctness requirement, not a formatting nicety, and must not be
-dropped during implementation.
+1. Name-suffixed header columns - deck_<name>/sideboard_<name> only.
+   Parsed once and matched with card_lookup.uuid_for_name_or_front_face(),
+   the policy GameCardColumns and DraftCardColumns use.
+2. Arena ids inside the per-half-turn cells (creatures_cast, ...). The
+   ids vary row to row, so they are matched by the parser, once per
+   distinct id, through uuid_for_arena_id()'s cache. An id must be
+   normalized to the ledger's str(int(...)) form first
+   (ScryfallCardIngestionStage registers Arena aliases as "104936",
+   never "104936.0").
 """
 
-import re
-from typing import ClassVar, Iterable, Literal
+from typing import Iterable
 from uuid import UUID
-
-import pandas as pd
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.card_lookup import uuid_for_name_or_front_face
@@ -48,25 +26,14 @@ _DECK_PREFIX = "deck_"
 _SIDEBOARD_PREFIX = "sideboard_"
 _COLUMN_PREFIXES = (_DECK_PREFIX, _SIDEBOARD_PREFIX)
 
-_TURN_COLUMN_PATTERN = re.compile(r"^(user|oppo)_turn_(\d+)_")
-
 
 class ReplayCardColumns:
     """Every deck_/sideboard_ column of one replay_data CSV matched to
-    nocab_uuids, plus a separate Arena-ID cache for every per-turn
-    event cell this same scan encounters, plus this CSV's own
-    per-actor turn-number range.
+    nocab_uuids, plus a separate Arena-id cache.
 
-    Single-consumer-per-metric: each metric builds its own instance
-    (via from_header()) at construction time, from the same
-    (card_binder, header, source_game) it was itself constructed with.
+    Single consumer: the CSV's ReplayDataChunkParser builds one (via
+    from_header()).
     """
-
-    # Every metric in this container that loops both half-turn actors
-    # shares this same tuple - centralized here (PRINCIPLES.md section
-    # 2) rather than re-typed as a private constant in each metric
-    # file.
-    ACTORS: ClassVar[tuple[Literal["user", "oppo"], ...]] = ("user", "oppo")
 
     def __init__(self, card_binder: CardBinder, source_game: GameId) -> None:
         """
@@ -87,8 +54,6 @@ class ReplayCardColumns:
         self._arena_id_cache: dict[str, UUID | None] = {}
         self._deck_columns: list[tuple[str, UUID]] = []
         self._sideboard_columns: list[tuple[str, UUID]] = []
-        self._user_turn_numbers: list[int] = []
-        self._oppo_turn_numbers: list[int] = []
 
     @staticmethod
     def from_header(
@@ -109,9 +74,7 @@ class ReplayCardColumns:
                 against.
         Output: a ReplayCardColumns whose deck_columns/
             sideboard_columns cover every column that matched exactly
-            one card (see unmatched_names for the rest), and whose
-            user_turn_numbers/oppo_turn_numbers reflect every turn
-            number actually present in header for that actor.
+            one card (see unmatched_names for the rest).
         Side effects: none beyond constructing the returned instance
             (no I/O - card_binder is assumed already loaded).
         Exceptions: none expected.
@@ -136,10 +99,6 @@ class ReplayCardColumns:
                 continue
 
             result._add_matched_column(prefix, column, card_uuid)
-
-        # Derive this CSV's own per-actor turn-number range from the
-        # header, rather than assuming a fixed max turn.
-        result._discover_turn_numbers(header)
 
         return result
 
@@ -227,10 +186,7 @@ class ReplayCardColumns:
         Inputs:
             arena_id: an Arena id, already normalized to the ledger's
                 own str(int(...)) convention (e.g. "104936", never
-                "104936.0") - see module docstring's "DTYPE TRAP".
-                Callers with a raw cell value should go through
-                arena_uuids() instead, which performs that
-                normalization.
+                "104936.0"); the parser normalizes raw tokens first.
         Output: the matching nocab_uuid, or None if
             card_binder.get_by_alias(source_game, DataSource.ARENA,
             arena_id) has no match.
@@ -253,111 +209,6 @@ class ReplayCardColumns:
         card_uuid = card.nocab_uuid if card is not None else None
         self._arena_id_cache[arena_id] = card_uuid
         return card_uuid
-
-    def arena_uuids(self, cell: float | int | str | None) -> list[UUID]:
-        """Match one per-turn Arena-ID cell into every card it names.
-
-        Inputs:
-            cell: one raw cell value from a per-turn event column (or
-                opening_hand/candidate_hand_N/eot_*_in_play) - NaN/None
-                when empty, a bare float/int when pandas inferred a
-                single-id column as numeric, or a "|"-delimited string
-                when 2+ ids ever co-occur in that column. See module
-                docstring's "DTYPE TRAP" - this method is where that
-                trap is closed, not the caller's concern.
-        Output: every card_uuid this cell names, matched via
-            uuid_for_arena_id() after normalizing each token (whole
-            cell, or each "|"-split piece) via str(int(float(token))).
-            Empty list if cell is NaN/None/empty, or if every token was
-            unmatched (see unmatched_arena_ids).
-        Side effects: same caching side effect as uuid_for_arena_id(),
-            once per distinct token encountered.
-        Exceptions: none expected for a well-formed cell.
-
-        Example:
-            >>> replay_columns.arena_uuids("105091|104894")
-        """
-        if cell is None or pd.isna(cell):
-            return []
-
-        cell_str = cell if isinstance(cell, str) else str(cell)
-
-        card_uuids = []
-        for token in cell_str.split("|"):
-            normalized = str(int(float(token)))
-            card_uuid = self.uuid_for_arena_id(normalized)
-            if card_uuid is not None:
-                card_uuids.append(card_uuid)
-        return card_uuids
-
-    def present_uuids(self, row: dict, columns: list[tuple[str, UUID]]) -> list[UUID]:
-        """Every matched card from `columns` whose count is > 0 on this
-        row.
-
-        Presence, not copies (as game_data's ZoneCounts.present()) -
-        shared by every deck_columns/sideboard_columns consumer in this
-        container, since both remain per-row copy COUNTS (deck_<name>
-        sums to 40), not per-copy list entries.
-
-        Inputs:
-            row: one replay_data CSV row, dict-like.
-            columns: deck_columns/sideboard_columns (or any
-                same-shaped list).
-        Output: every card_uuid from columns whose row[column_name] is
-            truthy (nonzero) - order matches columns' own order.
-        Side effects: none.
-        Exceptions: raises KeyError if a column in columns is missing
-            from row.
-
-        Example:
-            >>> replay_columns.present_uuids(row, replay_columns.deck_columns)
-        """
-        # A NaN/missing cell is absent even though `bool(float("nan"))`
-        # is True: NaN is the one value unequal to itself, a far cheaper
-        # test than pd.notna() on this per-row, per-column hot path. The
-        # `and` then still requires an actually-truthy (nonzero) count.
-        return [
-            card_uuid
-            for column_name, card_uuid in columns
-            if (count := row[column_name]) == count and count
-        ]
-
-    def cast_uuids_for_turn(
-        self, row: dict, actor: Literal["user", "oppo"], turn: int
-    ) -> list[UUID]:
-        """Every card matched out of this half-turn's creatures_cast
-        union non_creatures_cast cell.
-
-        Centralizes the creatures_cast/non_creatures_cast-cell lookup
-        shared by average_turn_cast_metric.py's AverageTurnCastMetric
-        and turns_to_game_end_after_cast_metric.py's
-        TurnsToGameEndAfterCastMetric (PRINCIPLES.md section 2 dedup) -
-        returns the richer list form (order-preserving, duplicates
-        possible), since a set can always be derived from a list via
-        set(...) but not vice versa; a caller needing deduplication
-        does that itself at the call site.
-
-        Inputs:
-            row: one replay_data CSV row, dict-like.
-            actor: which half-turn - "user" or "oppo".
-            turn: that actor's own turn-number counter.
-        Output: every matched card in creatures_cast union
-            non_creatures_cast for this half-turn, in creatures_cast-
-            then-non_creatures_cast order. Empty list if neither cell
-            names a card.
-        Side effects: none.
-        Exceptions: none expected.
-
-        Example:
-            >>> replay_columns.cast_uuids_for_turn(row, "user", 3)
-        """
-        creatures = self.arena_uuids(
-            row[ReplayCardColumns.turn_column(actor, turn, "creatures_cast")]
-        )
-        non_creatures = self.arena_uuids(
-            row[ReplayCardColumns.turn_column(actor, turn, "non_creatures_cast")]
-        )
-        return creatures + non_creatures
 
     @property
     def unmatched_names(self) -> list[str]:
@@ -390,96 +241,6 @@ class ReplayCardColumns:
             for arena_id, card_uuid in self._arena_id_cache.items()
             if card_uuid is None
         ]
-
-    @property
-    def user_turn_numbers(self) -> list[int]:
-        """Every turn number N for which at least one
-        "user_turn_N_<field>" column exists in this CSV's header,
-        sorted ascending.
-
-        Derived once at construction (_discover_turn_numbers()) -
-        never a hardcoded range, the same "derive table size at scan
-        time" precedent draft_data's pack/table size already
-        established.
-
-        Inputs: none.
-        Output: see above.
-        Side effects: none.
-        Exceptions: none.
-        """
-        return self._user_turn_numbers
-
-    @property
-    def oppo_turn_numbers(self) -> list[int]:
-        """Every turn number N for which at least one
-        "oppo_turn_N_<field>" column exists in this CSV's header,
-        sorted ascending. See user_turn_numbers.
-
-        Inputs: none.
-        Output: see above.
-        Side effects: none.
-        Exceptions: none.
-        """
-        return self._oppo_turn_numbers
-
-    def _discover_turn_numbers(self, header: Iterable[str]) -> None:
-        """Populate self._user_turn_numbers/_oppo_turn_numbers by
-        regex-scanning header.
-
-        Private helper - single consumer is from_header().
-
-        Inputs:
-            header: this CSV's column names.
-        Output: none.
-        Side effects: sets self._user_turn_numbers/
-            _oppo_turn_numbers from every "^(user|oppo)_turn_(\\d+)_"
-            match in header, each sorted ascending, deduplicated.
-        Exceptions: none expected.
-        """
-        user_turns = set()
-        oppo_turns = set()
-        for column in header:
-            match = _TURN_COLUMN_PATTERN.match(column)
-            if match is None:
-                continue
-            actor, turn = match.group(1), int(match.group(2))
-            if actor == "user":
-                user_turns.add(turn)
-            else:
-                oppo_turns.add(turn)
-
-        self._user_turn_numbers = sorted(user_turns)
-        self._oppo_turn_numbers = sorted(oppo_turns)
-
-    @staticmethod
-    def turn_column(actor: Literal["user", "oppo"], turn: int, field: str) -> str:
-        """Build the literal header column name for one (actor, turn,
-        field) triple.
-
-        Centralizes the f"{actor}_turn_{turn}_{field}" format string -
-        nearly every metric in this container loops turns and needs
-        this exact literal (PRINCIPLES.md section 2 dedup), so it lives
-        here rather than being re-typed per metric.
-
-        Inputs:
-            actor: which half-turn - "user" or "oppo".
-            turn: that actor's own turn-number counter (see
-                user_turn_numbers/oppo_turn_numbers - these are
-                independent per-actor counters, not a shared
-                elapsed-turn index).
-            field: the field name suffix (e.g. "creatures_cast",
-                "eot_user_life").
-        Output: the literal column name, e.g.
-            turn_column("user", 3, "creatures_cast") ->
-            "user_turn_3_creatures_cast".
-        Side effects: none.
-        Exceptions: none.
-
-        Example:
-            >>> ReplayCardColumns.turn_column("oppo", 5, "creatures_attacked")
-            'oppo_turn_5_creatures_attacked'
-        """
-        return f"{actor}_turn_{turn}_{field}"
 
     @staticmethod
     def _card_name_for_column(column: str) -> tuple[str, str] | None:

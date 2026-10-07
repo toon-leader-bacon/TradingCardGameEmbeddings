@@ -1,13 +1,9 @@
 """Header-derived card-name index for one 17lands draft_data CSV.
 
-Built once per metric instance (each metric constructs its own, from
-its own constructor's (card_binder, header, source_game) — see
-../pack_card_tally_metric.py's module docstring for why this is a
-per-metric-cheap, header-sized cost rather than a shared per-scan
-object). Every pack_card_<name>/pool_<name> column is parsed and its
-<name> suffix matched against card_binder with
-card_lookup.uuid_for_name_or_front_face() (no separate lookup/cache
-class in between).
+Built once per CSV, by that CSV's DraftDataChunkParser
+(draft_data_chunk_parser.py). Every pack_card_<name>/pool_<name> column
+is parsed and its <name> suffix matched against card_binder with
+card_lookup.uuid_for_name_or_front_face().
 
 The same name -> nocab_uuid matching also answers the `pick` column's
 per-row cell value: a pick's name is always drawn from the same per-set card
@@ -31,10 +27,8 @@ class DraftCardColumns:
     nocab_uuids, plus a cache for any other bare name (e.g. a `pick`
     cell value) this same scan encounters.
 
-    Single-consumer-per-metric: each metric builds its own instance (via
-    from_header()) at construction time, from the same (card_binder,
-    header, source_game) it was itself constructed with - see
-    ../pack_card_tally_metric.py's __init__.
+    Single consumer: the CSV's DraftDataChunkParser builds one (via
+    from_header()) and matches every chunk's pick cells through it.
     """
 
     def __init__(self, card_binder: CardBinder, source_game: GameId) -> None:
@@ -156,41 +150,6 @@ class DraftCardColumns:
         )
         self._cache[name] = card_uuid
         return card_uuid
-
-    def present_uuids(self, row: dict, columns: list[tuple[str, UUID]]) -> list[UUID]:
-        """Every matched card from `columns` whose count is > 0 on this
-        row.
-
-        Shared by every metric in this container - called with either
-        self.pack_columns (to get a row's pack options) or
-        self.pool_columns (to get a row's pool-so-far), so the "which
-        columns are actually present on this row" filtering logic
-        exists exactly once.
-
-        Inputs:
-            row: one draft_data CSV row, dict-like (column name -> cell
-                value) - see ../scanner.py's module docstring for where
-                this comes from.
-            columns: pack_columns or pool_columns (or any same-shaped
-                list) to filter against row.
-        Output: every card_uuid from columns whose row[column_name] is
-            truthy (nonzero) - order matches columns' own order.
-        Side effects: none.
-        Exceptions: raises KeyError if a column in columns is missing
-            from row.
-
-        Example:
-            >>> draft_columns.present_uuids(row, draft_columns.pack_columns)
-        """
-        # A NaN/missing cell is absent even though `bool(float("nan"))`
-        # is True: NaN is the one value unequal to itself, a far cheaper
-        # test than pd.notna() on this per-row, per-column hot path. The
-        # `and` then still requires an actually-truthy (nonzero) count.
-        return [
-            card_uuid
-            for column_name, card_uuid in columns
-            if (count := row[column_name]) == count and count
-        ]
 
     @property
     def unmatched_names(self) -> list[str]:

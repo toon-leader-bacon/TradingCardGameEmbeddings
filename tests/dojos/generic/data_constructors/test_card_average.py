@@ -114,8 +114,7 @@ class TestCardAverageDataConstructorBuild:
         assert result == []
 
     def test_uuid_column_overrides_default_nocab_uuid(self) -> None:
-        # TutorTargetPoolMetric's id column is "pool_card_uuid", not
-        # "nocab_uuid" - see TutorTargetPoolDojo.
+        # A metric whose id column is not "nocab_uuid"
         binder = CardBinder()
         card = _card("Strike", "strike")
         binder.create(card)

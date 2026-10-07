@@ -34,7 +34,10 @@ see DeckBoxDealer.card_binder_version for that case.
 """
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
+from types import MappingProxyType
+from typing import Callable, Mapping
 
 import pandas as pd
 import pyarrow as pa
@@ -45,6 +48,7 @@ from src.schema.game_id import GameId
 _GAME_KEY = b"game"
 _CARD_BINDER_VERSION_KEY = b"card_binder_version"
 _REQUIRES_DECK_BOX_KEY = b"requires_deck_box"
+_CARD_BINDER_VERSIONS_KEY = b"card_binder_versions"
 _TRUE_BYTES = b"1"
 _FALSE_BYTES = b"0"
 
@@ -63,6 +67,33 @@ class MetricVersionMetadata:
     game: GameId
     card_binder_version: str
     requires_deck_box: bool = False
+
+
+@dataclass(frozen=True)
+class MultiGameVersionMetadata:
+    """Which CardBinder snapshot of each game a multi-game metric output
+    was built from (a cross-game metric, whose one file spans games).
+
+    card_binder_versions: game -> CardLookup.version_for(game), for every
+        game the file has rows from.
+
+    Stored under its own schema key, so a file carrying it and a
+    single-game MetricVersionMetadata file never confuse each other.
+
+    Inputs: none (data holder). Output: n/a. Side effects: none.
+    Exceptions: none.
+    """
+
+    card_binder_versions: Mapping[GameId, str]
+
+    def __post_init__(self) -> None:
+        """Copy the mapping into a read-only view, so a caller's later
+        edits to its own dict cannot change this record."""
+        object.__setattr__(
+            self,
+            "card_binder_versions",
+            MappingProxyType(dict(self.card_binder_versions)),
+        )
 
 
 def schema_with_version_metadata(
@@ -123,11 +154,26 @@ def write_dataframe_with_version_metadata(
         ...     MetricVersionMetadata(GameId.DOMINION, "9c1a2f..."),
         ... )
     """
+    _write_dataframe_with_stamp(
+        df, path, lambda schema: schema_with_version_metadata(schema, metadata)
+    )
+
+
+def _write_dataframe_with_stamp(
+    df: pd.DataFrame, path: Path, stamp: Callable[[pa.Schema], pa.Schema]
+) -> None:
+    """Write df to path as parquet, its footer metadata taken from
+    stamp(df's schema). The one writer behind both public ones.
+
+    Inputs: df, path (overwritten), stamp (adds the version metadata to a
+        schema, e.g. schema_with_version_metadata bound to its metadata).
+    Output: none.
+    Side effects: creates path's parent directories; writes path.
+    Exceptions: whatever pyarrow.parquet.write_table raises.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     table = pa.Table.from_pandas(df, preserve_index=False)
-    table = table.replace_schema_metadata(
-        schema_with_version_metadata(table.schema, metadata).metadata
-    )
+    table = table.replace_schema_metadata(stamp(table.schema).metadata)
     pq.write_table(table, path)
 
 
@@ -185,3 +231,86 @@ def read_version_metadata(path: Path) -> MetricVersionMetadata | None:
         >>> read_version_metadata(Path("data/metrics/gwent_one/color_mask.parquet"))
     """
     return metadata_from_schema(pq.ParquetFile(path).schema_arrow)
+
+
+def schema_with_multi_game_versions(
+    schema: pa.Schema, metadata: MultiGameVersionMetadata
+) -> pa.Schema:
+    """Attach per-game binder versions to schema as parquet schema
+    metadata (one JSON object, game value -> version).
+
+    Inputs: schema (an output schema), metadata.
+    Output: a new pa.Schema; existing metadata is kept.
+    Side effects: none.
+    Exceptions: none.
+
+    Example:
+        >>> schema_with_multi_game_versions(
+        ...     pa.schema([("nocab_uuid", pa.string())]),
+        ...     MultiGameVersionMetadata({GameId.GWENT: "3f2b1c..."}),
+        ... )
+    """
+    versions = {
+        game.value: version for game, version in metadata.card_binder_versions.items()
+    }
+    stamp = json.dumps(versions, sort_keys=True).encode("utf-8")
+    return schema.with_metadata(
+        {**(schema.metadata or {}), _CARD_BINDER_VERSIONS_KEY: stamp}
+    )
+
+
+def write_dataframe_with_multi_game_versions(
+    df: pd.DataFrame, path: Path, metadata: MultiGameVersionMetadata
+) -> None:
+    """Write df to path as parquet with metadata embedded - the
+    multi-game twin of write_dataframe_with_version_metadata().
+
+    Inputs: df (the metric's complete rows), path (overwritten if it
+        exists), metadata.
+    Output: none.
+    Side effects: creates path's parent directories; writes path.
+    Exceptions: whatever pyarrow.parquet.write_table raises.
+
+    Example:
+        >>> write_dataframe_with_multi_game_versions(
+        ...     df, Path("data/metrics/cross_game/rarity_tier.parquet"),
+        ...     MultiGameVersionMetadata({GameId.MTG: "9c1a2f..."}),
+        ... )
+    """
+    _write_dataframe_with_stamp(
+        df, path, lambda schema: schema_with_multi_game_versions(schema, metadata)
+    )
+
+
+def multi_game_versions_from_schema(
+    schema: pa.Schema,
+) -> MultiGameVersionMetadata | None:
+    """Parse a schema's per-game binder versions back out.
+
+    Inputs: schema (read from an on-disk parquet file).
+    Output: the embedded MultiGameVersionMetadata, or None if the schema
+        carries no per-game versions (every single-game file).
+    Side effects: none.
+    Exceptions: ValueError if the stored value is not a JSON object of
+        known game values to strings.
+
+    Example:
+        >>> multi_game_versions_from_schema(
+        ...     pq.ParquetFile(path).schema_arrow)
+    """
+    raw_metadata = schema.metadata or {}
+    if _CARD_BINDER_VERSIONS_KEY not in raw_metadata:
+        return None
+
+    # Parse the stored JSON object into known games and string versions
+    try:
+        stored = json.loads(raw_metadata[_CARD_BINDER_VERSIONS_KEY].decode("utf-8"))
+        if not isinstance(stored, dict) or not all(
+            isinstance(version, str) for version in stored.values()
+        ):
+            raise ValueError("not an object of strings")
+        return MultiGameVersionMetadata(
+            {GameId(game): version for game, version in stored.items()}
+        )
+    except ValueError as error:
+        raise ValueError(f"bad stored card_binder_versions: {error}") from error

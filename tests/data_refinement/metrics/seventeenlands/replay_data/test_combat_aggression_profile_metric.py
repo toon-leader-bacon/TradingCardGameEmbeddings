@@ -1,143 +1,80 @@
 """Tests for combat_aggression_profile_metric.py's
-CombatAggressionProfileMetric.
-"""
+CombatAggressionProfileMetric."""
 
-from datetime import datetime, timezone
 from pathlib import Path
-from uuid import uuid4
 
-import pyarrow.parquet as pq
+import pytest
 
-from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.seventeenlands.replay_data.combat_aggression_profile_metric import (  # noqa: E501
     CombatAggressionProfileMetric,
 )
-from src.schema.card import GenericCard, Provenance
-from src.schema.data_source import DataSource
+from src.data_refinement.metrics.seventeenlands.replay_data.replay_data_chunk import (
+    Actor,
+    ReplayField,
+)
 from src.schema.game_id import GameId
+from tests.data_refinement.metrics.seventeenlands.replay_data._replay_fixtures import (
+    MORNINGSTAR_ID,
+    OWLBEAR_ID,
+    UNKNOWN_ID,
+    VERSION,
+    binder_with_cards,
+    field_column,
+    row,
+    scan_into_frame,
+)
 
-_HEADER = [
-    "draft_id",
-    "match_number",
-    "game_number",
-    "deck_Owlbear",
-    "user_turn_1_creatures_attacked",
-    "user_turn_2_creatures_attacked",
-]
+
+def _attacked(actor: Actor, turn: int) -> str:
+    return field_column(actor, turn, ReplayField.CREATURES_ATTACKED)
 
 
-def _make_card(name: str) -> GenericCard:
-    return GenericCard(
-        nocab_uuid=uuid4(),
-        source_game=GameId.MTG,
-        name=name,
-        raw_content={},
-        provenance=Provenance(
-            data_source=DataSource.SCRYFALL,
-            source_id=name,
-            fetched_at=datetime.now(timezone.utc),
-        ),
+def _scan(tmp_path: Path, rows: list[dict], deck_box: DeckBox | None = None):
+    metric = CombatAggressionProfileMetric(
+        VERSION, deck_box or DeckBox(), tmp_path / "out.parquet"
     )
+    return scan_into_frame(tmp_path, binder_with_cards(), rows, metric, index=None)
 
 
-def _binder_with_owlbear(arena_id: str) -> CardBinder:
-    binder = CardBinder()
-    card = _make_card("Owlbear")
-    binder.create(card)
-    binder.register_alias(GameId.MTG, DataSource.ARENA, arena_id, card.nocab_uuid)
-    return binder
-
-
-def _row(
-    deck: int,
-    turn_1_attacked: str | float = float("nan"),
-    turn_2_attacked: str | float = float("nan"),
-) -> dict:
-    return {
-        "draft_id": "draft1",
-        "match_number": 0,
-        "game_number": 0,
-        "deck_Owlbear": deck,
-        "user_turn_1_creatures_attacked": turn_1_attacked,
-        "user_turn_2_creatures_attacked": turn_2_attacked,
-    }
-
-
-def test_writes_one_row_per_game_with_the_average_attackers_per_turn(
+def test_one_row_per_game_averaging_matched_attackers_over_attacking_turns(
     tmp_path: Path,
 ) -> None:
-    binder = _binder_with_owlbear("1")
+    cells = {
+        _attacked(Actor.USER, 1): f"{OWLBEAR_ID}|{MORNINGSTAR_ID}|{UNKNOWN_ID}",
+        _attacked(Actor.USER, 2): OWLBEAR_ID,
+    }
+
+    frame = _scan(tmp_path, [row(cells, owlbear_deck=1), row(owlbear_deck=1)])
+
+    assert frame["combat_aggression_profile"].tolist() == [pytest.approx(1.5), 0.0]
+    assert frame["draft_id"].tolist() == ["draft1", "draft1"]
+
+
+def test_oppo_attacks_and_unmatched_only_turns_are_ignored(tmp_path: Path) -> None:
+    cells = {
+        _attacked(Actor.USER, 1): OWLBEAR_ID,
+        _attacked(Actor.USER, 2): UNKNOWN_ID,
+        _attacked(Actor.OPPO, 1): f"{OWLBEAR_ID}|{OWLBEAR_ID}",
+    }
+
+    frame = _scan(tmp_path, [row(cells, owlbear_deck=1)])
+
+    assert frame["combat_aggression_profile"].tolist() == [1.0]
+
+
+def test_each_games_deck_lands_in_the_deck_box_once(tmp_path: Path) -> None:
     deck_box = DeckBox()
-    metric = CombatAggressionProfileMetric(
-        binder, _HEADER, GameId.MTG, deck_box, output_path=tmp_path / "out.parquet"
-    )
+    rows = [
+        row(owlbear_deck=1, game_number=1),
+        row(owlbear_deck=1, game_number=2),
+        row(morningstar_deck=1, game_number=3),
+    ]
 
-    metric.accumulate(_row(deck=4, turn_1_attacked="1", turn_2_attacked="1"))
-    metric.finalize()
+    frame = _scan(tmp_path, rows, deck_box)
 
-    table = pq.read_table(tmp_path / "out.parquet")
-    assert table.num_rows == 1
-    row = table.to_pylist()[0]
-    assert row["combat_aggression_profile"] == 1.0
-    assert row["draft_id"] == "draft1"
-
-
-def test_turns_with_no_attack_are_excluded_from_the_average(tmp_path: Path) -> None:
-    """Averages only over user half-turns that had any attack at all,
-    not over every scanned turn."""
-    binder = _binder_with_owlbear("1")
-    deck_box = DeckBox()
-    metric = CombatAggressionProfileMetric(
-        binder, _HEADER, GameId.MTG, deck_box, output_path=tmp_path / "out.parquet"
-    )
-
-    # Only turn 1 has an attack - turn 2 stays NaN (no attack) and must
-    # not drag the average toward zero.
-    metric.accumulate(_row(deck=4, turn_1_attacked="1"))
-    metric.finalize()
-
-    row = pq.read_table(tmp_path / "out.parquet").to_pylist()[0]
-    assert row["combat_aggression_profile"] == 1.0
-
-
-def test_never_attacking_writes_zero_profile_not_omitted(tmp_path: Path) -> None:
-    binder = _binder_with_owlbear("1")
-    deck_box = DeckBox()
-    metric = CombatAggressionProfileMetric(
-        binder, _HEADER, GameId.MTG, deck_box, output_path=tmp_path / "out.parquet"
-    )
-
-    metric.accumulate(_row(deck=4))
-    metric.finalize()
-
-    table = pq.read_table(tmp_path / "out.parquet")
-    assert table.num_rows == 1
-    assert table.to_pylist()[0]["combat_aggression_profile"] == 0.0
-
-
-def test_writes_the_deck_into_the_shared_deck_box(tmp_path: Path) -> None:
-    binder = _binder_with_owlbear("1")
-    deck_box = DeckBox()
-    metric = CombatAggressionProfileMetric(
-        binder, _HEADER, GameId.MTG, deck_box, output_path=tmp_path / "out.parquet"
-    )
-
-    metric.accumulate(_row(deck=4, turn_1_attacked="1"))
-    metric.finalize()
-
-    assert len(list(deck_box.all_uuids(GameId.MTG))) == 1
-
-
-def test_identical_decks_across_games_dedupe_in_the_deck_box(tmp_path: Path) -> None:
-    binder = _binder_with_owlbear("1")
-    deck_box = DeckBox()
-    metric = CombatAggressionProfileMetric(
-        binder, _HEADER, GameId.MTG, deck_box, output_path=tmp_path / "out.parquet"
-    )
-
-    metric.accumulate(_row(deck=4, turn_1_attacked="1"))
-    metric.accumulate(_row(deck=4, turn_1_attacked="1"))
-    metric.finalize()
-
-    assert len(list(deck_box.all_uuids(GameId.MTG))) == 1
+    assert len(list(deck_box.all_uuids(GameId.MTG))) == 2
+    assert frame["deck_uuid"].nunique() == 2
+    assert set(frame["deck_uuid"]) == {
+        str(uuid) for uuid in deck_box.all_uuids(GameId.MTG)
+    }

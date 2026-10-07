@@ -25,6 +25,11 @@ from src.dojos.generic.multi_group_option_selection.dojo import (
 from src.dojos.generic.multi_group_regression.dojo import MultiGroupRegressionDojo
 from src.dojos.mods.common_mods import MaskTargetKeyMod
 from src.dojos.mods.mod_pipeline import ModPipeline
+from src.dojos.mods.per_game_mod import PerGameMod
+from src.dojos.cross_game.rarity_tier_dojo import RarityTierDojo
+from src.data_refinement.metrics.cross_game.rarity.rarity_tier_metric import (
+    RarityTierMetric,
+)
 from src.dojos.mods.mod_specs import (
     CardDropoutSpec,
     DuplicateCollapseSpec,
@@ -48,8 +53,30 @@ from src.data_refinement.metrics.isotropic.summary.full_deck_win_prediction_metr
 from src.data_refinement.metrics.play_gwent.leader_masked_from_deck_metric import (
     LeaderMaskedFromDeckMetric,
 )
+from src.data_refinement.metrics.seventeenlands.draft_data.pack_to_pick_choice_set_metric import (  # noqa: E501
+    PackToPickChoiceSetMetric,
+)
+from src.data_refinement.metrics.seventeenlands.draft_data.pick_number_decay_curve_metric import (  # noqa: E501
+    PickNumberDecayCurveMetric,
+)
+from src.data_refinement.metrics.seventeenlands.draft_data.pool_conditioned_pick_metric import (  # noqa: E501
+    PoolConditionedPickMetric,
+)
+from src.data_refinement.metrics.seventeenlands.game_data.game_deck_label_metrics import (  # noqa: E501
+    DeckRankTierPredictionMetric,
+    DeckWinPredictionMetric,
+)
+from src.data_refinement.metrics.seventeenlands.replay_data.attacker_blocker_combat_outcome_metric import (  # noqa: E501
+    AttackerBlockerCombatOutcomeMetric,
+)
 from src.data_refinement.metrics.sts2_runs import card_average_metrics as sts2_cards
 from src.data_refinement.metrics.sts2_runs import deck_label_metrics as sts2_decks
+from src.data_refinement.metrics.sts_gg.card_character_prediction_metric import (
+    CardCharacterPredictionMetric,
+)
+from src.dojos.sts_gg.card_character_prediction_dojo import (
+    CardCharacterPredictionDojo,
+)
 from src.data_refinement.metrics.sts_gg.deck_label_metrics import (
     CharacterPredictionMetric,
     KilledByMetric,
@@ -59,6 +86,22 @@ from src.dojos import isotropic
 from src.dojos.dominiontabs.cost_regression_dojo import CostRegressionDojo
 from src.dojos.dominiontabs.masked_field_dojos import SetMaskDojo
 from src.dojos.play_gwent.deck_card_mask_dojos import LeaderMaskedFromDeckDojo
+from src.dojos.seventeenlands.draft_data.pack_to_pick_choice_set_dojo import (
+    PackToPickChoiceSetDojo,
+)
+from src.dojos.seventeenlands.draft_data.pick_number_decay_curve_dojo import (
+    PickNumberDecayCurveDojo,
+)
+from src.dojos.seventeenlands.draft_data.pool_conditioned_pick_dojo import (
+    PoolConditionedPickDojo,
+)
+from src.dojos.seventeenlands.game_data.game_deck_label_dojos import (
+    DeckRankTierPredictionDojo,
+    DeckWinPredictionDojo,
+)
+from src.dojos.seventeenlands.replay_data.attacker_blocker_combat_outcome_dojo import (  # noqa: E501
+    AttackerBlockerCombatOutcomeDojo,
+)
 from src.dojos.sts_gg import deck_label_dojos
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
@@ -70,6 +113,7 @@ from src.training.dojo_catalog import (
     ContrastiveDojoRecipe,
     DeckDojoRecipe,
     DojoBuildContext,
+    MultiGameCardDojoRecipe,
     _augmentation_pipeline,
     _staple_subsampling,
     _with_augmentations,
@@ -88,6 +132,10 @@ class _RecordingShelf(CardShelf):
     def card_binder(self, game: GameId) -> Any:
         self.requested_games.append(game)
         return f"binder:{game.value}"
+
+    def card_lookup(self, games: Any) -> Any:
+        self.requested_games.extend(games)
+        return "lookup:" + ",".join(game.value for game in games)
 
     def deck_box(self, path: Path) -> Any:
         self.requested_boxes.append(path)
@@ -119,12 +167,20 @@ _INLINE_METRICS: dict[Any, Any] = {
     deck_label_dojos.WinDojo: WinMetric,
     deck_label_dojos.KilledByDojo: KilledByMetric,
     deck_label_dojos.CharacterDojo: CharacterPredictionMetric,
+    CardCharacterPredictionDojo: CardCharacterPredictionMetric,
+    RarityTierDojo: RarityTierMetric,
     CostRegressionDojo: CostRegressionMetric,
     SetMaskDojo: DominionSetMaskMetric,
     LeaderMaskedFromDeckDojo: LeaderMaskedFromDeckMetric,
     isotropic.FullDeckWinPredictionDojo: FullDeckWinPredictionMetric,
     isotropic.KingdomEndingTypeDojo: KingdomEndingTypeMetric,
     isotropic.WinningDeckMaskedCardDojo: WinningDeckMaskedCardMetric,
+    PackToPickChoiceSetDojo: PackToPickChoiceSetMetric,
+    PickNumberDecayCurveDojo: PickNumberDecayCurveMetric,
+    PoolConditionedPickDojo: PoolConditionedPickMetric,
+    DeckWinPredictionDojo: DeckWinPredictionMetric,
+    DeckRankTierPredictionDojo: DeckRankTierPredictionMetric,
+    AttackerBlockerCombatOutcomeDojo: AttackerBlockerCombatOutcomeMetric,
 }
 
 
@@ -143,6 +199,13 @@ def _metric_output_path_of(dojo_class: Any) -> Path:
         return dojo_class.OUTPUT_PATH
     metric = _INLINE_METRICS.get(dojo_class) or dojo_class.METRIC
     return metric.DEFAULT_OUTPUT_PATH
+
+
+def _sliced_metric_of(dojo_class: Any) -> Any:
+    """The 17lands metric a dojo class trains on (one with a FAMILY), or
+    None for any other dojo class."""
+    metric = _INLINE_METRICS.get(dojo_class) or getattr(dojo_class, "METRIC", None)
+    return metric if hasattr(metric, "FAMILY") else None
 
 
 def _context(shelf: CardShelf) -> DojoBuildContext:
@@ -186,6 +249,49 @@ class TestRecipes:
         }
         assert shelf.requested_boxes == [Path("x/box.db")]
 
+    def test_multi_game_recipe_builds_one_lookup_over_its_games(self) -> None:
+        shelf = _RecordingShelf()
+        dojo_class = _RecordingDojoClass()
+        context = _context(shelf)
+        recipe = MultiGameCardDojoRecipe(
+            (GameId.GWENT, GameId.MTG), dojo_class  # type: ignore[arg-type]
+        )
+
+        dojo = recipe.build("cross_game.x", context)
+
+        args, kwargs = dojo_class.calls[0]
+        assert args == ("lookup:gwent,mtg", context.holdout, 32)
+        assert kwargs == {"name": "cross_game.x", "rng_seed": 7}
+
+        # Each game's augmentations ride in one PerGameMod after the task mods
+        (mod,) = dojo.data_mod_pipeline.mods
+        assert isinstance(mod, PerGameMod)
+        assert mod.train_only
+        assert set(mod._pipelines) == {GameId.GWENT, GameId.MTG}
+
+    def test_multi_game_recipe_override_replaces_every_games_augmentations(
+        self,
+    ) -> None:
+        context = DojoBuildContext(
+            shelf=_RecordingShelf(),
+            holdout=HoldoutSpec.no_holdout(),
+            card_embedding_size=32,
+            rng_seed=7,
+            mod_overrides={"cross_game.x": (ShuffleKeysSpec(),)},
+        )
+        recipe = MultiGameCardDojoRecipe(
+            (GameId.GWENT, GameId.MTG), _RecordingDojoClass()  # type: ignore[arg-type]
+        )
+
+        dojo = recipe.build("cross_game.x", context)
+
+        (mod,) = dojo.data_mod_pipeline.mods
+        assert isinstance(mod, PerGameMod)
+        for pipeline in mod._pipelines.values():
+            assert [type(inner).__name__ for inner in pipeline.mods] == [
+                "ShuffleKeysMod"
+            ]
+
     def test_metric_output_replaces_the_dojos_own_metric_file(self) -> None:
         dojo_class = _RecordingDojoClass()
         recipe = CardDojoRecipe(GameId.GWENT, dojo_class, Path("m/other.parquet"))
@@ -209,8 +315,18 @@ class TestCatalog:
         # "<source>.<stem>" must match the metric output the dojo reads, so
         # a key cannot silently point at a different metric
         recipe = DOJO_CATALOG[key]
-        assert isinstance(recipe, (CardDojoRecipe, DeckDojoRecipe))
-        metric_path = recipe.metric_output or _metric_output_path_of(recipe.dojo_class)
+        assert isinstance(
+            recipe, (CardDojoRecipe, DeckDojoRecipe, MultiGameCardDojoRecipe)
+        )
+        sliced_metric = _sliced_metric_of(recipe.dojo_class)
+        if sliced_metric is not None:
+            # A 17lands dojo reads a slice file, not one metric output
+            family = sliced_metric.FAMILY.value
+            assert key == f"seventeenlands_{family}.{sliced_metric.OUTPUT_STEM}"
+            return
+        metric_path = getattr(recipe, "metric_output", None) or _metric_output_path_of(
+            recipe.dojo_class
+        )
         assert key == f"{metric_path.parent.name}.{metric_path.stem}"
 
     @pytest.mark.parametrize(
@@ -453,6 +569,8 @@ class TestDeckModOptIn:
             "isotropic.winning_deck_count",
             "final_decks.held_out_card_gwent",
             "isotropic.kingdom_opening_buy_prediction",
+            "seventeenlands_draft_data.pack_to_pick_choice_set",
+            "seventeenlands_replay_data.attacker_blocker_combat_outcome",
         ],
     )
     def test_count_and_answer_set_dojos_are_never_listed(self, name: str) -> None:

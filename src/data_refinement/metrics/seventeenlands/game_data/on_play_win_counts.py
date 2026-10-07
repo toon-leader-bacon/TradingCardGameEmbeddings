@@ -1,95 +1,92 @@
-"""OnPlayWinCounts - one subject's games and wins split by on_play, and
-the on-play/on-draw win rate delta they give
-(see game_data/README.md).
+"""Games and wins split by on_play, and the on-play/on-draw win rate
+delta they give (see game_data/README.md).
 
 Shared by OnPlayWinRateDeltaMetric (the subject is a card in the deck)
-and OnPlayWinRateSensitivityByDeckMetric (the subject is a whole deck):
-both tally the same four counts and write the same nullable delta. The
-two metrics tally over different keys (deck columns vs. distinct
-decks), so only the counts and the delta live here.
+and OnPlayWinRateSensitivityByDeckMetric (the subject is a whole deck).
+Both tally the same four counts (COUNT_COLUMNS) per subject and label a
+slice with the same nullable delta. They tally over different keys (deck
+columns vs. distinct decks), so only the counts and the delta live here:
+this module is the one place the delta rule is written.
 """
-
-from dataclasses import dataclass
 
 import numpy as np
 import numpy.typing as npt
+import pyarrow as pa
 
-# How many tallies row_masks() returns, and from_tallies() reads.
-TALLY_COUNT = 4
+# The four tallies, in on_play_row_masks() order: the count-table
+# columns of every metric built on them. Games come first on each side.
+COUNT_COLUMNS = ("play_games", "play_wins", "draw_games", "draw_wins")
+TALLY_COUNT = len(COUNT_COLUMNS)
+
+_PLAY_GAMES, _PLAY_WINS, _DRAW_GAMES, _DRAW_WINS = range(TALLY_COUNT)
 
 
-@dataclass(frozen=True)
-class OnPlayWinCounts:
-    """Games and wins on each side of on_play, for one card or deck.
+def on_play_row_masks(
+    won: npt.NDArray[np.bool_], on_play: npt.NDArray[np.bool_]
+) -> npt.NDArray[np.bool_]:
+    """Which rows count toward each tally, in COUNT_COLUMNS order.
 
-    play_games, play_wins: games on the play, and how many were won.
-    draw_games, draw_wins: the same, on the draw.
+    Inputs: won, on_play (shape (rows,)).
+    Output: shape (TALLY_COUNT, rows): play_games, play_wins,
+        draw_games, draw_wins.
+    Side effects: none. Exceptions: none.
+
+    Example:
+        >>> masks = on_play_row_masks(chunk.won, chunk.on_play)
+        >>> masks.astype(np.int64) @ deck.present()  # per-column tallies
     """
+    on_draw = ~on_play
+    return np.stack([on_play, on_play & won, on_draw, on_draw & won])
 
-    play_games: int
-    play_wins: int
-    draw_games: int
-    draw_wins: int
 
-    @staticmethod
-    def row_masks(
-        won: npt.NDArray[np.bool_], on_play: npt.NDArray[np.bool_]
-    ) -> npt.NDArray[np.bool_]:
-        """Which rows count toward each tally, in field order.
+def has_on_play_games(tallies: npt.NDArray[np.generic]) -> bool:
+    """Whether one subject's tallies hold a game on either side.
 
-        Inputs: won, on_play (shape (rows,)).
-        Output: shape (TALLY_COUNT, rows): play_games, play_wins,
-            draw_games, draw_wins.
-        Side effects: none. Exceptions: none.
+    Inputs: tallies, shape (TALLY_COUNT,), in COUNT_COLUMNS order.
+    Output: bool.
+    Side effects: none. Exceptions: none.
 
-        Example:
-            >>> masks = OnPlayWinCounts.row_masks(chunk.won, chunk.on_play)
-            >>> masks.astype(np.int64) @ deck.present()  # per-column tallies
-        """
-        on_draw = ~on_play
-        return np.stack([on_play, on_play & won, on_draw, on_draw & won])
+    Example:
+        >>> has_on_play_games(np.array([0, 0, 1, 0]))
+        True
+    """
+    return bool(tallies[_PLAY_GAMES] + tallies[_DRAW_GAMES] > 0)
 
-    @classmethod
-    def from_tallies(cls, tallies: npt.NDArray[np.int64]) -> "OnPlayWinCounts":
-        """Counts from a (TALLY_COUNT,) tally vector in row_masks()
-        order (Factory Method).
 
-        Inputs: tallies. Output: OnPlayWinCounts.
-        Side effects: none.
-        Exceptions: ValueError if tallies' shape is not (TALLY_COUNT,).
+def on_play_delta_output(
+    summed: pa.Table, key_columns: tuple[str, ...], label_column: str
+) -> pa.Table:
+    """The finished table for a count table holding COUNT_COLUMNS:
+    P(won | on_play) - P(won | on_draw) per key.
 
-        Example:
-            >>> OnPlayWinCounts.from_tallies(np.array([2, 2, 1, 0]))
-            OnPlayWinCounts(play_games=2, play_wins=2, draw_games=1, draw_wins=0)
-        """
-        if tallies.shape != (TALLY_COUNT,):
-            raise ValueError(f"expected {TALLY_COUNT} tallies, got {tallies.shape}")
-        play_games, play_wins, draw_games, draw_wins = (int(t) for t in tallies)
-        return cls(play_games, play_wins, draw_games, draw_wins)
+    Inputs: summed (key_columns + COUNT_COLUMNS, summed per key),
+        key_columns, label_column.
+    Output: key_columns + label_column (float64; null where either side
+        has no games, never guessed) + sample_count (play_games +
+        draw_games, int64), one row per key with at least one game.
+    Side effects: none.
+    Exceptions: KeyError if a count column is missing from summed.
 
-    def game_count(self) -> int:
-        """Games on either side.
+    Example:
+        >>> on_play_delta_output(summed, ("nocab_uuid",), "on_play_win_rate_delta")
+    """
+    play_games, play_wins, draw_games, draw_wins = (
+        summed.column(name).to_numpy().astype(np.float64) for name in COUNT_COLUMNS
+    )
+    game_count = play_games + draw_games
+    kept = game_count > 0
 
-        Inputs: none. Output: int. Side effects: none. Exceptions: none.
+    # Each side's rate, then the delta; null where a side has no games
+    both_sides = (play_games > 0) & (draw_games > 0)
+    delta = np.full(len(game_count), np.nan)
+    np.divide(play_wins, play_games, out=delta, where=both_sides)
+    delta[both_sides] -= draw_wins[both_sides] / draw_games[both_sides]
 
-        Example:
-            >>> OnPlayWinCounts(2, 2, 1, 0).game_count()
-            3
-        """
-        return self.play_games + self.draw_games
-
-    def win_rate_delta(self) -> float | None:
-        """P(won | on_play) - P(won | on_draw), or None when either side
-        has no games (undefined, not guessed). Computed as the row
-        implementation did: each side's wins / games, then subtracted.
-
-        Inputs: none. Output: float or None.
-        Side effects: none. Exceptions: none.
-
-        Example:
-            >>> OnPlayWinCounts(2, 2, 1, 0).win_rate_delta()
-            1.0
-        """
-        if self.play_games == 0 or self.draw_games == 0:
-            return None
-        return self.play_wins / self.play_games - self.draw_wins / self.draw_games
+    result = summed.select(list(key_columns)).filter(pa.array(kept))
+    result = result.append_column(
+        label_column,
+        pa.array(delta[kept], pa.float64(), mask=~both_sides[kept]),
+    )
+    return result.append_column(
+        "sample_count", pa.array(np.rint(game_count[kept]).astype(np.int64))
+    )

@@ -32,11 +32,16 @@ class ModPipeline:
             >>> ModPipeline([ShuffleKeysMod()]).mod_tallies()
             {'0:ShuffleKeysMod': ModTally(cards_seen=0, ...)}
         """
-        return {
-            f"{position}:{type(mod).__name__}": mod.tally
-            for position, mod in enumerate(self.mods)
-            if mod.tally is not None
-        }
+        result: dict[str, ModTally] = {}
+        for position, mod in enumerate(self.mods):
+            key = f"{position}:{type(mod).__name__}"
+            if mod.tally is not None:
+                result[key] = mod.tally
+
+            # A mod holding other mods reports theirs under its own key
+            for child_key, child_tally in mod.child_tallies().items():
+                result[f"{key}/{child_key}"] = child_tally
+        return result
 
     def apply_single(
         self, data: TrainingDatum, is_training: bool = True

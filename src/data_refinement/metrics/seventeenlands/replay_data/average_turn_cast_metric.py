@@ -1,157 +1,62 @@
-"""AverageTurnCastMetric - BRAINSTORM.md's "Average Turn Cast": for a
-card, the average turn number it's cast on, across every
-game it's cast in at all.
+"""AverageTurnCastMetric - BRAINSTORM.md's "Average Turn Cast": per card,
+the average turn number it is cast on, over every occurrence in
+creatures_cast or non_creatures_cast, either actor, no deck condition.
 
-Standalone - NOT a ReplayTurnEventRateMetric. Its per-occurrence value
-is the turn number itself, not a hit/miss boolean, so it needs its own
-(turn_sum, occurrence_count) running tally per card rather than
-(hit_count, total_count). Both sides' occurrences count - no deck-
-membership conditioning needed (a card cast by either player is valid
-signal here, unlike CastRateMetric's user-deck-only conditioning).
+A CodeCountTableMetric (code_count_table_metric.py): partitions hold
+(count, turn_sum) per card; the average is taken when a slice is built.
+Every matched entry counts, so two copies cast in one half-turn count
+twice, as the row implementation did.
 """
 
-from pathlib import Path
-from typing import ClassVar, Iterable
-from uuid import UUID
+from typing import ClassVar
 
-import pandas as pd
+import pyarrow as pa
 
-from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.metrics.seventeenlands.replay_data.replay_card_columns import (
-    ReplayCardColumns,
+from src.data_refinement.metrics.seventeenlands.count_table import ratio_output
+from src.data_refinement.metrics.seventeenlands.replay_data.code_count_table_metric import (
+    CodeCountTableMetric,
 )
-from src.data_refinement.metrics.version_metadata import (
-    MetricVersionMetadata,
-    write_dataframe_with_version_metadata,
-)
-from src.schema.game_id import GameId
-
-_DEFAULT_OUTPUT_PATH = Path(
-    "data/metrics/seventeenlands/replay_data/average_turn_cast.parquet"
+from src.data_refinement.metrics.seventeenlands.replay_data.replay_data_chunk import (
+    CAST_FIELDS,
+    ReplayDataChunk,
 )
 
+COUNT_COLUMN = "count"
+TURN_SUM_COLUMN = "turn_sum"
 
-class AverageTurnCastMetric:
-    """Card -> average turn number cast on, across every (actor, turn)
-    occurrence in every game scanned.
 
-    Satisfies the Metric[dict] Protocol (../../metric.py) structurally.
-    """
+class AverageTurnCastMetric(CodeCountTableMetric):
+    """Card -> average turn number it is cast on."""
 
-    DEFAULT_OUTPUT_PATH: ClassVar[Path] = _DEFAULT_OUTPUT_PATH
+    OUTPUT_STEM: ClassVar[str] = "average_turn_cast"
+    LABEL_COLUMN: ClassVar[str] = "average_turn_cast"
+    COUNT_COLUMNS: ClassVar[tuple[str, ...]] = (COUNT_COLUMN, TURN_SUM_COLUMN)
 
-    def __init__(
-        self,
-        card_binder: CardBinder,
-        header: Iterable[str],
-        source_game: GameId,
-        output_path: Path | None = None,
-    ) -> None:
-        """
-        Inputs:
-            card_binder: registry to match this CSV's per-turn
-                creatures_cast/non_creatures_cast Arena-ID cells
-                against - assumed already fully populated for
-                source_game. Never queried directly by this class -
-                only through the ReplayCardColumns this constructor
-                builds from it.
-            header: this CSV's column names (e.g.
-                pandas.read_csv(path, nrows=0).columns) - parsed once,
-                here, into this instance's own ReplayCardColumns.
-            source_game: which game's cards header names are matched
-                against.
-            output_path: overrides DEFAULT_OUTPUT_PATH when given.
-        Output: none (constructor).
-        Side effects: none beyond building this instance's own
-            ReplayCardColumns from card_binder/header.
-        Exceptions: none.
-        """
-        self._replay_columns = ReplayCardColumns.from_header(
-            header, card_binder, source_game
-        )
-        self._version_metadata = MetricVersionMetadata(
-            game=source_game, card_binder_version=card_binder.version_for(source_game)
-        )
-        self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
-        self._turn_sum: dict[UUID, int] = {}
-        self._occurrence_count: dict[UUID, int] = {}
+    @classmethod
+    def output_from_counts(
+        cls, summed: pa.Table, baseline: pa.Table | None
+    ) -> pa.Table:
+        """See CountTableMetric.output_from_counts(): turn_sum / count,
+        with count as sample_count.
 
-    def accumulate(self, row: dict) -> None:
-        """Tally every (actor, turn) cast occurrence's turn number
-        toward this metric's running per-card state.
-
-        Inputs:
-            row: one replay_data CSV row, dict-like - see
-                ../scanner.py's module docstring.
-        Output: none.
-        Side effects: for each actor in ("user", "oppo"), for each turn
-            in that actor's own turn-number range, matches every card
-            in that half-turn's creatures_cast union
-            non_creatures_cast and updates self._turn_sum/
-            self._occurrence_count in place, once per occurrence.
-        Exceptions: implementation-defined (expected: none for a
-            well-formed row).
+        Inputs: summed (nocab_uuid, count, turn_sum), baseline (None).
+        Output: nocab_uuid, average_turn_cast, sample_count.
+        Side effects: none. Exceptions: none.
 
         Example:
-            >>> metric = AverageTurnCastMetric(card_binder, header, GameId.MTG)
-            >>> metric.accumulate(row)
-            >>> metric.finalize()
+            >>> AverageTurnCastMetric.output_from_counts(summed, None)
         """
-        for actor in ReplayCardColumns.ACTORS:
-            turn_numbers = (
-                self._replay_columns.user_turn_numbers
-                if actor == "user"
-                else self._replay_columns.oppo_turn_numbers
-            )
-            for turn in turn_numbers:
-                for card_uuid in self._replay_columns.cast_uuids_for_turn(
-                    row, actor, turn
-                ):
-                    self._turn_sum[card_uuid] = self._turn_sum.get(card_uuid, 0) + turn
-                    self._occurrence_count[card_uuid] = (
-                        self._occurrence_count.get(card_uuid, 0) + 1
-                    )
-
-    def finalize(self) -> Path:
-        """Compute every seen card's average cast turn and write one
-        row per card to self._output_path.
-
-        Inputs: none (uses accumulated state).
-        Output: self._output_path.
-        Side effects: creates self._output_path's parent directories if
-            missing; writes self._output_path (a parquet file with
-            columns nocab_uuid: str, average_turn_cast: float,
-            sample_count: int).
-        Exceptions: whatever pyarrow.parquet.write_table raises.
-
-        Example:
-            >>> metric.finalize()
-            PosixPath('data/metrics/seventeenlands/replay_data/average_turn_cast.parquet')
-        """
-        result = [self._cast_row(card_uuid) for card_uuid in self._occurrence_count]
-
-        write_dataframe_with_version_metadata(
-            pd.DataFrame(result), self._output_path, self._version_metadata
+        return ratio_output(
+            summed, cls.KEY_COLUMNS, TURN_SUM_COLUMN, COUNT_COLUMN, cls.LABEL_COLUMN
         )
-        return self._output_path
 
-    def _cast_row(self, card_uuid: UUID) -> dict:
-        """Build one output row for a single already-tallied card.
+    def _tally(self, chunk: ReplayDataChunk) -> None:
+        """See CodeCountTableMetric._tally(): every matched cast entry,
+        counted and summed by turn.
 
-        Private helper - single consumer is finalize().
-
-        Inputs:
-            card_uuid: a key already present in self._occurrence_count.
-        Output: a dict with keys "nocab_uuid" (str), "average_turn_cast"
-            (float, self._turn_sum[card_uuid] /
-            self._occurrence_count[card_uuid]), "sample_count" (int,
-            self._occurrence_count[card_uuid]).
-        Side effects: none.
-        Exceptions: none.
+        Inputs: chunk. Output: none.
+        Side effects: adds to the tallies. Exceptions: none.
         """
-        count = self._occurrence_count[card_uuid]
-        return {
-            "nocab_uuid": str(card_uuid),
-            "average_turn_cast": self._turn_sum[card_uuid] / count,
-            "sample_count": count,
-        }
+        cast = chunk.events_for(CAST_FIELDS).matched()
+        self._tallies.add(0, cast.codes)
+        self._tallies.add(1, cast.codes, cast.turns)
