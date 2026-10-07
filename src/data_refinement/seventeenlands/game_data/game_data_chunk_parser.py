@@ -3,8 +3,7 @@ column names: built once per CSV from its header and the CardBinder,
 then turns each pyarrow RecordBatch into a GameDataChunk.
 
 Card-name matching is delegated to GameCardColumns.from_header()
-(game_card_columns.py), so which header columns match which card is
-identical to the row implementation. Each row's deck is identified by
+(game_card_columns.py). Each row's deck is identified by
 build_chunk_decks() (chunk_decks.py). The scanner never sees the
 binder; the driver builds this parser and hands it to scan_game_csv().
 
@@ -46,8 +45,8 @@ from src.schema.game_id import GameId
 
 # Every scalar column a GameDataChunk carries, with its read type. A
 # string column reads an empty cell as "" (pyarrow's default), never as
-# null, so an unranked event's rank is "" (and an empty draft_id would
-# pass through as "", as it did when the row metrics read it). A header
+# null, so an unranked event's rank is "" (and an empty draft_id reads
+# as ""). A header
 # missing a required scalar fails the whole CSV rather than one metric;
 # an optional one (_OPTIONAL_SCALAR_DEFAULTS) reads as its default.
 _SCALAR_TYPES: Mapping[str, pa.DataType] = {
@@ -109,8 +108,8 @@ class GameDataChunkParser:
         """Match one CSV's header against card_binder (Factory Method).
 
         Inputs:
-            header: the CSV's column names (e.g. pd.read_csv(path,
-                nrows=0).columns).
+            header: the CSV's column names (e.g.
+                csv_header.read_csv_header(path)).
             card_binder: populated for source_game; read only here.
             source_game: whose cards the column suffixes name.
         Output: a GameDataChunkParser.
@@ -125,8 +124,8 @@ class GameDataChunkParser:
         # Validate inputs: every scalar the chunk carries must exist
         _require_scalar_columns(header)
 
-        # Reuse the row implementation's matching, so column -> card is
-        # identical, then regroup its per-zone lists by GameZone
+        # Match every card column, then regroup the per-prefix lists by
+        # GameZone
         game_columns = GameCardColumns.from_header(header, card_binder, source_game)
         zone_columns = _group_zone_columns(game_columns)
         deck_identity_columns = _deck_identity_columns(

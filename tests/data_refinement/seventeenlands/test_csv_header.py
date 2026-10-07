@@ -25,5 +25,13 @@ def test_an_empty_csv_has_no_header(tmp_path: Path) -> None:
     csv_path = tmp_path / "KTK.TradDraft.csv"
     csv_path.write_text("", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="empty"):
+    with pytest.raises(ValueError, match="no header"):
+        read_csv_header(csv_path)
+
+
+def test_a_blank_first_line_has_no_header(tmp_path: Path) -> None:
+    csv_path = tmp_path / "KTK.TradDraft.csv"
+    csv_path.write_text("\na,b\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="no header"):
         read_csv_header(csv_path)

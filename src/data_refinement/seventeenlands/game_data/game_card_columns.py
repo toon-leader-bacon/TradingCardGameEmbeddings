@@ -81,7 +81,7 @@ class GameCardColumns:
 
         Inputs:
             columns: a game_data CSV's column names (e.g.
-                pandas.read_csv(path, nrows=0).columns) - only
+                csv_header.read_csv_header(path)) - only
                 "opening_hand_<name>"/"drawn_<name>"/"tutored_<name>"/
                 "deck_<name>"/"sideboard_<name>"-prefixed entries are
                 inspected, every other column name (expansion,
@@ -102,7 +102,7 @@ class GameCardColumns:
         Exceptions: none expected.
 
         Example:
-            >>> header = pd.read_csv(raw_csv_path, nrows=0).columns
+            >>> header = read_csv_header(raw_csv_path)
             >>> GameCardColumns.from_header(header, card_binder, GameId.MTG)
         """
         game_columns = GameCardColumns(card_binder, source_game)

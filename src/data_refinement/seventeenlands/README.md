@@ -18,6 +18,9 @@ imports `deck_box/` or `metrics/`.
 - `batch_columns.py` - typed numpy columns from a pyarrow batch:
   `read_column`, `raise_on_null`, and `read_zone_counts` (card counts
   read as float32, since some exports write `1.0`, and narrowed to int16).
+- `csv_header.py` - `read_csv_header(path)`: a CSV's column names from
+  its first line, without reading the rest; `scripts/run_metrics.py`
+  and the game_data extraction stage build their parsers from it.
 - `chunk_decks.py` - `GameKeys` (each row's `draft_id`, `match_number`,
   `game_number`), `ChunkDecks` (every distinct deck in a chunk, in order
   of first row, plus `row_deck`, each row's index into them) and
@@ -69,14 +72,16 @@ Nothing here runs on its own; the parser is driven by
 To parse one batch by hand (ROCm venv, project root):
 
 ```python
+from pathlib import Path
 import pyarrow.csv as pa_csv
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.seventeenlands.csv_header import read_csv_header
 from src.data_refinement.seventeenlands.game_data.game_data_chunk_parser import GameDataChunkParser
 from src.schema.game_id import GameId
 
-path = "data/raw/17lands/game_data/KTK.TradSealed.csv"
+path = Path("data/raw/17lands/game_data/KTK.TradSealed.csv")
 binder = CardBinder.load([CardBinder.default_output_path(GameId.MTG)])
-parser = GameDataChunkParser.from_header(pa_csv.open_csv(path).schema.names, binder, GameId.MTG)
+parser = GameDataChunkParser.from_header(read_csv_header(path), binder, GameId.MTG)
 reader = pa_csv.open_csv(path, convert_options=pa_csv.ConvertOptions(
     include_columns=parser.needed_columns(), column_types=parser.column_types()))
 chunk = parser.parse(reader.read_next_batch())

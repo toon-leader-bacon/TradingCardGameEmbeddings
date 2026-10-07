@@ -10,7 +10,8 @@ def read_csv_header(csv_path: Path) -> tuple[str, ...]:
 
     Inputs: csv_path. Output: the column names, in file order.
     Side effects: reads csv_path's first line; the file is closed after.
-    Exceptions: OSError reading csv_path; ValueError if it is empty.
+    Exceptions: OSError reading csv_path; csv.Error on a malformed first
+        line; ValueError if the file or its first line is empty.
 
     Example:
         >>> read_csv_header(Path("data/raw/17lands/game_data/KTK.TradSealed.csv"))[:2]
@@ -19,6 +20,6 @@ def read_csv_header(csv_path: Path) -> tuple[str, ...]:
     # utf-8-sig drops a byte-order mark, as pyarrow's reader does
     with csv_path.open(newline="", encoding="utf-8-sig") as raw_csv:
         header = next(csv.reader(raw_csv), None)
-    if header is None:
-        raise ValueError(f"{csv_path} is empty")
+    if not header:
+        raise ValueError(f"{csv_path} has no header line")
     return tuple(header)

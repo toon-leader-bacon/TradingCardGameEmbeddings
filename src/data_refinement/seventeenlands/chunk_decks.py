@@ -12,15 +12,11 @@ copies of that column's card_uuid, in header order, so two rows that
 differ only in copy counts hash to different deck ids. The canonical
 MTG DeckBox (deck_box/seventeenlands_game_data/extraction_stage.py)
 stores exactly these decks, so the ids agree by construction. Rows are
-grouped by that per-column count pattern first (not merely which
-columns are present - see _group_rows_by_pattern()'s own docstring for
-why presence alone is no longer a safe coarsening), so each pattern is
-hashed with deck_ids.deck_uuid_from_cards() once per chunk, not once
-per row per metric. Two patterns can hash to one deck (two header
-columns naming one card, or - now that grouping is by count - any
-other coincidence that still produces the same multiset), so patterns
-are then merged by deck id, keeping the earliest row's deck.
-
+grouped by their full per-column count pattern first, so each pattern
+is hashed with deck_ids.deck_uuid_from_cards() once per chunk, not once
+per row per metric. Two patterns can still hash to one deck (two header
+columns naming one card), so patterns are then merged by deck id,
+keeping the earliest row's deck.
 """
 
 from dataclasses import dataclass
@@ -141,14 +137,10 @@ def _group_rows_by_pattern(
 ) -> tuple[npt.NDArray[np.intp], npt.NDArray[np.intp]]:
     """Group counts's rows by identical per-column copy-count pattern.
 
-    Grouping by mere column PRESENCE (count > 0) is no longer a safe
-    coarsening now that a row's deck is the full copy-count multiset
-    (see module docstring): two rows can share a present-column pattern
-    while differing in copy counts (e.g. one copy of a card vs. two),
-    and those hash to different deck ids. Grouping by the full count
-    pattern instead keeps every row that pre-groups together on a path
-    to the SAME hash, so no two rows with different multisets are ever
-    merged before _merge_by_deck_id() runs.
+    A row's deck is its full copy-count multiset, so rows sharing which
+    columns are present can still be different decks (one copy of a
+    card vs. two); grouping by the full count pattern never puts two
+    different multisets in one group before _merge_by_deck_id() runs.
 
     Inputs: counts, shape (rows, columns).
     Output: (first_rows, row_group): first_rows[g] is group g's first
