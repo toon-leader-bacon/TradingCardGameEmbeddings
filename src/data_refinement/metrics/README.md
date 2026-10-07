@@ -126,6 +126,10 @@ implementation yet). Implemented today:
   card names against `dominiontabs`' `CardBinder`; this project's
   second `DeckCardMaskMetric` consumer, after `play_gwent/`. See
   [`isotropic/summary/README.md`](isotropic/summary/README.md).
+- **`cross_game/`** - metrics whose rows span games. `rarity/` labels
+  every card of six games with a shared four-step `RarityTier`, written
+  as one parquet stamped with a binder version per game. See
+  [`cross_game/README.md`](cross_game/README.md).
 - **`final_decks/`** - one `HeldOutDeckCardMetric` per published deck
   box (Pokemon, FaB, Gwent, Dominion, StS2, MTG), reading
   `data/final/decks/<game>.db` directly. See

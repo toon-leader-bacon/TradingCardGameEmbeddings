@@ -137,6 +137,14 @@ from src.data_refinement.metrics.sts2_runs.scanner import (
     scan_sts2_runs,
 )
 
+# --- cross_game ---
+from src.data_refinement.metrics.cross_game.rarity.rarity_tier_metric import (
+    RarityTierMetric,
+)
+from src.data_refinement.metrics.cross_game.rarity.translator_tables import (
+    RARITY_TRANSLATORS,
+)
+
 # --- gwent_one ---
 from src.data_refinement.metrics.gwent_one.armor_mask_metric import ArmorMaskMetric
 from src.data_refinement.metrics.gwent_one.color_mask_metric import ColorMaskMetric
@@ -150,6 +158,32 @@ from src.data_refinement.metrics.gwent_one.provision_mask_metric import (
 from src.data_refinement.metrics.gwent_one.rarity_mask_metric import RarityMaskMetric
 from src.data_refinement.metrics.gwent_one.set_mask_metric import SetMaskMetric
 from src.data_refinement.metrics.gwent_one.type_mask_metric import TypeMaskMetric
+
+# --- cross_game ---
+
+
+def run_cross_game(raw_path: Path | None) -> None:
+    """Label every translated game's cards with a RarityTier.
+
+    Inputs: raw_path (must be None). Output: none.
+    Side effects: loads every translated game's binder into one
+        CardBinder; writes RarityTierMetric.DEFAULT_OUTPUT_PATH. A scan()
+        failure (such as UnmappedRarityError) is logged by
+        _scan_corpus_metrics, not raised.
+    Exceptions: SystemExit if raw_path is given or a game's binder file
+        is missing.
+    """
+    _reject_raw_path("cross_game", raw_path)
+
+    # One binder loaded from each translated game's file
+    paths = [CardBinder.default_output_path(game) for game in RARITY_TRANSLATORS]
+    missing = [path for path in paths if not path.exists()]
+    if missing:
+        raise SystemExit(f"missing card binder file(s) {missing}; ingest those first.")
+    binder = CardBinder.load(paths)
+
+    _scan_corpus_metrics("cross_game", [RarityTierMetric(binder)])
+
 
 # --- dominiontabs ---
 from src.data_refinement.metrics.dominiontabs.cost_regression_metric import (
@@ -1431,6 +1465,7 @@ def run_final_decks(name: str, raw_path: Path | None) -> None:
 _FAMILIES: dict[str, Callable[[Path | None], None]] = {
     "sts_gg": run_sts_gg,
     "sts2_runs": run_sts2_runs,
+    "cross_game": run_cross_game,
     "gwent_one": run_gwent_one,
     "dominiontabs": run_dominiontabs,
     "play_gwent": run_play_gwent,

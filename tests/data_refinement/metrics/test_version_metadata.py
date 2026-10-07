@@ -1,14 +1,19 @@
 from pathlib import Path
 
+import pytest
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
+    MultiGameVersionMetadata,
     metadata_from_schema,
+    multi_game_versions_from_schema,
     read_version_metadata,
+    schema_with_multi_game_versions,
     schema_with_version_metadata,
+    write_dataframe_with_multi_game_versions,
     write_dataframe_with_version_metadata,
 )
 from src.schema.game_id import GameId
@@ -120,3 +125,58 @@ class TestWriteDataframeWithVersionMetadata:
         )
 
         assert len(pd.read_parquet(path)) == 3
+
+
+class TestMultiGameVersions:
+    def test_round_trips_through_a_schema(self) -> None:
+        metadata = MultiGameVersionMetadata({GameId.GWENT: "v1", GameId.MTG: "v2"})
+
+        schema = schema_with_multi_game_versions(_SCHEMA, metadata)
+
+        assert multi_game_versions_from_schema(schema) == metadata
+
+    def test_a_single_game_file_has_none(self) -> None:
+        single = schema_with_version_metadata(
+            _SCHEMA, MetricVersionMetadata(GameId.GWENT, "v1")
+        )
+
+        assert multi_game_versions_from_schema(single) is None
+        assert multi_game_versions_from_schema(_SCHEMA) is None
+
+    @pytest.mark.parametrize(
+        "stored", [b"not json", b'["a"]', b'{"gwent": 3}', b'{"no_such_game": "v"}']
+    )
+    def test_a_bad_stored_value_raises_value_error(self, stored: bytes) -> None:
+        schema = _SCHEMA.with_metadata({b"card_binder_versions": stored})
+
+        with pytest.raises(ValueError, match="card_binder_versions"):
+            multi_game_versions_from_schema(schema)
+
+    def test_the_dataframe_writer_embeds_the_versions(self, tmp_path: Path) -> None:
+        path = tmp_path / "out" / "x.parquet"
+        metadata = MultiGameVersionMetadata({GameId.GWENT: "v1"})
+
+        write_dataframe_with_multi_game_versions(
+            pd.DataFrame({"nocab_uuid": ["a"]}), path, metadata
+        )
+
+        schema = pq.ParquetFile(path).schema_arrow
+        assert multi_game_versions_from_schema(schema) == metadata
+
+    def test_does_not_disturb_single_game_metadata(self) -> None:
+        single = MetricVersionMetadata(GameId.GWENT, "v1")
+        schema = schema_with_version_metadata(_SCHEMA, single)
+
+        stamped = schema_with_multi_game_versions(
+            schema, MultiGameVersionMetadata({GameId.MTG: "v2"})
+        )
+
+        assert metadata_from_schema(stamped) == single
+
+    def test_the_stored_mapping_is_a_copy(self) -> None:
+        versions = {GameId.GWENT: "v1"}
+        metadata = MultiGameVersionMetadata(versions)
+
+        versions[GameId.MTG] = "v2"
+
+        assert dict(metadata.card_binder_versions) == {GameId.GWENT: "v1"}

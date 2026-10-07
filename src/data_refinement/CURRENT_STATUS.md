@@ -70,6 +70,10 @@ Cross-source:
   box (Pokemon, FaB, Gwent, Dominion, StS2, MTG): pick the held-out
   card from 8 candidates. 6 keys, outputs on disk. Splits are by deck, so
   a deck's several held-out rows never straddle TRAIN and TEST.
+- **`cross_game` rarity tier:** `RarityTierMetric` labels MTG,
+  Hearthstone, Gwent, FaB and StS2 cards on a shared four-step ladder
+  (Pokemon follows once its binder stores rarity; Dominion has none). One
+  parquet for all games; the dojo and catalog key are not built yet.
 - **`contrastive`:** one deck-contrastive key per deck-box game. 6 keys,
   no metric needed.
 
