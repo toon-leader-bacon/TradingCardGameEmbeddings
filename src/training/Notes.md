@@ -292,9 +292,11 @@ MTGO, 29,544 Gatherer, 11,862 Arena entries.
    worth confirming each consumer does.
 5. **Docstring is stale:** it cites `oracle-cards-20260820090157.jsonl`;
    the file on disk is `oracle-cards-20260912210156.jsonl`.
-6. Oracle-level vs printing-level: because the dump keeps one arbitrary
-   printing per card, MTG `set`/`rarity` describe that printing. Do not build
-   a set- or rarity-mask dojo on MTG expecting oracle-level meaning.
+6. Oracle-level vs printing-level: the oracle-cards dump keeps one
+   arbitrary printing per card, so MTG `set` describes that printing. MTG
+   `rarity` is the lowest rarity across the card's printings (from the
+   default-cards dump); do not build a set-mask dojo expecting oracle-level
+   meaning.
 
 ## 9. Encoder wiring (section B: max_length, model_kwargs, length bucketing)
 

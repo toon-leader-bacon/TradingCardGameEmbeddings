@@ -48,12 +48,19 @@ Confirmed by sampling data/raw/pokemon_tcg/cards/*.json directly
     printings share the same dex number, and an alias key has no
     defined multi-owner behavior.
 
+RARITY: rarity differs between the prints of one (name, set) identity, so
+the stored "rarity" is the LOWEST rarity across the identity's prints, by
+_RARITY_BY_RESTRICTIVENESS (the same rule as cardvault_fabtcg's stage). A
+card none of whose prints has a rarity stores none. ingest() reads the set
+files once to collect these before it ingests.
+
 LEAN CONTENT: raw_content is not the raw row (see _lean_card_content and
 "What goes in raw_content" in card_binder/README.md). Dropped: id, number,
-artist, flavorText, rarity, images (printing-level; rarity and art differ
-between reprints in the same set), nationalPokedexNumbers (a species id),
-legalities (rotates; regulationMark carries the same signal), retreatCost (always a list of
-"Colorless", so it only repeats convertedRetreatCost), and each attack's
+artist, flavorText, images, and each row's own rarity (replaced by the lowest
+print rarity above; art differs between reprints in the same set),
+nationalPokedexNumbers (a species id), legalities (rotates; regulationMark
+carries the same signal), retreatCost (always a list of "Colorless", so it
+only repeats convertedRetreatCost), and each attack's
 convertedEnergyCost (equals len(cost)). Kept: evolvesFrom AND evolvesTo,
 the evolution links. They name other cards, but they are card-level
 information that the card's own other fields do not give (whether a Basic
@@ -72,7 +79,7 @@ URL lengths.
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Iterable
 from uuid import UUID, uuid4
 
 from tqdm import tqdm
@@ -87,6 +94,58 @@ from src.data_refinement.card_binder.lean_content import (
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
+
+# From least to most restrictive: how hard a card at that rarity is to get.
+# A judgment call about Pokemon (edit here if it is wrong): the booster
+# rarities, then the special-art and chase treatments, then reprint-set and
+# promo labels. A rarity not listed (a future one) ranks after every listed
+# one.
+_RARITY_BY_RESTRICTIVENESS = (
+    "Common",
+    "Uncommon",
+    "Rare",
+    "Rare Holo",
+    "Rare Holo EX",
+    "Rare Holo GX",
+    "Rare Holo V",
+    "Rare Holo VMAX",
+    "Rare Holo VSTAR",
+    "Rare Holo ex",
+    "Rare Holo LV.X",
+    "Rare BREAK",
+    "Rare Prime",
+    "Rare Prism Star",
+    "Rare Holo Star",
+    "Rare Shining",
+    "Rare Shiny",
+    "Rare Shiny GX",
+    "Shiny Rare",
+    "Shiny Ultra Rare",
+    "Rare ACE",
+    "ACE SPEC Rare",
+    "LEGEND",
+    "Amazing Rare",
+    "Radiant Rare",
+    "Double Rare",
+    "Rare Ultra",
+    "Ultra Rare",
+    "Illustration Rare",
+    "Trainer Gallery Rare Holo",
+    "Rare Rainbow",
+    "Rare Secret",
+    "Hyper Rare",
+    "Special Illustration Rare",
+    "Mega Hyper Rare",
+    "MEGA_ATTACK_RARE",
+    "Futuristic Rare",
+    "Black White Rare",
+    "Holo Rare V",
+    "Holo Rare VMAX",
+    "Holo Rare VSTAR",
+    "Classic Collection",
+    "Pikachu Rare",
+    "Promo",
+)
 
 # Dropped wherever they appear (see the module docstring for why each).
 _PRINTING_AND_REDUNDANT_KEYS = frozenset(
@@ -113,6 +172,7 @@ _LEADING_KEYS = (
     "evolvesFrom",
     "evolvesTo",
     "set",
+    "rarity",
     "regulationMark",
     "weaknesses",
     "resistances",
@@ -180,16 +240,41 @@ class PokemonTcgCardIngestionStage:
             )
 
         changed_uuids = []
+        rarities = self._lowest_rarities(set_paths)
         for set_path in tqdm(set_paths, desc="pokemon_tcg ingest", unit="file"):
-            with open(set_path, "r", encoding="utf-8") as set_file:
-                rows = json.load(set_file)
-            for row in rows:
-                result = self._ingest_row(row, binder)
+            for row in _read_set_file(set_path):
+                identity = (row["name"], self._set_code(row["id"]))
+                result = self._ingest_row(row, binder, rarities.get(identity))
                 if result is not None:
                     changed_uuids.append(result)
         return changed_uuids
 
-    def _ingest_row(self, row: dict, binder: CardBinder) -> UUID | None:
+    def _lowest_rarities(self, set_paths: list[Path]) -> dict[tuple[str, str], str]:
+        """Each (name, set code) identity's lowest rarity over its prints.
+
+        Inputs: set_paths: the set .json files ingest() will read.
+        Output: dict (name, set code) -> rarity. An identity none of whose
+            prints has a rarity has no entry.
+        Side effects: reads every file in set_paths once.
+        Exceptions: raises if a file is not a JSON array of objects each
+            carrying "id" and "name".
+        """
+        rarities_by_identity: dict[tuple[str, str], str] = {}
+        for set_path in set_paths:
+            for row in _read_set_file(set_path):
+                rarity = row.get("rarity")
+                if not rarity:
+                    continue
+                identity = (row["name"], self._set_code(row["id"]))
+                known = rarities_by_identity.get(identity)
+                rarities_by_identity[identity] = _least_restrictive(
+                    [rarity] if known is None else [known, rarity]
+                )
+        return rarities_by_identity
+
+    def _ingest_row(
+        self, row: dict, binder: CardBinder, rarity: str | None
+    ) -> UUID | None:
         """Create-or-merge one pokemon-tcg-data row directly against binder.
 
         Private helper — single consumer is ingest(). THIS METHOD IS
@@ -221,6 +306,8 @@ class PokemonTcgCardIngestionStage:
             row: one parsed JSON object from a pokemon-tcg-data
                 cards/*.json file's array.
             binder: the CardBinder to read from and write to.
+            rarity: the lowest rarity over this row's (name, set) identity,
+                or None if none of its prints has one.
         Output: the stored/canonical nocab_uuid for this row IF this
             call caused a create() or an actual content-changing
             replace(); None if this row matched an existing card but
@@ -234,12 +321,12 @@ class PokemonTcgCardIngestionStage:
         existing = self._find_matching_printing(row["name"], set_code, binder)
 
         if existing is None:
-            card = self._build_card(row, printing_id)
+            card = self._build_card(row, printing_id, rarity)
             binder.create(card)
             stored_uuid = card.nocab_uuid
             changed = True
         else:
-            candidate = self._build_card(row, printing_id)
+            candidate = self._build_card(row, printing_id, rarity)
             merged = merge_strategies.keep_longer_content(existing, candidate)
             changed = merged != existing
             if changed:
@@ -300,7 +387,9 @@ class PokemonTcgCardIngestionStage:
         """
         return printing_id.rsplit("-", 1)[0]
 
-    def _build_card(self, row: dict, printing_id: str) -> GenericCard:
+    def _build_card(
+        self, row: dict, printing_id: str, rarity: str | None
+    ) -> GenericCard:
         """Build a fresh GenericCard for one pokemon-tcg-data row.
 
         Private helper — single consumer is _ingest_row(), from both
@@ -310,6 +399,7 @@ class PokemonTcgCardIngestionStage:
             row: one parsed JSON object from a pokemon-tcg-data
                 cards/*.json file's array.
             printing_id: row["id"], passed in rather than re-read.
+            rarity: the rarity to store, or None for none.
         Output: a new GenericCard with a freshly minted nocab_uuid and the
             row's lean content (see _lean_card_content) as raw_content.
         Side effects: none.
@@ -319,7 +409,7 @@ class PokemonTcgCardIngestionStage:
             nocab_uuid=uuid4(),
             source_game=self.SOURCE_GAME,
             name=row["name"],
-            raw_content=self._lean_card_content(row, printing_id),
+            raw_content=self._lean_card_content(row, printing_id, rarity),
             provenance=Provenance(
                 data_source=DataSource.POKEMON_TCG,
                 source_id=printing_id,
@@ -327,23 +417,64 @@ class PokemonTcgCardIngestionStage:
             ),
         )
 
-    def _lean_card_content(self, row: dict, printing_id: str) -> JsonObject:
+    def _lean_card_content(
+        self, row: dict, printing_id: str, rarity: str | None
+    ) -> JsonObject:
         """Reduce a pokemon-tcg-data row to what describes the card.
 
         Inputs:
             row: one parsed JSON object from a cards/*.json array.
             printing_id: row["id"], for the set code.
+            rarity: the rarity to store (None: store none).
         Output: a new JsonObject: the row without the printing-level and
-            redundant keys, plus "set" (the set code), identity first and
-            long text last.
+            redundant keys, plus "set" (the set code) and rarity, identity
+            first and long text last.
         Side effects: none.
         Exceptions: none.
 
         Example:
             >>> stage._lean_card_content({"id": "base4-1", "name": "Alakazam",
-            ...     "hp": "80", "rarity": "Rare"}, "base4-1")
-            {'name': 'Alakazam', 'hp': '80', 'set': 'base4'}
+            ...     "hp": "80", "rarity": "Rare Holo"}, "base4-1", "Rare")
+            {'name': 'Alakazam', 'hp': '80', 'set': 'base4', 'rarity': 'Rare'}
         """
         content = strip_noise(row, extra_noise_keys=_PRINTING_AND_REDUNDANT_KEYS)
         content["set"] = self._set_code(printing_id)
+        if rarity:
+            content["rarity"] = rarity
         return order_keys(content, _LEADING_KEYS, _TRAILING_KEYS)
+
+
+def _read_set_file(set_path: Path) -> list[dict]:
+    """The card objects of one set .json file (a JSON array).
+
+    Inputs: set_path: a pokemon-tcg-data per-set .json file.
+    Output: its parsed rows.
+    Side effects: reads set_path.
+    Exceptions: raises if the file is unreadable or not valid JSON.
+    """
+    with open(set_path, "r", encoding="utf-8") as set_file:
+        rows: list[dict] = json.load(set_file)
+    return rows
+
+
+def _least_restrictive(rarities: Iterable[str]) -> str:
+    """The rarity that is least restrictive (see _RARITY_BY_RESTRICTIVENESS).
+
+    Unlisted rarities rank after every listed one, ties between them break
+    alphabetically, so the result never depends on input order.
+
+    Inputs: rarities (Iterable[str]): at least one rarity.
+    Output: str. Side effects: none.
+    Exceptions: ValueError if rarities is empty.
+
+    Example:
+        >>> _least_restrictive(["Rare Holo", "Promo", "Rare"])
+        'Rare'
+    """
+
+    def restrictiveness(rarity: str) -> tuple[int, str]:
+        if rarity in _RARITY_BY_RESTRICTIVENESS:
+            return _RARITY_BY_RESTRICTIVENESS.index(rarity), rarity
+        return len(_RARITY_BY_RESTRICTIVENESS), rarity
+
+    return min(rarities, key=restrictiveness)

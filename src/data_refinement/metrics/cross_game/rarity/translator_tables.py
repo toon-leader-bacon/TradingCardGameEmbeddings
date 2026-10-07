@@ -6,8 +6,8 @@ Data, not logic: tuning a game's mapping is an edit here. Tier meaning
 SPECIAL is scarce but off the ladder; OTHER is not a rarity.
 
 Dominion has no rarity and no translator, so it gets no rows. Pokemon and
-MTG tables assume the binder stores a card's lowest-print rarity (the
-ingestion change in plans/cross_game_rarity.md, "Ingestion").
+MTG tables assume the binder stores a card's lowest-print rarity (see the
+ingestion stages in src/data_refinement/card_binder/).
 """
 
 from typing import Mapping

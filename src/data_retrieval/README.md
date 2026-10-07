@@ -32,7 +32,7 @@ One subdirectory per source:
 | `pitchstack/` | Flesh and Blood | pitchstack.gg deck ids and card lists (`pitchstack.md`: unimplemented endpoints) |
 | `play_gwent/` | Gwent | playgwent.com deck guides |
 | `pokemon_tcg/` | Pokemon | the pokemon-tcg-data repo's card and deck JSON |
-| `scryfall/` | MTG | a Scryfall oracle-cards bulk file |
+| `scryfall/` | MTG | Scryfall oracle-cards and default-cards (every printing) bulk files |
 | `seventeenlands/` | MTG | 17lands per-set/per-format draft, game and replay CSVs (own [README](seventeenlands/README.md)) |
 | `spire_codex/` | Slay the Spire 2 | spire-codex `cards.json` and its paginated run export |
 | `sts2runs/` | Slay the Spire 2 | a monthly sts2runs.com run snapshot |

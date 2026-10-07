@@ -71,13 +71,14 @@ Cross-source:
   box (Pokemon, FaB, Gwent, Dominion, StS2, MTG): pick the held-out
   card from 8 candidates. 6 keys, outputs on disk. Splits are by deck, so
   a deck's several held-out rows never straddle TRAIN and TEST.
-- **`cross_game` rarity tier:** `RarityTierMetric` labels MTG,
+- **`cross_game` rarity tier:** `RarityTierMetric` labels MTG, Pokemon,
   Hearthstone, Gwent, FaB and StS2 cards on a shared four-step ladder
-  (Pokemon follows once its binder stores rarity; Dominion has none). One
-  parquet for all games, trained by `RarityTierDojo` (key
+  (Dominion has none). One parquet for all games, regenerated 2026-10-07
+  against the re-ingested MTG and Pokemon binders (each stores its lowest
+  print rarity); trained by `RarityTierDojo` (key
   `cross_game.rarity_tier`, one head, TRAIN drawn evenly across games).
-  MTG's rarity is still one arbitrary printing's until the Scryfall
-  ingestion change (`plans/cross_game_rarity.md`).
+  The other MTG and Pokemon metrics, decks and splits still carry the old
+  binder versions and are stale until regenerated.
 - **`contrastive`:** one deck-contrastive key per deck-box game. 6 keys,
   no metric needed.
 

@@ -513,3 +513,75 @@ class TestExtractAliases:
         )
 
         assert aliases == []
+
+
+class TestLowestPrintingRarity:
+    def _ingest(
+        self, tmp_path: Path, oracle_rows: list[dict], printings: list[dict] | None
+    ) -> CardBinder:
+        oracle_path = tmp_path / "oracle-cards.jsonl"
+        _write_jsonl(oracle_path, oracle_rows)
+        printings_path = tmp_path / "default-cards.jsonl"
+        if printings is not None:
+            _write_jsonl(printings_path, printings)
+        stage = ScryfallCardIngestionStage(
+            find_printings_path=(lambda: printings_path) if printings else None
+        )
+        binder = CardBinder()
+        stage.ingest(oracle_path, binder)
+        return binder
+
+    def test_card_stores_its_lowest_printing_rarity(self, tmp_path: Path) -> None:
+        binder = self._ingest(
+            tmp_path,
+            [{"oracle_id": "o1", "name": "Bolt", "rarity": "uncommon"}],
+            [
+                {"oracle_id": "o1", "rarity": "uncommon"},
+                {"oracle_id": "o1", "rarity": "common"},
+                {"oracle_id": "o1", "rarity": "special"},
+            ],
+        )
+
+        card = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "o1")
+        assert card is not None
+        assert card.raw_content["rarity"] == "common"
+
+    def test_card_without_a_printing_keeps_the_oracle_rarity(
+        self, tmp_path: Path
+    ) -> None:
+        binder = self._ingest(
+            tmp_path,
+            [{"oracle_id": "o1", "name": "Bolt", "rarity": "rare"}],
+            [{"oracle_id": "other", "rarity": "common"}],
+        )
+
+        card = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "o1")
+        assert card is not None
+        assert card.raw_content["rarity"] == "rare"
+
+    def test_without_a_printings_file_the_oracle_rarity_is_kept(
+        self, tmp_path: Path
+    ) -> None:
+        binder = self._ingest(
+            tmp_path,
+            [{"oracle_id": "o1", "name": "Bolt", "rarity": "rare"}],
+            None,
+        )
+
+        card = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "o1")
+        assert card is not None
+        assert card.raw_content["rarity"] == "rare"
+
+    def test_printings_without_an_oracle_id_are_skipped(self, tmp_path: Path) -> None:
+        binder = self._ingest(
+            tmp_path,
+            [{"oracle_id": "o1", "name": "Bolt", "rarity": "rare"}],
+            [
+                {"name": "No Oracle Id", "rarity": "common"},
+                {"oracle_id": "o1", "rarity": "mythic"},
+            ],
+        )
+
+        card = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "o1")
+        assert card is not None
+        assert card.raw_content["rarity"] == "mythic"

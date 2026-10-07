@@ -54,16 +54,17 @@ Evaluation reads it with `MetricParquetLabels("rarity_tier", [path])`.
 
 ### Mapping
 
-Counts are from the live binders on 2026-10-07.
+Counts are from the live binders on 2026-10-07. A card whose
+binder entry has no rarity (295 Pokemon, 1 MTG) gets no row.
 
 | Game | TIER_1 | TIER_2 | TIER_3 | TIER_4 | SPECIAL | OTHER |
 | --- | --- | --- | --- | --- | --- | --- |
-| MTG | 11,102 | 10,421 | 10,836 | 2,279 | 72 | 0 |
+| MTG | 11,592 | 10,317 | 10,912 | 2,057 | 3 | 0 |
 | Hearthstone | 2,448 | 1,714 | 1,011 | 1,014 | 0 | 0 |
 | Gwent | 270 | 243 | 341 | 406 | 0 | 0 |
 | Flesh and Blood | 2,592 | 1,304 | 976 | 114 | 44 | 157 |
 | StS2 | 119 | 219 | 155 | 18 | 19 | 47 |
-| Pokemon | no rows: the binder drops `rarity` | | | | | |
+| Pokemon | 5,021 | 4,705 | 3,754 | 2,180 | 973 | 0 |
 
 - MTG: common, uncommon, rare, mythic; special and bonus are `SPECIAL`.
 - Hearthstone: FREE and COMMON, RARE, EPIC, LEGENDARY.
@@ -75,7 +76,8 @@ Counts are from the live binders on 2026-10-07.
 - Pokemon: Common, Uncommon, Rare and Rare Holo, then 37 ultra, secret,
   illustration, shiny, ex, V, GX and ACE SPEC variants as one top tier;
   Promo, Classic Collection and Pikachu Rare are `SPECIAL`. This table
-  is checked against the raw set files; the binder holds no rarity yet.
+  is checked against the raw set files; the binder stores each card's
+  lowest print rarity.
 
 Games fill the tiers unevenly (Gwent is top-heavy, FaB's top tier is
 2%); that is each game's design, not a mapping error.

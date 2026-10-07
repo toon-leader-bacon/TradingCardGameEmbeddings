@@ -26,8 +26,8 @@ Choices:
 - Not built: supertype (hp, attacks and rules make it obvious on every
   card), trainer subtype (85% of Trainers carry reminder text in
   `rules`, such as "You may play only 1 Supporter card", and `rules` is
-  also their whole effect text), and rarity (leaned out of
-  `raw_content`).
+  also their whole effect text), and rarity (covered
+  by the `cross_game` rarity tier).
 
 ## How to run
 

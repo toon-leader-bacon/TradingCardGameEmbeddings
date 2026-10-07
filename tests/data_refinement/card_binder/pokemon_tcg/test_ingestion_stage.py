@@ -80,6 +80,71 @@ class TestIngest:
             "set": "base4",
         }
 
+    def test_rarity_is_the_lowest_over_the_identitys_prints(
+        self, tmp_path: Path
+    ) -> None:
+        _write_set_file(
+            tmp_path / "swsh8.json",
+            [
+                {"id": "swsh8-113", "name": "Mew V", "rarity": "Rare Holo V"},
+                {"id": "swsh8-250", "name": "Mew V", "rarity": "Ultra Rare"},
+                {"id": "swsh8-251", "name": "Mew V", "rarity": "Rare Rainbow"},
+            ],
+        )
+        binder = CardBinder()
+
+        PokemonTcgCardIngestionStage().ingest(tmp_path, binder)
+
+        (card,) = binder.get_by_name(GameId.POKEMON, "Mew V")
+        assert card.raw_content["rarity"] == "Rare Holo V"
+
+    def test_rarity_is_per_set_not_per_name(self, tmp_path: Path) -> None:
+        _write_set_file(
+            tmp_path / "a.json",
+            [{"id": "a-1", "name": "Pikachu", "rarity": "Common"}],
+        )
+        _write_set_file(
+            tmp_path / "b.json",
+            [{"id": "b-1", "name": "Pikachu", "rarity": "Rare Holo"}],
+        )
+        binder = CardBinder()
+
+        PokemonTcgCardIngestionStage().ingest(tmp_path, binder)
+
+        rarities = {
+            card.raw_content["set"]: card.raw_content["rarity"]
+            for card in binder.get_by_name(GameId.POKEMON, "Pikachu")
+        }
+        assert rarities == {"a": "Common", "b": "Rare Holo"}
+
+    def test_a_card_with_no_rarity_on_any_print_stores_none(
+        self, tmp_path: Path
+    ) -> None:
+        _write_set_file(
+            tmp_path / "a.json", [{"id": "a-1", "name": "Mystery", "rarity": None}]
+        )
+        binder = CardBinder()
+
+        PokemonTcgCardIngestionStage().ingest(tmp_path, binder)
+
+        (card,) = binder.get_by_name(GameId.POKEMON, "Mystery")
+        assert "rarity" not in card.raw_content
+
+    def test_unlisted_rarities_rank_after_listed_ones(self, tmp_path: Path) -> None:
+        _write_set_file(
+            tmp_path / "a.json",
+            [
+                {"id": "a-1", "name": "Odd", "rarity": "Brand New Rare"},
+                {"id": "a-2", "name": "Odd", "rarity": "Promo"},
+            ],
+        )
+        binder = CardBinder()
+
+        PokemonTcgCardIngestionStage().ingest(tmp_path, binder)
+
+        (card,) = binder.get_by_name(GameId.POKEMON, "Odd")
+        assert card.raw_content["rarity"] == "Promo"
+
     def test_printing_level_and_redundant_fields_are_dropped(
         self, tmp_path: Path
     ) -> None:
@@ -118,6 +183,7 @@ class TestIngest:
             "evolvesFrom": "Trubbish",
             "evolvesTo": ["Something"],
             "set": "sm2",
+            "rarity": "Rare",
             "convertedRetreatCost": 2,
             "attacks": [
                 {

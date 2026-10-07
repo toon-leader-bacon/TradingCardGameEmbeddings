@@ -230,9 +230,11 @@ Rules of thumb when writing a stage:
    shuffle keys later; that is fine.)
 10. **When a source has several rows per card, store the card-level answer,
     not one row's.** If a field varies by printing but is a useful label
-    (FaB `rarity`), pick a deterministic card-level value (FaB: the least
-    restrictive rarity across the English prints) rather than whichever
-    row happens to be read last.
+    (`rarity`), pick a deterministic card-level value rather than whichever
+    row happens to be read last: the least restrictive rarity across the
+    card's prints (FaB: English prints; Pokemon: the (name, set) identity's
+    prints; MTG: the printings in Scryfall's default-cards dump, which the
+    stage reads beside the oracle-cards dump).
 11. **Decide which source rows are cards.** A dump can contain rows that
     are not playable cards (Scryfall `art_series` art cards, placeholders).
     Skip or flag them deliberately rather than by accident.

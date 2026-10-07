@@ -86,6 +86,27 @@ def _latest_scryfall_dump() -> Path:
     return Path(candidates[-1])
 
 
+def _latest_scryfall_default_cards() -> Path:
+    """Newest default-cards-*.jsonl (every Scryfall printing) under the
+    Scryfall raw dir; the card stage reads it for each card's lowest rarity.
+
+    Inputs: none. Output: Path.
+    Side effects: lists that directory.
+    Exceptions: FileNotFoundError if no default-cards-*.jsonl is there."""
+    candidates = sorted(
+        glob.glob(
+            str(ScryfallOracleDownloader.DEFAULT_RAW_DATA_DIR / "default-cards-*.jsonl")
+        )
+    )
+    if not candidates:
+        raise FileNotFoundError(
+            f"No default-cards-*.jsonl found under "
+            f"{ScryfallOracleDownloader.DEFAULT_RAW_DATA_DIR} - run "
+            f"scripts/run_data_retrieval.py --source scryfall first."
+        )
+    return Path(candidates[-1])
+
+
 def _latest_hearthstone_build() -> Path:
     """The HearthstoneJSON build file with the highest build id: each
     build is a full card-pool snapshot, and only the newest is ingested
@@ -111,7 +132,10 @@ def _latest_hearthstone_build() -> Path:
 # raw_path matches what run_data_retrieval.py's own downloader for that
 # source writes.
 STAGES: dict[str, tuple[CardIngestionStage, Callable[[], Path]]] = {
-    "scryfall": (ScryfallCardIngestionStage(), _latest_scryfall_dump),
+    "scryfall": (
+        ScryfallCardIngestionStage(find_printings_path=_latest_scryfall_default_cards),
+        _latest_scryfall_dump,
+    ),
     "pokemon_tcg": (
         PokemonTcgCardIngestionStage(),
         lambda: PokemonTcgDataDownloader.DEFAULT_RAW_DATA_DIR / "cards",

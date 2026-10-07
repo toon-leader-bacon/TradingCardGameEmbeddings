@@ -86,8 +86,9 @@ _HEARTHSTONEJSON_LISTING_URL = "https://api.hearthstonejson.com/v1/"
 _SCRYFALL_BULK_DATA_API = "https://api.scryfall.com/bulk-data"
 
 
-def _current_scryfall_oracle_cards_url() -> str:
-    """Look up today's oracle-cards dump URL from Scryfall's bulk-data
+def _current_scryfall_bulk_url(bulk_type: str) -> str:
+    """Look up today's URL for one Scryfall bulk dump ("oracle_cards" or
+    "default_cards") from Scryfall's bulk-data
     API, rather than hardcoding one — unlike every other source here,
     Scryfall's dump URL is timestamped and changes with every release,
     so a hardcoded default would silently go stale (see
@@ -105,9 +106,9 @@ def _current_scryfall_oracle_cards_url() -> str:
         )
     )
     for entry in payload["data"]:
-        if entry["type"] == "oracle_cards":
+        if entry["type"] == bulk_type:
             return str(entry["jsonl_download_uri"])
-    raise RuntimeError(f"{_SCRYFALL_BULK_DATA_API} returned no 'oracle_cards' entry")
+    raise RuntimeError(f"{_SCRYFALL_BULK_DATA_API} returned no {bulk_type!r} entry")
 
 
 def _run_standard(downloader: Downloader) -> None:
@@ -119,9 +120,12 @@ def _run_standard(downloader: Downloader) -> None:
 
 
 def run_scryfall() -> None:
-    url = _current_scryfall_oracle_cards_url()
-    print(f"Scryfall oracle-cards dump: {url}")
-    _run_standard(ScryfallOracleDownloader(url))
+    # oracle-cards: one row per card. default-cards: one row per printing,
+    # which the card stage reads for each card's lowest rarity.
+    for bulk_type in ("oracle_cards", "default_cards"):
+        url = _current_scryfall_bulk_url(bulk_type)
+        print(f"Scryfall {bulk_type} dump: {url}")
+        _run_standard(ScryfallOracleDownloader(url))
 
 
 def run_pokemon_tcg() -> None:

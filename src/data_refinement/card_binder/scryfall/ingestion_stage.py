@@ -54,6 +54,12 @@ Design (see card_binder/README.md):
     different game's binder without any way to catch the mismatch;
     tying it to the class instead makes that a non-issue by
     construction.
+  - RARITY: rarity is per printing, and an oracle-cards row carries one
+    arbitrary printing's. When the stage is given a default-cards dump (every
+    printing, see __init__), a card stores the LOWEST rarity across its
+    printings (_RARITY_BY_RESTRICTIVENESS), the same rule as
+    cardvault_fabtcg's stage. A card with no default-cards printing keeps
+    its oracle-cards row's rarity.
   - Every row's own primary alias (oracle_id) and every secondary
     alias it carries are registered on EVERY branch — including a row
     that matched an existing card but changed nothing: a losing/no-op
@@ -63,7 +69,7 @@ Design (see card_binder/README.md):
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import ClassVar
+from typing import Callable, ClassVar, Iterable
 from uuid import UUID, uuid4
 
 from tqdm import tqdm
@@ -88,8 +94,9 @@ _SINGLE_VALUE_ALIAS_FIELDS = {
 
 # Keys dropped wherever they appear. The dump holds one arbitrary printing
 # per oracle_id, so these describe that printing, its commerce or the API
-# envelope, not the card's rules. Kept on purpose: set and rarity (what a
-# player reads on a card, and labels a masked-field dojo may want), digital,
+# envelope, not the card's rules. Kept on purpose: set, rarity (replaced by
+# the lowest printing rarity, see _lean_card_content; labels masked-field
+# dojos), digital,
 # reserved and game_changer (true-only flags, their presence is the signal),
 # produced_mana. Every id/uri/url key and every URL/UUID/date value is
 # already removed by strip_noise.
@@ -141,6 +148,16 @@ _LEADING_KEYS = (
     "set",
 )
 _TRAILING_KEYS = ("oracle_text", "card_faces")
+# From least to most restrictive. A rarity not listed (a future one) ranks
+# after every listed one.
+_RARITY_BY_RESTRICTIVENESS = (
+    "common",
+    "uncommon",
+    "rare",
+    "mythic",
+    "special",
+    "bonus",
+)
 _NOT_LEGAL = "not_legal"
 
 # Scryfall layouts that are not a playable card a deck can contain -
@@ -177,6 +194,20 @@ class ScryfallCardIngestionStage:
 
     SOURCE_GAME: ClassVar[GameId] = GameId.MTG
 
+    def __init__(self, find_printings_path: Callable[[], Path] | None = None) -> None:
+        """
+        Inputs:
+            find_printings_path: called at the start of ingest() to get the
+                Scryfall default-cards .jsonl file (one row per printing)
+                that supplies each card's lowest rarity. A callable, not a
+                path, so a missing file fails when ingest runs rather than
+                when the stage is constructed. None: every card keeps its
+                oracle-cards row's rarity.
+        Output: none (constructor).
+        Side effects: none. Exceptions: none.
+        """
+        self._find_printings_path = find_printings_path
+
     def ingest(self, raw_path: Path, binder: CardBinder) -> list[UUID]:
         """Parse a Scryfall oracle-cards .jsonl file, creating/updating
         cards directly on binder as a side effect.
@@ -206,10 +237,12 @@ class ScryfallCardIngestionStage:
             registers aliases directly on binder, once per line.
             Prints a tqdm progress bar to stderr, sized against
             raw_path's byte size (not its line count, which isn't
-            known up front without a separate full read).
+            known up front without a separate full read). When a
+            default-cards file is configured, reads it once first.
         Exceptions: raises if raw_path doesn't exist, isn't valid
             JSONL, or a line is missing "oracle_id" or "name" (see
-            _ingest_row()).
+            _ingest_row()); whatever find_printings_path or reading the
+            default-cards file raises.
 
         Example:
             >>> binder = CardBinder.load([Path("data/final/cards/mtg.jsonl")])
@@ -220,6 +253,7 @@ class ScryfallCardIngestionStage:
             ... )
         """
         changed_uuids = []
+        lowest_rarities = self._lowest_printing_rarities()
         total_bytes = raw_path.stat().st_size
         with open(raw_path, "r", encoding="utf-8") as raw_file, tqdm(
             total=total_bytes,
@@ -232,18 +266,55 @@ class ScryfallCardIngestionStage:
                 row = json.loads(line)
                 if row.get("layout") in _EXCLUDED_LAYOUTS:
                     continue
-                result = self._ingest_row(row, binder)
+                rarity = lowest_rarities.get(row["oracle_id"], row.get("rarity"))
+                result = self._ingest_row(row, binder, rarity)
                 if result is not None:
                     changed_uuids.append(result)
         return changed_uuids
 
-    def _ingest_row(self, row: dict, binder: CardBinder) -> UUID | None:
+    def _lowest_printing_rarities(self) -> dict[str, str]:
+        """Each oracle_id's lowest rarity over its default-cards printings.
+
+        Inputs: none (uses the configured find_printings_path).
+        Output: dict oracle_id -> rarity; empty if no default-cards file is
+            configured. Rows without a top-level oracle_id (a few
+            multi-face printings) are skipped.
+        Side effects: reads the default-cards file once, with a progress bar.
+        Exceptions: whatever find_printings_path or reading the file raises.
+        """
+        if self._find_printings_path is None:
+            return {}
+        printings_path = self._find_printings_path()
+        rarities_by_card: dict[str, str] = {}
+        with open(printings_path, "r", encoding="utf-8") as printings_file, tqdm(
+            total=printings_path.stat().st_size,
+            unit="B",
+            unit_scale=True,
+            desc=f"scryfall printings: {printings_path.name}",
+        ) as progress:
+            for line in printings_file:
+                progress.update(len(line.encode("utf-8")))
+                row = json.loads(line)
+                oracle_id = row.get("oracle_id")
+                if oracle_id is None or row.get("layout") in _EXCLUDED_LAYOUTS:
+                    continue
+                known = rarities_by_card.get(oracle_id)
+                rarities_by_card[oracle_id] = _least_restrictive(
+                    [row["rarity"]] if known is None else [known, row["rarity"]]
+                )
+        return rarities_by_card
+
+    def _ingest_row(
+        self, row: dict, binder: CardBinder, rarity: str | None
+    ) -> UUID | None:
         """Create-or-merge one Scryfall row directly against binder.
 
         Inputs:
             row: one parsed JSON object from a Scryfall oracle-cards
                 line.
             binder: the CardBinder to read from and write to.
+            rarity: the rarity to store (the card's lowest printing rarity),
+                or None for a card with none.
         Output: the stored/canonical nocab_uuid for this row IF this
             call caused a create() or an actual content-changing
             replace(); None if this row matched an existing card but
@@ -257,13 +328,13 @@ class ScryfallCardIngestionStage:
 
         if existing is None:
             # New card: build a fresh GenericCard and create it.
-            card = self._build_card(row, oracle_id)
+            card = self._build_card(row, oracle_id, rarity)
             binder.create(card)
             stored_uuid = card.nocab_uuid
             changed = True
         else:
             # Existing card: the incoming row wins if its content differs.
-            candidate = self._build_card(row, oracle_id)
+            candidate = self._build_card(row, oracle_id, rarity)
             merged = merge_strategies.keep_incoming_if_content_differs(
                 existing, candidate
             )
@@ -280,7 +351,7 @@ class ScryfallCardIngestionStage:
 
         return stored_uuid if changed else None
 
-    def _build_card(self, row: dict, oracle_id: str) -> GenericCard:
+    def _build_card(self, row: dict, oracle_id: str, rarity: str | None) -> GenericCard:
         """Build a fresh GenericCard for one Scryfall row.
 
         Private helper — single consumer is _ingest_row(), from both
@@ -294,6 +365,7 @@ class ScryfallCardIngestionStage:
                 line.
             oracle_id: row["oracle_id"], passed in rather than
                 re-read, since callers already have it at hand.
+            rarity: the rarity to store, or None for none.
         Output: a new GenericCard with a freshly minted nocab_uuid and the
             row's lean content (see _lean_card_content) as raw_content.
         Side effects: none.
@@ -303,7 +375,7 @@ class ScryfallCardIngestionStage:
             nocab_uuid=uuid4(),
             source_game=self.SOURCE_GAME,
             name=row["name"],
-            raw_content=_lean_card_content(row),
+            raw_content=_lean_card_content(row, rarity),
             provenance=Provenance(
                 data_source=DataSource.SCRYFALL,
                 source_id=oracle_id,
@@ -343,7 +415,30 @@ class ScryfallCardIngestionStage:
         return aliases
 
 
-def _lean_card_content(row: JsonObject) -> JsonObject:
+def _least_restrictive(rarities: Iterable[str]) -> str:
+    """The rarity that is least restrictive (see _RARITY_BY_RESTRICTIVENESS).
+
+    Unlisted rarities rank after every listed one, ties between them break
+    alphabetically, so the result never depends on input order.
+
+    Inputs: rarities (Iterable[str]): at least one rarity.
+    Output: str. Side effects: none.
+    Exceptions: ValueError if rarities is empty.
+
+    Example:
+        >>> _least_restrictive(["mythic", "uncommon", "special"])
+        'uncommon'
+    """
+
+    def restrictiveness(rarity: str) -> tuple[int, str]:
+        if rarity in _RARITY_BY_RESTRICTIVENESS:
+            return _RARITY_BY_RESTRICTIVENESS.index(rarity), rarity
+        return len(_RARITY_BY_RESTRICTIVENESS), rarity
+
+    return min(rarities, key=restrictiveness)
+
+
+def _lean_card_content(row: JsonObject, rarity: str | None) -> JsonObject:
     """Reduce a Scryfall oracle-cards row to what describes the card.
 
     Applies lean_content.strip_noise with this source's printing/envelope
@@ -351,15 +446,22 @@ def _lean_card_content(row: JsonObject) -> JsonObject:
     first, oracle_text and card_faces last), including inside each face.
 
     Inputs: row (JsonObject): one parsed Scryfall oracle-cards line.
+        rarity (str | None): the rarity to store in place of the row's own
+        (None: store none).
     Output: a new JsonObject; row itself is not modified.
     Side effects: none.
     Exceptions: none.
 
     Example:
-        >>> _lean_card_content({"name": "Bolt", "id": "x", "cmc": 1.0, "lang": "en"})
-        {'name': 'Bolt', 'cmc': 1}
+        >>> _lean_card_content(
+        ...     {"name": "Bolt", "id": "x", "cmc": 1.0, "rarity": "rare"}, "common"
+        ... )
+        {'name': 'Bolt', 'cmc': 1, 'rarity': 'common'}
     """
     content = strip_noise(row, extra_noise_keys=_PRINTING_AND_ENVELOPE_KEYS)
+    content.pop("rarity", None)
+    if rarity:
+        content["rarity"] = rarity
     legalities = content.get("legalities")
     if isinstance(legalities, dict):
         legal_formats = _legal_formats_by_status(legalities)
