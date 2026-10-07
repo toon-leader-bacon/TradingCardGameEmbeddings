@@ -66,6 +66,12 @@ from src.data_refinement.metrics.seventeenlands.replay_data.attacker_blocker_com
 )
 from src.data_refinement.metrics.sts2_runs import card_average_metrics as sts2_cards
 from src.data_refinement.metrics.sts2_runs import deck_label_metrics as sts2_decks
+from src.data_refinement.metrics.sts_gg.card_character_prediction_metric import (
+    CardCharacterPredictionMetric,
+)
+from src.dojos.sts_gg.card_character_prediction_dojo import (
+    CardCharacterPredictionDojo,
+)
 from src.data_refinement.metrics.sts_gg.deck_label_metrics import (
     CharacterPredictionMetric,
     KilledByMetric,
@@ -151,6 +157,7 @@ _INLINE_METRICS: dict[Any, Any] = {
     deck_label_dojos.WinDojo: WinMetric,
     deck_label_dojos.KilledByDojo: KilledByMetric,
     deck_label_dojos.CharacterDojo: CharacterPredictionMetric,
+    CardCharacterPredictionDojo: CardCharacterPredictionMetric,
     CostRegressionDojo: CostRegressionMetric,
     SetMaskDojo: DominionSetMaskMetric,
     LeaderMaskedFromDeckDojo: LeaderMaskedFromDeckMetric,

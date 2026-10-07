@@ -21,8 +21,22 @@ has to be duplicated here or in any subclass.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 from pathlib import Path
+
+# Environment variable that moves the default split directory; the test
+# suite sets it per test so no test writes into the real data/splits/
+SPLIT_DIRECTORY_ENV_VAR = "NOCAB_SPLIT_DIRECTORY"
+
+
+def default_split_directory() -> Path:
+    """The directory split files go to unless a DojoConfig names one:
+    $NOCAB_SPLIT_DIRECTORY if set, else data/splits.
+
+    Inputs: none. Output: a Path. Side effects: none. Exceptions: none.
+    """
+    return Path(os.environ.get(SPLIT_DIRECTORY_ENV_VAR, "data/splits"))
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -62,15 +76,13 @@ class DojoConfig:
     # output_file_prefix) pair will silently read/overwrite each
     # other's splits.
 
-    # Directory every split file is written under. Defaults to the
-    # directory every dojo in this project has always used. Override
+    # Directory every split file is written under. Defaults to
+    # default_split_directory() (data/splits unless the environment moves
+    # it; tests/conftest.py points it at a per-test tmp_path). Override
     # when a dojo instance must not share split storage with the
     # default location - e.g. comparing two seedings of the same metric
-    # side by side, or test isolation (every test in this project's own
-    # suite that builds a dojo from a file named e.g. "source.parquet"
-    # must set this to a tmp_path-scoped directory, or it will silently
-    # collide with every other test doing the same).
-    output_directory: Path = Path("data/splits")
+    # side by side.
+    output_directory: Path = field(default_factory=default_split_directory)
 
     # Filename prefix for this dojo's three split files
     # (<prefix>_{train,test,validation}.parquet). None (the default)

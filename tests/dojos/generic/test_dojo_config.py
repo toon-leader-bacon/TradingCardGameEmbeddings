@@ -1,10 +1,15 @@
 import dataclasses
 from pathlib import Path
 
-from src.dojos.generic.dojo_config import DojoConfig
+import pytest
+
+from src.dojos.generic.dojo_config import SPLIT_DIRECTORY_ENV_VAR, DojoConfig
 
 
-def test_defaults_preserve_pre_dojo_config_behavior() -> None:
+def test_defaults_preserve_pre_dojo_config_behavior(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(SPLIT_DIRECTORY_ENV_VAR)
     config = DojoConfig()
 
     assert config.name is None
@@ -13,6 +18,14 @@ def test_defaults_preserve_pre_dojo_config_behavior() -> None:
     assert config.force_resplit is False
     assert config.rng_seed is None
     assert config.strict_version_check is True
+
+
+def test_split_directory_follows_the_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv(SPLIT_DIRECTORY_ENV_VAR, str(tmp_path))
+
+    assert DojoConfig().output_directory == tmp_path
 
 
 def test_is_frozen() -> None:

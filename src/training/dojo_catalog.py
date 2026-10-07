@@ -108,6 +108,9 @@ from src.dojos.seventeenlands.replay_data.tutor_target_rate_dojo import (
 from src.dojos.spire_codex import card_mask_dojos as sts2_masks
 from src.dojos import isotropic
 from src.dojos.sts_gg import card_average_dojos as sts_cards
+from src.dojos.sts_gg.card_character_prediction_dojo import (
+    CardCharacterPredictionDojo,
+)
 from src.dojos.generic.generic_dojo import GenericDojo
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.dojos.mods.mod_specs import DeckModSpec, ModSpec
@@ -679,6 +682,9 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     # card_win_rate_at_act2 and killed_by labels are constant and have no
     # key here (see metrics/sts_gg/deck_label_metrics.py's WINS ONLY note)
     "sts_gg.ascension_prediction": _recipe_for_sts_deck(sts_decks.DeckAscensionDojo),
+    "sts_gg.card_character_prediction": _recipe_for_sts_card(
+        CardCharacterPredictionDojo
+    ),
     "sts_gg.card_deck_size": _recipe_for_sts_card(sts_cards.CardDeckSizeDojo),
     "sts_gg.card_elites_killed": _recipe_for_sts_card(sts_cards.CardElitesKilledDojo),
     "sts_gg.card_floors_cleared": _recipe_for_sts_card(sts_cards.CardFloorsClearedDojo),
