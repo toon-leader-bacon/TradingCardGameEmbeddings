@@ -12,10 +12,9 @@ canonical DeckBox's identity (deck_uuid_from_cards(), the same
 multiset hash as src/data_refinement/deck_box/seventeenlands_game_data/
 extraction_stage.py).
 
-KNOWN GAP (2026-10-06): the canonical box stores one deck per draft
-(its canonical game), while these deck ids are per game, so a game
-played with another build or after sideboarding has no box entry (about
-half of KTK.TradSealed's game rows); see game_data/README.md.
+Extraction reads rows with the same parser
+(src/data_refinement/seventeenlands/), so every deck_uuid written here is
+a deck the canonical box stores.
 
 Three of round 1's multi-card metrics (game_deck_label_metrics.py's
 DeckWinPredictionMetric, DeckGameLengthPredictionMetric,
@@ -56,7 +55,7 @@ import numpy.typing as npt
 import pyarrow as pa
 
 from src.data_refinement.metrics.parquet_builder import ParquetBuilder
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+from src.data_refinement.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
 )
 from src.data_refinement.metrics.version_metadata import (

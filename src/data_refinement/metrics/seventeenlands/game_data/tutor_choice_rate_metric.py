@@ -18,7 +18,7 @@ from typing import ClassVar
 import numpy as np
 import numpy.typing as npt
 
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+from src.data_refinement.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
     GameZone,
 )

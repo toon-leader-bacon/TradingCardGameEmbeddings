@@ -19,7 +19,7 @@ import numpy.typing as npt
 from src.data_refinement.metrics.seventeenlands.game_data.game_card_average_metric import (
     GameCardAverageMetric,
 )
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+from src.data_refinement.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
     GameZone,
 )

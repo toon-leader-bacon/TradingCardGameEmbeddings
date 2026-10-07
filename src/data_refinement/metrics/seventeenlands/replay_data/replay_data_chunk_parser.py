@@ -26,7 +26,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.metrics.seventeenlands.batch_columns import (
+from src.data_refinement.seventeenlands.batch_columns import (
     CARD_COUNT_TYPE,
     raise_on_null,
     read_column,
@@ -35,7 +35,7 @@ from src.data_refinement.metrics.seventeenlands.batch_columns import (
 from src.data_refinement.metrics.seventeenlands.chunk_scanner import (
     UnsupportedCsvLayout,
 )
-from src.data_refinement.metrics.seventeenlands.chunk_decks import (
+from src.data_refinement.seventeenlands.chunk_decks import (
     GameKeys,
     build_chunk_decks,
 )

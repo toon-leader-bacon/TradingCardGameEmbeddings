@@ -33,7 +33,7 @@ streams.
     code table (`NO_PICK` = -1 for an empty or unmatched pick), and
     `first_uuids` holds the first pick's uuid as a str (None when
     unmatched).
-  - `DraftDataChunk`: `pack` and `pool` (`../zone_counts.py`'s
+  - `DraftDataChunk`: `pack` and `pool` (`../../../seventeenlands/zone_counts.py`'s
     `ZoneCounts`), `pack_column_codes`, `picks`, `draft_id`,
     `pack_number`, `pick_number` and `rank` (`""` when unranked). It
     checks every per-row field's length at construction. `picked()` is
@@ -44,7 +44,7 @@ streams.
   CSV's column names. Card matching is `DraftCardColumns`' (below),
   done once per CSV; the pack card code table and each pack column's
   code are built once too. Card counts are read as float32 (some
-  exports write `1.0`) and narrowed to int16 by `../batch_columns.py`.
+  exports write `1.0`) and narrowed to int16 by `../../../seventeenlands/batch_columns.py`.
   Each distinct pick name is matched once per chunk. A missing scalar
   column fails the CSV; a null scalar raises naming the column and row.
   The rank is read from `rank`, else `user_rank` (older exports, MID

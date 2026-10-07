@@ -10,7 +10,7 @@ from uuid import uuid4
 
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.metrics.seventeenlands.game_data.game_card_columns import (
+from src.data_refinement.seventeenlands.game_data.game_card_columns import (
     GameCardColumns,
 )
 from src.schema.card import GenericCard, Provenance
@@ -78,12 +78,15 @@ class TestFromHeader:
 
     def test_unmatched_column_name_is_absent_from_every_list(self) -> None:
         binder = _binder_with_cards([])
-        header = ["deck_Nonexistent Card"]
+        header = ["deck_Nonexistent Card", "drawn_Nonexistent Card"]
 
         game_columns = GameCardColumns.from_header(header, binder, GameId.MTG)
 
         assert game_columns.deck_columns == []
+        assert game_columns.drawn_columns == []
         assert "Nonexistent Card" in game_columns.unmatched_names
+        # Only a deck_ column is part of a deck's identity
+        assert game_columns.unmatched_deck_columns == ["deck_Nonexistent Card"]
 
     def test_split_card_falls_back_to_front_face_regex(self) -> None:
         binder = CardBinder()

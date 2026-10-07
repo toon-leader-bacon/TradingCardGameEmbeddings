@@ -45,12 +45,12 @@ streams. No metric splits a cell or visits a row in Python.
     `rows_naming(codes, row_count)` lines the entries up against any
     card list (rows × list positions), and `combine()` concatenates
     fields.
-  - `ReplayDataChunk`: `deck` (`../zone_counts.py`'s `ZoneCounts`),
+  - `ReplayDataChunk`: `deck` (`../../../seventeenlands/zone_counts.py`'s `ZoneCounts`),
     `deck_codes` (each deck column's card code), `events` (a read-only
     mapping with a `TurnEvents` for every `ReplayField`; empty where the
     CSV lacks the field), `card_uuids` (the card table as of this
     chunk), `keys`, `num_turns` and `decks` (each row's deck, from
-    `../chunk_decks.py`). Construction checks row counts, that every
+    `../../../seventeenlands/chunk_decks.py`). Construction checks row counts, that every
     field is present, that event rows and codes are in range, and that
     `deck_codes` name `deck.card_uuids`. `events_for(fields)` combines
     several fields.
@@ -65,7 +65,7 @@ streams. No metric splits a cell or visits a row in Python.
   token fails the CSV. `CardCodeTable` is the CSV's append-only card
   table, seeded with the deck columns' cards, so a code means the same
   card in every chunk. Deck counts are read as float32 and narrowed to
-  int16 by `../batch_columns.py`. A missing scalar column (`draft_id`,
+  int16 by `../../../seventeenlands/batch_columns.py`. A missing scalar column (`draft_id`,
   `match_number`, `game_number`, `num_turns`) fails the CSV; a null
   scalar raises naming the column and row. The oldest layout (AFR, STX:
   `game_index`, no `deck_` columns, no `match_number`) raises

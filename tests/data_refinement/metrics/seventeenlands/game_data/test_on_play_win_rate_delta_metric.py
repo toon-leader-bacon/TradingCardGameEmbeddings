@@ -6,10 +6,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+from src.data_refinement.seventeenlands.game_data.game_data_chunk import (
     GameZone,
 )
-from src.data_refinement.metrics.seventeenlands.zone_counts import ZoneCounts
+from src.data_refinement.seventeenlands.zone_counts import ZoneCounts
 from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_rate_delta_metric import (
     OnPlayWinRateDeltaMetric,
 )

@@ -8,11 +8,10 @@ chunk, for each family's chunk parser.
 
 A row's deck is the FULL multiset of its deck_<name> columns: each
 present column (count > 0) contributes deck_zone.counts[row, column]
-copies of that column's card_uuid, in header order - the same
-full-copy-count expansion
-deck_box/seventeenlands_game_data/extraction_stage.py's
-_card_nocab_uuids_for_row() does for the canonical DeckBox, so two rows
-that differ only in copy counts hash to different deck ids. Rows are
+copies of that column's card_uuid, in header order, so two rows that
+differ only in copy counts hash to different deck ids. The canonical
+MTG DeckBox (deck_box/seventeenlands_game_data/extraction_stage.py)
+stores exactly these decks, so the ids agree by construction. Rows are
 grouped by that per-column count pattern first (not merely which
 columns are present - see _group_rows_by_pattern()'s own docstring for
 why presence alone is no longer a safe coarsening), so each pattern is
@@ -20,8 +19,7 @@ hashed with deck_ids.deck_uuid_from_cards() once per chunk, not once
 per row per metric. Two patterns can hash to one deck (two header
 columns naming one card, or - now that grouping is by count - any
 other coincidence that still produces the same multiset), so patterns
-are then merged by deck id, keeping the earliest row's deck: the deck
-the row implementation stored first.
+are then merged by deck id, keeping the earliest row's deck.
 
 """
 
@@ -31,9 +29,8 @@ from uuid import UUID
 import numpy as np
 import numpy.typing as npt
 
-from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.deck_ids import deck_uuid_from_cards
-from src.data_refinement.metrics.seventeenlands.zone_counts import ZoneCounts
+from src.data_refinement.seventeenlands.zone_counts import ZoneCounts
 from src.schema.card import GenericDeck
 from src.schema.game_id import GameId
 
@@ -107,7 +104,9 @@ def build_chunk_decks(
     """Every distinct deck in a chunk's deck zone, plus each row's.
 
     Inputs:
-        deck_zone: the chunk's GameZone.DECK counts.
+        deck_zone: the zone each row's decklist is read from (for
+            game_data, every deck_ column, unmatched ones as the Unknown
+            sentinel; see game_data/game_data_chunk_parser.py).
         keys: the chunk's per-row game ids (name each deck after its
             first row's game).
         source_game: stamped on every GenericDeck.
@@ -135,24 +134,6 @@ def build_chunk_decks(
     # Patterns hashing to one deck id share that id's earliest deck
     decks, pattern_to_deck = _merge_by_deck_id(pattern_decks)
     return ChunkDecks(decks=decks, row_deck=pattern_to_deck[row_pattern])
-
-
-def store_chunk_decks(decks: ChunkDecks, deck_box: DeckBox) -> None:
-    """Store every deck of a chunk in deck_box, once per deck. A deck
-    already in the box keeps its stored entry. Used by replay_data's
-    combat aggression metric, whose family keeps a private box.
-
-    Inputs: decks (a chunk's), deck_box (the family's metrics-private
-        box).
-    Output: none.
-    Side effects: deck_box.create_if_absent() once per deck.
-    Exceptions: DeckBox's batch-wide errors (see deck_box.py).
-
-    Example:
-        >>> store_chunk_decks(chunk.decks, deck_box)
-    """
-    for deck in decks.decks:
-        deck_box.create_if_absent(deck)
 
 
 def _group_rows_by_pattern(
@@ -231,9 +212,7 @@ def _deck_for_row(
 
     Each present column (deck_zone.counts[row, column] > 0) contributes
     that many copies of its card_uuid - not merely one per present
-    column - so the result is row's genuine full decklist, matching
-    deck_box/seventeenlands_game_data/extraction_stage.py's
-    _card_nocab_uuids_for_row() expansion.
+    column - so the result is row's genuine full decklist.
 
     Inputs: deck_zone, keys, row, source_game, family_label (the name's
         prefix).

@@ -23,7 +23,7 @@ from src.data_refinement.metrics.seventeenlands.draft_data.draft_data_chunk impo
 from src.data_refinement.metrics.seventeenlands.draft_data.pack_pool_columns import (
     DraftCardColumns,
 )
-from src.data_refinement.metrics.seventeenlands.batch_columns import (
+from src.data_refinement.seventeenlands.batch_columns import (
     CARD_COUNT_TYPE,
     raise_on_null,
     read_column,

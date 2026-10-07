@@ -4,7 +4,7 @@ Enriches the canonical DeckBox (src/data_refinement/deck_box/
 seventeenlands_game_data/), which holds each decklist once, with its
 popularity: a later sampler can weight decks by it. No DeckBox of its
 own; deck_uuids use the canonical box's deck_uuid_from_cards() identity
-(see game_deck_label_metric.py's KNOWN GAP on box coverage).
+(extraction uses the same parser, so each id is a stored deck).
 
 A vectorized Metric[GameDataChunk] (see game_data/README.md) and a
 CountTableMetric (../sliced_metric.py): each partition holds, per
@@ -33,7 +33,7 @@ from src.data_refinement.metrics.seventeenlands.count_table import (
     SAMPLE_COUNT_COLUMN,
     write_count_table,
 )
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+from src.data_refinement.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
 )
 from src.data_refinement.metrics.version_metadata import MetricVersionMetadata

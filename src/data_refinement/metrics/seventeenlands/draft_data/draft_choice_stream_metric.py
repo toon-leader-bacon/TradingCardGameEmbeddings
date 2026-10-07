@@ -28,7 +28,7 @@ from src.data_refinement.metrics.parquet_builder import ParquetBuilder
 from src.data_refinement.metrics.seventeenlands.draft_data.draft_data_chunk import (
     DraftDataChunk,
 )
-from src.data_refinement.metrics.seventeenlands.zone_counts import ZoneCounts
+from src.data_refinement.seventeenlands.zone_counts import ZoneCounts
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     schema_with_version_metadata,

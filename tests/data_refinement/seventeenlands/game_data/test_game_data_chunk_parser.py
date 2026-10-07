@@ -5,10 +5,11 @@ from pathlib import Path
 import pyarrow as pa
 import pytest
 
-from src.data_refinement.metrics.seventeenlands.game_data.game_card_columns import (
+from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.seventeenlands.game_data.game_card_columns import (
     GameCardColumns,
 )
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+from src.data_refinement.seventeenlands.game_data.game_data_chunk import (
     GameZone,
 )
 from src.schema.game_id import GameId
@@ -32,12 +33,13 @@ def test_a_header_without_the_scalar_columns_is_rejected() -> None:
         parser_for(binder, header=[c for c in HEADER if c != "num_turns"])
 
 
-def test_needed_columns_skips_unmatched_columns() -> None:
+def test_needed_columns_read_an_unmatched_deck_column_for_deck_identity() -> None:
     parser = parser_for(binder_with_cards([OWLBEAR, MORNINGSTAR]))
 
     needed = parser.needed_columns()
 
-    assert "deck_Unmatched Card" not in needed
+    assert "deck_Unmatched Card" in needed
+    assert parser.unmatched_deck_columns() == ["deck_Unmatched Card"]
     assert {
         "draft_id",
         "match_number",
@@ -207,3 +209,18 @@ def test_float_formatted_counts_read_as_int16(tmp_path: Path) -> None:
     deck = chunk.zones[GameZone.DECK]
     assert deck.counts.dtype.name == "int16"
     assert deck.counts.tolist() == [[2]]
+
+
+def test_an_unmatched_deck_column_is_the_unknown_card_in_the_deck_only(
+    tmp_path: Path,
+) -> None:
+    binder = binder_with_cards([OWLBEAR, MORNINGSTAR])
+    game = {**row(won=True, owlbear_deck=2), "deck_Unmatched Card": 3}
+
+    chunk = parse_one(write_csv(tmp_path / "g.csv", [game]), parser_for(binder))
+
+    unknown = CardBinder.unknown_card_uuid(GameId.MTG)
+    assert unknown not in chunk.zones[GameZone.DECK].card_uuids
+    (deck,) = chunk.decks.decks
+    assert deck.card_nocab_uuids.count(unknown) == 3
+    assert deck.card_nocab_uuids.count(uuid_for(binder, OWLBEAR)) == 2

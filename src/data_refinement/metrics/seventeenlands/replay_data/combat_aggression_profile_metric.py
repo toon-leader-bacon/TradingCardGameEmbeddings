@@ -7,8 +7,9 @@ that had any (matched) attack, 0.0 for a game without one.
 A vectorized Metric[ReplayDataChunk] and a RowStreamMetric
 (../sliced_metric.py): one output row per game, its deck referenced by
 deck_uuid. Each chunk's decks are identified once by the parser
-(ChunkDecks, ../chunk_decks.py) and stored in the family DeckBox with
-store_chunk_decks(); the output is stamped requires_deck_box=True.
+(ChunkDecks, src/data_refinement/seventeenlands/chunk_decks.py) and
+stored in the family DeckBox with _store_chunk_decks(); the output is
+stamped requires_deck_box=True.
 """
 
 import dataclasses
@@ -21,9 +22,7 @@ import pyarrow as pa
 
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.parquet_builder import ParquetBuilder
-from src.data_refinement.metrics.seventeenlands.chunk_decks import (
-    store_chunk_decks,
-)
+from src.data_refinement.seventeenlands.chunk_decks import ChunkDecks
 from src.data_refinement.metrics.seventeenlands.replay_data.replay_data_chunk import (
     Actor,
     ReplayDataChunk,
@@ -92,7 +91,7 @@ class CombatAggressionProfileMetric:
 
         Inputs: chunk.
         Output: none.
-        Side effects: store_chunk_decks(chunk.decks, deck box); writes
+        Side effects: _store_chunk_decks(chunk.decks, deck box); writes
             the chunk's rows to the open ParquetBuilder.
         Exceptions: DeckBox's batch-wide errors.
 
@@ -101,7 +100,7 @@ class CombatAggressionProfileMetric:
             >>> metric.accumulate(chunk)
             >>> metric.finalize()
         """
-        store_chunk_decks(chunk.decks, self._deck_box)
+        _store_chunk_decks(chunk.decks, self._deck_box)
         self._writer.write_columns(
             {
                 "draft_id": chunk.keys.draft_id,
@@ -148,3 +147,17 @@ def _aggression_profiles(chunk: ReplayDataChunk) -> npt.NDArray[np.float64]:
     result = np.zeros(len(chunk), np.float64)
     np.divide(attack_sum, attack_turns, out=result, where=attack_turns > 0)
     return result
+
+
+def _store_chunk_decks(decks: ChunkDecks, deck_box: DeckBox) -> None:
+    """Store every deck of a chunk in replay_data's private deck_box,
+    once per deck. A deck already in the box keeps its stored entry.
+
+    Inputs: decks (a chunk's), deck_box (the family's metrics-private
+        box).
+    Output: none.
+    Side effects: deck_box.create_if_absent() once per deck.
+    Exceptions: DeckBox's batch-wide errors (see deck_box.py).
+    """
+    for deck in decks.decks:
+        deck_box.create_if_absent(deck)

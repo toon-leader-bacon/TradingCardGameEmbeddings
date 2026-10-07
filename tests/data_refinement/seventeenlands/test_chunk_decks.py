@@ -7,14 +7,12 @@ from uuid import uuid4
 
 import numpy as np
 
-from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.deck_ids import deck_uuid_from_cards
-from src.data_refinement.metrics.seventeenlands.chunk_decks import (
+from src.data_refinement.seventeenlands.chunk_decks import (
     GameKeys,
     build_chunk_decks,
-    store_chunk_decks,
 )
-from src.data_refinement.metrics.seventeenlands.zone_counts import ZoneCounts
+from src.data_refinement.seventeenlands.zone_counts import ZoneCounts
 from src.schema.game_id import GameId
 
 
@@ -143,19 +141,3 @@ def test_patterns_hashing_to_one_deck_share_its_earliest_entry() -> None:
     assert decks.row_deck.tolist() == [0, 0]
     assert len(decks.decks) == 1
     assert decks.decks[0].name == "game_data d0/0/2 deck"
-
-
-def test_store_chunk_decks_stores_each_deck_once() -> None:
-    owlbear, morningstar = uuid4(), uuid4()
-    zone = ZoneCounts((owlbear, morningstar), np.array([[1, 0], [0, 1]], np.int16))
-    decks = build_chunk_decks(zone, _keys(2), GameId.MTG, "game_data")
-    deck_box = DeckBox()
-
-    store_chunk_decks(decks, deck_box)
-    store_chunk_decks(decks, deck_box)  # a later chunk with the same decks
-
-    assert sorted(deck_box.all_uuids(GameId.MTG)) == sorted(
-        deck.nocab_uuid for deck in decks.decks
-    )
-    stored = deck_box.get_by_uuid(decks.decks[0].nocab_uuid)
-    assert stored is not None and stored.name == "game_data d0/0/2 deck"

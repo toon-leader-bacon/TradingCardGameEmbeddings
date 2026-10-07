@@ -4,7 +4,7 @@ satisfies structurally.
 Each raw source feeds a different unit into accumulate(): sts_gg's
 JSONL rows are dicts, isotropic's are parsed GameHeader / GameLog
 values, and 17lands' game_data is a typed, numpy-backed GameDataChunk
-of many rows (seventeenlands/game_data/game_data_chunk.py; draft and
+of many rows (../seventeenlands/game_data/game_data_chunk.py; draft and
 replay follow). So this
 Protocol is generic over that unit rather than fixing one concrete
 shape. Row vs chunk is independent of streaming vs accumulation, which

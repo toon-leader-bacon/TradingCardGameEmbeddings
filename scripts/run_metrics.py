@@ -41,7 +41,6 @@ failure is logged and does not stop the rest.
 """
 
 import argparse
-import csv
 from functools import partial
 import sys
 import traceback
@@ -61,6 +60,7 @@ from src.data_refinement.metrics.version_metadata import MetricVersionMetadata
 from src.data_refinement.metrics.seventeenlands.chunk_scanner import (
     UnsupportedCsvLayout,
 )
+from src.data_refinement.seventeenlands.csv_header import read_csv_header
 from src.data_refinement.metrics.seventeenlands.deck_box_path import (
     REPLAY_DATA_DECK_BOX_PATH,
 )
@@ -330,7 +330,7 @@ from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_rate_sensi
 from src.data_refinement.metrics.seventeenlands.game_data.deck_occurrence_count_metric import (  # noqa: E501
     DeckOccurrenceCountMetric,
 )
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk_parser import (
+from src.data_refinement.seventeenlands.game_data.game_data_chunk_parser import (
     GameDataChunkParser,
 )
 from src.data_refinement.metrics.seventeenlands.game_data.scanner import (
@@ -1185,7 +1185,7 @@ def _scan_one_csv(run: _FamilyRun, csv_path: Path) -> CsvScanOutcome:
     """
     try:
         expansion, format_code = _parse_expansion_format(csv_path)
-        header = _read_header(csv_path)
+        header = read_csv_header(csv_path)
         # The parser first: an unsupported layout is skipped before any
         # metric is built
         scan = run.family.scan_for_csv(header, run.binder)
@@ -1210,21 +1210,6 @@ def _scan_one_csv(run: _FamilyRun, csv_path: Path) -> CsvScanOutcome:
     except Exception:  # one bad CSV must not end a multi-hour family run
         print(f"CSV FAILURE {csv_path}:\n{traceback.format_exc()}")
         return CsvScanOutcome.FAILED
-
-
-def _read_header(csv_path: Path) -> tuple[str, ...]:
-    """A CSV's column names, from its first line.
-
-    Inputs: csv_path. Output: the column names, in file order.
-    Side effects: reads csv_path's first line.
-    Exceptions: OSError reading csv_path; ValueError if it is empty.
-    """
-    # utf-8-sig drops a byte-order mark, as pyarrow's reader does
-    with csv_path.open(newline="", encoding="utf-8-sig") as raw_csv:
-        header = next(csv.reader(raw_csv), None)
-    if header is None:
-        raise ValueError(f"{csv_path} is empty")
-    return tuple(header)
 
 
 def _deck_box_path(default_path: Path | None, output_root: Path | None) -> Path | None:

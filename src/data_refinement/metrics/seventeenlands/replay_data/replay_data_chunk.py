@@ -27,11 +27,11 @@ from uuid import UUID
 import numpy as np
 import numpy.typing as npt
 
-from src.data_refinement.metrics.seventeenlands.chunk_decks import (
+from src.data_refinement.seventeenlands.chunk_decks import (
     ChunkDecks,
     GameKeys,
 )
-from src.data_refinement.metrics.seventeenlands.zone_counts import ZoneCounts
+from src.data_refinement.seventeenlands.zone_counts import ZoneCounts
 
 # The code of an Arena id that matched no card
 UNMATCHED = -1

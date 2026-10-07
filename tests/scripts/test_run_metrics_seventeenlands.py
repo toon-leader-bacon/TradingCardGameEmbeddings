@@ -16,7 +16,7 @@ from src.data_refinement.metrics.seventeenlands.chunk_scanner import (
 from src.data_refinement.metrics.seventeenlands.game_data.game_card_average_metrics import (
     WinRateWhenInDeckMetric,
 )
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk_parser import (
+from src.data_refinement.seventeenlands.game_data.game_data_chunk_parser import (
     GameDataChunkParser,
 )
 from src.data_retrieval.seventeenlands.refs import DataType, Expansion, FormatCode
@@ -193,23 +193,6 @@ def test_a_chunk_scan_binds_a_parser_built_from_the_header(
     scan = script._GAME_DATA_SCAN(HEADER, binder_with_cards(["Owlbear"]))
 
     assert isinstance(scan.keywords["parser"], GameDataChunkParser)
-
-
-def test_the_header_is_read_from_the_first_line(
-    script: ModuleType, tmp_path: Path
-) -> None:
-    csv_path = tmp_path / "KTK.TradDraft.csv"
-    csv_path.write_text('a,"b,c",d\n1,2,3\n', encoding="utf-8")
-
-    assert script._read_header(csv_path) == ("a", "b,c", "d")
-
-
-def test_an_empty_csv_has_no_header(script: ModuleType, tmp_path: Path) -> None:
-    csv_path = tmp_path / "KTK.TradDraft.csv"
-    csv_path.write_text("", encoding="utf-8")
-
-    with pytest.raises(ValueError, match="empty"):
-        script._read_header(csv_path)
 
 
 def _scan_outcome(script: ModuleType, tmp_path: Path, scan_error: Exception) -> object:

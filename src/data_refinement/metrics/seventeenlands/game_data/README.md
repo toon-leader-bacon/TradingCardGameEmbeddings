@@ -11,7 +11,7 @@ already populated for `GameId.MTG` (see
 [`../../../card_binder/README.md`](../../../card_binder/README.md)).
 
 The scan is chunked and typed. `scan_game_csv` streams a CSV in pyarrow
-record batches. `GameDataChunkParser` turns each batch into one
+record batches. `GameDataChunkParser` (shared, see below) turns each batch into one
 `GameDataChunk` (numpy arrays, plus each row's deck identified once),
 and every metric's `accumulate()` receives that chunk. All twelve
 metrics are vectorized `Metric[GameDataChunk]`s: none loops over rows in
@@ -21,62 +21,12 @@ Python.
 
 ### Chunk, parser, scanner
 
-- `game_data_chunk.py` — the chunk's data types:
-  - `GameZone`: the five card-column families, valued by header prefix.
-  - `ZoneCounts` (shared, `../zone_counts.py`): one zone's card uuids
-    (one per matched header column, possibly repeating) and an int16
-    `(rows, columns)` count matrix.
-    `present()` is `counts > 0`; `present_for(card_uuids)` lines the zone
-    up against any card list (a card's presence under any of its
-    columns; never present if the zone has no column for it).
-  - `GameKeys` and `ChunkDecks` (shared, `../chunk_decks.py`): each
-    row's `(draft_id, match_number, game_number)`, and every distinct
-    deck in the chunk (one `GenericDeck` per deck id, in order of first
-    row) with `row_deck`, each row's index into them;
-    `row_deck_uuids()` gives each row's id as a str. `ChunkDecks`
-    rejects two decks with one id, or a row naming no deck.
-  - `GameDataChunk`: every zone's `ZoneCounts`, typed `won`/`on_play`/
-    `num_turns`, `keys`, `rank` (str; `""` for unranked Trad and Sealed
-    events) and `decks`. It checks at construction that every zone is
-    present and every per-row field has the same row count.
-- `../chunk_decks.py` (shared with replay_data) — `build_chunk_decks(
-  deck_zone, keys, source_game, family_label)`. A row's deck is the FULL copy-count multiset over `deck_<name>`
-  columns: each present column contributes
-  `deck_zone.counts[row, column]` copies of its card uuid, in header
-  order (matching
-  `deck_box/seventeenlands_game_data/extraction_stage.py`'s own
-  full-multiset expansion), not merely one uuid per present column.
-  Rows are grouped by that full count pattern (presence alone is not a
-  safe pre-grouping key once copy counts matter); each pattern is
-  hashed once with `deck_ids.deck_uuid_from_cards()`. Patterns with the
-  same id (two columns naming one card, or any other coincidence
-  producing the same multiset) share the earliest row's deck. A deck is
-  named after its first row's game (`<family_label> <draft_id>/<match>/
-  <game> deck`, here `game_data`). Deck identity is hashed the same way as the canonical
-  `DeckBox` builder (`deck_box/seventeenlands_game_data/
-  extraction_stage.py`), so a deck id means the same decklist on both
-  sides. **Known gap:** the canonical box stores one deck per draft (its
-  canonical game), while these ids are per game. A game played with a
-  later build or after sideboarding has no box entry: on
-  KTK.TradSealed, 257 of 297 drafts play more than one decklist and only
-  51% of game rows' decks are in the box. The deck dojos skip rows whose
-  deck is missing.
-- `game_data_chunk_parser.py` — `GameDataChunkParser.from_header(header,
-  card_binder, source_game)`, the only place that knows the CSV's
-  column names. Card matching is `GameCardColumns.from_header()`'s.
-  `needed_columns()` and `column_types()` tell the scanner what to read:
-  the matched card columns as int16, and the seven scalars (`won`,
-  `on_play`, `num_turns`, `draft_id`, `match_number`, `game_number`,
-  `rank`). `parse(batch)` builds a `GameDataChunk`: a null count cell
-  becomes 0, a null scalar raises `ValueError` naming the column and
-  row, and an empty string cell reads as `""`. A header missing a scalar
-  fails the whole CSV.
-- `game_card_columns.py` — `GameCardColumns`, built once per CSV by the
-  parser. It matches every card column's `<name>` suffix against
-  `card_binder` (see "Card-name matching" below) into
-  `opening_hand_columns`/`drawn_columns`/`tutored_columns`/
-  `deck_columns`/`sideboard_columns` (`list[tuple[str, UUID]]`), plus
-  `uuid_for_name(name)` and `unmatched_names`.
+- The chunk, its parser and the deck identity
+  (`GameDataChunk`, `GameDataChunkParser`, `GameCardColumns`,
+  `ChunkDecks`) live in
+  [`../../../seventeenlands/`](../../../seventeenlands/README.md),
+  shared with the deck box extraction stage, so every `deck_uuid` these
+  metrics write is a deck in the canonical `data/final/decks/mtg.db`.
 - `scanner.py` — `scan_game_csv(raw_csv_path, metrics, parser,
   block_size)`: the shared `../chunk_scanner.py`'s `scan_chunked_csv()`,
   typed for game_data. It streams the CSV with `pyarrow.csv.open_csv`,
@@ -184,12 +134,11 @@ per key, and the label is computed only when a slice is built
 
 ## Card-name matching
 
-`card_lookup.uuid_for_name_or_front_face()` (`src/data_refinement/card_binder/card_lookup.py`) matches a bare card name: a unique exact
-`get_by_name()` match, else a unique split/MDFC front-face match (17lands'
-column names use only a card's front face; Scryfall names it `"A // B"`),
-else unmatched. Ambiguity is never guessed at. `GameCardColumns` applies
-it to every card column suffix, once per CSV; an unmatched column is
-simply absent from every zone.
+`GameCardColumns` (shared, see
+[`../../../seventeenlands/README.md`](../../../seventeenlands/README.md))
+matches every card column once per CSV. An unmatched column is absent
+from every zone, so no metric tallies it, though it still counts in the
+row's deck as the Unknown card.
 
 ## Card-binder and deck-box access shape
 
@@ -205,7 +154,7 @@ This family has no deck box of its own (`deck_box_output_path=None`):
 every deck-input metric only needs a `deck_uuid` for its output row,
 which it already gets from the chunk's own `ChunkDecks`
 (`chunk.decks.row_deck_uuids()`), so none of them ever read a `DeckBox`
-back. The canonical box that resolves those ids to card lists is built
+back. The canonical box that maps those ids back to card lists is built
 separately, by `deck_box/seventeenlands_game_data/extraction_stage.py`.
 
 A game's identifier is the composite `(draft_id: str, match_number:

@@ -136,7 +136,7 @@ card reference it can't match, rather than dropping it.
 | `spire_codex_runs/` | `SpireCodexRunsDeckExtractionStage` (subclasses the sts2runs stage) | Slay the Spire 2 | spire_codex `runs/page_*.jsonl.gz` | `uuid5(ns, f"{run_hash}:{player_index}")` |
 | `fabtcg_decklists/` | `FabtcgDecklistsExtractionStage` | Flesh and Blood | fabtcg.com decklist HTML (parsed by `fragment_parsing.py`) | `uuid5(ns, deck_slug)` |
 | `play_gwent/` | `PlayGwentDeckExtractionStage` | Gwent | playgwent.com `guides.jsonl` | `uuid5(ns, guide_id)` |
-| `seventeenlands_game_data/` | `SeventeenLandsGameDataDeckExtractionStage` | MTG | 17lands `game_data` CSVs (`deck_<name>` copy-count columns) | `uuid5(ns, draft_id)`: one deck per draft, taken from its lowest `(build_index, match_number, game_number)`, i.e. its earliest played build |
+| `seventeenlands_game_data/` | `SeventeenLandsGameDataDeckExtractionStage` | MTG | 17lands `game_data` CSVs (`deck_<name>` copy-count columns), read with the shared `../seventeenlands/` parser | `deck_uuid_from_cards()` over the full copy-count multiset: every distinct decklist any game played, stored once (an unmatched column counts as the Unknown card) |
 
 ## How it works
 

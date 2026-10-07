@@ -13,7 +13,7 @@ from uuid import UUID
 from src.data_refinement.metrics.seventeenlands.card_count_table_metric import (
     CardCountTableMetric,
 )
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+from src.data_refinement.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
     GameZone,
 )

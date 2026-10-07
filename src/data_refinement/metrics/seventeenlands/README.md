@@ -3,7 +3,11 @@
 Metric classes over 17lands' public MTG draft/game/replay data exports
 (`data/raw/17lands/`). Each raw export gets its own subdirectory here,
 independent of the others: none share state, though they share the
-chunk-scan machinery below.
+chunk-scan machinery below. The typed chunk pieces every family builds
+on (`ZoneCounts`, batch column readers, `GameKeys`/`ChunkDecks`, and the
+whole game_data parser) live in
+[`../../seventeenlands/`](../../seventeenlands/README.md), shared with
+the deck box extraction stage.
 
 Every family scans its CSVs in typed chunks, sharing:
 
@@ -18,10 +22,6 @@ Every family scans its CSVs in typed chunks, sharing:
   private deck box, written by `run_metrics.py` and read by its deck
   dojo. game_data's deck ids are the canonical MTG box's
   (`data/final/decks/mtg.db`), so game_data keeps no box.
-- `batch_columns.py` - typed numpy columns from a batch; card counts
-  read as float32 and narrowed to int16.
-- `zone_counts.py` - `ZoneCounts`: one card-column family's per-row
-  count matrix.
 - `card_column_tallies.py` - `CardColumnTallies`: per-column tallies
   summed per card.
 - `card_count_table_metric.py` - `CardCountTableMetric[ChunkT]`
@@ -30,13 +30,6 @@ Every family scans its CSVs in typed chunks, sharing:
   (`_column_card_uuids(chunk)`) and their per-column increments
   (`_increments(chunk)`). game_data's `GameCardCountTableMetric` and
   replay_data's `DeckEventRateMetric` build on it.
-- `chunk_decks.py` - `GameKeys` (each row's `draft_id`,
-  `match_number`, `game_number`), `ChunkDecks` and
-  `build_chunk_decks(deck_zone, keys, source_game, family_label)`: each
-  row's deck, identified once per distinct card pattern, and
-  `store_chunk_decks()` to add them to a family deck box (only
-  replay_data keeps one). Used by
-  game_data and replay_data.
 
 ## Partitions and slices
 
@@ -94,7 +87,7 @@ take `data_slice` (default: everything), so a dojo's default name and
 split prefix is the slice file's stem (`win_rate_when_in_deck.all`).
 `FileManagerParquet` and the generic dojo bases are unchanged.
 
-Every 17lands metric is sliced: game_data (8 count tables, 3 row
+Every 17lands metric is sliced: game_data (9 count tables, 3 row
 streams), draft_data (4 count tables, 2 row streams) and replay_data (7
 count tables, 2 row streams).
 
@@ -104,7 +97,7 @@ count tables, 2 row streams).
   (four count tables, two row streams) over per-pick draft CSVs
   (`data/raw/17lands/draft_data/<Set>.<EventType>.csv`). See
   [`draft_data/README.md`](draft_data/README.md).
-- **`game_data/`** - eleven vectorized `Metric[GameDataChunk]` metrics (eight
+- **`game_data/`** - twelve vectorized `Metric[GameDataChunk]` metrics (nine
   count tables, three row streams)
   over per-game CSVs (`data/raw/17lands/game_data/<Set>.<EventType>.csv`),
   scanned in typed numpy chunks (`GameDataChunk`). See

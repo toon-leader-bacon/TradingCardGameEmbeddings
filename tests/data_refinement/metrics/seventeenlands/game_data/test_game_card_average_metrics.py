@@ -13,10 +13,10 @@ from src.data_refinement.metrics.seventeenlands.game_data.game_card_average_metr
     OpeningHandWinRateMetric,
     WinRateWhenInDeckMetric,
 )
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+from src.data_refinement.seventeenlands.game_data.game_data_chunk import (
     GameZone,
 )
-from src.data_refinement.metrics.seventeenlands.zone_counts import ZoneCounts
+from src.data_refinement.seventeenlands.zone_counts import ZoneCounts
 from src.data_refinement.metrics.version_metadata import read_version_metadata
 from tests.data_refinement.metrics.seventeenlands.game_data._chunk_fixtures import (
     MORNINGSTAR,

@@ -6,15 +6,15 @@ from uuid import uuid4
 import numpy as np
 import pytest
 
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+from src.data_refinement.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
     GameZone,
 )
-from src.data_refinement.metrics.seventeenlands.chunk_decks import (
+from src.data_refinement.seventeenlands.chunk_decks import (
     ChunkDecks,
     GameKeys,
 )
-from src.data_refinement.metrics.seventeenlands.zone_counts import ZoneCounts
+from src.data_refinement.seventeenlands.zone_counts import ZoneCounts
 from src.schema.card import GenericDeck
 from src.schema.game_id import GameId
 

@@ -30,7 +30,7 @@ from src.data_refinement.metrics.seventeenlands.game_data.game_card_average_metr
     VALUE_SUM_COLUMN,
     GameCardAverageMetric,
 )
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+from src.data_refinement.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
     GameZone,
 )

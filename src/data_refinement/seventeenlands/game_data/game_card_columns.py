@@ -19,8 +19,10 @@ structural consistency reasons DraftCardColumns keeps it public.
 from typing import Iterable
 from uuid import UUID
 
-from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.card_binder.card_lookup import uuid_for_name_or_front_face
+from src.data_refinement.card_binder.card_lookup import (
+    CardLookup,
+    uuid_for_name_or_front_face,
+)
 from src.schema.game_id import GameId
 
 _OPENING_HAND_PREFIX = "opening_hand_"
@@ -47,7 +49,7 @@ class GameCardColumns:
     CSV.
     """
 
-    def __init__(self, card_binder: CardBinder, source_game: GameId) -> None:
+    def __init__(self, card_binder: CardLookup, source_game: GameId) -> None:
         """
         Inputs:
             card_binder: registry to look up card names against -
@@ -66,10 +68,11 @@ class GameCardColumns:
         self._tutored_columns: list[tuple[str, UUID]] = []
         self._deck_columns: list[tuple[str, UUID]] = []
         self._sideboard_columns: list[tuple[str, UUID]] = []
+        self._unmatched_deck_columns: list[str] = []
 
     @staticmethod
     def from_header(
-        columns: Iterable[str], card_binder: CardBinder, source_game: GameId
+        columns: Iterable[str], card_binder: CardLookup, source_game: GameId
     ) -> "GameCardColumns":
         """Parse and match one CSV's header into a GameCardColumns.
 
@@ -115,6 +118,8 @@ class GameCardColumns:
 
             card_uuid = game_columns.uuid_for_name(card_name)
             if card_uuid is None:
+                if prefix == _DECK_PREFIX:
+                    game_columns._unmatched_deck_columns.append(column)
                 continue
 
             game_columns._add_matched_column(prefix, column, card_uuid)
@@ -201,6 +206,20 @@ class GameCardColumns:
         Exceptions: none.
         """
         return self._deck_columns
+
+    @property
+    def unmatched_deck_columns(self) -> list[str]:
+        """Every "deck_<name>" column whose <name> matched no card, in the
+        header's own column order. Absent from deck_columns (no metric
+        tallies them), but still part of the deck's identity: see
+        GameDataChunkParser's deck identity columns.
+
+        Inputs: none.
+        Output: see above.
+        Side effects: none.
+        Exceptions: none.
+        """
+        return self._unmatched_deck_columns
 
     @property
     def sideboard_columns(self) -> list[tuple[str, UUID]]:

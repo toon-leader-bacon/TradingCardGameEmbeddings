@@ -33,7 +33,7 @@ from src.data_refinement.metrics.seventeenlands.count_table import ratio_output
 from src.data_refinement.metrics.seventeenlands.game_data.card_count_table_metric import (
     GameCardCountTableMetric,
 )
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+from src.data_refinement.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
     GameZone,
 )

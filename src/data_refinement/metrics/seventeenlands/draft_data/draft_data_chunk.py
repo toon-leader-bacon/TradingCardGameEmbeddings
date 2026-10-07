@@ -24,7 +24,7 @@ from enum import Enum
 import numpy as np
 import numpy.typing as npt
 
-from src.data_refinement.metrics.seventeenlands.zone_counts import ZoneCounts
+from src.data_refinement.seventeenlands.zone_counts import ZoneCounts
 
 # The code of a pick that names no pack column's card (or is empty)
 NO_PICK = -1

@@ -14,7 +14,7 @@ import numpy as np
 import numpy.typing as npt
 import pyarrow as pa
 
-from src.data_refinement.metrics.seventeenlands.zone_counts import ZoneCounts
+from src.data_refinement.seventeenlands.zone_counts import ZoneCounts
 
 # Read type for every card count column (narrowed by read_zone_counts)
 CARD_COUNT_TYPE = pa.float32()

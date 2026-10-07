@@ -8,10 +8,9 @@ A vectorized Metric[GameDataChunk] (see game_data/README.md).
 Per chunk it counts each distinct deck's four on_play_win_counts tallies
 over its rows in one pass, and adds them to a running per-deck_uuid
 total - no DeckBox of its own: deck_uuids use the canonical DeckBox's
-deck_uuid_from_cards() identity (see game_deck_label_metric.py's KNOWN
-GAP on box coverage). A CountTableMetric
-(../sliced_metric.py): each partition holds those four counts per
-deck_uuid.
+deck_uuid_from_cards() identity (extraction uses the same parser, so
+each id is a stored deck). A CountTableMetric (../sliced_metric.py):
+each partition holds those four counts per deck_uuid.
 
 ACCUMULATION, NOT STREAMING: unlike game_deck_label_metric.py's
 GameDeckLabelMetric family, this metric's label needs every game with
@@ -34,8 +33,8 @@ import pyarrow as pa
 from src.data_refinement.metrics.seventeenlands.count_table import (
     write_count_table,
 )
-from src.data_refinement.metrics.seventeenlands.chunk_decks import ChunkDecks
-from src.data_refinement.metrics.seventeenlands.game_data.game_data_chunk import (
+from src.data_refinement.seventeenlands.chunk_decks import ChunkDecks
+from src.data_refinement.seventeenlands.game_data.game_data_chunk import (
     GameDataChunk,
 )
 from src.data_refinement.metrics.seventeenlands.game_data.on_play_win_counts import (

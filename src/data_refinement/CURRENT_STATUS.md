@@ -46,7 +46,7 @@ game's deck box, metrics and splits. The refresh order is in the plan.
 | Source (retrieval) | Game | Card binder | Deck box | Metrics | Keys |
 | --- | --- | --- | --- | --- | --- |
 | `scryfall` | MTG | ✅ `ScryfallCardIngestionStage` | n/a (cards only) | 🟨 6 single-card masks (cmc, type, rarity, colors, power, toughness) | 6 |
-| `seventeenlands` › `game_data` | MTG | (scryfall) | ✅ `seventeenlands_game_data` → `mtg.db`, 4.8M decks (one per draft), 0.71% Unknown slots | 🟨 11 built, all with dojos, all vectorized (chunk scan, slices 1-2). Partial run: 76 set/format dirs, no PremierDraft | 0 (outputs not merged) |
+| `seventeenlands` › `game_data` | MTG | (scryfall) | ✅ `seventeenlands_game_data` → `mtg.db`: every distinct decklist any game played (multiset hash; rebuild pending 2026-10-06, count TBD) | 🟨 11 built, all with dojos, all vectorized (chunk scan, slices 1-2). Partial run: 76 set/format dirs, no PremierDraft | 0 (outputs not merged) |
 | `seventeenlands` › `draft_data` | MTG | (scryfall) | n/a (picks, not decks) | 🟨 6 built with dojos. Only one shakeout file run (OM1) | 0 |
 | `seventeenlands` › `replay_data` | MTG | (scryfall) | n/a (same games as game_data) | 🟨 9 built with dojos. Only one shakeout file run (PIO; Arena ids miss the binder) | 0 |
 | `pokemon_tcg` | Pokemon | ✅ `PokemonTcgCardIngestionStage` | ✅ `pokemon_tcg` → `pokemon.db`, 188 theme decks (prefabs, low value) | 🟨 5 single-card masks (HP, types, stage, retreat cost, weakness) | 5 |
