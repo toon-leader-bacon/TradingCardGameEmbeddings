@@ -52,9 +52,9 @@ class DataSource(str, Enum):
     # guides (see src/data_retrieval/play_gwent/downloader.py and
     # src/data_refinement/deck_box/play_gwent/extraction_stage.py) —
     # distinct from GWENT_ONE (that deck's cards' own data source).
-    STS2RUNS = "sts2runs"  # sts2runs.com's monthly community run dump
-    # (see src/data_retrieval/sts2runs/downloader.py and
-    # src/data_refinement/deck_box/sts2runs/extraction_stage.py).
+    STS2RUNS = "sts2runs"  # sts2runs.com's monthly community run dump. The
+    # source is dead and its code is in archive/sts2runs/; the value stays
+    # because 6,796 decks in the StS2 deck box carry it as provenance.
     STS_GG = "sts_gg"  # sts_gg's runs.jsonl run data (see
     # src/data_retrieval/sts_gg/run_downloader.py and
     # src/data_refinement/deck_box/sts_gg/extraction_stage.py).

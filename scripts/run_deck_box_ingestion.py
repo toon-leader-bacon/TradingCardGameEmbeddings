@@ -53,9 +53,6 @@ from src.data_refinement.deck_box.pokemon_tcg.extraction_stage import (
 from src.data_refinement.deck_box.spire_codex_runs.extraction_stage import (
     SpireCodexRunsDeckExtractionStage,
 )
-from src.data_refinement.deck_box.sts2runs.extraction_stage import (
-    Sts2RunsDeckExtractionStage,
-)
 from src.data_refinement.deck_box.seventeenlands_game_data.extraction_stage import (
     SeventeenLandsGameDataDeckExtractionStage,
 )
@@ -89,10 +86,6 @@ _STAGES: dict[str, tuple[DeckExtractionStage, Callable[[], Path]]] = {
     "spire_codex_runs": (
         SpireCodexRunsDeckExtractionStage(),
         lambda: SpireCodexRunsDeckExtractionStage.DEFAULT_RAW_PATH,
-    ),
-    "sts2runs": (
-        Sts2RunsDeckExtractionStage(),
-        lambda: Sts2RunsDeckExtractionStage.DEFAULT_RAW_PATH,
     ),
     "seventeenlands_game_data": (
         SeventeenLandsGameDataDeckExtractionStage(),

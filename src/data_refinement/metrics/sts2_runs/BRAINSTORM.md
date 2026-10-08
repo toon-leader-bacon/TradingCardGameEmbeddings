@@ -1,8 +1,8 @@
-# BRAINSTORM (sts2runs / Slay the Spire 2 run data)
+# BRAINSTORM (sts2_runs / Slay the Spire 2 run data)
 
-Candidate metrics/dojos derivable from a single sts2runs run record
-(`data/tmp/single_run.json`, one gzip-NDJSON line from
-`src/data_retrieval/sts2runs/downloader.py`'s output). Not a plan, not
+Candidate metrics/dojos derivable from a single run record
+(`data/tmp/single_run.json`, one gzip-NDJSON line; the schema spire_codex
+and the archived sts2runs source share). Not a plan, not
 scoped or prioritized — a raw idea list to narrow down later.
 
 Each metric below states:

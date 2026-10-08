@@ -1,7 +1,7 @@
 """Every concrete sts2_runs CardAverageMetric (card_average_metric.py):
 sts_gg's nine per-card averages (../sts_gg/card_average_metrics.py) plus
-its upgrade rate and act-2 win rate, recomputed from spire_codex +
-sts2runs runs.
+its upgrade rate and act-2 win rate, recomputed from spire_codex
+runs.
 
 Each shares its sts_gg counterpart's LABEL_COLUMN by reference, so that
 counterpart's dojo wrapper (src/dojos/sts_gg/card_average_dojos.py)

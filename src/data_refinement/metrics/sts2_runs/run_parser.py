@@ -1,8 +1,8 @@
 """Raw StS2 run dict -> Sts2Run (run_record.py): the one place the
 sts2_runs metrics read the raw run schema.
 
-RAW SHAPE (spire_codex's run export and sts2runs' dump share it; see
-src/data_refinement/deck_box/sts2runs/extraction_stage.py): top-level
+RAW SHAPE (spire_codex's run export; see
+src/data_refinement/deck_box/spire_codex_runs/extraction_stage.py): top-level
 "win", "was_abandoned", "ascension", "game_mode", "killed_by_encounter"
 / "killed_by_event" ("NONE.NONE" when unset), "players" (each with "id",
 "character", "deck", "relics") and "map_point_history" (one list of map
@@ -32,8 +32,8 @@ import logging
 from uuid import UUID
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.data_refinement.deck_box.sts2runs.extraction_stage import (
-    Sts2RunsDeckExtractionStage,
+from src.data_refinement.deck_box.spire_codex_runs.extraction_stage import (
+    SpireCodexRunsDeckExtractionStage,
 )
 from src.data_refinement.metrics.sts2_runs.card_removal_reader import (
     CardRemovalReader,
@@ -71,16 +71,14 @@ class Sts2RunParser:
     """Parses one source's raw runs into Sts2Runs (see module docstring)."""
 
     def __init__(
-        self, card_lookup: CardLookup, stage: Sts2RunsDeckExtractionStage
+        self, card_lookup: CardLookup, stage: SpireCodexRunsDeckExtractionStage
     ) -> None:
         """
         Inputs:
             card_lookup: the Slay the Spire 2 binder (spire_codex cards);
                 never written to.
-            stage: the deck box extraction stage for this run source
-                (Sts2RunsDeckExtractionStage or
-                SpireCodexRunsDeckExtractionStage); supplies RUN_ID_KEY
-                and deck_uuid().
+            stage: the deck box extraction stage for this run source;
+                supplies RUN_ID_KEY and deck_uuid().
         Output: none (constructor).
         Side effects: none.
         Exceptions: none.

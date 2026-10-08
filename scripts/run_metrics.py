@@ -22,7 +22,7 @@ multiple sets never overwrites a previous one's output — the
 metric classes themselves have no cross-file accumulation (each file's
 header names different cards), so "one file, one output" is the actual
 unit of work, not "one family, one output". sts2_runs reads two
-fixed sources (spire_codex's ~1.7M-run pages and sts2runs' dump) in one
+fixed source (spire_codex's ~1.7M-run pages) in one
 pass; it is the slow one (most of an hour).
 
 Usage (from the project root):
@@ -526,7 +526,7 @@ _STS2_RUNS_METRIC_CLASSES: tuple[
 
 
 def run_sts2_runs(raw_path: Path | None) -> None:
-    """Scan spire_codex's run pages and sts2runs' dump (both at their
+    """Scan spire_codex's run pages (at their
     default paths) into data/metrics/sts2_runs/. The deck-level outputs
     point into the published deck box (data/final/decks/
     slay_the_spire_2.db); nothing is written to it."""
@@ -537,7 +537,7 @@ def run_sts2_runs(raw_path: Path | None) -> None:
     )
     metrics: list[Metric[Sts2Run]] = [cls(binder) for cls in _STS2_RUNS_METRIC_CLASSES]
 
-    print("=== sts2_runs: spire_codex run pages + sts2runs dump ===")
+    print("=== sts2_runs: spire_codex run pages ===")
     tally = scan_sts2_runs(default_run_sources(), binder, metrics)
     print(tally.as_dict())
     print(f"wrote {len(metrics)} metric outputs")

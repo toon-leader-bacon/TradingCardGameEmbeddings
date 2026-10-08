@@ -33,9 +33,10 @@ that matter:
 - **scryfall:** a newer dump (`oracle-cards-20261002...`, was 09-12).
 - **spire_codex runs:** 40 pages / 6.1 GB (34 pages / 5.2 GB ingested).
 - **play_gwent:** guides re-downloading in progress.
-- **sts2runs:** `data/raw/sts2runs/` is **empty**. The download failed
-  on a DNS error (`sts2runs.com`). Its 6,796 decks are still in
-  `slay_the_spire_2.db` and in the `sts2_runs` metrics.
+- **sts2runs:** dead (2026-10-08; `sts2runs.com` no longer resolves in DNS) and
+  archived in `archive/sts2runs/`. Its 6,796 decks stay in
+  `slay_the_spire_2.db` (provenance `sts2runs`); the `sts2_runs` metrics now
+  read spire_codex runs only.
 - **17lands:** none of the 303 CSVs is tar-wrapped any more. The old
   download had 19.
 
@@ -55,7 +56,7 @@ game's deck box, metrics and splits. The refresh order is in the plan.
 | `gwent_one` | Gwent | ✅ `GwentOneCardIngestionStage` | n/a (cards only) | 🟨 8 single-card masks | 8 |
 | `play_gwent` | Gwent | (gwent_one) | ✅ `play_gwent` → `gwent.db`, 60k guide decks | 🟨 4: leader masked from deck, card inclusion rate, faction-conditioned inclusion, guide votes. All four only read the published box | 4 |
 | `spire_codex` (cards) | StS2 | ✅ `SpireCodexCardIngestionStage` | n/a | 🟨 4 single-card masks (cost, type, rarity, color) | 4 |
-| `spire_codex` (runs) + `sts2runs` | StS2 | (spire_codex) | ✅ `spire_codex_runs` (subclasses the sts2runs stage) + `sts2runs` → `slay_the_spire_2.db`, ~2.76M decks incl. abandoned runs | 🟩 27 in `metrics/sts2_runs/` over 1.36M scored runs, with losses. Four per-floor pick metrics (`card_reward_pick`, `shop_purchase_pick` (noisy: gold is not an input), `card_removal_pick`, `card_upgrade_pick`) each have a dojo and catalog key (`sts2_runs.*_pick`), not yet scanned on the full corpus; the rest-site choice is not built | 26 |
+| `spire_codex` (runs) | StS2 | (spire_codex) | ✅ `spire_codex_runs` → `slay_the_spire_2.db`, ~2.76M decks incl. abandoned runs (6,796 from the archived sts2runs source) | 🟩 27 in `metrics/sts2_runs/` over 1.36M scored runs, with losses. Four per-floor pick metrics (`card_reward_pick`, `shop_purchase_pick` (noisy: gold is not an input), `card_removal_pick`, `card_upgrade_pick`) each have a dojo and catalog key (`sts2_runs.*_pick`), not yet scanned on the full corpus; the rest-site choice is not built | 26 |
 | `sts_gg` | StS2 | (spire_codex) | ✅ `sts_gg` (1,004 decks, into the same box) | 🟩 24 built with dojos. Wins only (a leaderboard), so the 4 win/killed-by labels are constant and have no key; `sts2_runs` covers them. `card_character_prediction` has a key (2026-10-07) | 20 |
 | `cardvault_fabtcg` | FaB | ✅ `CardVaultFabtcgCardIngestionStage` | n/a (cards only) | 🟨 6 single-card masks (pitch, cost, power, defense, class, type) | 6 |
 | `fabtcg_decklists` | FaB | (cardvault_fabtcg) | ✅ `fabtcg_decklists` → `flesh_and_blood.db`, 4,161 decks (cards keyed by name) | 🟨 3: hero masked from deck, card inclusion rate, hero-conditioned inclusion. Pitch-curve shape not built | 3 |

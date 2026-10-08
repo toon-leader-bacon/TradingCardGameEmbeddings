@@ -8,9 +8,6 @@ import pytest
 from src.data_refinement.deck_box.spire_codex_runs.extraction_stage import (
     SpireCodexRunsDeckExtractionStage,
 )
-from src.data_refinement.deck_box.sts2runs.extraction_stage import (
-    Sts2RunsDeckExtractionStage,
-)
 from src.data_refinement.metrics.sts2_runs.run_parser import Sts2RunParser
 from src.data_refinement.metrics.sts2_runs.run_record import CardSlot, Sts2Run
 from src.data_refinement.metrics.sts2_runs.scanner import (
@@ -99,20 +96,20 @@ class TestScanSts2Runs:
     def test_feeds_scored_runs_to_every_metric_and_tallies_the_rest(
         self, tmp_path: Path
     ) -> None:
-        malformed = raw_run(_serverId=3)
+        malformed = raw_run(run_hash="3")
         del malformed["players"][0]["deck"][0]["floor_added_to_deck"]
         raw_path = _write_runs(
             tmp_path / "runs.json.gz",
             [
-                raw_run(_serverId=1),
-                raw_run(_serverId=2, was_abandoned=True),
+                raw_run(run_hash="1"),
+                raw_run(run_hash="2", was_abandoned=True),
                 malformed,
             ],
         )
         healthy, failing = _RecordingMetric(), _RecordingMetric(fail=True)
 
         tally = scan_sts2_runs(
-            [RunSource(Sts2RunsDeckExtractionStage(), raw_path)],
+            [RunSource(SpireCodexRunsDeckExtractionStage(), raw_path)],
             binder(tmp_path),
             [failing, healthy],
         )
@@ -126,19 +123,18 @@ class TestScanSts2Runs:
         }
 
     def test_a_non_dict_deck_entry_is_malformed_not_fatal(self, tmp_path: Path) -> None:
-        broken = raw_run(_serverId=1)
+        broken = raw_run(run_hash="1")
         broken["players"][0]["deck"].append("CARD.NOT_A_DICT")
         raw_path = _write_runs(tmp_path / "runs.json.gz", [broken])
 
         tally = scan_sts2_runs(
-            [RunSource(Sts2RunsDeckExtractionStage(), raw_path)], binder(tmp_path), []
+            [RunSource(SpireCodexRunsDeckExtractionStage(), raw_path)],
+            binder(tmp_path),
+            [],
         )
 
         assert tally.excluded == {RunExclusion.MALFORMED: 1}
 
-    def test_default_sources_are_spire_codex_then_sts2runs(self) -> None:
+    def test_default_source_is_spire_codex(self) -> None:
         stages = [type(source.stage) for source in default_run_sources()]
-        assert stages == [
-            SpireCodexRunsDeckExtractionStage,
-            Sts2RunsDeckExtractionStage,
-        ]
+        assert stages == [SpireCodexRunsDeckExtractionStage]

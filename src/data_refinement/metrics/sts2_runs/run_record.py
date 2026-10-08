@@ -1,8 +1,8 @@
 """Typed records for one Slay the Spire 2 run, as the sts2_runs metrics
 read it.
 
-Both run sources (spire_codex's run export and sts2runs' dump) share one
-raw schema; run_parser.py turns a raw run dict into these records, and
+The raw run export (spire_codex's; sts2runs' dump had the same schema)
+has one schema; run_parser.py turns a raw run dict into these records, and
 nothing past that parse step touches the raw dict. Every value a metric
 needs is computed once, at parse time, from the run's top-level fields,
 its players' final decks and relics, and its map_point_history.
@@ -91,7 +91,7 @@ class Sts2Run:
 
     run_id: the source's own run id (str(_serverId) or run_hash).
     game_mode: raw "game_mode" ("standard", "daily", "custom").
-    is_cheated: sts2runs' _isCheated flag (False when absent).
+    is_cheated: the _isCheated flag of sts2runs-schema runs (False when absent).
     outcome: see RunOutcome.
     killed_by: the encounter (or event) id that ended a LOSS; None for
         any other outcome, and for a loss the raw run names no killer.

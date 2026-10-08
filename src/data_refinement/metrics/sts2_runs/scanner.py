@@ -1,5 +1,5 @@
 """Drives every sts2_runs metric over one read pass of each StS2 run
-source (spire_codex's run pages, sts2runs' dump).
+source (spire_codex's run pages).
 
 Reading reuses each source's deck box extraction stage (raw_files() and
 runs()), so the raw files are found and decompressed the same way the
@@ -41,9 +41,6 @@ from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.spire_codex_runs.extraction_stage import (
     SpireCodexRunsDeckExtractionStage,
 )
-from src.data_refinement.deck_box.sts2runs.extraction_stage import (
-    Sts2RunsDeckExtractionStage,
-)
 from src.data_refinement.metrics.isolated_call import call_isolated
 from src.data_refinement.metrics.metric import Metric
 from src.data_refinement.metrics.sts2_runs.run_parser import Sts2RunParser
@@ -59,7 +56,7 @@ class RunSource:
     """One raw run source: its deck box extraction stage, and the raw
     path to read (None = the stage's DEFAULT_RAW_PATH)."""
 
-    stage: Sts2RunsDeckExtractionStage
+    stage: SpireCodexRunsDeckExtractionStage
     raw_path: Path | None = None
 
 
@@ -169,24 +166,21 @@ def scored_run(run: Sts2Run) -> Sts2Run | RunExclusion:
 
 
 def default_run_sources() -> tuple[RunSource, ...]:
-    """Both StS2 run sources at their default raw paths: spire_codex's
-    run pages, then sts2runs' dump.
+    """The StS2 run sources at their default raw paths: spire_codex's
+    run pages.
 
     Inputs: none. Output: tuple[RunSource, ...]. Side effects: none.
     Exceptions: none.
 
     Example:
         >>> [type(s.stage).__name__ for s in default_run_sources()]
-        ['SpireCodexRunsDeckExtractionStage', 'Sts2RunsDeckExtractionStage']
+        ['SpireCodexRunsDeckExtractionStage']
     """
-    return (
-        RunSource(SpireCodexRunsDeckExtractionStage()),
-        RunSource(Sts2RunsDeckExtractionStage()),
-    )
+    return (RunSource(SpireCodexRunsDeckExtractionStage()),)
 
 
 def _scored_or_excluded(
-    parser: Sts2RunParser, stage: Sts2RunsDeckExtractionStage, row: dict
+    parser: Sts2RunParser, stage: SpireCodexRunsDeckExtractionStage, row: dict
 ) -> Sts2Run | RunExclusion:
     """Parse one raw run and apply scored_run(); a run the parser cannot
     read is RunExclusion.MALFORMED (logged), never an error.

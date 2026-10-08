@@ -3,14 +3,13 @@
 ## New deck sources
 
 Flat decks only (a `card_nocab_uuids` multiset), per `GenericDeck`'s
-no-metadata design. Built today: `sts_gg/`, `sts2runs/`,
+no-metadata design. Built today: `sts_gg/`, `spire_codex_runs/`,
 `fabtcg_decklists/`, `play_gwent/`, `seventeenlands_game_data/`.
 
 - **`spire_codex` runs** - `src/data_retrieval/spire_codex/run_downloader.py`
   pulls spire-codex's paginated run export. Once downloaded, it would be
-  a third Slay the Spire 2 run source alongside `sts_gg` and `sts2runs`;
-  check for schema overlap with those two before building a
-  near-identical stage.
+  a Slay the Spire 2 run source alongside `sts_gg`; built as
+  `spire_codex_runs/`.
 - **`pitchstack`** - `decks.jsonl` holds deck metadata only, no card
   list. The downloader needs the per-version `/cards` endpoint first
   (see `src/data_retrieval/pitchstack/pitchstack.md`).
@@ -111,7 +110,7 @@ not decks).
   caught by any `save()` step.
 
 - **Abandoned StS2 runs.** Every StS2 deck source keeps them today
-  (sts_gg, sts2runs, spire_codex_runs; the last has a
+  (sts_gg, spire_codex_runs; the last has a
   `keep_abandoned` toggle, default on). The project favors quantity, but a
   quit run's deck is not a finished one and early quits are mostly
   starter decks. If that ever shows up as noise, filter only runs

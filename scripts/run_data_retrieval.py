@@ -69,7 +69,6 @@ from src.data_retrieval.scryfall.downloader import ScryfallOracleDownloader
 from src.data_retrieval.seventeenlands.downloader import SeventeenLandsDownloader
 from src.data_retrieval.spire_codex.card_downloader import SpireCodexCardDownloader
 from src.data_retrieval.spire_codex.run_downloader import SpireCodexRunDownloader
-from src.data_retrieval.sts2runs.downloader import STS2RunsDownloader
 from src.data_retrieval.sts_gg.run_downloader import STSGGRunDownloader
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -152,10 +151,6 @@ def run_sts_gg() -> None:
     _run_standard(STSGGRunDownloader())
 
 
-def run_sts2runs() -> None:
-    _run_standard(STS2RunsDownloader())
-
-
 def run_play_gwent() -> None:
     _run_standard(PlayGwentDownloader())
 
@@ -198,7 +193,6 @@ DOWNLOADERS: dict[str, Callable[[], None]] = {
     "seventeenlands": run_seventeenlands,
     "spire_codex_cards": run_spire_codex_cards,
     "spire_codex_runs": run_spire_codex_runs,
-    "sts2runs": run_sts2runs,
     "sts_gg": run_sts_gg,
 }
 

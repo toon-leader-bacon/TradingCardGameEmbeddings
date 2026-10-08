@@ -1,9 +1,9 @@
 # sts2_runs
 
-Slay the Spire 2 run metrics over the two run sources that share one
-raw schema: spire_codex's run export (`data/raw/spire_codex/runs/`,
-~1.67M runs in 34 gzip pages) and sts2runs' dump
-(`data/raw/sts2runs/*.json.gz`, 6,796 runs). Card references resolve
+Slay the Spire 2 run metrics over spire_codex's run export
+(`data/raw/spire_codex/runs/`, ~1.67M runs in gzip pages). A second
+source, sts2runs' dump, was dropped when the site died (code in
+`archive/sts2runs/`); its raw schema matched. Card references resolve
 against the `spire_codex` `CardBinder`. Unlike sts_gg (a leaderboard of
 wins only, see [`../sts_gg/README.md`](../sts_gg/README.md)'s "Wins
 only"), these runs include losses, so the win and killed-by labels
@@ -58,7 +58,7 @@ wrappers (`src/dojos/sts_gg/`) with a `metric_output` override.
 ## How it works
 
 - **Reading** reuses the deck box extraction stages
-  (`deck_box/sts2runs/`, `deck_box/spire_codex_runs/`): `raw_files()`
+  (`deck_box/spire_codex_runs/`): `raw_files()`
   lists a source's files, `runs()` streams its parsed runs, and
   `deck_uuid(run_id, player_index)` names the deck the stage stored.
 - **No deck box is written.** Every (run, player) final deck is already
@@ -143,7 +143,7 @@ built.
 PYTHONPATH=. python scripts/run_metrics.py --source sts2_runs
 ```
 
-About 60 s per spire_codex page (~50k runs) plus the sts2runs dump, so
+About 60 s per spire_codex page (~50k runs) so
 roughly 35-40 minutes in all, under 0.5 GB of memory.
 
 ```python

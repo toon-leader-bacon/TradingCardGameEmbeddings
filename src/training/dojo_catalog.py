@@ -821,7 +821,7 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     "final_decks.held_out_card_mtg": _recipe_for_final_deck_box(
         GameId.MTG, final_decks.MtgHeldOutCardDojo
     ),
-    # spire_codex + sts2runs runs, through the sts_gg wrappers (see the
+    # spire_codex runs, through the sts_gg wrappers (see the
     # module docstring)
     "sts2_runs.ascension_prediction": _recipe_for_sts2_runs_deck(
         sts_decks.DeckAscensionDojo,

@@ -8,9 +8,6 @@ from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.deck_box.spire_codex_runs.extraction_stage import (
     SpireCodexRunsDeckExtractionStage,
 )
-from src.data_refinement.deck_box.sts2runs.extraction_stage import (
-    Sts2RunsDeckExtractionStage,
-)
 from src.data_refinement.metrics.sts2_runs.pick_choice import PickKind
 from src.data_refinement.metrics.sts2_runs.run_parser import Sts2RunParser
 from src.data_refinement.metrics.sts2_runs.run_record import RunOutcome
@@ -139,15 +136,6 @@ class TestDeck:
             "abc123", 0
         )
 
-    def test_sts2runs_runs_use_their_own_id_key_and_namespace(
-        self, tmp_path: Path
-    ) -> None:
-        stage = Sts2RunsDeckExtractionStage()
-        parser = Sts2RunParser(binder(tmp_path), stage)
-        run = parser.parse(raw_run(_serverId=42))
-        assert run.run_id == "42"
-        assert run.players[0].deck_uuid == stage.deck_uuid("42", 0)
-
     def test_slots_carry_card_floor_and_upgrade(
         self, parser: Sts2RunParser, tmp_path: Path
     ) -> None:
@@ -177,8 +165,8 @@ def test_parsed_deck_uuids_are_the_decks_extract_stores(tmp_path: Path) -> None:
     # The deck-label metrics' rows point at these decks in the published box
     lookup = binder(tmp_path)
     lookup.ensure_unknown_card(GameId.SLAY_THE_SPIRE_2)
-    stage = Sts2RunsDeckExtractionStage()
-    row = raw_run(_serverId=42)
+    stage = SpireCodexRunsDeckExtractionStage()
+    row = raw_run(run_hash="42")
     raw_path = tmp_path / "runs.json.gz"
     with gzip.open(raw_path, "wt", encoding="utf-8") as raw_file:
         raw_file.write(json.dumps(row) + "\n")

@@ -16,7 +16,7 @@ WINS ONLY: sts.gg's source is its leaderboard, which lists winning
 runs only (all 1,004 rows of data/raw/sts_gg/runs.jsonl have win=True
 and killedBy=null, checked 2026-10-01). So WinMetric and KilledByMetric
 carry no signal on this source; they are kept for the run schema they
-document, and ../sts2_runs/ computes both from spire_codex + sts2runs
+document, and ../sts2_runs/ computes both from spire_codex
 runs, which include losses.
 NULLABLE LABEL: KilledByMetric's label is None on a win (killed_by is
 only ever set on a loss) - pyarrow's string type is nullable by

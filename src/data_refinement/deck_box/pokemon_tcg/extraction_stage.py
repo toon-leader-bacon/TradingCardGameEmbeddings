@@ -1,7 +1,7 @@
 """Translates pokemon-tcg-data's theme decks into a DeckBox.
 
 See src/data_refinement/deck_box/extraction.py for the shared
-DeckExtractionStage interface, and sts2runs/extraction_stage.py for the
+DeckExtractionStage interface, and spire_codex_runs/extraction_stage.py for the
 sibling this follows (deterministic deck uuids, create-or-update, the
 Unknown sentinel on a card miss).
 

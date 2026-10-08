@@ -65,8 +65,8 @@ merged or cross-referenced.
 
 `metrics/sts2_runs/` goes the other way: it writes no box, and its
 deck-level metric rows point straight at the published StS2 box, using
-`Sts2RunsDeckExtractionStage.deck_uuid()` (and the spire_codex
-subclass's) to name the deck the stage stored for each (run, player).
+`SpireCodexRunsDeckExtractionStage.deck_uuid()` to name the deck the
+stage stored for each (run, player).
 It also reads the raw runs through the stages' `raw_files()`/`runs()`.
 So changing a run stage's deck identity or raw reading changes those
 metrics too.
@@ -132,8 +132,7 @@ card reference it can't match, rather than dropping it.
 | Directory | Stage | Game | Raw input | Deck identity |
 |---|---|---|---|---|
 | `sts_gg/` | `StsGgDeckExtractionStage` | Slay the Spire 2 | sts_gg `runs.jsonl` | `uuid5(ns, run_id)` |
-| `sts2runs/` | `Sts2RunsDeckExtractionStage` | Slay the Spire 2 | sts2runs monthly `.json.gz` | `uuid5(ns, f"{run_id}:{player_index}")` |
-| `spire_codex_runs/` | `SpireCodexRunsDeckExtractionStage` (subclasses the sts2runs stage) | Slay the Spire 2 | spire_codex `runs/page_*.jsonl.gz` | `uuid5(ns, f"{run_hash}:{player_index}")` |
+| `spire_codex_runs/` | `SpireCodexRunsDeckExtractionStage` | Slay the Spire 2 | spire_codex `runs/page_*.jsonl.gz` | `uuid5(ns, f"{run_hash}:{player_index}")` |
 | `fabtcg_decklists/` | `FabtcgDecklistsExtractionStage` | Flesh and Blood | fabtcg.com decklist HTML (parsed by `fragment_parsing.py`) | `uuid5(ns, deck_slug)` |
 | `play_gwent/` | `PlayGwentDeckExtractionStage` | Gwent | playgwent.com `guides.jsonl` | `uuid5(ns, guide_id)` |
 | `seventeenlands_game_data/` | `SeventeenLandsGameDataDeckExtractionStage` | MTG | 17lands `game_data` CSVs (`deck_<name>` copy-count columns), read with the shared `../seventeenlands/` parser | `deck_uuid_from_cards()` over the full copy-count multiset: every distinct decklist any game played, stored once (an unmatched column counts as the Unknown card) |

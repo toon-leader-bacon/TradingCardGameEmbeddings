@@ -115,7 +115,7 @@
   `metrics/cardvault_fabtcg/typebox.py`;
   `card_mask_metrics.py` and `fabtcg_decklists/hero_legality.py` both
   import it instead of each keeping their own copy.
-- [ ] **StS2 per-floor metrics (B2).** The spire_codex + sts2runs run
+- [ ] **StS2 per-floor metrics (B2).** The spire_codex run
   records carry per-floor `card_choices`, shop purchases, removals,
   upgrades and rest-site choices, none used yet. Top candidates: card
   reward pick given the deck so far (`[offered, partial deck]`, the same

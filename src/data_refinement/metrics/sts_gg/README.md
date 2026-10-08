@@ -200,7 +200,7 @@ drops the run. `CardUpgradeRateMetric`, `CardWinRateAtAct2Metric`,
 `DeckLabelMetric`, `CardAverageMetric`, and
 `CardCharacterPredictionMetric` each repeat the same `"CARD."`-prefix-strip
 + `CardBinder.get_by_alias` card rule rather than sharing a helper (the
-sts2runs deck extraction stage repeats it too); within each family, the
+spire_codex runs deck extraction stage repeats it too); within each family, the
 Template Method base (`DeckLabelMetric`'s eleven subclasses,
 `CardAverageMetric`'s nine) keeps it to one copy.
 

@@ -1,7 +1,7 @@
 """Every concrete sts2_runs DeckLabelMetric (deck_label_metric.py): the
 twelve sts_gg deck-label metrics (../sts_gg/deck_label_metrics.py and
-../sts_gg/ascension_prediction_metric.py), recomputed from spire_codex +
-sts2runs runs.
+../sts_gg/ascension_prediction_metric.py), recomputed from spire_codex
+runs.
 
 Each shares its sts_gg counterpart's LABEL_COLUMN and LABEL_TYPE (and
 LABEL_VALUES where it has them) by reference, so that counterpart's dojo

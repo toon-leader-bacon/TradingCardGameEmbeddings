@@ -35,7 +35,6 @@ One subdirectory per source:
 | `scryfall/` | MTG | Scryfall oracle-cards and default-cards (every printing) bulk files |
 | `seventeenlands/` | MTG | 17lands per-set/per-format draft, game and replay CSVs (own [README](seventeenlands/README.md)) |
 | `spire_codex/` | Slay the Spire 2 | spire-codex `cards.json` and its paginated run export |
-| `sts2runs/` | Slay the Spire 2 | a monthly sts2runs.com run snapshot |
 | `sts_gg/` | Slay the Spire 2 | sts.gg run ids and run detail JSON |
 | `dominion/` | Dominion | not a downloader: research leads (`todo.md`) and a prototype replay scraper |
 
