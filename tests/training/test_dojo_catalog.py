@@ -1,3 +1,4 @@
+import inspect
 import random
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from src.dojos.generic.multi_group_option_selection.dojo import (
     MultiGroupOptionSelectionDojo,
 )
 from src.dojos.generic.multi_group_regression.dojo import MultiGroupRegressionDojo
+from src.dojos.loss.regression_objective import RegressionObjective
 from src.dojos.mods.common_mods import MaskTargetKeyMod
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.dojos.mods.per_game_mod import PerGameMod
@@ -114,7 +116,9 @@ from src.training.dojo_catalog import (
     DeckDojoRecipe,
     DojoBuildContext,
     MultiGameCardDojoRecipe,
+    _REGRESSION_CELLS,
     _augmentation_pipeline,
+    _constructor_for,
     _staple_subsampling,
     _with_augmentations,
     build_dojos,
@@ -676,3 +680,47 @@ class TestStapleThresholds:
         assert (
             _staple_subsampling("contrastive.gwent", dealer, self._context({})) is None
         )
+
+
+class TestRegressionObjective:
+    def test_exactly_the_regression_dojo_classes_accept_an_objective(self) -> None:
+        # A new regression cell outside _REGRESSION_CELLS would silently
+        # train with MSE; a classifier must not be handed an objective
+        for key, recipe in DOJO_CATALOG.items():
+            dojo_class = getattr(recipe, "dojo_class", None)
+            if dojo_class is None:
+                continue
+            takes = "objective" in inspect.signature(dojo_class).parameters
+            assert takes == issubclass(dojo_class, _REGRESSION_CELLS), key
+
+    def test_a_regression_class_is_bound_to_the_runs_objective(self) -> None:
+        objective = RegressionObjective.huber()
+        context = DojoBuildContext(
+            shelf=_RecordingShelf(),
+            holdout=HoldoutSpec.no_holdout(),
+            card_embedding_size=32,
+            rng_seed=0,
+            regression_objective=objective,
+        )
+
+        bound: Any = _constructor_for(CostRegressionDojo, context)
+
+        assert bound.keywords == {"objective": objective}
+
+    def test_any_other_class_is_left_alone(self) -> None:
+        context = DojoBuildContext(
+            shelf=_RecordingShelf(),
+            holdout=HoldoutSpec.no_holdout(),
+            card_embedding_size=32,
+            rng_seed=0,
+        )
+        assert _constructor_for(SetMaskDojo, context) is SetMaskDojo
+
+    def test_the_default_objective_is_plain_mse(self) -> None:
+        context = DojoBuildContext(
+            shelf=_RecordingShelf(),
+            holdout=HoldoutSpec.no_holdout(),
+            card_embedding_size=32,
+            rng_seed=0,
+        )
+        assert type(context.regression_objective.loss).__name__ == "MseLoss"

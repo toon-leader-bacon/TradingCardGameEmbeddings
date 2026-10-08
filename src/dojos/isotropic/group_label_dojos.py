@@ -51,6 +51,7 @@ from src.data_refinement.metrics.isotropic.summary.kingdom_member_label_metrics 
     WinningDeckCountMetric,
     WinningDeckMembershipMetric,
 )
+from src.dojos.loss.regression_objective import RegressionObjective
 from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.multi_group_binary_classification.dojo import (
     MultiGroupBinaryClassificationDojo,
@@ -165,6 +166,7 @@ class IsotropicGroupRegressionDojo(MultiGroupRegressionDojo):
         name: str | None = None,
         rng_seed: int | None = None,
         strict_version_check: bool = True,
+        objective: RegressionObjective | None = None,
     ) -> None:
         """
         Inputs: as IsotropicGroupBinaryDojo.
@@ -185,6 +187,7 @@ class IsotropicGroupRegressionDojo(MultiGroupRegressionDojo):
             holdout=holdout,
             card_embedding_size=card_embedding_size,
             deck_box=deck_box,
+            objective=objective,
             config=DojoConfig(
                 name=name,
                 rng_seed=rng_seed,

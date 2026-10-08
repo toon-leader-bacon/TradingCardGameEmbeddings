@@ -43,6 +43,7 @@ from src.data_refinement.metrics.isotropic.summary.full_deck_win_prediction_metr
 from src.data_refinement.metrics.isotropic.summary.kingdom_game_length_metric import (
     KingdomGameLengthMetric,
 )
+from src.dojos.loss.regression_objective import RegressionObjective
 from src.dojos.generic.data_constructor import DataConstructor
 from src.dojos.generic.data_constructors import DeckLabelDataConstructor
 from src.dojos.generic.dojo_config import DojoConfig
@@ -144,6 +145,7 @@ class IsotropicDeckRegressionDojo(MultiCardRegressionDojo):
         name: str | None = None,
         rng_seed: int | None = None,
         strict_version_check: bool = True,
+        objective: RegressionObjective | None = None,
     ) -> None:
         """
         Inputs:
@@ -157,6 +159,8 @@ class IsotropicDeckRegressionDojo(MultiCardRegressionDojo):
             rng_seed: split/shuffle seed; None means unseeded.
             strict_version_check: raise (rather than warn) on a metric
                 file or deck box built against another CardBinder.
+            objective: the loss and baseline to train with; None is plain
+                MSE with the mean predictor's baseline (RegressionObjective.mse()).
         Output: none (constructor).
         Side effects: see MultiCardRegressionDojo (may write split files).
         Exceptions: see MultiCardRegressionDojo.
@@ -176,6 +180,7 @@ class IsotropicDeckRegressionDojo(MultiCardRegressionDojo):
             ),
             card_embedding_size=card_embedding_size,
             deck_box=deck_box,
+            objective=objective,
             config=DojoConfig(
                 name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),

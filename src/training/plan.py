@@ -12,6 +12,7 @@ from typing import get_args
 
 from src.encoder_model.precision import Precision
 from src.schema.holdout import HoldoutSpec
+from src.training.loss_weighting import LossWeighting
 
 
 @dataclass(frozen=True)
@@ -151,6 +152,11 @@ class TrainingPlan:
     eval_examples_per_dojo: cap passed as max_examples to each per-round
         TEST pass.
     seed: seeds the diet sampler and any other trainer randomness.
+    faults: how failed steps are tolerated.
+    loss_weighting: per-dojo weights and the baseline floor applied to every
+        training step's loss (src/training/loss_weighting.py). None trains
+        on the raw loss, as the extrinsic runs do. Every weight must name a
+        dojo in some phase's diet.
     """
 
     phases: tuple[Phase, ...]
@@ -159,6 +165,7 @@ class TrainingPlan:
     eval_examples_per_dojo: int
     seed: int
     faults: FaultPolicy = FaultPolicy()
+    loss_weighting: LossWeighting | None = None
 
     def __post_init__(self) -> None:
         if not self.phases:
@@ -176,6 +183,12 @@ class TrainingPlan:
                 raise ValueError(
                     f"phase {phase.name!r} trains held-out dojos {sorted(overlap)}"
                 )
+        # Every weighted dojo must be trained in some phase
+        if self.loss_weighting is not None:
+            trained = {name for phase in self.phases for name in phase.dojo_names}
+            untrained = sorted(set(self.loss_weighting.weights) - trained)
+            if untrained:
+                raise ValueError(f"loss_weights names {untrained}, in no phase's diet")
 
 
 @dataclass(frozen=True)

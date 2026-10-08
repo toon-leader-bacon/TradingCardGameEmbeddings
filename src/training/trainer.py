@@ -8,6 +8,7 @@ import gc
 import logging
 import random
 import time
+from dataclasses import dataclass
 from typing import Any, Callable, Sequence
 
 import torch
@@ -56,6 +57,37 @@ class NonFiniteGradientError(ValueError):
     skipped."""
 
 
+@dataclass
+class _RoundSkips:
+    """Steps that took no optimizer step this round, by cause. Neither is a
+    fault: an fp16 overflow is the GradScaler probing its scale, and a batch
+    with no usable baseline is a harmless degenerate batch."""
+
+    fp16_overflow: int = 0
+    unusable_baseline: int = 0
+
+    def log_and_reset(self, phase_name: str, round_index: int) -> None:
+        """Log (INFO) each nonzero count, then zero both.
+        Inputs: phase_name, round_index (for the log line). Output: None.
+        Side effects: logs; resets the counts. Exceptions: none."""
+        if self.fp16_overflow:
+            logger.info(
+                "[%s] round %d: %d fp16 step(s) skipped on gradient overflow",
+                phase_name,
+                round_index,
+                self.fp16_overflow,
+            )
+        if self.unusable_baseline:
+            logger.info(
+                "[%s] round %d: %d step(s) skipped, batch had no usable baseline",
+                phase_name,
+                round_index,
+                self.unusable_baseline,
+            )
+        self.fp16_overflow = 0
+        self.unusable_baseline = 0
+
+
 class Trainer:
     """Trains one encoder against a suite of dojos according to a plan.
 
@@ -90,8 +122,8 @@ class Trainer:
         self._rng = random.Random(plan.seed)
         self._precision = limits.precision
         self._steps_taken = 0
-        # fp16 steps the GradScaler skipped since the last round's report
-        self._overflow_skips = 0
+        # Steps skipped since the last round's report
+        self._skips = _RoundSkips()
         # The encoder parameters that are trainable as built (a pretrained
         # LM frozen by its own flag stays frozen); phases toggle only these
         self._encoder_params = [p for p in model.parameters() if p.requires_grad]
@@ -130,7 +162,7 @@ class Trainer:
             best: CheckpointRecord | None = None  # best is per phase
             for round_index in range(phase.max_rounds):
                 self._train_round(phase_run)
-                self._log_overflow_skips(phase.name, round_index)
+                self._skips.log_and_reset(phase.name, round_index)
                 if phase_run.faults.gave_up():
                     # Keep the last good checkpoint: current weights may be corrupt
                     stopped_early_reason = (
@@ -199,6 +231,7 @@ class Trainer:
             scaler=torch.amp.GradScaler(
                 device_type_of(self._model), enabled=self._precision == "fp16"
             ),
+            weighting=self._plan.loss_weighting,
         )
 
     def _log_trainable_parameters(self, phase: Phase) -> None:
@@ -218,20 +251,6 @@ class Trainer:
             head_count,
             phase.head_lr,
         )
-
-    def _log_overflow_skips(self, phase_name: str, round_index: int) -> None:
-        """Log (INFO) and reset the count of fp16 steps skipped this round.
-        Inputs: phase_name, round_index (for the log line). Output: None.
-        Side effects: logs if any were skipped; resets the counter.
-        Exceptions: none."""
-        if self._overflow_skips:
-            logger.info(
-                "[%s] round %d: %d fp16 step(s) skipped on gradient overflow",
-                phase_name,
-                round_index,
-                self._overflow_skips,
-            )
-        self._overflow_skips = 0
 
     def _build_optimizer(self, phase: Phase) -> torch.optim.Optimizer:
         """AdamW with an encoder group at encoder_lr (only if trainable)
@@ -291,9 +310,10 @@ class Trainer:
                 return
             dojo: Dojo | None = None
             failure: Exception | None = None
+            ran = False
             try:
                 dojo = phase_run.sampler.next_dojo(active, self._rng)
-                self._take_step(phase_run, dojo)
+                ran = self._take_step(phase_run, dojo)
             except Exception as error:
                 failure = error
             # Recover outside the except block: inside it the traceback still
@@ -301,22 +321,36 @@ class Trainer:
             if failure is not None:
                 self._recover_from_failed_step(phase_run, dojo, failure)
                 failure = None
-            elif dojo is not None:
+            elif dojo is not None and ran:
+                # A skipped degenerate batch is neither a success nor a fault
                 faults.record_success(dojo.name)
             if faults.gave_up():
                 return
             # A quarantine may have changed the diet
             active = self._active_dojos(phase_run)
 
-    def _take_step(self, phase_run: PhaseRun, dojo: Dojo) -> None:
+    def _take_step(self, phase_run: PhaseRun, dojo: Dojo) -> bool:
         """One optimizer step on the dojo's next batch. Raises on any
-        failure (caught only by _train_round)."""
+        failure (caught only by _train_round).
+
+        Output: True when the step ran to completion (an fp16 overflow skip
+        counts: it is normal). False when the batch had no usable baseline
+        and the step was skipped before any forward pass: that is counted
+        in self._skips and is neither a success nor a fault.
+        """
         batch = phase_run.streams[dojo.name].next_batch()
+
+        # Scale first: a degenerate batch costs no forward pass
+        scale = self._loss_scale_for(phase_run, dojo, batch)
+        if scale is None:
+            self._skips.unusable_baseline += 1
+            return False
 
         # Forward: encoder embeds batch.inputs, the dojo scores them
         with autocast_for(self._model, self._precision):
             loss = self._loss_of(dojo, batch)
         self._require_finite(loss, dojo)
+        loss = loss * scale
 
         # Backward (loss scaled under fp16, else unchanged), then unscale so
         # clipping sees gradients in true units
@@ -337,9 +371,10 @@ class Trainer:
             )
             optimizer.step()
             self._steps_taken += 1
-            return
+            return True
         torch.nn.utils.clip_grad_norm_(parameters, phase_run.phase.max_grad_norm)
         self._scaled_step(scaler, optimizer, dojo)
+        return True
 
     def _scaled_step(
         self, scaler: torch.amp.GradScaler, optimizer: torch.optim.Optimizer, dojo: Dojo
@@ -356,7 +391,7 @@ class Trainer:
             self._steps_taken += 1
             return
         if scale_before > _MIN_LOSS_SCALE:
-            self._overflow_skips += 1
+            self._skips.fp16_overflow += 1
             logger.debug(
                 "fp16 overflow on %r; skipped the step, loss scale %g -> %g",
                 dojo.name,
@@ -369,6 +404,23 @@ class Trainer:
             f"dojo {dojo.name!r} gradients are non-finite at loss scale "
             f"{_MIN_LOSS_SCALE:g}"
         )
+
+    def _loss_scale_for(
+        self, phase_run: PhaseRun, dojo: Dojo, batch: DojoBatch
+    ) -> float | None:
+        """The factor _take_step multiplies this batch's loss by.
+
+        Inputs: phase_run (carries the plan's LossWeighting or None), dojo,
+            batch (one dojo yielded).
+        Output: float | None. 1.0 when phase_run.weighting is None (train
+            on the raw loss). Otherwise weighting.scale_for(dojo, batch),
+            whose None means "this batch has no usable baseline": the
+            caller skips the step, which is neither a success nor a fault.
+        Side effects: none. Exceptions: TypeError from a mismatched batch.
+        """
+        if phase_run.weighting is None:
+            return 1.0
+        return phase_run.weighting.scale_for(dojo, batch)
 
     def _loss_of(self, dojo: Dojo, batch: DojoBatch) -> torch.Tensor:
         """Encode batch.inputs and return dojo.compute_loss (a scalar mean)."""

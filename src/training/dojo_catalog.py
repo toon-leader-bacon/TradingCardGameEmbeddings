@@ -25,10 +25,11 @@ and in order; its augmentations run after them. Deck mods
 DECK_MOD_GROUPS take them, and only when `mods:` lists them.
 """
 
+import functools
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping, Protocol, Sequence
+from typing import Callable, Mapping, Protocol, Sequence, TypeVar, cast
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.card_lookup import CardLookup
@@ -52,6 +53,14 @@ from src.dojos.contrastive.staple_subsampling import (
     cached_document_frequency,
 )
 from src.dojos.dojo import Dojo
+from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
+from src.dojos.generic.multi_group_regression.dojo import (
+    MultiGroupRegressionDojo,
+)
+from src.dojos.generic.single_card_regression.dojo import (
+    SingleCardRegressionDojo,
+)
+from src.dojos.loss.regression_objective import RegressionObjective
 from src.dojos.file_managers.deck_box_dealer import DeckBoxDealer
 from src.dojos.final_decks import held_out_card_dojos as final_decks
 from src.dojos.cross_game.rarity_tier_dojo import RarityTierDojo
@@ -252,7 +261,9 @@ class DojoBuildContext:
     staple_thresholds: per contrastive dojo name, its staple-subsampling t
     (src/dojos/contrastive/staple_subsampling.py); a dojo not named keeps
     t = inf (no subsampling). build_dojos rejects a name that is not a
-    contrastive dojo being built.
+    contrastive dojo being built. regression_objective: the loss and
+    baseline every regression dojo trains with (default: plain MSE); only
+    the three regression cells take it (see _constructor_for).
     """
 
     shelf: CardShelf
@@ -261,6 +272,9 @@ class DojoBuildContext:
     rng_seed: int
     mod_overrides: Mapping[str, tuple[ModSpec, ...]] = field(default_factory=dict)
     staple_thresholds: Mapping[str, float] = field(default_factory=dict)
+    regression_objective: RegressionObjective = field(
+        default_factory=RegressionObjective.mse
+    )
 
 
 class DojoRecipe(Protocol):
@@ -274,6 +288,37 @@ class DojoRecipe(Protocol):
         ...
 
 
+_REGRESSION_CELLS = (
+    SingleCardRegressionDojo,
+    MultiCardRegressionDojo,
+    MultiGroupRegressionDojo,
+)
+_ConstructorT = TypeVar("_ConstructorT")
+
+
+def _constructor_for(
+    dojo_class: _ConstructorT, context: DojoBuildContext
+) -> _ConstructorT:
+    """dojo_class, bound to the run's regression objective if it is a
+    regression dojo.
+
+    Inputs: dojo_class (a dojo class, typed as its constructor Protocol),
+        context (carries regression_objective).
+    Output: for a subclass of a regression cell, a functools.partial with
+        objective=context.regression_objective; any other class unchanged.
+        (Only regression constructors accept objective, so this is the one
+        place the catalog tells them apart.)
+    Side effects: none. Exceptions: none.
+    """
+    if isinstance(dojo_class, type) and issubclass(dojo_class, _REGRESSION_CELLS):
+        constructor = cast(Callable[..., GenericDojo], dojo_class)
+        return cast(
+            _ConstructorT,
+            functools.partial(constructor, objective=context.regression_objective),
+        )
+    return dojo_class
+
+
 @dataclass(frozen=True)
 class CardDojoRecipe:
     """A dojo that needs only its game's CardBinder. metric_output, when
@@ -285,7 +330,7 @@ class CardDojoRecipe:
 
     def build(self, name: str, context: DojoBuildContext) -> Dojo:
         """See DojoRecipe.build; augmentations as _with_augmentations."""
-        dojo = self.dojo_class(
+        dojo = _constructor_for(self.dojo_class, context)(
             context.shelf.card_binder(self.game),
             context.holdout,
             context.card_embedding_size,
@@ -361,7 +406,7 @@ class DeckDojoRecipe:
 
     def build(self, name: str, context: DojoBuildContext) -> Dojo:
         """See DojoRecipe.build; augmentations as _with_augmentations."""
-        dojo = self.dojo_class(
+        dojo = _constructor_for(self.dojo_class, context)(
             context.shelf.card_binder(self.game),
             context.holdout,
             context.shelf.deck_box(self.deck_box_path),

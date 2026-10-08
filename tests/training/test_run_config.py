@@ -15,6 +15,8 @@ from src.dojos.mods.mod_specs import (
     WeightedFieldMaskSpec,
 )
 from src.schema.game_id import GameId
+from src.dojos.loss.regression_objective import RegressionLossKind
+from src.training.loss_weighting import DEFAULT_BASELINE_FLOOR, LossWeighting
 from src.training.plan import Proportional, Temperature, Uniform
 from src.training.run_config import (
     ConfigDocument,
@@ -397,6 +399,71 @@ class TestModOverrides:
         document = _document()
         document["staple_subsampling"] = thresholds
         with pytest.raises(ValueError, match=message):
+            parse_run_config(document)
+
+    def test_parses_loss_weights_and_the_floor(self) -> None:
+        document = _document()
+        document["loss_weights"] = {"a": 2.0, "b": 0.75}
+        document["baseline_floor"] = 0.1
+        weighting = parse_run_config(document).plan.loss_weighting
+        assert weighting is not None
+        assert dict(weighting.weights) == {"a": 2.0, "b": 0.75}
+        assert weighting.baseline_floor == 0.1
+
+    def test_absent_loss_weights_still_normalize_every_dojo(self) -> None:
+        weighting = parse_run_config(_document()).plan.loss_weighting
+        assert weighting == LossWeighting({}, DEFAULT_BASELINE_FLOOR)
+
+    @pytest.mark.parametrize(
+        ("key", "value", "message"),
+        [
+            ("loss_weights", {"a": 0}, r"loss_weights\.a must be finite and > 0"),
+            ("loss_weights", {"a": -1.0}, "must be finite and > 0"),
+            ("loss_weights", {"a": "x"}, "number"),
+            ("loss_weights", {"c": 2.0}, "loss_weights names"),
+            ("loss_weights", {"zzz": 2.0}, "loss_weights names"),
+            ("baseline_floor", 0, r"baseline_floor must be finite and > 0"),
+            ("baseline_floor", "x", "number"),
+        ],
+    )
+    def test_bad_loss_weighting_raises(
+        self, key: str, value: Any, message: str
+    ) -> None:
+        document = _document()
+        document[key] = value
+        with pytest.raises(ValueError, match=message):
+            parse_run_config(document)
+
+    def test_weight_by_baseline_false_trains_on_the_raw_loss(self) -> None:
+        document = _document()
+        document["weight_by_baseline"] = False
+        assert parse_run_config(document).plan.loss_weighting is None
+
+    @pytest.mark.parametrize(
+        ("key", "value"), [("loss_weights", {"a": 2.0}), ("baseline_floor", 0.1)]
+    )
+    def test_weights_alongside_weight_by_baseline_false_raise(
+        self, key: str, value: Any
+    ) -> None:
+        document = _document()
+        document["weight_by_baseline"] = False
+        document[key] = value
+        with pytest.raises(ValueError, match="weight_by_baseline"):
+            parse_run_config(document)
+
+    def test_regression_loss_defaults_to_mse(self) -> None:
+        assert parse_run_config(_document()).regression_loss is RegressionLossKind.MSE
+
+    @pytest.mark.parametrize("name", ["mse", "huber"])
+    def test_parses_regression_loss(self, name: str) -> None:
+        document = _document()
+        document["regression_loss"] = name
+        assert parse_run_config(document).regression_loss is RegressionLossKind(name)
+
+    def test_a_bad_regression_loss_raises_with_its_location(self) -> None:
+        document = _document()
+        document["regression_loss"] = "l1"
+        with pytest.raises(ValueError, match=r"config\.regression_loss.*'l1'"):
             parse_run_config(document)
 
     def test_an_empty_list_means_no_augmentation(self) -> None:

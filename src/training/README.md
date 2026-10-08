@@ -113,6 +113,31 @@ TEST loss (loss / its baseline: 1.0 = learned nothing, 0.0 = perfect;
 see `../dojos/README.md`), so no dojo's loss scale outweighs another's.
 Raw losses are still reported beside them.
 
+**Loss weighting:** the same ratio scales training. `Trainer` multiplies
+each step's loss by `weight / max(baseline, baseline_floor)`
+(`loss_weighting.py`), so every dojo's untrained loss starts near its
+weight and a dojo with `loss_weights: {name: 2.0}` counts twice a baseline
+dojo. `loss_weights:` (dojo name to multiplier, default 1.0 each) and
+`baseline_floor:` (default 0.05; caps the scale at `1 / baseline_floor`
+for a near-deterministic dojo) are top-level config keys, one set for the
+whole run. A batch with no usable baseline (a contrastive batch with no
+negatives) is skipped before the forward pass and counted in the round's
+log line; it is neither a success nor a fault for the fault ledger. A plan
+whose `loss_weighting` is `None` trains on the raw loss: that is what
+evaluation's extrinsic runs do. `max_grad_norm` clips the weighted
+gradient. `scripts/survey_dojo_baselines.py` prints every catalog dojo's
+baseline spread, for choosing the floor.
+
+**Regression loss:** the top-level `regression_loss: mse | huber` (default
+`mse`) picks the loss every regression dojo trains with
+(`RegressionObjective`, `../dojos/loss/`). Huber is quadratic for errors
+under 1.345 label stds and linear beyond, so one extreme label cannot
+dominate a batch; its baseline (the best constant predictor's Huber loss)
+is below 1.0 on heavy-tailed labels. `weight_by_baseline: false` trains on
+the raw loss, the control for comparing the two losses (it is an error
+alongside `loss_weights:` or `baseline_floor:`). Only the three regression
+cells take the objective; the catalog binds it in `_constructor_for`.
+
 **Saturation:** a dojo whose normalized TEST loss has stopped improving
 (no gain larger than `epsilon` for `patience_rounds` rounds) leaves the
 diet. It re-enters if its normalized loss rises more than
@@ -231,7 +256,7 @@ prints each augmentation mod's tally over its one batch (cards changed,
 failed) and warns on a mod that changed nothing or failed; that never
 stops the run. A config's optional `mods:` section replaces a dojo's
 default augmentations (see `configs/training/gwent_contrastive.yaml`);
-dojo names contain ".", so `--set` cannot reach them. The run
+dojo names contain ".", so `--set` cannot reach them (nor `loss_weights:`). The run
 directory must not already exist; it receives `run_config.yaml` (the
 config with overrides applied; defaults it left out are not written),
 `rounds.csv`, `checkpoints.csv` and the checkpoint directories. Batch cost

@@ -12,6 +12,10 @@ from src.dojos.batch import Batch
 from src.dojos.dojo import BatchBudget
 from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
+from src.dojos.loss.huber_loss import HuberLoss
+from src.dojos.loss.mse_loss import MseLoss
+from src.dojos.loss.regression_objective import RegressionObjective
+from src.dojos.loss.standardized_label_loss import StandardizedLabelLoss
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
@@ -190,3 +194,55 @@ class TestMultiCardRegressionDojoComputeLoss:
             assert False, "expected ValueError"
         except ValueError:
             pass
+
+
+class _OutlierDataConstructor:
+    """One 40-unit label among labels of 0 and 1: a heavy tail after z-scoring."""
+
+    def __init__(self, deck: MultiCardInput) -> None:
+        self._deck = deck
+
+    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+        labels = [40.0 if i == 0 else float(i % 2) for i in range(len(chunk))]
+        return [(self._deck, label) for label in labels]
+
+
+class TestRegressionObjective:
+    def _dojo(self, tmp_path: Path, objective: RegressionObjective | None):
+        source = tmp_path / "source.parquet"
+        _write_source(source, num_rows=400)
+        return MultiCardRegressionDojo(
+            path_to_training_data=source,
+            data_constructor=_OutlierDataConstructor([_card("Strike")]),
+            card_lookup=CardBinder(),
+            holdout=HoldoutSpec.no_holdout(),
+            card_embedding_size=4,
+            config=DojoConfig(
+                rng_seed=0,
+                strict_version_check=False,
+                output_directory=tmp_path / "splits",
+            ),
+            objective=objective,
+        )
+
+    def _baseline(self, dojo) -> float:
+        return dojo.baseline_loss(next(dojo.batches(Split.TRAIN, _BUDGET)))
+
+    def test_defaults_to_mse_with_the_mean_predictors_baseline(
+        self, tmp_path: Path
+    ) -> None:
+        dojo = self._dojo(tmp_path, None)
+
+        assert isinstance(dojo.loss_calculator, StandardizedLabelLoss)
+        assert isinstance(dojo.loss_calculator.inner, MseLoss)
+        assert self._baseline(dojo) == 1.0
+
+    def test_a_huber_objective_trains_with_huber_and_its_own_baseline(
+        self, tmp_path: Path
+    ) -> None:
+        dojo = self._dojo(tmp_path, RegressionObjective.huber())
+
+        assert isinstance(dojo.loss_calculator, StandardizedLabelLoss)
+        assert isinstance(dojo.loss_calculator.inner, HuberLoss)
+        # The outlier inflates the std, so Huber's baseline is well below 1
+        assert 0.0 < self._baseline(dojo) < 0.9

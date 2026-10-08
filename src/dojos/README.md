@@ -18,7 +18,10 @@ trainer judges each dojo by loss / baseline_loss: 1.0 means the dojo
 learned nothing, 0.0 is perfect. Generic dojos fit one baseline to
 their TRAIN split at construction and z-score regression labels from
 the same TRAIN sample (`generic/README.md`, "Loss calibration"); the
-contrastive dojo computes its baseline per batch, as below.
+contrastive dojo computes its baseline per batch, as below. The trainer
+also divides each step's loss by this baseline (times a per-dojo weight)
+before backward(), so the gradient scale matches the judged scale
+(`../training/README.md`, "Loss weighting").
 
 Most dojos read (input, label) rows from a parquet file one of
 `../data_refinement/metrics/`'s metrics wrote. The contrastive dojo
@@ -47,13 +50,15 @@ rows never straddle TRAIN and TEST.
   `(input shape, task shape)`, plus the `DataConstructor`s that feed
   them and the bases per-metric wrappers build on.
 - **`loss/`** - the `NocabLoss` Protocol and the row-wise losses the
-  cells use (`MseLoss`, `BceLoss`, `FixedClassificationLoss`,
+  cells use (`MseLoss`, `HuberLoss`, `BceLoss`, `FixedClassificationLoss`,
   `SoftClassificationLoss`, `MaskedVectorRegressionLoss`,
   `PickPredictionCrossEntropyLoss`). A cell builds its own loss; callers
   never construct one. Also the loss calibration that fits a cell's loss
   to its TRAIN split: `LossCalibration` Strategy and its `CalibratedLoss`
   result (`loss_calibration.py`, with `StandardizedRegressionCalibration`
-  for the regression cells), `LabelStats` (TRAIN mean and population
+  and `HuberRegressionCalibration` for the regression cells; a
+  `RegressionObjective` bundles each loss with its matching calibration),
+  `LabelStats` (TRAIN mean and population
   std, `label_stats.py`), the `StandardizedLabelLoss` Decorator that
   z-scores a regression loss's labels, and `prior_baseline_calibrations.py`
   (a Template Method base, one subclass per non-regression loss family,

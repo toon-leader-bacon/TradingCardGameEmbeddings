@@ -55,7 +55,7 @@ class PreflightResult:
         return self.error is None
 
 
-def _random_embeddings_like(inputs: Any, card_embedding_size: int) -> Any:
+def random_embeddings_like(inputs: Any, card_embedding_size: int) -> Any:
     """Random tensors nested exactly like `inputs`, replacing each
     GenericCard leaf with one torch.randn(card_embedding_size).
 
@@ -68,7 +68,7 @@ def _random_embeddings_like(inputs: Any, card_embedding_size: int) -> Any:
     """
     if isinstance(inputs, GenericCard):
         return torch.randn(card_embedding_size)
-    return [_random_embeddings_like(item, card_embedding_size) for item in inputs]
+    return [random_embeddings_like(item, card_embedding_size) for item in inputs]
 
 
 def preflight_dojo(
@@ -107,7 +107,7 @@ def preflight_dojo(
                 f"example_count reports {train_count} TRAIN examples but "
                 "batches() yielded none"
             ) from None
-        embeddings = _random_embeddings_like(batch.inputs, card_embedding_size)
+        embeddings = random_embeddings_like(batch.inputs, card_embedding_size)
         loss = dojo.compute_loss(embeddings, batch)
         if loss.dim() != 0:
             raise ValueError(

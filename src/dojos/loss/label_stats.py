@@ -1,7 +1,7 @@
 """TRAIN-split statistics of a scalar regression label, for z-scoring.
 
-A regression dojo trains on (y - mean) / std so its MSE is in "label
-standard deviations" rather than raw units. The stats come from the
+A regression dojo trains on (y - mean) / std so its loss (MSE or Huber)
+is in "label standard deviations" rather than raw units. The stats come from the
 TRAIN split only (test labels would leak otherwise) and live on the dojo
 (`GenericDojo.label_stats`), so a prediction can be mapped back to label
 units for a report.

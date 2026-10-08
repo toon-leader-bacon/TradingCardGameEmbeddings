@@ -20,7 +20,7 @@ from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
 from src.schema.type_hints import TrainingDatum
-from src.training.preflight import _random_embeddings_like, preflight_dojo
+from src.training.preflight import random_embeddings_like, preflight_dojo
 
 _BUDGET = BatchBudget(max_cost=8, cost_of=lambda card: 1)
 
@@ -177,20 +177,20 @@ class TestPreflightAgainstAFakeDojo:
 
 class TestRandomEmbeddingsMirrorInputNesting:
     def test_a_single_card_becomes_one_tensor(self) -> None:
-        embeddings = _random_embeddings_like(_card("A"), card_embedding_size=5)
+        embeddings = random_embeddings_like(_card("A"), card_embedding_size=5)
         assert isinstance(embeddings, torch.Tensor)
         assert embeddings.shape == (5,)
 
     def test_a_list_of_cards_becomes_a_list_of_tensors(self) -> None:
         cards = [_card("A"), _card("B"), _card("C")]
-        embeddings = _random_embeddings_like(cards, card_embedding_size=3)
+        embeddings = random_embeddings_like(cards, card_embedding_size=3)
         assert isinstance(embeddings, list)
         assert len(embeddings) == 3
         assert all(tensor.shape == (3,) for tensor in embeddings)
 
     def test_a_list_of_decks_becomes_a_matching_nested_list(self) -> None:
         decks = [[_card("A"), _card("B")], [_card("C")]]
-        embeddings = _random_embeddings_like(decks, card_embedding_size=4)
+        embeddings = random_embeddings_like(decks, card_embedding_size=4)
         assert [len(group) for group in embeddings] == [2, 1]
         assert embeddings[0][0].shape == (4,)
         assert embeddings[1][0].shape == (4,)

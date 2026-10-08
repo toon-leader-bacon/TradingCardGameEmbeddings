@@ -15,8 +15,7 @@ from src.dojos.generic.multi_card_regression.decoder_head import (
     MultiCardRegressionDecoderHead,
 )
 from src.dojos.generic.pooling import EmbeddingPooler
-from src.dojos.loss.mse_loss import MseLoss
-from src.dojos.loss.loss_calibration import StandardizedRegressionCalibration
+from src.dojos.loss.regression_objective import RegressionObjective
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
 
@@ -39,8 +38,12 @@ class MultiCardRegressionDojo(GenericDojo):
         pooler: EmbeddingPooler | None = None,
         deck_box: DeckBox | None = None,
         config: DojoConfig = DojoConfig(),
+        objective: RegressionObjective | None = None,
     ) -> None:
         self.card_embedding_size = card_embedding_size
+        # None: plain MSE with the mean predictor's baseline (today's behavior)
+        if objective is None:
+            objective = RegressionObjective.mse()
         super().__init__(
             path_to_training_data=path_to_training_data,
             data_constructor=data_constructor,
@@ -49,8 +52,8 @@ class MultiCardRegressionDojo(GenericDojo):
             decoder_head=MultiCardRegressionDecoderHead(
                 card_embedding_size, pooler=pooler
             ),
-            loss_calculator=MseLoss(),
-            calibration=StandardizedRegressionCalibration(),
+            loss_calculator=objective.loss,
+            calibration=objective.calibration,
             mod_pipeline=mod_pipeline,
             deck_box=deck_box,
             config=config,

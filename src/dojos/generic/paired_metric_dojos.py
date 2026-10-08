@@ -30,6 +30,7 @@ from src.data_refinement.metrics.generic.masked_field_multi_label_metric import 
 from src.data_refinement.metrics.generic.masked_field_regression_metric import (
     MaskedFieldRegressionMetric,
 )
+from src.dojos.loss.regression_objective import RegressionObjective
 from src.dojos.generic.data_constructors import (
     CardAverageDataConstructor,
     DeckCardMaskDataConstructor,
@@ -149,6 +150,7 @@ class CardAverageMetricDojo(SingleCardRegressionDojo):
         name: str | None = None,
         rng_seed: int | None = None,
         strict_version_check: bool = True,
+        objective: RegressionObjective | None = None,
     ) -> None:
         """
         Inputs:
@@ -164,6 +166,8 @@ class CardAverageMetricDojo(SingleCardRegressionDojo):
             rng_seed: split/shuffle seed; None means unseeded.
             strict_version_check: raise (rather than warn) on a metric
                 file built against a different CardBinder version.
+            objective: the loss and baseline to train with; None is plain
+                MSE with the mean predictor's baseline (RegressionObjective.mse()).
         Output: none (constructor).
         Side effects: see SingleCardRegressionDojo (may write split files).
         Exceptions: see SingleCardRegressionDojo.
@@ -178,6 +182,7 @@ class CardAverageMetricDojo(SingleCardRegressionDojo):
             or self.METRIC.DEFAULT_OUTPUT_PATH,
             data_constructor=CardAverageDataConstructor(self.METRIC.LABEL_COLUMN),
             card_embedding_size=card_embedding_size,
+            objective=objective,
             config=DojoConfig(
                 name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),
@@ -205,6 +210,7 @@ class DeckLabelMetricDojo(MultiCardRegressionDojo):
         name: str | None = None,
         rng_seed: int | None = None,
         strict_version_check: bool = True,
+        objective: RegressionObjective | None = None,
     ) -> None:
         """
         Inputs: as CardAverageMetricDojo, plus deck_box (DeckBox), the
@@ -226,6 +232,7 @@ class DeckLabelMetricDojo(MultiCardRegressionDojo):
             ),
             card_embedding_size=card_embedding_size,
             deck_box=deck_box,
+            objective=objective,
             config=DojoConfig(
                 name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),
@@ -465,6 +472,7 @@ class MaskedFieldRegressionMetricDojo(SingleCardRegressionDojo):
         name: str | None = None,
         rng_seed: int | None = None,
         strict_version_check: bool = True,
+        objective: RegressionObjective | None = None,
     ) -> None:
         """
         Inputs: as CardAverageMetricDojo.
@@ -487,6 +495,7 @@ class MaskedFieldRegressionMetricDojo(SingleCardRegressionDojo):
                 self.EXTRA_MASKED_KEYS,
                 self.EXTRA_MASKED_PATHS,
             ),
+            objective=objective,
             config=DojoConfig(
                 name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),

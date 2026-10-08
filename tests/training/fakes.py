@@ -67,6 +67,7 @@ class FakeDojo:
         fail_at_batch: int | None = None,
         loss_gain: float = 1.0,
         baseline: float = 1.0,
+        unusable_baseline: bool = False,
     ) -> None:
         self.name = name
         self.holdout = HoldoutSpec.no_holdout()
@@ -81,6 +82,7 @@ class FakeDojo:
         self._fail_at_batch = fail_at_batch
         self._loss_gain = loss_gain
         self._baseline = baseline
+        self.unusable_baseline = unusable_baseline
         self.head_device: torch.device | None = None
 
     def batches(
@@ -107,7 +109,11 @@ class FakeDojo:
 
     def baseline_loss(self, batch: Any) -> float:
         """Dojo.baseline_loss: a fixed "learned nothing" loss, so a test's
-        normalized loss equals its raw loss unless it sets baseline."""
+        normalized loss equals its raw loss unless it sets baseline.
+        While unusable_baseline is set it raises ValueError, like a
+        contrastive batch with no negatives."""
+        if self.unusable_baseline:
+            raise ValueError(f"{self.name}: batch has no usable baseline")
         return self._baseline
 
     def trainable_parameters(self) -> Iterable[nn.Parameter]:

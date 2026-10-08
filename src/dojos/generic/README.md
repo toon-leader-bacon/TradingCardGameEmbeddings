@@ -55,14 +55,14 @@ so one cell serves every metric family with the same shape.
 
 | Cell | Input | Label | Loss | Calibration (baseline) |
 |---|---|---|---|---|
-| `single_card_regression/` | one card | float | `MseLoss` | z-scored labels (1.0) |
+| `single_card_regression/` | one card | float | `MseLoss` or `HuberLoss` (its `objective`) | z-scored labels (MSE: 1.0; Huber: the best constant's Huber loss) |
 | `single_card_fixed_classification/` | one card | one of `label_values` | from its `LossSpec` (default `FixedClassificationLoss`) | from its `LossSpec` (default class-prior entropy) |
-| `multi_card_regression/` | a deck | float | `MseLoss` | z-scored labels (1.0) |
+| `multi_card_regression/` | a deck | float | `MseLoss` or `HuberLoss` (its `objective`) | z-scored labels (MSE: 1.0; Huber: the best constant's Huber loss) |
 | `multi_card_binary_classification/` | a deck | 0/1 | `BceLoss` (one logit) | binary entropy of the positive rate |
 | `multi_card_fixed_classification/` | a deck | one of `label_values` | `FixedClassificationLoss` | class-prior entropy |
 | `multi_card_option_selection/` | a ragged pack of options | picked option's index | `PickPredictionCrossEntropyLoss` | mean ln(pack size) |
 | `multi_group_option_selection/` | `[pack_options, pool]` | picked option's index (with `can_skip`: `len(options)` = none picked) | `PickPredictionCrossEntropyLoss` | mean ln(pack size), +1 option with `can_skip` |
-| `multi_group_regression/` | `[group_0, group_1]` | float | `MseLoss` | z-scored labels (1.0) |
+| `multi_group_regression/` | `[group_0, group_1]` | float | `MseLoss` or `HuberLoss` (its `objective`) | z-scored labels (MSE: 1.0; Huber: the best constant's Huber loss) |
 | `multi_group_binary_classification/` | `[group_0, group_1]` | 0/1 | `BceLoss` (one logit) | binary entropy of the positive rate |
 
 `multi_group_option_selection/` takes `can_skip=True` for a pick that may be
@@ -104,8 +104,11 @@ then every k-th row) and hands it to the calibration. The result, one
 `CalibratedLoss`, holds:
 
 - the loss `compute_loss` scores with (`loss_calculator`). Regression
-  cells wrap `MseLoss` in `StandardizedLabelLoss`, so the head predicts
-  (y - mean) / std of the TRAIN labels; batches keep raw labels.
+  cells wrap their loss (`MseLoss` by default, `HuberLoss` when given
+  `RegressionObjective.huber()`) in `StandardizedLabelLoss`, so the head
+  predicts (y - mean) / std of the TRAIN labels; batches keep raw labels.
+  The run config's `regression_loss: mse | huber` picks the objective for
+  every regression dojo (`../../training/README.md`).
 - the baseline `baseline_loss(batch)` returns for every batch: the loss
   of the best input-ignoring predictor on the sample (column above).
 - `label_stats` (regression only): the TRAIN `LabelStats`, to map a

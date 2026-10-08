@@ -7,6 +7,7 @@ import torch
 from src.training.diet.diet_sampler import DietSampler
 from src.training.diet.dojo_fault_ledger import DojoFaultLedger
 from src.training.diet.dojo_batch_stream import DojoBatchStream
+from src.training.loss_weighting import LossWeighting
 from src.training.plan import Phase
 from src.training.diet.saturation_tracker import SaturationTracker
 
@@ -22,6 +23,8 @@ class PhaseRun:
     faults: failure counts and dojo quarantine.
     scaler: fp16 loss scaler (a disabled pass-through at other precisions);
         one per phase, like the optimizer it steps.
+    weighting: the plan's loss weighting, applied to every step's loss;
+        None trains on the raw loss.
     """
 
     phase: Phase
@@ -31,3 +34,4 @@ class PhaseRun:
     streams: dict[str, DojoBatchStream]
     faults: DojoFaultLedger
     scaler: torch.amp.GradScaler
+    weighting: LossWeighting | None

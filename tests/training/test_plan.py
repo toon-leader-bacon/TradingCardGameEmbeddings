@@ -1,5 +1,6 @@
 import pytest
 
+from src.training.loss_weighting import LossWeighting
 from src.training.plan import FaultPolicy, HardwareLimits, Temperature
 from tests.training.fakes import make_phase, make_plan, saturation_spec
 
@@ -76,3 +77,19 @@ def test_plan_rejects_duplicate_phase_names_and_no_eval_examples() -> None:
 def test_plan_rejects_phase_names_differing_only_by_case() -> None:
     with pytest.raises(ValueError):
         make_plan((make_phase(("a",), name="A"), make_phase(("a",), name="a")))
+
+
+class TestLossWeighting:
+    def test_defaults_to_the_raw_loss(self) -> None:
+        assert make_plan((make_phase(("a",)),)).loss_weighting is None
+
+    def test_accepts_weights_for_dojos_in_a_diet(self) -> None:
+        weighting = LossWeighting({"a": 2.0})
+        plan = make_plan((make_phase(("a",)),), loss_weighting=weighting)
+        assert plan.loss_weighting is weighting
+
+    def test_rejects_a_weight_for_a_dojo_in_no_phase(self) -> None:
+        with pytest.raises(ValueError, match="loss_weights names"):
+            make_plan(
+                (make_phase(("a",)),), loss_weighting=LossWeighting({"typo": 2.0})
+            )

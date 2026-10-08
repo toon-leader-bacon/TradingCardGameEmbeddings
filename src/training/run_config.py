@@ -44,6 +44,8 @@ from src.dojos.mods.mod_specs import (
 )
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
+from src.dojos.loss.regression_objective import RegressionLossKind
+from src.training.loss_weighting import DEFAULT_BASELINE_FLOOR, LossWeighting
 from src.training.plan import (
     DietRule,
     FaultPolicy,
@@ -119,6 +121,9 @@ class RunConfig:
         staple_subsampling.py); a dojo not named keeps t = inf (no
         subsampling). Checked here to name run dojos; build_dojos checks
         each is contrastive.
+    regression_loss: the loss every regression dojo trains with (mse,
+        today's, or huber); the run's DojoBuildContext carries the matching
+        RegressionObjective.
     """
 
     run_directory: Path
@@ -129,6 +134,7 @@ class RunConfig:
     limits: HardwareLimits
     mod_overrides: Mapping[str, tuple[ModSpec, ...]] = field(default_factory=dict)
     staple_thresholds: Mapping[str, float] = field(default_factory=dict)
+    regression_loss: RegressionLossKind = RegressionLossKind.MSE
 
     def __post_init__(self) -> None:
         # No duplicate dojos (the Trainer keys dojos by name and would
@@ -211,8 +217,11 @@ def parse_run_config(document: ConfigDocument) -> RunConfig:
     held_out_dojos (optional), holdout, hardware, eval_examples_per_dojo,
     phases, faults (optional), mods (optional: dojo name -> list of mod
     entries, see _parse_mod_spec), staple_subsampling (optional: dojo name
-    -> t, see _parse_staple_thresholds). A phase without a "dojos" key trains every
-    run dojo that is not held out.
+    -> t, see _parse_staple_thresholds), loss_weights (optional: dojo name
+    -> multiplier), baseline_floor and weight_by_baseline (optional; see
+    _parse_loss_weighting), and regression_loss (optional: mse or huber;
+    see _parse_regression_loss).
+    A phase without a "dojos" key trains every run dojo that is not held out.
 
     Inputs: document (ConfigDocument).
     Output: RunConfig.
@@ -239,6 +248,7 @@ def parse_run_config(document: ConfigDocument) -> RunConfig:
     eval_examples_per_dojo = top.required("eval_examples_per_dojo", int)
     seed = top.required("seed", int)
     faults = _build_flat_dataclass(FaultPolicy, top.optional_section("faults"))
+    loss_weighting = _parse_loss_weighting(top)
     plan = _construct_at(
         "config",
         lambda: TrainingPlan(
@@ -248,6 +258,7 @@ def parse_run_config(document: ConfigDocument) -> RunConfig:
             eval_examples_per_dojo=eval_examples_per_dojo,
             seed=seed,
             faults=faults,
+            loss_weighting=loss_weighting,
         ),
     )
 
@@ -256,6 +267,7 @@ def parse_run_config(document: ConfigDocument) -> RunConfig:
     device = _parse_device(top.required("device", str), top.location_of("device"))
     model = _parse_model(top.required_section("model"))
     limits = _build_flat_dataclass(HardwareLimits, top.required_section("hardware"))
+    regression_loss = _parse_regression_loss(top)
     mod_overrides = _parse_mod_overrides(top.optional_section("mods"))
     staple_thresholds = _parse_staple_thresholds(
         top.optional_section("staple_subsampling")
@@ -272,6 +284,7 @@ def parse_run_config(document: ConfigDocument) -> RunConfig:
             limits=limits,
             mod_overrides=mod_overrides,
             staple_thresholds=staple_thresholds,
+            regression_loss=regression_loss,
         ),
     )
     return result
@@ -607,6 +620,91 @@ def _parse_staple_thresholds(section: ConfigSection) -> dict[str, float]:
         result[name] = threshold
     section.reject_unread_keys()
     return result
+
+
+def _parse_regression_loss(top: ConfigSection) -> RegressionLossKind:
+    """The top-level `regression_loss:` key -> RegressionLossKind (default
+    mse, today's behavior).
+
+        regression_loss: huber
+
+    Inputs: top (the config's top ConfigSection). Output: RegressionLossKind.
+    Side effects: marks the key read.
+    Exceptions: ValueError, naming the key's config location, for a value
+        that is not one of the kind names.
+    """
+    text = top.optional("regression_loss", str, RegressionLossKind.MSE.value)
+    try:
+        return RegressionLossKind(text)
+    except ValueError:
+        wanted = [kind.value for kind in RegressionLossKind]
+        raise ValueError(
+            f"{top.location_of('regression_loss')} is {text!r}, want one of {wanted}"
+        ) from None
+
+
+def _parse_loss_weighting(top: ConfigSection) -> LossWeighting | None:
+    """The `loss_weights:` mapping and `baseline_floor:` scalar at the top
+    level of the config -> LossWeighting. Both are optional: no weights and
+    the default floor still normalize every dojo by its baseline.
+
+        weight_by_baseline: false    # optional, default true
+
+    `weight_by_baseline: false` returns None (train on the raw loss, the
+    weights-off control for an experiment); it is an error to combine it
+    with `loss_weights:` or `baseline_floor:`.
+
+        loss_weights:
+          cross_game.rarity_tier: 2.0
+          mtg.card_cmc: 0.75
+        baseline_floor: 0.05
+
+    The weight keys are dojo names (dotted), so `--set` overrides cannot
+    address them; edit the file.
+
+    Inputs: top (the config's top ConfigSection).
+    Output: LossWeighting, or None when weight_by_baseline is false.
+    Side effects: marks the keys read.
+    Exceptions: ValueError, naming the key's config location, for a weight
+        or floor that is not a finite number > 0 (checked here, like
+        _parse_staple_thresholds, before LossWeighting is built), or for
+        weights or a floor given alongside weight_by_baseline: false.
+    """
+    # weight_by_baseline: false is the raw-loss control; nothing else may be set
+    if not top.optional("weight_by_baseline", bool, True):
+        if top.has("loss_weights") or top.has("baseline_floor"):
+            raise ValueError(
+                f"{top.location_of('weight_by_baseline')} is false, so "
+                "loss_weights and baseline_floor have no effect; remove them"
+            )
+        return None
+
+    weights: dict[str, float] = {}
+    section = top.optional_section("loss_weights")
+    for name in section.keys():
+        weights[name] = _read_positive_finite(section, name)
+    section.reject_unread_keys()
+    floor = _read_positive_finite(top, "baseline_floor", DEFAULT_BASELINE_FLOOR)
+    return LossWeighting(weights, floor)
+
+
+def _read_positive_finite(
+    section: ConfigSection, key: str, default: float | None = None
+) -> float:
+    """The float at key, which must be finite and > 0.
+
+    Inputs: section, key, default (used when key is absent; None makes the
+        key required). Output: float. Side effects: marks key read.
+    Exceptions: ValueError naming the key's location if missing without a
+        default, wrongly typed, or not finite and > 0.
+    """
+    if default is None:
+        value = section.required(key, float)
+    else:
+        value = section.optional(key, float, default)
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{section.location_of(key)} must be finite and > 0")
+    return value
 
 
 def _parse_mod_spec(section: ConfigSection) -> ModSpec:

@@ -1,10 +1,10 @@
 """Decorator: z-score a scalar regression loss's labels before scoring.
 
-Wraps a row-wise regression NocabLoss (today MseLoss) so the head learns
+Wraps a row-wise regression NocabLoss (MseLoss or HuberLoss) so the head learns
 to predict (y - mean) / std instead of y. The batch's labels stay in label
 units end to end (data constructors, mods, Batch); only the loss sees the
 standardized values, so no constructor or dojo subclass changes. Built by
-StandardizedRegressionCalibration (loss_calibration.py), once the dojo's
+a regression calibration (loss_calibration.py), once the dojo's
 TRAIN LabelStats are known.
 """
 
@@ -20,7 +20,7 @@ class StandardizedLabelLoss(NocabLoss[Any, List[float]]):
     """A NocabLoss that standardizes float labels, then delegates.
 
     Inputs (constructor): inner (NocabLoss[Any, List[float]]), the loss in
-        standardized units (e.g. MseLoss()); label_stats (LabelStats), the
+        standardized units (e.g. MseLoss() or HuberLoss()); label_stats (LabelStats), the
         dojo's TRAIN stats.
     """
 
@@ -35,7 +35,8 @@ class StandardizedLabelLoss(NocabLoss[Any, List[float]]):
         Inputs: decoder_output (the regression head's output, in
             standardized units), labels (List[float], label units).
         Output: scalar loss tensor (for MseLoss: MSE in std units, so 1.0
-            is the mean predictor's TRAIN loss).
+            is the mean predictor's TRAIN loss; for HuberLoss: Huber loss
+            in std units, whose baseline is the best constant's loss).
         Side effects: none.
         Exceptions: whatever inner.calculate raises (length mismatch,
             non-float label).

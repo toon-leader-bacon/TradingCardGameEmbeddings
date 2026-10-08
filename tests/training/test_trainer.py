@@ -9,6 +9,7 @@ import torch
 from src.dojos.dojo import Dojo
 from src.schema.holdout import HoldoutSpec
 from src.encoder_model.precision import Precision
+from src.training.loss_weighting import LossWeighting
 from src.training.plan import FaultPolicy, HardwareLimits
 from src.training.recording.checkpointer import DirectoryCheckpointer
 from src.training.recording.reports import CheckpointRecord, RoundReport
@@ -504,6 +505,137 @@ class TestMixedPrecision:
         assert result.stopped_early_reason is None
         assert result.final_report is not None
         assert result.final_report.step > 0
+
+
+def _first_step_gradient(
+    tmp_path: Path,
+    baseline: float,
+    weighting: LossWeighting | None,
+) -> torch.Tensor:
+    """The encoder weight gradient after exactly one _take_step, from
+    identical seeded model, head and batch each call."""
+    torch.manual_seed(0)
+    model, dojo = FakeModel(), FakeDojo("a", baseline=baseline)
+    trainer = _trainer(
+        tmp_path,
+        [dojo],
+        model=model,
+        max_grad_norm=1e9,
+        plan_overrides={"loss_weighting": weighting},
+    )
+    phase_run = trainer._open_phase(trainer._plan.phases[0])
+    trainer._model.train()
+    assert trainer._take_step(phase_run, dojo)
+    assert model.layer.weight.grad is not None
+    return model.layer.weight.grad.detach().clone()
+
+
+class TestLossWeighting:
+    def test_none_trains_on_the_raw_loss(self, tmp_path: Path) -> None:
+        raw = _first_step_gradient(tmp_path, baseline=4.0, weighting=None)
+        again = _first_step_gradient(tmp_path, baseline=1.0, weighting=None)
+        assert torch.equal(raw, again)
+
+    def test_the_gradient_is_scaled_by_weight_over_baseline(
+        self, tmp_path: Path
+    ) -> None:
+        raw = _first_step_gradient(tmp_path, baseline=1.0, weighting=None)
+        weighting = LossWeighting({"a": 3.0}, baseline_floor=0.01)
+        scaled = _first_step_gradient(tmp_path, baseline=4.0, weighting=weighting)
+        assert torch.allclose(scaled, raw * 0.75)
+
+    def test_a_baseline_below_the_floor_scales_by_the_floor(
+        self, tmp_path: Path
+    ) -> None:
+        raw = _first_step_gradient(tmp_path, baseline=1.0, weighting=None)
+        weighting = LossWeighting({"a": 3.0}, baseline_floor=0.5)
+        capped = _first_step_gradient(tmp_path, baseline=1e-6, weighting=weighting)
+        assert torch.allclose(capped, raw * 6.0)
+
+    def test_a_batch_with_no_usable_baseline_is_skipped_not_a_fault(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        model = FakeModel()
+        before = model.layer.weight.detach().clone()
+        dojo = FakeDojo("a")
+        trainer = _trainer(
+            tmp_path,
+            [dojo],
+            model=model,
+            steps_per_round=10,
+            plan_overrides={
+                "loss_weighting": LossWeighting({}),
+                "faults": FaultPolicy(2, 2),
+            },
+        )
+        phase_run = trainer._open_phase(trainer._plan.phases[0])
+        dojo.unusable_baseline = True
+
+        with caplog.at_level(logging.INFO):
+            trainer._train_round(phase_run)
+            trainer._skips.log_and_reset("joint", 0)
+
+        # Ten skips with limits of 2 would have quarantined a faulting dojo
+        assert not phase_run.faults.quarantined_names()
+        assert not phase_run.faults.gave_up()
+        assert torch.equal(before, model.layer.weight)
+        assert "10 step(s) skipped, batch had no usable baseline" in caplog.text
+
+    def test_a_skipped_batch_does_not_reset_a_failure_streak(
+        self, tmp_path: Path
+    ) -> None:
+        dojo = FakeDojo("a")
+        trainer = _trainer(
+            tmp_path,
+            [dojo],
+            steps_per_round=1,
+            plan_overrides={
+                "loss_weighting": LossWeighting({}),
+                "faults": FaultPolicy(2, 100),
+            },
+        )
+        phase_run = trainer._open_phase(trainer._plan.phases[0])
+        phase_run.faults.record_failure("a", RuntimeError("boom"))
+        dojo.unusable_baseline = True
+
+        trainer._train_round(phase_run)
+        phase_run.faults.record_failure("a", RuntimeError("boom"))
+
+        # Had the skip counted as a success, the streak would be 1, not 2
+        assert phase_run.faults.is_quarantined("a")
+
+    def test_a_weighted_fp16_step_still_faults_at_the_minimum_scale(
+        self, tmp_path: Path
+    ) -> None:
+        model = FakeModel()
+        result = _trainer(
+            tmp_path,
+            [FakeDojo("a", nan_grad=True)],
+            model=model,
+            precision="fp16",
+            steps_per_round=40,
+            max_rounds=1,
+            plan_overrides={
+                "faults": FaultPolicy(2, 1000),
+                "loss_weighting": LossWeighting({"a": 5.0}),
+            },
+        ).run()
+
+        assert result.stopped_early_reason == "every dojo quarantined in 'joint'"
+
+    def test_a_run_with_weights_trains_and_stays_finite(self, tmp_path: Path) -> None:
+        model = FakeModel()
+        before = model.layer.weight.detach().clone()
+        result = _trainer(
+            tmp_path,
+            [FakeDojo("a", baseline=0.5), FakeDojo("b", baseline=8.0)],
+            model=model,
+            plan_overrides={"loss_weighting": LossWeighting({"a": 2.0})},
+        ).run()
+
+        assert result.stopped_early_reason is None
+        assert not torch.equal(before, model.layer.weight)
+        assert all(torch.isfinite(p).all() for p in model.parameters())
 
 
 def test_fake_dojo_satisfies_the_protocol() -> None:

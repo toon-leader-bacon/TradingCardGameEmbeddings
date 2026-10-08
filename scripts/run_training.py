@@ -34,6 +34,7 @@ import torch
 import yaml
 
 from src.dojos.dojo import BatchBudget, Dojo
+from src.dojos.loss.regression_objective import RegressionObjective
 from src.dojos.mods.mod import ModTally
 from src.encoder_model.card_encoder_model import CardEncoderModel
 from src.encoder_model.reference_singlecard_models import (
@@ -179,6 +180,7 @@ def main() -> int:
         rng_seed=config.plan.seed,
         mod_overrides=config.mod_overrides,
         staple_thresholds=config.staple_thresholds,
+        regression_objective=RegressionObjective.for_kind(config.regression_loss),
     )
     dojos = build_dojos(config.dojo_names, context)
     if not preflight_passes(dojos, config):

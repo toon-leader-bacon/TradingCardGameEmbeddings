@@ -14,8 +14,7 @@ from src.dojos.generic.generic_dojo import GenericDojo
 from src.dojos.generic.single_card_regression.decoder_head import (
     SingleCardRegressionDecoderHead,
 )
-from src.dojos.loss.mse_loss import MseLoss
-from src.dojos.loss.loss_calibration import StandardizedRegressionCalibration
+from src.dojos.loss.regression_objective import RegressionObjective
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
 
@@ -37,16 +36,20 @@ class SingleCardRegressionDojo(GenericDojo):
         mod_pipeline: ModPipeline | None = None,
         deck_box: DeckBox | None = None,
         config: DojoConfig = DojoConfig(),
+        objective: RegressionObjective | None = None,
     ) -> None:
         self.card_embedding_size = card_embedding_size
+        # None: plain MSE with the mean predictor's baseline (today's behavior)
+        if objective is None:
+            objective = RegressionObjective.mse()
         super().__init__(
             path_to_training_data=path_to_training_data,
             data_constructor=data_constructor,
             card_lookup=card_lookup,
             holdout=holdout,
             decoder_head=SingleCardRegressionDecoderHead(card_embedding_size),
-            loss_calculator=MseLoss(),
-            calibration=StandardizedRegressionCalibration(),
+            loss_calculator=objective.loss,
+            calibration=objective.calibration,
             mod_pipeline=mod_pipeline,
             deck_box=deck_box,
             config=config,

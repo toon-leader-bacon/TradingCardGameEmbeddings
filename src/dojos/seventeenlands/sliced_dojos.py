@@ -38,6 +38,7 @@ from src.data_refinement.metrics.seventeenlands.sliced_metric import (
     RowStreamMetric,
     SlicedMetricClass,
 )
+from src.dojos.loss.regression_objective import RegressionObjective
 from src.dojos.generic.data_constructors import (
     CardAverageDataConstructor,
     DeckLabelDataConstructor,
@@ -108,6 +109,7 @@ class SeventeenLandsCardLabelDojo(SingleCardRegressionDojo):
         name: str | None = None,
         rng_seed: int | None = None,
         strict_version_check: bool = True,
+        objective: RegressionObjective | None = None,
     ) -> None:
         """
         Inputs:
@@ -122,6 +124,8 @@ class SeventeenLandsCardLabelDojo(SingleCardRegressionDojo):
             rng_seed: split/shuffle seed; None means unseeded.
             strict_version_check: raise (rather than warn) on a binder
                 version mismatch.
+            objective: the loss and baseline to train with; None is plain
+                MSE with the mean predictor's baseline (RegressionObjective.mse()).
         Output: none (constructor).
         Side effects: may build the slice file; see
             SingleCardRegressionDojo (may write split files).
@@ -139,6 +143,7 @@ class SeventeenLandsCardLabelDojo(SingleCardRegressionDojo):
             ),
             data_constructor=CardAverageDataConstructor(self.METRIC.LABEL_COLUMN),
             card_embedding_size=card_embedding_size,
+            objective=objective,
             config=DojoConfig(
                 name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),
@@ -165,6 +170,7 @@ class SeventeenLandsDeckRegressionDojo(MultiCardRegressionDojo):
         name: str | None = None,
         rng_seed: int | None = None,
         strict_version_check: bool = True,
+        objective: RegressionObjective | None = None,
     ) -> None:
         """
         Inputs: as SeventeenLandsCardLabelDojo, plus deck_box (the
@@ -189,6 +195,7 @@ class SeventeenLandsDeckRegressionDojo(MultiCardRegressionDojo):
             ),
             card_embedding_size=card_embedding_size,
             deck_box=deck_box,
+            objective=objective,
             config=DojoConfig(
                 name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),

@@ -3,7 +3,11 @@ from typing import List
 import torch
 import torch.nn as nn
 
-from src.dojos.loss.nocab_loss import NocabLoss, device_of
+from src.dojos.loss.nocab_loss import NocabLoss
+from src.dojos.loss.regression_target import (
+    regression_target_for,
+    stacked_predictions,
+)
 
 
 class MseLoss(NocabLoss[List[torch.Tensor], List[float]]):
@@ -21,17 +25,6 @@ class MseLoss(NocabLoss[List[torch.Tensor], List[float]]):
     def calculate(
         self, decoder_output: List[torch.Tensor], labels: List[float]
     ) -> torch.Tensor:
-        if len(decoder_output) != len(labels):
-            raise ValueError(
-                f"The number of decoder outputs ({len(decoder_output)}) does not "
-                f"match the number of labels ({len(labels)})"
-            )
-        if not all(isinstance(output, torch.Tensor) for output in decoder_output):
-            raise ValueError("All decoder outputs must be torch.Tensor")
-        if not all(isinstance(label, float) for label in labels):
-            raise ValueError("All labels must be floats")
-        func = nn.MSELoss()
-        target = torch.tensor(
-            labels, dtype=torch.float32, device=device_of(decoder_output)
-        )
-        return func(decoder_output, target)
+        # Shared validation and target construction
+        target = regression_target_for(decoder_output, labels)
+        return nn.MSELoss()(stacked_predictions(decoder_output), target)

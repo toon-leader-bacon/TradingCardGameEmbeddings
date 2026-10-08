@@ -211,8 +211,14 @@ a median of ~200 tokens and FaB to ~570.
      `validation.json`; best-checkpoint selection and saturation use
      normalized loss (`epsilon`/`reactivation_delta` are now fractions of
      the baseline; the existing configs' 0.001 / 0.05 still read sensibly).
-     The gradient itself is not rescaled: a dojo's raw loss still sets its
-     share of the shared encoder's update.
+  1b. **Done.** The gradient is rescaled too: each step's loss is divided
+     by the dojo's baseline and multiplied by a per-run `loss_weights:`
+     entry (`loss_weighting.py`). `baseline_floor` defaults to 0.05 from
+     `scripts/survey_dojo_baselines.py` (111 buildable keys, baselines
+     0.0077 to 4.9; only `play_gwent.faction_conditioned_inclusion` and
+     `hearthstonejson.races_mask` sit below it). Open: a per-dojo grad-clip
+     counter in the round log and a look at the clip rate on the first GPU
+     run, and later a diet whose weights shift over time.
   2. Two-level diet sampling, below.
   3. Much later, as experiments: learned per-dojo weights (uncertainty
      weighting, Kendall et al. 2018) and learning-progress task selection
@@ -224,7 +230,7 @@ a median of ~200 tokens and FaB to ~570.
   `sts_gg.card_win_rate` and `sts_gg.win` left the catalog (code kept),
   and the win-based labels come from the `sts2_runs.*` keys instead
   (spire_codex runs, which include losses).
-- [ ] **Handle outlier regression labels.** z-scoring rescales labels but
+- [x] **Handle outlier regression labels (Huber built; experiment pending).** z-scoring rescales labels but
   does not tame heavy tails. isotropic.kingdom_game_length has mean 19.8
   turns and std 6.4, but a max of 323 (about 47 std out). Under MSE that
   one example adds about 2,200 to its batch loss and dominates the
@@ -243,9 +249,24 @@ a median of ~200 tokens and FaB to ~570.
   NextTurnActionCountDojo clips at 30 (IsotropicDeckRegressionDojo's
   LABEL_CAP). Other regression dojos are unchecked.
   Still unclipped (2026-10-01): the new `sts2_runs` deck labels, e.g.
-  total_cards_skipped (max 209) and elites_killed (max 28). A Huber loss
-  in the three regression cells would cover every dojo at once instead of
-  per-metric caps.
+  total_cards_skipped (max 209) and elites_killed (max 28).
+  Built (2026-10-08): `HuberLoss` (`src/dojos/loss/huber_loss.py`) in the
+  three regression cells, selected per run by `regression_loss: huber`
+  (default `mse`, today's behavior). The MSE-vs-Huber experiment is still
+  to run: both arms with loss weighting on and off
+  (`weight_by_baseline: false`), compared on RMSE and MAE in label units
+  on TEST plus wall-clock time (normalized loss is not comparable: the
+  baselines differ). Then decide the default, whether to retire the two
+  domain caps (cap-only, Huber-only and both arms on those two dojos), and
+  the Huber baseline's role as the loss-weighting divisor (rerun
+  `scripts/survey_dojo_baselines.py --regression-loss huber`). That survey
+  ran 2026-10-08 on the 57 buildable regression keys: Huber baselines
+  0.49 to 1.0 (median 0.87, none under the 0.05 floor), so loss weighting
+  scales those dojos by at most about 2x; the card-average regressions
+  and the sts2 deck counts are lowest (`sts2_runs.card_deck_size` 0.49).
+  26 regression keys could not build (stale MTG/Pokemon/17lands metrics). Still open:
+  label transforms (log) for the most extreme labels, and robust scaling
+  (median/IQR) for the std inflation tails cause.
 - [ ] **Save each dojo's `LabelStats` with the run.** The TRAIN mean/std
   that z-score a regression dojo's labels are recomputed at every dojo
   construction and only appear in the construction log line. That is
