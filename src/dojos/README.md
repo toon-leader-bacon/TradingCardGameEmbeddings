@@ -144,7 +144,7 @@ rows never straddle TRAIN and TEST.
   `cross_game.rarity_tier`, built by `MultiGameCardDojoRecipe`.
 - **`contrastive/`** - `ContrastiveDojo`, below.
 - **Per-source wrappers** - `gwent_one/`, `dominiontabs/`, `play_gwent/`,
-  `sts_gg/`, `sts2_runs/` (the card-reward pick), `seventeenlands/{draft_data,game_data,replay_data}/`,
+  `sts_gg/`, `sts2_runs/` (the card-reward, shop-purchase, card-removal and card-upgrade picks), `seventeenlands/{draft_data,game_data,replay_data}/`,
   `isotropic/`, `final_decks/`, `scryfall/`, `pokemon_tcg/`, `cardvault_fabtcg/`,
   `hearthstonejson/`, `spire_codex/`, `fabtcg_decklists/`: one thin generic-cell subclass per metric (see
   `generic/README.md`'s "Per-metric wrappers"). The 17lands

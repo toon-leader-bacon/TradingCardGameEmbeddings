@@ -21,7 +21,7 @@ run- and player-level numbers are summed from map_point_history:
       player_stats entries ("damage_taken"; "card_choices" options with
       "was_picked" true / false).
 
-CARD RESOLUTION: the same "CARD."-prefix strip + spire_codex alias
+CARD ALIAS LOOKUP: the same "CARD."-prefix strip + spire_codex alias
 lookup the deck box stage uses, cached per raw id. A miss becomes a
 CardSlot with card_uuid None (the box stored the Unknown sentinel there)
 and is logged once per distinct id, not once per copy: over ~1.7M runs a
@@ -35,15 +35,27 @@ from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.sts2runs.extraction_stage import (
     Sts2RunsDeckExtractionStage,
 )
+from src.data_refinement.metrics.sts2_runs.card_removal_reader import (
+    CardRemovalReader,
+)
 from src.data_refinement.metrics.sts2_runs.card_reward_reader import (
     CardRewardReader,
 )
+from src.data_refinement.metrics.sts2_runs.card_upgrade_reader import (
+    CardUpgradeReader,
+)
+from src.data_refinement.metrics.sts2_runs.pick_choice import PickKind
+from src.data_refinement.metrics.sts2_runs.pick_choice_reader import PickChoiceReader
+from src.data_refinement.metrics.sts2_runs.player_history import PlayerHistory
 from src.data_refinement.metrics.sts2_runs.run_record import (
     COMBAT_ROOM_TYPES,
     CardSlot,
     PlayerRun,
     RunOutcome,
     Sts2Run,
+)
+from src.data_refinement.metrics.sts2_runs.shop_purchase_reader import (
+    ShopPurchaseReader,
 )
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
@@ -76,7 +88,12 @@ class Sts2RunParser:
         self._card_lookup = card_lookup
         self._stage = stage
         self._card_uuids: dict[str, UUID | None] = {}
-        self._card_reward_reader = CardRewardReader(self._card_uuid)
+        self._pick_readers: dict[PickKind, PickChoiceReader] = {
+            PickKind.CARD_REWARD: CardRewardReader(self._card_uuid),
+            PickKind.SHOP_PURCHASE: ShopPurchaseReader(self._card_uuid),
+            PickKind.CARD_REMOVAL: CardRemovalReader(self._card_uuid),
+            PickKind.CARD_UPGRADE: CardUpgradeReader(self._card_uuid),
+        }
 
     def parse(self, row: dict) -> Sts2Run:
         """Parse one raw run.
@@ -136,6 +153,7 @@ class Sts2RunParser:
             choice for stats in own_stats for choice in stats.get("card_choices", [])
         ]
         picked = sum(bool(choice.get("was_picked")) for choice in choices)
+        history = PlayerHistory.build(player, map_points)
         return PlayerRun(
             deck_uuid=self._stage.deck_uuid(run_id, player_index),
             character=player["character"],
@@ -144,7 +162,10 @@ class Sts2RunParser:
             damage_taken=sum(stats.get("damage_taken", 0) for stats in own_stats),
             cards_picked=picked,
             cards_skipped=len(choices) - picked,
-            card_rewards=self._card_reward_reader.read(player, map_points),
+            pick_choices={
+                kind: reader.read(history)
+                for kind, reader in self._pick_readers.items()
+            },
         )
 
     def _card_slot(self, entry: dict) -> CardSlot:
@@ -163,7 +184,7 @@ class Sts2RunParser:
 
     def _card_uuid(self, raw_card_id: str) -> UUID | None:
         """The nocab_uuid for a raw "CARD.<NAME>" id, or None when
-        spire_codex has no such alias (see CARD RESOLUTION).
+        spire_codex has no such alias (see CARD ALIAS LOOKUP).
 
         Inputs: raw_card_id (str). Output: UUID | None.
         Side effects: caches the answer; logs the first miss of an id.

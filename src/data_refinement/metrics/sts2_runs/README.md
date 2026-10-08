@@ -10,8 +10,8 @@ only"), these runs include losses, so the win and killed-by labels
 carry signal here.
 
 The metrics are sts_gg's two families recomputed from this schema: 12
-deck-label metrics and 11 per-card averages, plus one per-floor metric,
-`CardRewardPickMetric` (below). Each of the 23 sts_gg-derived metrics
+deck-label metrics and 11 per-card averages, plus four per-floor pick
+metrics (below). Each of the 23 sts_gg-derived metrics
 writes to
 `data/metrics/sts2_runs/<same stem as sts_gg>.parquet` with its sts_gg
 counterpart's label column. No new dojo classes exist for them: the
@@ -40,11 +40,19 @@ wrappers (`src/dojos/sts_gg/`) with a `metric_output` override.
   of `_value_for(run, player, slot)` over its copies) and its 11
   subclasses: sts_gg's nine run-level averages plus upgrade rate and
   act-2 win rate.
-- `card_reward_reader.py` - `CardRewardReader`: a raw player -> that
-  player's `CardRewardChoice`s (the only code that reads the per-floor
-  raw fields). `deck_timeline.py` - `DeckTimeline`: every copy a player
-  held, and the deck on arrival at a floor.
-- `card_reward_pick_metric.py` - `CardRewardPickMetric` (below).
+- `pick_choice.py` - `PickChoice` (a deck, the options, the one taken)
+  and `PickKind`; `PlayerRun.pick_choices` holds each kind's choices.
+- `player_history.py` - `PlayerHistory`: a raw player's points plus the
+  deck timeline. `deck_timeline.py` - `DeckTimeline`: every copy a
+  player held, and the deck on arrival at a floor.
+- `pick_choice_reader.py` - `PickChoiceReader` (Template Method) and its
+  four subclasses, the only code that reads the per-floor raw fields:
+  `card_reward_reader.py`, `shop_purchase_reader.py`,
+  `card_removal_reader.py`, `card_upgrade_reader.py`.
+- `pick_choice_metric.py` - `PickChoiceMetric`, the shared streaming
+  writer; its subclasses `card_reward_pick_metric.py`,
+  `shop_purchase_pick_metric.py`, `card_removal_pick_metric.py` and
+  `card_upgrade_pick_metric.py` set only a `PickKind` and an output path.
 - `BRAINSTORM.md` - candidate metrics from this schema.
 
 ## How it works
@@ -77,15 +85,41 @@ wrappers (`src/dojos/sts_gg/`) with a `metric_output` override.
 
 ## Per-floor metrics
 
-`CardRewardPickMetric` (BRAINSTORM #15): one row per card-reward room, the
-StS2 analog of 17lands' pool-conditioned pick. Columns: `run_id`,
+Four metrics share one row layout (`PickChoiceMetric`): `run_id`,
 `deck_uuid`, `floor`, `deck_uuids` (the deck on arrival, one uuid per
-copy), `offered_uuids` and `picked_uuid` (NULL = skipped). The deck is
+copy), `offered_uuids` (the options the pick was made among) and
+`picked_uuid` (NULL = declined; only the card reward can be). The deck is
 inline, not in a deck box, and only the CardBinder version is stamped. A
-dojo splits by `run_id`: a run yields about 17 rows.
+dojo splits by `run_id`. An option with no alias voids the row; the
+dojos' `Sts2RunPickDojo` base reads all four.
 
-- **Which rooms:** monster, elite and boss rooms that offered cards and
-  had at most one pick. Shops (several purchases a visit), events and
+| Metric | One row per | Options | Dojo key |
+|---|---|---|---|
+| `CardRewardPickMetric` (BRAINSTORM #15) | card-reward room | cards offered, plus a skip | `sts2_runs.card_reward_pick` |
+| `ShopPurchasePickMetric` (#16) | card bought | cards still for sale | `sts2_runs.shop_purchase_pick` |
+| `CardRemovalPickMetric` (#23) | shop removal | distinct deck cards | `sts2_runs.card_removal_pick` |
+| `CardUpgradePickMetric` (#24) | smith at a rest site | distinct deck cards with an un-upgraded copy | `sts2_runs.card_upgrade_pick` |
+
+**Shop purchase is a noisy target.** A purchase turns on gold, prices and
+the rest of the basket, none of which is an input, so expect a loss close
+to the baseline. It is modelled as a series of draft picks: a shop opens
+with 7 card slots; `card_choices` lists those still unsold, `cards_gained`
+those bought (in purchase order, assumed). Purchase k picks from the stock
+less the k-1 earlier buys, and its deck includes them. Options are sorted
+by raw id so their order cannot give the label away. Visits with a
+`was_picked` flag or whose stock does not add up to 7 are skipped. Card
+removal pays gold too (milder); the upgrade does not.
+
+Removal and upgrade options are the *distinct* deck cards (sorted), so
+three Strikes are one option; the deck context shows the copies. A removal
+is the shop service only (exactly one removed card); an upgrade is a
+`SMITH` rest-site choice that upgraded exactly one card. The upgrade's
+options leave out cards whose copies are all upgraded, counted from every
+earlier upgrade (an upgraded copy later removed is miscounted). On 3,000
+runs, 98% of smith visits and 96% of shop removals became rows.
+
+- **Card reward rooms:** monster, elite and boss rooms that offered cards
+  and had at most one pick. Shops (several purchases a visit), events and
   multi-pick rewards are different decisions and write nothing.
 - **The deck on arrival** is rebuilt from the final deck plus the copies
   that left it (shop removals, event transforms), each with the floor it
@@ -95,16 +129,13 @@ dojo splits by `run_id`: a run yields about 17 rows.
 - **Unaliased cards** (the binder lacks some newer cards: about 1.5% of
   rewards offer one) are dropped from the deck, and a reward offering one
   writes no row.
-- **Size:** about 29M rows over the full corpus. The writer streams
+- **Size:** about 29M card-reward rows over the full corpus. The writer streams
   10,000-row groups, so memory stays flat.
 
-Its dojo, `CardRewardPickDojo` (`src/dojos/sts2_runs/`), is a
-`MultiGroupOptionSelectionDojo` with `can_skip=True`: `[offered, deck]` in,
-the card taken or a learned "none" option out.
-
-Shop purchase, card removal, upgrade target and rest-site choice
-(BRAINSTORM #16, #23, #24, #26) can reuse `DeckTimeline` and a reader
-alongside `CardRewardReader`; none is built.
+Each dojo (`src/dojos/sts2_runs/`) is a `MultiGroupOptionSelectionDojo`
+over `[options, deck]`; only the card reward sets `can_skip=True` (a
+learned "none" option). The rest-site choice (BRAINSTORM #26) is not
+built.
 
 ## How to run
 

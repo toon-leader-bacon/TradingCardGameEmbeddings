@@ -3,7 +3,8 @@ from uuid import NAMESPACE_OID, UUID, uuid5
 from src.data_refinement.metrics.sts2_runs.card_reward_reader import (
     CardRewardReader,
 )
-from src.data_refinement.metrics.sts2_runs.run_record import CardRewardChoice
+from src.data_refinement.metrics.sts2_runs.pick_choice import PickChoice
+from src.data_refinement.metrics.sts2_runs.player_history import PlayerHistory
 
 _UNKNOWN = "CARD.UNKNOWN"
 
@@ -34,8 +35,8 @@ def _player(*deck: tuple[str, int]) -> dict:
     }
 
 
-def _read(player: dict, points: list[dict]) -> tuple[CardRewardChoice, ...]:
-    return CardRewardReader(_uuid_of).read(player, points)
+def _read(player: dict, points: list[dict]) -> tuple[PickChoice, ...]:
+    return CardRewardReader(_uuid_of).read(PlayerHistory.build(player, points))
 
 
 class TestRead:

@@ -14,7 +14,10 @@ card in that slot instead; the metrics never emit a per-card row for it.
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Mapping
 from uuid import UUID
+
+from src.data_refinement.metrics.sts2_runs.pick_choice import PickChoice, PickKind
 
 # Room types that are combats; the rooms whose rewards include a card choice.
 COMBAT_ROOM_TYPES = frozenset({"monster", "elite", "boss"})
@@ -45,37 +48,6 @@ class CardSlot:
 
 
 @dataclass(frozen=True)
-class CardRewardChoice:
-    """One card-reward room as the player faced it: the deck on arrival,
-    the cards offered, and which one (if any) was taken.
-
-    floor: the floor of the reward (deck_timeline.py's numbering).
-    deck_before: the deck on arrival, one card_uuid per copy (None = no
-        spire_codex alias). Card identity only: no upgrade or enchantment.
-    offered: the cards offered, in the order shown (None = no alias).
-    picked_index: the offered card taken, or None if the player skipped.
-    """
-
-    floor: int
-    deck_before: tuple[UUID | None, ...]
-    offered: tuple[UUID | None, ...]
-    picked_index: int | None
-
-    def __post_init__(self) -> None:
-        """Reject a picked_index outside offered.
-        Inputs: none. Output: none. Side effects: none.
-        Exceptions: ValueError if picked_index is not None and not a
-            position in offered."""
-        if self.picked_index is not None and not (
-            0 <= self.picked_index < len(self.offered)
-        ):
-            raise ValueError(
-                f"picked_index {self.picked_index} is outside "
-                f"{len(self.offered)} offered cards"
-            )
-
-
-@dataclass(frozen=True)
 class PlayerRun:
     """One player's side of a run (co-op runs have several).
 
@@ -87,8 +59,8 @@ class PlayerRun:
     damage_taken: damage taken over every map point.
     cards_picked / cards_skipped: card-reward options taken / not taken,
         summed over every card choice the player saw.
-    card_rewards: each qualifying card-reward room, in floor order (see
-        card_reward_reader.py).
+    pick_choices: the player's decisions of each PickKind, in floor order
+        (see pick_choice.py); every kind is present, possibly empty.
     """
 
     deck_uuid: UUID
@@ -98,7 +70,7 @@ class PlayerRun:
     damage_taken: int
     cards_picked: int
     cards_skipped: int
-    card_rewards: tuple[CardRewardChoice, ...]
+    pick_choices: Mapping[PickKind, tuple[PickChoice, ...]]
 
     def known_card_uuids(self) -> list[UUID]:
         """The deck's card uuids, one per copy, without unaliased cards.

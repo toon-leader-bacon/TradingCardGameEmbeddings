@@ -130,9 +130,11 @@ from src.data_refinement.metrics.generic.held_out_deck_card.metric import (
 
 # --- sts2_runs ---
 from src.data_refinement.metrics.sts2_runs import card_average_metrics as sts2_cards
-from src.data_refinement.metrics.sts2_runs.card_reward_pick_metric import (
-    CardRewardPickMetric,
-)
+from src.data_refinement.metrics.sts2_runs.card_removal_pick_metric import CardRemovalPickMetric
+from src.data_refinement.metrics.sts2_runs.card_reward_pick_metric import CardRewardPickMetric
+from src.data_refinement.metrics.sts2_runs.card_upgrade_pick_metric import CardUpgradePickMetric
+from src.data_refinement.metrics.sts2_runs.pick_choice_metric import PickChoiceMetric
+from src.data_refinement.metrics.sts2_runs.shop_purchase_pick_metric import ShopPurchasePickMetric
 from src.data_refinement.metrics.sts2_runs import deck_label_metrics as sts2_decks
 from src.data_refinement.metrics.sts2_runs.run_record import Sts2Run
 from src.data_refinement.metrics.sts2_runs.scanner import (
@@ -490,7 +492,7 @@ def run_sts_gg(raw_path: Path | None) -> None:
 _STS2_RUNS_METRIC_CLASSES: tuple[
     type[sts2_decks.DeckLabelMetric]
     | type[sts2_cards.CardAverageMetric]
-    | type[CardRewardPickMetric],
+    | type[PickChoiceMetric],
     ...,
 ] = (
     sts2_decks.AscensionPredictionMetric,
@@ -517,6 +519,9 @@ _STS2_RUNS_METRIC_CLASSES: tuple[
     sts2_cards.CardUpgradeRateMetric,
     sts2_cards.CardWinRateAtAct2Metric,
     CardRewardPickMetric,
+    ShopPurchasePickMetric,
+    CardRemovalPickMetric,
+    CardUpgradePickMetric,
 )
 
 

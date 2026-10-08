@@ -8,8 +8,8 @@ at any floor is a filter over every copy the player ever held, which this
 module holds as TimedCards.
 
 Card ids here are the raw "CARD.<NAME>" strings: this module neither
-reads the raw run dict nor looks cards up (the reader that builds a
-DeckTimeline does both; see card_reward_reader.py).
+reads the raw run dict nor looks cards up (PlayerHistory.build builds a
+DeckTimeline from the raw player; the readers look the cards up).
 
 FLOORS count map points across all acts from 1, the numbering
 "floor_added_to_deck" uses (the run-start deck is floor 1).

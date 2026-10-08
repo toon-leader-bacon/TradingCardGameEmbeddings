@@ -4,8 +4,8 @@ from uuid import uuid4
 import pandas as pd
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.dojos.sts2_runs.card_reward_pick_data_constructor import (
-    CardRewardPickDataConstructor,
+from src.dojos.sts2_runs.option_pick_data_constructor import (
+    OptionPickDataConstructor,
 )
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
@@ -48,7 +48,7 @@ class TestBuild:
         a, b, c, deck_card = _card("A"), _card("B"), _card("C"), _card("Deck")
         binder = _binder(a, b, c, deck_card)
 
-        result = CardRewardPickDataConstructor().build(
+        result = OptionPickDataConstructor().build(
             _chunk([deck_card], [a, b, c], str(b.nocab_uuid)), binder
         )
 
@@ -57,7 +57,7 @@ class TestBuild:
     def test_a_skip_is_labelled_one_past_the_last_offered_card(self) -> None:
         a, b = _card("A"), _card("B")
 
-        result = CardRewardPickDataConstructor().build(
+        result = OptionPickDataConstructor().build(
             _chunk([], [a, b], None), _binder(a, b)
         )
 
@@ -68,14 +68,14 @@ class TestBuild:
         chunk = _chunk([], [a], None)
         chunk["picked_uuid"] = pd.Series([float("nan")])
 
-        result = CardRewardPickDataConstructor().build(chunk, _binder(a))
+        result = OptionPickDataConstructor().build(chunk, _binder(a))
 
         assert [label for _, label in result] == [1]
 
     def test_the_offer_is_group_0_and_the_deck_group_1(self) -> None:
         a, deck_card = _card("A"), _card("Deck")
 
-        ((groups, _),) = CardRewardPickDataConstructor().build(
+        ((groups, _),) = OptionPickDataConstructor().build(
             _chunk([deck_card], [a], None), _binder(a, deck_card)
         )
 
@@ -84,7 +84,7 @@ class TestBuild:
     def test_a_row_with_an_unknown_offered_card_is_dropped(self) -> None:
         a, stranger = _card("A"), _card("Stranger")
 
-        result = CardRewardPickDataConstructor().build(
+        result = OptionPickDataConstructor().build(
             _chunk([], [a, stranger], None), _binder(a)
         )
 
@@ -93,7 +93,7 @@ class TestBuild:
     def test_an_unknown_deck_card_is_dropped_but_the_row_stays(self) -> None:
         a, deck_card, stranger = _card("A"), _card("Deck"), _card("Stranger")
 
-        result = CardRewardPickDataConstructor().build(
+        result = OptionPickDataConstructor().build(
             _chunk([deck_card, stranger], [a], str(a.nocab_uuid)), _binder(a, deck_card)
         )
 
@@ -102,7 +102,7 @@ class TestBuild:
     def test_a_picked_card_that_was_not_offered_drops_the_row(self) -> None:
         a, other = _card("A"), _card("Other")
 
-        result = CardRewardPickDataConstructor().build(
+        result = OptionPickDataConstructor().build(
             _chunk([], [a], str(other.nocab_uuid)), _binder(a, other)
         )
 
@@ -111,7 +111,7 @@ class TestBuild:
     def test_an_unparseable_pick_is_dropped_not_read_as_a_skip(self) -> None:
         a = _card("A")
 
-        result = CardRewardPickDataConstructor().build(
+        result = OptionPickDataConstructor().build(
             _chunk([], [a], "not-a-uuid"), _binder(a)
         )
 
@@ -120,7 +120,7 @@ class TestBuild:
     def test_an_empty_deck_is_valid(self) -> None:
         a = _card("A")
 
-        ((groups, _),) = CardRewardPickDataConstructor().build(
+        ((groups, _),) = OptionPickDataConstructor().build(
             _chunk([], [a], str(a.nocab_uuid)), _binder(a)
         )
 

@@ -1,9 +1,9 @@
-"""CardRewardPickDataConstructor - CardRewardPickMetric rows -> data for
-a MultiGroupOptionSelectionDojo with can_skip=True.
+"""OptionPickDataConstructor - rows of any PickChoiceMetric
+(src/data_refinement/metrics/sts2_runs/pick_choice_metric.py) -> data for a
+MultiGroupOptionSelectionDojo.
 
-See src/data_refinement/metrics/sts2_runs/card_reward_pick_metric.py for
-the row: deck_uuids (the deck on arrival), offered_uuids (the cards
-offered) and picked_uuid (NULL = the player took none of them).
+The four StS2 pick metrics share one row layout (deck_uuids, offered_uuids,
+picked_uuid), so one constructor serves them all.
 """
 
 from typing import List, cast
@@ -20,37 +20,36 @@ from src.dojos.generic.data_constructors.row_values import (
 from src.schema.type_hints import MultiCardInput, TrainingDatum
 
 
-class CardRewardPickDataConstructor:
-    """DataConstructor: one ([offered cards, deck cards], label) per row.
+class OptionPickDataConstructor:
+    """DataConstructor: one ([option cards, deck cards], label) per row.
 
-    **offered MUST stay group index 0, the deck group index 1** (the
-    cell's loss baseline counts group 0; see
-    PoolConditionedPickDataConstructor for why a possibly-empty group
-    goes second).
+    **options MUST stay group index 0, the deck group index 1** (the
+    cell's loss baseline counts group 0).
 
-    The label is the picked card's index among the offered cards, or
-    len(offered) for a skip, the extra option MultiGroupOptionSelectionDojo
-    adds when can_skip is set. Pair it only with a dojo built with
-    can_skip=True (a test builds both and checks the label fits the
-    logits).
+    The label is the picked card's index among the options, or
+    len(options) when picked_uuid is NULL: the skip option a dojo built
+    with can_skip=True adds. Only the card reward writes NULLs; for the
+    other metrics every row has a pick, so the same constructor feeds a
+    dojo without can_skip. Pair a NULL-bearing metric only with a dojo
+    built with can_skip=True.
     """
 
     def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
         """Convert a chunk of metric rows into option-selection data.
 
         Inputs:
-            chunk: rows of CardRewardPickMetric's output.
+            chunk: rows of a PickChoiceMetric's output.
             lookup: the split's holdout-filtered lookup.
-        Output: one ([offered_cards, deck_cards], label) per usable row.
-            A row is skipped when any offered uuid fails to parse or
-            look up (it would shift the label), or when picked_uuid is
-            set but not among the offered cards. Deck uuids that fail
-            are dropped individually; an empty deck is valid.
+        Output: one ([option_cards, deck_cards], label) per usable row.
+            A row is skipped when any offered uuid fails to parse or look
+            up (it would shift the label), or when picked_uuid is set but
+            not among the options. Deck uuids that fail are dropped
+            individually; an empty deck is valid.
         Side effects: none.
         Exceptions: none (a bad row is skipped, never raised).
 
         Example:
-            >>> CardRewardPickDataConstructor().build(chunk, lookup)
+            >>> OptionPickDataConstructor().build(chunk, lookup)
             [([[<GenericCard>, <GenericCard>], [<GenericCard>]], 1), ...]
         """
         result: List[TrainingDatum] = []

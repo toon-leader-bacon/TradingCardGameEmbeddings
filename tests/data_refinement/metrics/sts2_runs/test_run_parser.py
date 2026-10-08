@@ -11,6 +11,7 @@ from src.data_refinement.deck_box.spire_codex_runs.extraction_stage import (
 from src.data_refinement.deck_box.sts2runs.extraction_stage import (
     Sts2RunsDeckExtractionStage,
 )
+from src.data_refinement.metrics.sts2_runs.pick_choice import PickKind
 from src.data_refinement.metrics.sts2_runs.run_parser import Sts2RunParser
 from src.data_refinement.metrics.sts2_runs.run_record import RunOutcome
 from src.schema.data_source import DataSource
@@ -21,6 +22,49 @@ from tests.data_refinement.metrics.sts2_runs._runs import binder, raw_run
 @pytest.fixture
 def parser(tmp_path: Path) -> Sts2RunParser:
     return Sts2RunParser(binder(tmp_path), SpireCodexRunsDeckExtractionStage())
+
+
+class TestPickChoices:
+    def test_each_kind_is_read_by_its_own_reader(self, parser: Sts2RunParser) -> None:
+        stock = [f"CARD.S{i}" for i in range(1, 7)]
+        shop = {
+            "rooms": [{"room_type": "shop"}],
+            "player_stats": [
+                {
+                    "player_id": 1,
+                    "card_choices": [
+                        {"card": {"id": c}, "was_picked": False} for c in stock
+                    ],
+                    "cards_gained": [{"id": "CARD.S7"}],
+                    "cards_removed": [
+                        {"id": "CARD.STRIKE_SILENT", "floor_added_to_deck": 1}
+                    ],
+                }
+            ],
+        }
+        rest = {
+            "rooms": [{"room_type": "rest_site"}],
+            "player_stats": [
+                {
+                    "player_id": 1,
+                    "rest_site_choices": ["SMITH"],
+                    "upgraded_cards": ["CARD.DEFEND_SILENT"],
+                }
+            ],
+        }
+        raw = raw_run()
+        raw["map_point_history"][1] += [shop, rest]
+
+        choices = parser.parse(raw).players[0].pick_choices
+
+        assert {kind: len(found) for kind, found in choices.items()} == {
+            PickKind.CARD_REWARD: 2,
+            PickKind.SHOP_PURCHASE: 1,
+            PickKind.CARD_REMOVAL: 1,
+            PickKind.CARD_UPGRADE: 1,
+        }
+        assert [c.floor for c in choices[PickKind.CARD_REMOVAL]] == [5]
+        assert [c.floor for c in choices[PickKind.CARD_UPGRADE]] == [6]
 
 
 class TestOutcome:
