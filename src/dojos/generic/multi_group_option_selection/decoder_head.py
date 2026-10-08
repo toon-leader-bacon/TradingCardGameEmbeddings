@@ -11,7 +11,8 @@ each option embedding, plus that context, to an injected
 OptionScoringHead (src/dojos/generic/option_scoring.py) - the same
 strategy class multi_card_option_selection's decoder head uses, just
 always given a real (possibly None, if the pool was empty) context here
-instead of always None.
+instead of always None. With learns_skip_option, one learned "pick none"
+embedding is scored as a last extra option, so the logits run one longer.
 """
 
 from typing import List
@@ -37,6 +38,7 @@ class MultiGroupOptionSelectionDecoderHead(nn.Module):
         card_embedding_size: int,
         scoring_head: OptionScoringHead | None = None,
         pooler: EmbeddingPooler | None = None,
+        learns_skip_option: bool = False,
     ) -> None:
         """
         Inputs:
@@ -50,6 +52,11 @@ class MultiGroupOptionSelectionDecoderHead(nn.Module):
             pooler: the EmbeddingPooler strategy this head delegates
                 pool-collapsing to. None (default) uses
                 MeanEmbeddingPooler.
+            learns_skip_option: True adds one more option after the real
+                ones, "pick none of them", scored like a card by a
+                learned embedding (skip_embedding). The logits then have
+                len(options) + 1 entries and a skip's label is
+                len(options). False (default): no such option.
         Output: none (constructor).
         Side effects: registers this module's layers (nn.Module state) -
             including scoring_head's own parameters, since it's an
@@ -61,6 +68,13 @@ class MultiGroupOptionSelectionDecoderHead(nn.Module):
             card_embedding_size
         )
         self.pooler = pooler or MeanEmbeddingPooler()
+        # The learned stand-in for "pick none of them"; None when the
+        # cell has no skip option
+        self.skip_embedding: nn.Parameter | None = (
+            nn.Parameter(torch.randn(card_embedding_size) * 0.02)
+            if learns_skip_option
+            else None
+        )
 
     def forward(self, embeddings: BatchedMultiGroupEmbedding) -> List[torch.Tensor]:
         """One ragged logits tensor per example in the batch.
@@ -86,11 +100,16 @@ class MultiGroupOptionSelectionDecoderHead(nn.Module):
                 pool_embeddings] group pair. pool_embeddings may be
                 empty (a drafter's first pick of a draft has no pool
                 yet) - see the empty-pool guard below.
-        Output: a (len(option_embeddings),) tensor of logits.
+        Output: a (len(option_embeddings),) tensor of logits, or
+            (len(option_embeddings) + 1,) when this head learns a skip
+            option (the skip's logit is last).
         Side effects: none.
         Exceptions: none expected.
         """
         option_embeddings, pool_embeddings = embeddings
+        # The skip option scores like one more card, after the real ones
+        if self.skip_embedding is not None:
+            option_embeddings = [*option_embeddings, self.skip_embedding]
         # An empty pool (first pick of a draft) has nothing to pool -
         # score with no conditioning context at all, same as
         # multi_card_option_selection's unconditioned case, rather than

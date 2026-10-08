@@ -35,7 +35,11 @@ from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.sts2runs.extraction_stage import (
     Sts2RunsDeckExtractionStage,
 )
+from src.data_refinement.metrics.sts2_runs.card_reward_reader import (
+    CardRewardReader,
+)
 from src.data_refinement.metrics.sts2_runs.run_record import (
+    COMBAT_ROOM_TYPES,
     CardSlot,
     PlayerRun,
     RunOutcome,
@@ -48,7 +52,6 @@ _logger = logging.getLogger(__name__)
 
 _CARD_ID_PREFIX = "CARD."
 _NO_KILLER = "NONE.NONE"
-_COMBAT_ROOM_TYPES = frozenset({"monster", "elite", "boss"})
 _ELITE_ROOM_TYPE = "elite"
 
 
@@ -73,6 +76,7 @@ class Sts2RunParser:
         self._card_lookup = card_lookup
         self._stage = stage
         self._card_uuids: dict[str, UUID | None] = {}
+        self._card_reward_reader = CardRewardReader(self._card_uuid)
 
     def parse(self, row: dict) -> Sts2Run:
         """Parse one raw run.
@@ -103,9 +107,7 @@ class Sts2RunParser:
             ascension=row["ascension"],
             floors_per_act=tuple(len(act) for act in row["map_point_history"]),
             total_turns=sum(room.get("turns_taken", 0) for room in rooms),
-            total_combats=sum(
-                room["room_type"] in _COMBAT_ROOM_TYPES for room in rooms
-            ),
+            total_combats=sum(room["room_type"] in COMBAT_ROOM_TYPES for room in rooms),
             elites_killed=_elites_killed(map_points, outcome),
             players=tuple(
                 self._player_run(run_id, index, player, map_points)
@@ -142,6 +144,7 @@ class Sts2RunParser:
             damage_taken=sum(stats.get("damage_taken", 0) for stats in own_stats),
             cards_picked=picked,
             cards_skipped=len(choices) - picked,
+            card_rewards=self._card_reward_reader.read(player, map_points),
         )
 
     def _card_slot(self, entry: dict) -> CardSlot:

@@ -10,7 +10,9 @@ only"), these runs include losses, so the win and killed-by labels
 carry signal here.
 
 The metrics are sts_gg's two families recomputed from this schema: 12
-deck-label metrics and 11 per-card averages, each writing to
+deck-label metrics and 11 per-card averages, plus one per-floor metric,
+`CardRewardPickMetric` (below). Each of the 23 sts_gg-derived metrics
+writes to
 `data/metrics/sts2_runs/<same stem as sts_gg>.parquet` with its sts_gg
 counterpart's label column. No new dojo classes exist for them: the
 `sts2_runs.*` keys in `src/training/dojo_catalog.py` reuse the sts_gg
@@ -38,6 +40,11 @@ wrappers (`src/dojos/sts_gg/`) with a `metric_output` override.
   of `_value_for(run, player, slot)` over its copies) and its 11
   subclasses: sts_gg's nine run-level averages plus upgrade rate and
   act-2 win rate.
+- `card_reward_reader.py` - `CardRewardReader`: a raw player -> that
+  player's `CardRewardChoice`s (the only code that reads the per-floor
+  raw fields). `deck_timeline.py` - `DeckTimeline`: every copy a player
+  held, and the deck on arrival at a floor.
+- `card_reward_pick_metric.py` - `CardRewardPickMetric` (below).
 - `BRAINSTORM.md` - candidate metrics from this schema.
 
 ## How it works
@@ -68,16 +75,36 @@ wrappers (`src/dojos/sts_gg/`) with a `metric_output` override.
   strictly before act 2's first floor (per run, from the act lengths).
 - The 868 runs present in both sources are scored twice (0.05%).
 
-## Per-floor metrics (not built)
+## Per-floor metrics
 
-Card-reward pick, shop purchase, card removal, upgrade target and rest
-site choice (BRAINSTORM #15, #16, #23, #24, #26) need the deck as it
-was at a given floor. The parser already walks `map_point_history` per
-player; a per-floor metric would add a `FloorSnapshot` record (deck so
-far, from `floor_added` plus the floor's `cards_gained`/`cards_removed`,
-and the floor's choices) to `run_record.py`, emitted by the parser, and
-a new metric base over (run, player, snapshot). Those decks are partial,
-so they would go into a metrics-private DeckBox, not the published one.
+`CardRewardPickMetric` (BRAINSTORM #15): one row per card-reward room, the
+StS2 analog of 17lands' pool-conditioned pick. Columns: `run_id`,
+`deck_uuid`, `floor`, `deck_uuids` (the deck on arrival, one uuid per
+copy), `offered_uuids` and `picked_uuid` (NULL = skipped). The deck is
+inline, not in a deck box, and only the CardBinder version is stamped. A
+dojo splits by `run_id`: a run yields about 17 rows.
+
+- **Which rooms:** monster, elite and boss rooms that offered cards and
+  had at most one pick. Shops (several purchases a visit), events and
+  multi-pick rewards are different decisions and write nothing.
+- **The deck on arrival** is rebuilt from the final deck plus the copies
+  that left it (shop removals, event transforms), each with the floor it
+  entered or left on. Checked on 3,000 spire_codex runs: after floor 1,
+  every copy gained was later held or recorded as removed. A card is its
+  id alone; upgrades (final state only) and enchantments are ignored.
+- **Unaliased cards** (the binder lacks some newer cards: about 1.5% of
+  rewards offer one) are dropped from the deck, and a reward offering one
+  writes no row.
+- **Size:** about 29M rows over the full corpus. The writer streams
+  10,000-row groups, so memory stays flat.
+
+Its dojo, `CardRewardPickDojo` (`src/dojos/sts2_runs/`), is a
+`MultiGroupOptionSelectionDojo` with `can_skip=True`: `[offered, deck]` in,
+the card taken or a learned "none" option out.
+
+Shop purchase, card removal, upgrade target and rest-site choice
+(BRAINSTORM #16, #23, #24, #26) can reuse `DeckTimeline` and a reader
+alongside `CardRewardReader`; none is built.
 
 ## How to run
 

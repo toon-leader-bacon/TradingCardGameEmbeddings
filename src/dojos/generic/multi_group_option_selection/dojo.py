@@ -5,6 +5,7 @@ decoder head and loss; everything else is the shared `Dojo` contract.
 """
 
 from pathlib import Path
+from typing import Callable
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
@@ -44,7 +45,17 @@ class MultiGroupOptionSelectionDojo(GenericDojo):
         pooler: EmbeddingPooler | None = None,
         deck_box: DeckBox | None = None,
         config: DojoConfig = DojoConfig(),
+        can_skip: bool = False,
     ) -> None:
+        """
+        Inputs: as GenericDojo, plus can_skip: True adds a learned "pick
+            none of them" option after each example's options (see
+            MultiGroupOptionSelectionDecoderHead); the data constructor
+            then labels a skip as len(options), and the loss baseline
+            counts that extra option. False (default): picks only.
+        Output: none (constructor).
+        Side effects, Exceptions: as GenericDojo.
+        """
         self.card_embedding_size = card_embedding_size
         super().__init__(
             path_to_training_data=path_to_training_data,
@@ -52,11 +63,14 @@ class MultiGroupOptionSelectionDojo(GenericDojo):
             card_lookup=card_lookup,
             holdout=holdout,
             decoder_head=MultiGroupOptionSelectionDecoderHead(
-                card_embedding_size, scoring_head=scoring_head, pooler=pooler
+                card_embedding_size,
+                scoring_head=scoring_head,
+                pooler=pooler,
+                learns_skip_option=can_skip,
             ),
             loss_calculator=PickPredictionCrossEntropyLoss(),
             calibration=UniformOptionCalibration(
-                option_count=_option_count_of_pack_group
+                option_count=_option_count_fn(can_skip)
             ),
             mod_pipeline=mod_pipeline,
             deck_box=deck_box,
@@ -64,10 +78,32 @@ class MultiGroupOptionSelectionDojo(GenericDojo):
         )
 
 
+def _option_count_fn(can_skip: bool) -> Callable[[TrainingInput], int]:
+    """The input -> option count function for the loss baseline: the
+    pack's size, plus one when the cell has a skip option.
+
+    Inputs: can_skip. Output: a function of a TrainingInput.
+    Side effects: none. Exceptions: none (the function it returns raises
+        as _option_count_of_pack_group does).
+    """
+    return _option_count_with_skip if can_skip else _option_count_of_pack_group
+
+
+def _option_count_with_skip(group_input: TrainingInput) -> int:
+    """The pack's size plus the skip option.
+
+    Inputs: group_input, as _option_count_of_pack_group.
+    Output: int. Side effects: none.
+    Exceptions: as _option_count_of_pack_group.
+    """
+    return _option_count_of_pack_group(group_input) + 1
+
+
 def _option_count_of_pack_group(group_input: TrainingInput) -> int:
     """How many options a (pack, conditioning group) input offers: the
-    size of group 0, the pack (PoolConditionedPickDataConstructor keeps
-    the pack at index 0 and the pool at index 1).
+    size of group 0, the pack (every constructor feeding this cell, e.g.
+    PoolConditionedPickDataConstructor and CardRewardPickDataConstructor,
+    keeps the options at index 0 and the conditioning group at index 1).
 
     Inputs: group_input, a MultiGroupInput [pack_cards, pool_cards].
     Output: int, len(pack_cards).

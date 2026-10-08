@@ -61,9 +61,15 @@ so one cell serves every metric family with the same shape.
 | `multi_card_binary_classification/` | a deck | 0/1 | `BceLoss` (one logit) | binary entropy of the positive rate |
 | `multi_card_fixed_classification/` | a deck | one of `label_values` | `FixedClassificationLoss` | class-prior entropy |
 | `multi_card_option_selection/` | a ragged pack of options | picked option's index | `PickPredictionCrossEntropyLoss` | mean ln(pack size) |
-| `multi_group_option_selection/` | `[pack_options, pool]` | picked option's index | `PickPredictionCrossEntropyLoss` | mean ln(pack size) |
+| `multi_group_option_selection/` | `[pack_options, pool]` | picked option's index (with `can_skip`: `len(options)` = none picked) | `PickPredictionCrossEntropyLoss` | mean ln(pack size), +1 option with `can_skip` |
 | `multi_group_regression/` | `[group_0, group_1]` | float | `MseLoss` | z-scored labels (1.0) |
 | `multi_group_binary_classification/` | `[group_0, group_1]` | 0/1 | `BceLoss` (one logit) | binary entropy of the positive rate |
+
+`multi_group_option_selection/` takes `can_skip=True` for a pick that may be
+"none of them" (StS2 card rewards): its decoder head learns one extra
+embedding, scored as a last option after the real ones, so the logits run
+one longer and a skip's label is `len(options)`. The data constructor and
+the dojo flag must agree.
 
 Multi-card cells pool the deck with an injected `EmbeddingPooler` before
 their MLP. The option-selection cells never pool the options: they

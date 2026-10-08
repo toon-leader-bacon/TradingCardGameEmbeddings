@@ -112,6 +112,7 @@ from src.dojos.seventeenlands.replay_data.tutor_target_rate_dojo import (
     TutorTargetRateDojo as ReplayTutorTargetRateDojo,
 )
 from src.dojos.spire_codex import card_mask_dojos as sts2_masks
+from src.dojos.sts2_runs.card_reward_pick_dojo import CardRewardPickDojo
 from src.dojos import isotropic
 from src.dojos.sts_gg import card_average_dojos as sts_cards
 from src.dojos.sts_gg.card_character_prediction_dojo import (
@@ -756,6 +757,8 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     "cross_game.rarity_tier": MultiGameCardDojoRecipe(
         tuple(RARITY_TRANSLATORS), RarityTierDojo
     ),
+    # [cards offered, deck so far] -> the card taken, or none
+    "sts2_runs.card_reward_pick": _recipe_for_sts_card(CardRewardPickDojo),
     # sts_gg lists winning runs only, so its win, card_win_rate,
     # card_win_rate_at_act2 and killed_by labels are constant and have no
     # key here (see metrics/sts_gg/deck_label_metrics.py's WINS ONLY note)
@@ -1042,6 +1045,8 @@ DECK_MOD_GROUPS: Mapping[str, frozenset[int]] = {
     "seventeenlands_replay_data.combat_aggression_profile": frozenset({0}),
     # [pack options, pool so far]: the pool only
     "seventeenlands_draft_data.pool_conditioned_pick": frozenset({1}),
+    # [cards offered, deck so far]: the deck only
+    "sts2_runs.card_reward_pick": frozenset({1}),
 }
 
 

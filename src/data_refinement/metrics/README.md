@@ -86,8 +86,9 @@ implementation yet). Implemented today:
 - **`sts_gg/`** - twenty-four `Metric[dict]` accumulator/streaming
   metrics over Slay the Spire 2 run data. See
   [`sts_gg/README.md`](sts_gg/README.md).
-- **`sts2_runs/`** - twenty-three `Metric[Sts2Run]` metrics (sts_gg's
-  deck-label and per-card families, recomputed) over spire_codex's
+- **`sts2_runs/`** - twenty-four `Metric[Sts2Run]` metrics (sts_gg's
+  deck-label and per-card families, recomputed, plus the per-floor
+  card-reward pick) over spire_codex's
   ~1.7M-run export plus sts2runs' dump, which include losses. Its
   deck-level rows point into the published StS2 deck box. See
   [`sts2_runs/README.md`](sts2_runs/README.md).

@@ -168,12 +168,63 @@ def cards_for_uuids(lookup: CardLookup, raw_uuids: object) -> List[GenericCard]:
     return cards
 
 
+def option_cards_for_uuids(
+    lookup: CardLookup, raw_option_uuids: object
+) -> MultiCardInput | None:
+    """A row's option list as cards, all or nothing.
+
+    Shared by option_cards_and_pick_index() and the datum builders whose
+    pick may be "none" (CardRewardPickDataConstructor). Unlike
+    cards_for_uuids(), one bad option voids the row: the label is a
+    POSITION in this list, so dropping a card would shift it.
+
+    Inputs: lookup (never written to), raw_option_uuids (a list[str]
+        cell).
+    Output: the option cards in the cell's order, or None if any uuid
+        fails to parse or to look up.
+    Side effects: none. Exceptions: none.
+
+    Example:
+        >>> option_cards_for_uuids(binder, [str(card_a.nocab_uuid)])
+        [<GenericCard>]
+    """
+    result: MultiCardInput = []
+    for raw_option_uuid in cast(List[str], raw_option_uuids):
+        option_uuid = parsed_uuid(raw_option_uuid)
+        if option_uuid is None:
+            return None
+        card = lookup.get_by_uuid(option_uuid)
+        if card is None:
+            return None
+        result.append(card)
+    return result
+
+
+def pick_position(option_cards: MultiCardInput, pick_uuid: UUID | None) -> int | None:
+    """Where a picked card sits in a row's option list.
+
+    Inputs: option_cards (the row's options), pick_uuid (the picked
+        card's uuid, or None).
+    Output: the index of the first option with that uuid; None if
+        pick_uuid is None or not among the options.
+    Side effects: none. Exceptions: none.
+
+    Example:
+        >>> pick_position([card_a, card_b], card_b.nocab_uuid)
+        1
+    """
+    for position, card in enumerate(option_cards):
+        if card.nocab_uuid == pick_uuid:
+            return position
+    return None
+
+
 def option_cards_and_pick_index(
     lookup: CardLookup,
     raw_pack_option_uuids: object,
     raw_pick_uuid: object,
 ) -> Tuple[MultiCardInput, int] | None:
-    """Resolve one row's pack option list plus which position in it was
+    """One row's pack option list as cards, plus which position in it was
     picked.
 
     Shared by PackToPickChoiceSetDataConstructor and
@@ -204,28 +255,10 @@ def option_cards_and_pick_index(
     Side effects: none.
     Exceptions: none - all failures collapse to None.
     """
-    try:
-        pick_uuid = UUID(str(raw_pick_uuid))
-    except (TypeError, ValueError):
+    pick_uuid = parsed_uuid(raw_pick_uuid)
+    option_cards = option_cards_for_uuids(lookup, raw_pack_option_uuids)
+    if pick_uuid is None or option_cards is None:
         return None
 
-    option_uuids: List[UUID] = []
-    for raw_option_uuid in cast(List[str], raw_pack_option_uuids):
-        try:
-            option_uuids.append(UUID(str(raw_option_uuid)))
-        except (TypeError, ValueError):
-            return None
-
-    try:
-        pick_index = option_uuids.index(pick_uuid)
-    except ValueError:
-        return None
-
-    option_cards: MultiCardInput = []
-    for option_uuid in option_uuids:
-        card = lookup.get_by_uuid(option_uuid)
-        if card is None:
-            return None
-        option_cards.append(card)
-
-    return option_cards, pick_index
+    pick_index = pick_position(option_cards, pick_uuid)
+    return None if pick_index is None else (option_cards, pick_index)
