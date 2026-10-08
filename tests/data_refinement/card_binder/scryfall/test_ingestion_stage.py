@@ -585,3 +585,83 @@ class TestLowestPrintingRarity:
         card = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "o1")
         assert card is not None
         assert card.raw_content["rarity"] == "mythic"
+
+
+class TestPrintedNameAliases:
+    def _ingest(self, tmp_path: Path, printings: list[dict]) -> CardBinder:
+        oracle_path = tmp_path / "oracle-cards.jsonl"
+        _write_jsonl(
+            oracle_path,
+            [
+                {"oracle_id": "o1", "name": "Masked Meower", "rarity": "common"},
+                {"oracle_id": "o2", "name": "Other Card", "rarity": "common"},
+                {"oracle_id": "o3", "name": "Bespoke Bō", "rarity": "rare"},
+            ],
+        )
+        printings_path = tmp_path / "default-cards.jsonl"
+        _write_jsonl(printings_path, printings)
+        binder = CardBinder()
+        ScryfallCardIngestionStage(lambda: printings_path).ingest(oracle_path, binder)
+        return binder
+
+    def _printing(self, oracle_id: str, name: str, printed: str, **extra) -> dict:
+        return {
+            "oracle_id": oracle_id,
+            "name": name,
+            "printed_name": printed,
+            "rarity": "common",
+            **extra,
+        }
+
+    def test_a_differing_printed_name_resolves_to_its_card(
+        self, tmp_path: Path
+    ) -> None:
+        binder = self._ingest(
+            tmp_path, [self._printing("o1", "Masked Meower", "Skittering Kitten")]
+        )
+
+        card = binder.get_by_alias(
+            GameId.MTG, DataSource.PRINTED_NAME, "Skittering Kitten"
+        )
+        assert card is not None and card.name == "Masked Meower"
+
+    def test_a_printed_name_equal_to_the_name_registers_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        binder = self._ingest(
+            tmp_path, [self._printing("o1", "Masked Meower", "Masked Meower")]
+        )
+
+        assert (
+            binder.get_by_alias(GameId.MTG, DataSource.PRINTED_NAME, "Masked Meower")
+            is None
+        )
+
+    def test_a_printed_name_shared_by_two_cards_registers_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        binder = self._ingest(
+            tmp_path,
+            [
+                self._printing("o1", "Masked Meower", "Twin"),
+                self._printing("o2", "Other Card", "Twin"),
+            ],
+        )
+
+        assert binder.get_by_alias(GameId.MTG, DataSource.PRINTED_NAME, "Twin") is None
+
+    def test_a_foreign_language_printing_registers_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        binder = self._ingest(
+            tmp_path,
+            [self._printing("o1", "Masked Meower", "Gato", lang="es")],
+        )
+
+        assert binder.get_by_alias(GameId.MTG, DataSource.PRINTED_NAME, "Gato") is None
+
+    def test_the_mojibake_spelling_resolves_to_bespoke_bo(self, tmp_path: Path) -> None:
+        binder = self._ingest(tmp_path, [{"oracle_id": "o2", "rarity": "common"}])
+
+        card = binder.get_by_alias(GameId.MTG, DataSource.PRINTED_NAME, "Bespoke B?")
+        assert card is not None and card.name == "Bespoke Bō"

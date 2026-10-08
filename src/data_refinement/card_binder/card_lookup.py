@@ -76,7 +76,8 @@ def uuid_for_name_or_front_face(
     card_lookup: CardLookup, source_game: GameId, name: str
 ) -> UUID | None:
     """The one card a source's bare card name refers to, allowing for a
-    split/MDFC card being spelled by its front face only.
+    split/MDFC card being spelled by either face alone, or by a registered
+    alternate name (DataSource.PRINTED_NAME).
 
     Inputs:
         card_lookup: the card store to search (read-only).
@@ -85,9 +86,9 @@ def uuid_for_name_or_front_face(
             Banner" for the binder's "Bruce Banner // The Hulk").
     Output: the matching nocab_uuid if get_by_name() returns exactly one
         card; else if exactly one card's name matches
-        f"^{re.escape(name)}( //.*)?$" (name as a front face); else
-        None. Ambiguity (2+ matches) is never guessed at - it is
-        treated as no match.
+        f"^(.* // )?{re.escape(name)}( //.*)?$" (name as either face); else
+        the card registered under (PRINTED_NAME, name); else None. Ambiguity
+        (2+ matches) is never guessed at - it is treated as no match.
     Side effects: none (read-only queries).
     Exceptions: none expected.
 
@@ -99,9 +100,13 @@ def uuid_for_name_or_front_face(
     if len(exact_matches) == 1:
         return exact_matches[0].nocab_uuid
 
-    front_face_matches = card_lookup.get_by_name_regex(
-        source_game, f"^{re.escape(name)}( //.*)?$"
+    # Either face of a two-faced card: "name // back" or "front // name"
+    face_matches = card_lookup.get_by_name_regex(
+        source_game, f"^(.* // )?{re.escape(name)}( //.*)?$"
     )
-    if len(front_face_matches) == 1:
-        return front_face_matches[0].nocab_uuid
-    return None
+    if len(face_matches) == 1:
+        return face_matches[0].nocab_uuid
+
+    # A registered alternate spelling of a card
+    named_card = card_lookup.get_by_alias(source_game, DataSource.PRINTED_NAME, name)
+    return None if named_card is None else named_card.nocab_uuid

@@ -135,6 +135,13 @@ directly; every interaction goes through `CardBinder.get_by_alias()`/
 `register_alias()`. Persisted as a sibling `<name>.alias_ledger.jsonl`
 file next to the main `<name>.jsonl`.
 
+`DataSource.PRINTED_NAME` aliases are alternate spellings of a card's
+name (the id is the name itself): the MTG Scryfall stage registers each
+English printing's `printed_name` that differs from its name (Arena's
+OM1 names), plus a manual `Bespoke B?` entry. `uuid_for_name_or_front_face()`
+(`card_lookup.py`) tries the exact name, then either face of a two-faced
+card, then this alias.
+
 ## Read-only access: `CardLookup`
 
 Any consumer that should only ever read — never `create()`/`update()`/

@@ -59,42 +59,11 @@ not decks).
   per affected deck, which fits the OM1 gap below.
 - **17lands card names the MTG binder can't match** (from the full-run
   log; 162 distinct names, each logged once per file). All become the
-  Unknown sentinel, which is acceptable cruft, but most fall into a few
-  fixable groups:
-  - *`OM1` (Through the Omenpath), ~144 names* such as `Skittering
-    Kitten` and `Rizna, the Spider-Crowned`: nearly the whole Arena set.
-    None are in the oracle-cards dump
-    (`oracle-cards-20260912210156.jsonl`), probably because Scryfall
-    files them as alternate names of the Spider-Man (`SPM`) printings,
-    which only the default-cards dump carries (e.g. as `flavor_name`).
-    This is the biggest gap: OM1 decks are mostly Unknown. Check the
-    default-cards dump and add those names as aliases.
-  - *Back faces of modal double-faced cards (KHM), 13 names* such as
-    `Mistgate Pathway`, `Tibalt, Cosmic Impostor`, `Kaldring, the
-    Rimestaff`: the binder has the cards, but
-    `card_lookup.uuid_for_name_or_front_face()` only matches the front
-    face. Match back faces too.
-  - *Alchemy rebalanced `A-` names (HBG), 2 names*: `A-Baba Lysaga,
-    Night Witch`, `A-Monster Manual`. The binder has the paper cards;
-    either strip the `A-` prefix to the original card or accept them
-    as Unknown, since the rebalanced text differs.
-  - *Arena Cube cards, 7 names* such as `Ademi of the Silkchutes`,
-    `Yera and Oski, Weaver and Guide` (`Cube_-_Powered`): digital-only
-    and not in the oracle dump. Probably accept.
-  - *Corrupted in the source data*: `Bespoke B?` (TMT) is literally
-    `B?` in the 17lands CSV header (most likely `Bespoke Bō`). A
-    one-entry alias would fix it.
-  - *Same-name collisions*: `Pick Your Poison` (above) and `Red
-    Herring` (MKM, four binder entries with that name). Same decision
-    as Pick Your Poison.
-- **Read only the needed CSV columns.** `pd.read_csv` in
-  `_extract_file` parses every column, including the
-  `opening_hand_`/`drawn_`/`tutored_`/`sideboard_` card columns the
-  stage never uses (about 4/5 of the file). Passing `usecols` (the key
-  columns plus `deck_*`) should cut parse time and the 0.4-3.7 GB
-  per-chunk memory several-fold, which matters given the low-memory
-  kills. It would also remove the 13 `DtypeWarning`s (`opp_rank`,
-  `splash_colors`) from the log.
+  Unknown sentinel. The OM1 names (Arena printed names), KHM back faces
+  and `Bespoke B?` are now matched by aliases (takes effect on the next
+  MTG binder rebuild). What remains is accepted cruft: `A-` Alchemy
+  rebalanced names (HBG, 2), Arena Cube digital-only cards (7), and the
+  same-name collisions `Pick Your Poison` and `Red Herring`.
 - Possible speedup, not needed yet: for the ~80% of 17lands rows that
   are later games of a stored draft, `_extract_row` calls
   `get_by_uuid()`, which builds the whole card list only to read the

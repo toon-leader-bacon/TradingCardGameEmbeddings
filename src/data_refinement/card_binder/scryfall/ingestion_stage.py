@@ -60,6 +60,15 @@ Design (see card_binder/README.md):
     printings (_RARITY_BY_RESTRICTIVENESS), the same rule as
     cardvault_fabtcg's stage. A card with no default-cards printing keeps
     its oracle-cards row's rarity.
+  - PRINTED NAMES: Arena names some printings differently from Scryfall's
+    oracle name (the OM1 set: Scryfall's "Masked Meower" is printed
+    "Skittering Kitten"), and 17lands spells the Arena name. From the same
+    default-cards scan, every English printing whose printed_name differs
+    from its name registers a (PRINTED_NAME, printed_name) alias on its
+    card, so a name lookup can fall back to it (see
+    card_lookup.uuid_for_name_or_front_face). A printed name shared by two
+    cards is ambiguous and registers nothing. _MANUAL_NAME_ALIASES covers
+    spellings no dump carries.
   - Every row's own primary alias (oracle_id) and every secondary
     alias it carries are registered on EVERY branch — including a row
     that matched an existing card but changed nothing: a losing/no-op
@@ -67,6 +76,7 @@ Design (see card_binder/README.md):
 """
 
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, ClassVar, Iterable
@@ -148,6 +158,25 @@ _LEADING_KEYS = (
     "set",
 )
 _TRAILING_KEYS = ("oracle_text", "card_faces")
+
+# Spellings found in 17lands data that no Scryfall dump carries: the CSV
+# header has the mojibake "B?" for "Bō". Maps spelling -> the card's name.
+_MANUAL_NAME_ALIASES = {"Bespoke B?": "Bespoke B\u014d"}
+
+
+@dataclass(frozen=True)
+class _PrintingScan:
+    """What one pass over a default-cards dump yields.
+
+    lowest_rarities: oracle_id -> lowest rarity over the card's printings.
+    oracle_id_by_printed_name: printed name -> oracle_id, for names that
+        differ from the card's name and belong to exactly one card.
+    """
+
+    lowest_rarities: dict[str, str]
+    oracle_id_by_printed_name: dict[str, str]
+
+
 # From least to most restrictive. A rarity not listed (a future one) ranks
 # after every listed one.
 _RARITY_BY_RESTRICTIVENESS = (
@@ -253,7 +282,7 @@ class ScryfallCardIngestionStage:
             ... )
         """
         changed_uuids = []
-        lowest_rarities = self._lowest_printing_rarities()
+        scan = self._scan_printings()
         total_bytes = raw_path.stat().st_size
         with open(raw_path, "r", encoding="utf-8") as raw_file, tqdm(
             total=total_bytes,
@@ -266,26 +295,28 @@ class ScryfallCardIngestionStage:
                 row = json.loads(line)
                 if row.get("layout") in _EXCLUDED_LAYOUTS:
                     continue
-                rarity = lowest_rarities.get(row["oracle_id"], row.get("rarity"))
+                rarity = scan.lowest_rarities.get(row["oracle_id"], row.get("rarity"))
                 result = self._ingest_row(row, binder, rarity)
                 if result is not None:
                     changed_uuids.append(result)
+        self._register_name_aliases(scan, binder)
         return changed_uuids
 
-    def _lowest_printing_rarities(self) -> dict[str, str]:
-        """Each oracle_id's lowest rarity over its default-cards printings.
+    def _scan_printings(self) -> _PrintingScan:
+        """Read the default-cards file once for lowest rarities and printed names.
 
         Inputs: none (uses the configured find_printings_path).
-        Output: dict oracle_id -> rarity; empty if no default-cards file is
-            configured. Rows without a top-level oracle_id (a few
+        Output: a _PrintingScan; both dicts are empty if no default-cards
+            file is configured. Rows without a top-level oracle_id (a few
             multi-face printings) are skipped.
         Side effects: reads the default-cards file once, with a progress bar.
         Exceptions: whatever find_printings_path or reading the file raises.
         """
         if self._find_printings_path is None:
-            return {}
-        printings_path = self._find_printings_path()
+            return _PrintingScan({}, {})
         rarities_by_card: dict[str, str] = {}
+        oracle_ids_by_printed_name: dict[str, set[str]] = {}
+        printings_path = self._find_printings_path()
         with open(printings_path, "r", encoding="utf-8") as printings_file, tqdm(
             total=printings_path.stat().st_size,
             unit="B",
@@ -302,7 +333,50 @@ class ScryfallCardIngestionStage:
                 rarities_by_card[oracle_id] = _least_restrictive(
                     [row["rarity"]] if known is None else [known, row["rarity"]]
                 )
-        return rarities_by_card
+                printed_name = row.get("printed_name")
+                if (
+                    printed_name is not None
+                    and printed_name != row.get("name")
+                    and row.get("lang", "en") == "en"
+                ):
+                    oracle_ids_by_printed_name.setdefault(printed_name, set()).add(
+                        oracle_id
+                    )
+        unambiguous = {
+            printed_name: next(iter(oracle_ids))
+            for printed_name, oracle_ids in oracle_ids_by_printed_name.items()
+            if len(oracle_ids) == 1
+        }
+        return _PrintingScan(rarities_by_card, unambiguous)
+
+    def _register_name_aliases(self, scan: _PrintingScan, binder: CardBinder) -> None:
+        """Register every printed-name and manual name alias on its card.
+
+        Inputs: scan (this ingest's printing scan), binder (holding the
+            cards just ingested).
+        Output: none.
+        Side effects: registers (PRINTED_NAME, name) aliases on binder; a
+            name whose card is not in the binder is skipped.
+        Exceptions: none.
+        """
+        for printed_name, oracle_id in scan.oracle_id_by_printed_name.items():
+            card = binder.get_by_alias(self.SOURCE_GAME, DataSource.SCRYFALL, oracle_id)
+            if card is not None:
+                binder.register_alias(
+                    self.SOURCE_GAME,
+                    DataSource.PRINTED_NAME,
+                    printed_name,
+                    card.nocab_uuid,
+                )
+        for spelling, card_name in _MANUAL_NAME_ALIASES.items():
+            matches = binder.get_by_name(self.SOURCE_GAME, card_name)
+            if len(matches) == 1:
+                binder.register_alias(
+                    self.SOURCE_GAME,
+                    DataSource.PRINTED_NAME,
+                    spelling,
+                    matches[0].nocab_uuid,
+                )
 
     def _ingest_row(
         self, row: dict, binder: CardBinder, rarity: str | None

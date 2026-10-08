@@ -26,6 +26,9 @@ class DataSource(str, Enum):
     SCRYFALL = "scryfall"
     ARENA = "arena"
     MTGO = "mtgo"
+    PRINTED_NAME = "printed_name"  # a name a card is printed or spelled under
+    # that differs from its canonical name (MTG: Arena's names for OM1 cards,
+    # from Scryfall's printed_name); the id is the name itself.
     GATHERER = "gatherer"  # Wizards' Gatherer database id (Scryfall's
     # multiverse_ids field) — added during CardBinder implementation,
     # not present in the original skeleton's enum members; same
