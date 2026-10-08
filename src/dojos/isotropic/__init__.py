@@ -12,6 +12,9 @@ from src.dojos.isotropic.card_rate_dojos import (
     TurnCountAssociationDojo,
     VetoRateDojo,
 )
+from src.dojos.isotropic.copies_bought_distribution_dojo import (
+    CopiesBoughtDistributionDojo,
+)
 from src.dojos.isotropic.deck_card_mask_dojos import WinningDeckMaskedCardDojo
 from src.dojos.isotropic.deck_label_dojos import (
     FullDeckWinPredictionDojo,
@@ -37,6 +40,7 @@ from src.dojos.isotropic.pick_dojos import (
 )
 
 __all__ = [
+    "CopiesBoughtDistributionDojo",
     "AverageCopiesBoughtDojo",
     "DeckCardSetCopyCountDojo",
     "DeckPairWinnerDojo",

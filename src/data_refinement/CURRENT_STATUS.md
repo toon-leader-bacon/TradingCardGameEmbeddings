@@ -18,9 +18,9 @@ are what a training config can name.
   deck source.
 - **Metrics:** 150 classes, 148 with a dojo
   (`docs/metric_dojo_inventory.csv`).
-- **Catalog:** 151 keys. The first 123 each passed `run_training.py
+- **Catalog:** 156 keys. The first 123 each passed `run_training.py
   --check` on real data when added (2026-09-30 to 10-01);
-  `sts_gg.card_character_prediction` and `cross_game.rarity_tier` passed
+  `sts_gg.card_character_prediction` and `cross_game.rarity_tier` and `isotropic.copies_bought_distribution` passed
   on 2026-10-07. The 26 17lands keys were added 10-06; the four MTG deck
   keys wait on the multiset deck box and metric rebuild.
 
@@ -47,9 +47,9 @@ game's deck box, metrics and splits. The refresh order is in the plan.
 | Source (retrieval) | Game | Card binder | Deck box | Metrics | Keys |
 | --- | --- | --- | --- | --- | --- |
 | `scryfall` | MTG | ✅ `ScryfallCardIngestionStage` | n/a (cards only) | 🟨 6 single-card masks (cmc, type, rarity, colors, power, toughness) | 6 |
-| `seventeenlands` › `game_data` | MTG | (scryfall) | ✅ `seventeenlands_game_data` → `mtg.db`: every distinct decklist any game played (multiset hash; rebuild pending 2026-10-06, count TBD) | 🟨 11 built, all with dojos, all vectorized (chunk scan, slices 1-2). Partial run: 76 set/format dirs, no PremierDraft | 0 (outputs not merged) |
-| `seventeenlands` › `draft_data` | MTG | (scryfall) | n/a (picks, not decks) | 🟨 6 built with dojos. Only one shakeout file run (OM1) | 0 |
-| `seventeenlands` › `replay_data` | MTG | (scryfall) | n/a (same games as game_data) | 🟨 9 built with dojos. Only one shakeout file run (PIO; Arena ids miss the binder) | 0 |
+| `seventeenlands` › `game_data` | MTG | (scryfall) | ✅ `seventeenlands_game_data` → `mtg.db`: every distinct decklist any game played (multiset hash; rebuild pending 2026-10-06, count TBD) | 🟨 11 built, all with dojos, all vectorized (chunk scan, slices 1-2). Partial run: 76 set/format dirs, no PremierDraft | 11 |
+| `seventeenlands` › `draft_data` | MTG | (scryfall) | n/a (picks, not decks) | 🟨 6 built with dojos. Only one shakeout file run (OM1) | 6 |
+| `seventeenlands` › `replay_data` | MTG | (scryfall) | n/a (same games as game_data) | 🟨 9 built with dojos. Only one shakeout file run (PIO; Arena ids miss the binder) | 9 |
 | `pokemon_tcg` | Pokemon | ✅ `PokemonTcgCardIngestionStage` | ✅ `pokemon_tcg` → `pokemon.db`, 188 theme decks (prefabs, low value) | 🟨 5 single-card masks (HP, types, stage, retreat cost, weakness) | 5 |
 | `hearthstonejson` | Hearthstone | ✅ `HearthstoneJsonCardIngestionStage` (newest build only, 6,187 collectible cards) | n/a (cards only) | 🟨 8 single-card masks (cost, attack, health, class, rarity, type, races, spell school) | 8 |
 | `gwent_one` | Gwent | ✅ `GwentOneCardIngestionStage` | n/a (cards only) | 🟨 8 single-card masks | 8 |
@@ -61,7 +61,7 @@ game's deck box, metrics and splits. The refresh order is in the plan.
 | `fabtcg_decklists` | FaB | (cardvault_fabtcg) | ✅ `fabtcg_decklists` → `flesh_and_blood.db`, 4,161 decks (cards keyed by name) | 🟨 3: hero masked from deck, card inclusion rate, hero-conditioned inclusion. Pitch-curve shape not built | 3 |
 | `pitchstack` | FaB | (cardvault_fabtcg) | ❌ Blocked: `decks.jsonl` (1,686 decks) has metadata only; card lists need the unimplemented `/cards` endpoint | 🟥 brainstorm only | 0 |
 | `dominiontabs` | Dominion | ✅ `DominionTabsCardIngestionStage` | n/a (cards only) | 🟩 all 3 viable ideas (cost regression, set, type) | 3 |
-| `isotropic` | Dominion | (dominiontabs) | ✅ `isotropic` → `dominion.db`, 531,675 final decks (resigned players skipped) | 🟩 24 (13 summary, 11 games), re-run 2026-10-01. 22 with keys; `copies_bought_distribution` and `multiplayer_placement` have no dojo. Resignation metrics not built | 22 |
+| `isotropic` | Dominion | (dominiontabs) | ✅ `isotropic` → `dominion.db`, 531,675 final decks (resigned players skipped) | 🟩 24 (13 summary, 11 games), re-run 2026-10-01. 23 with keys (`copies_bought_distribution` is a copy-count classifier); `multiplayer_placement` has no dojo. Resignation metrics not built | 23 |
 | `dominion/` | Dominion | Not a downloader (research notes and a prototype scraper) | n/a | n/a | n/a |
 | none | Yu-Gi-Oh | ❌ `GameId.YUGIOH` exists, but there is no retrieval source | n/a | n/a | n/a |
 
@@ -105,7 +105,7 @@ The detail is in `plans/pre_training_data.md`. In short:
    seeds the Unknown sentinel, `play_gwent` no longer writes `gwent.db`,
    and the held-out-card and isotropic per-kingdom dojos split by group.
 2. **17lands:** vectorize draft_data and replay_data (slices 3-4), build the per-metric
-   merge step, run the full corpus, add catalog keys.
+   merge step, run the full corpus (the catalog keys exist).
 3. **Refresh from the 10-02 re-download:** a scratch binder version
    check per game, then rebuild only the games that changed (Gwent and
    the StS2 spire_codex runs for sure; MTG only as one combined job).

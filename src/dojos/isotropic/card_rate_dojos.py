@@ -5,9 +5,9 @@ Wrapped: AverageCopiesBoughtMetric, TurnCountAssociationMetric
 (isotropic/summary/) and OpeningBuyRateMetric, PileExhaustionRateMetric
 (isotropic/games/), VetoRateMetric (isotropic/summary/).
 
-Not wrapped: CopiesBoughtDistributionMetric (raw
-per-deck samples of the quantity AverageCopiesBoughtMetric averages; an
-MSE head on it would learn the same mean).
+CopiesBoughtDistributionMetric has its own classification dojo
+(copies_bought_distribution_dojo.py): an MSE head on its raw samples would
+only learn the mean AverageCopiesBoughtMetric already gives.
 """
 
 from src.data_refinement.metrics.isotropic.games.opening_buy_rate_metric import (

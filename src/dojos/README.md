@@ -152,10 +152,11 @@ rows never straddle TRAIN and TEST.
   slice's file (`seventeenlands/sliced_dojos.py`; see
   `../data_refinement/metrics/seventeenlands/README.md`, "Partitions and
   slices"). Every implemented metric
-  has one, except two isotropic ones: `CopiesBoughtDistributionMetric`
-  (raw samples of the mean `AverageCopiesBoughtDojo` already learns) and
-  `MultiplayerPlacementMetric` (a ranking over 3-4 decks; no cell ranks
-  groups). Its kingdom and partial-deck metrics key rows by
+  has one, except isotropic `MultiplayerPlacementMetric` (a ranking over
+  3-4 decks; no cell ranks groups) and the support-only 17lands
+  `DeckOccurrenceCountMetric`. `CopiesBoughtDistributionDojo` classifies a
+  card's copy count in a finished deck (1 to 9, 10+), so it learns the
+  whole distribution where `AverageCopiesBoughtDojo` learns the mean. Its kingdom and partial-deck metrics key rows by
   `kingdom_uuid`/`partial_deck_uuid`, so `isotropic/` wraps
   `DeckLabelDataConstructor` in a column-renaming Decorator
   (`generic/renamed_column_data_constructor.py` - reused by

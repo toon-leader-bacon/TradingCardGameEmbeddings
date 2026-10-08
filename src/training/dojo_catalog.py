@@ -691,6 +691,9 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     "isotropic.average_copies_bought": CardDojoRecipe(
         GameId.DOMINION, isotropic.AverageCopiesBoughtDojo
     ),
+    "isotropic.copies_bought_distribution": CardDojoRecipe(
+        GameId.DOMINION, isotropic.CopiesBoughtDistributionDojo
+    ),
     "isotropic.opening_buy_rate": CardDojoRecipe(
         GameId.DOMINION, isotropic.OpeningBuyRateDojo
     ),
