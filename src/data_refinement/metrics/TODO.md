@@ -26,7 +26,10 @@
   private `data/metrics/isotropic/deck_box.db` holds 1.7M decks,
   4.4 GB). Run heavy jobs one at a time; two in parallel ran the
   machine out of memory.
-- [ ] **Re-run `seventeenlands_replay_data` (2026-10-09 regen).** The run
+- [x] **Re-run `seventeenlands_replay_data` (2026-10-09 regen).** Done
+  2026-10-09: 96 CSVs scanned (the 4 AFR/STX ones are skipped by
+  design), 871 valid parquets, peak memory 3.6 GB, and all 9 replay keys
+  survey cleanly. The run
   was stopped at 26 of 100 CSVs: with no box file on disk, the family's
   deck box started in `:memory:` and reached about 14.5 GB at 45 of 149
   GB (on course for about 45 GB on a 32 GB machine). Fixed in
