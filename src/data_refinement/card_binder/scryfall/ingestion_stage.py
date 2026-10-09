@@ -219,6 +219,9 @@ class ScryfallCardIngestionStage:
 
     Single-consumer to src/data_refinement/card_binder/ — no other
     container depends on this class directly.
+
+    Runtime: about 15 s for 34,665 cards: 6 s scanning the 634 MB default-cards
+    dump, 5 s for the oracle-cards dump, plus the save (measured 2026-10-08).
     """
 
     SOURCE_GAME: ClassVar[GameId] = GameId.MTG

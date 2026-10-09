@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import pandas as pd
+import pyarrow as pa
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
@@ -166,3 +167,28 @@ class TestDeckLabelDataConstructorBuild:
         result = constructor.build(chunk, card_binder)
 
         assert [label for _, label in result] == ["ENCOUNTER.THE_KIN_BOSS"]
+
+    def test_skips_row_with_an_arrow_null_float_label(self) -> None:
+        # FileManagerParquet reads with ArrowDtype, where a null float is
+        # pd.NA rather than NaN (e.g. OnPlayWinRateSensitivityByDeckMetric)
+        card_binder = CardBinder()
+        deck_box = DeckBox()
+        card = _card("Strike", "strike")
+        card_binder.create(card)
+        deck = _deck([card])
+        deck_box.create(deck)
+        # All-Arrow columns, as FileManagerParquet reads them, in the real
+        # slice's layout: with the int column, iterrows() keeps the null as
+        # pd.NA instead of coercing it to NaN
+        chunk = pa.table(
+            {
+                "deck_uuid": [str(deck.nocab_uuid)] * 2,
+                "sensitivity": pa.array([None, 0.25], type=pa.float64()),
+                "sample_count": [1, 2],
+            }
+        ).to_pandas(types_mapper=pd.ArrowDtype)
+        constructor = DeckLabelDataConstructor(deck_box, "sensitivity")
+
+        result = constructor.build(chunk, card_binder)
+
+        assert [label for _, label in result] == [0.25]

@@ -73,6 +73,10 @@ class SeventeenLandsGameDataDeckExtractionStage:
 
     Single-consumer to src/data_refinement/deck_box/ — no other
     container depends on this class directly.
+
+    Runtime: about 3 h 20 min for all 133 game_data CSVs (85 GB, about 7 MB/s
+    on average) into a fresh box: 6,911,380 decks, a 40 GB mtg.db. Later files
+    run slower as the box grows (measured 2026-10-08).
     """
 
     SOURCE_GAME: ClassVar[GameId] = GameId.MTG

@@ -177,6 +177,8 @@ def run_cross_game(raw_path: Path | None) -> None:
         _scan_corpus_metrics, not raised.
     Exceptions: SystemExit if raw_path is given or a game's binder file
         is missing.
+
+    Runtime: about 25 s (measured 2026-10-08).
     """
     _reject_raw_path("cross_game", raw_path)
 
@@ -464,6 +466,7 @@ _STS_GG_METRIC_CLASSES: tuple[Any, ...] = (
 
 
 def run_sts_gg(raw_path: Path | None) -> None:
+    """Runtime: about 35 s (measured 2026-10-08)."""
     effective_raw_path = raw_path or StsGgDeckExtractionStage.DEFAULT_RAW_PATH
     binder = _require_binder(
         GameId.SLAY_THE_SPIRE_2,
@@ -529,7 +532,12 @@ def run_sts2_runs(raw_path: Path | None) -> None:
     """Scan spire_codex's run pages (at their
     default paths) into data/metrics/sts2_runs/. The deck-level outputs
     point into the published deck box (data/final/decks/
-    slay_the_spire_2.db); nothing is written to it."""
+    slay_the_spire_2.db); nothing is written to it.
+
+    Runtime: about 1 h 37 min for 40 spire_codex run pages (6.1 GB, 1.58M
+    scored runs, 27 outputs), the first hour alongside isotropic_summary
+    (measured 2026-10-08).
+    """
     _reject_raw_path("sts2_runs", raw_path)
     binder = _require_binder(
         GameId.SLAY_THE_SPIRE_2,
@@ -574,6 +582,7 @@ def _scan_corpus_metrics(name: str, metrics: Sequence[CorpusScanMetric]) -> None
 
 
 def run_gwent_one(raw_path: Path | None) -> None:
+    """Runtime: about 4 s (measured 2026-10-08)."""
     _reject_raw_path("gwent_one", raw_path)
     binder = _require_binder(
         GameId.GWENT,
@@ -597,6 +606,7 @@ def run_gwent_one(raw_path: Path | None) -> None:
 
 
 def run_dominiontabs(raw_path: Path | None) -> None:
+    """Runtime: about 4 s (measured 2026-10-08)."""
     _reject_raw_path("dominiontabs", raw_path)
     binder = _require_binder(
         GameId.DOMINION,
@@ -615,6 +625,7 @@ def run_dominiontabs(raw_path: Path | None) -> None:
 
 
 def run_scryfall(raw_path: Path | None) -> None:
+    """Runtime: about 25 s (measured 2026-10-08)."""
     _reject_raw_path("scryfall", raw_path)
     binder = _require_binder(GameId.MTG, _MTG_BINDER_HINT)
     metrics: list[CorpusScanMetric] = [
@@ -629,6 +640,7 @@ def run_scryfall(raw_path: Path | None) -> None:
 
 
 def run_pokemon_tcg(raw_path: Path | None) -> None:
+    """Runtime: about 15 s (measured 2026-10-08)."""
     _reject_raw_path("pokemon_tcg", raw_path)
     binder = _require_binder(
         GameId.POKEMON,
@@ -646,6 +658,7 @@ def run_pokemon_tcg(raw_path: Path | None) -> None:
 
 
 def run_cardvault_fabtcg(raw_path: Path | None) -> None:
+    """Runtime: about 7 s (measured 2026-10-08)."""
     _reject_raw_path("cardvault_fabtcg", raw_path)
     binder = _require_binder(
         GameId.FLESH_AND_BLOOD,
@@ -664,6 +677,7 @@ def run_cardvault_fabtcg(raw_path: Path | None) -> None:
 
 
 def run_spire_codex(raw_path: Path | None) -> None:
+    """Runtime: about 2 s (measured 2026-10-08)."""
     _reject_raw_path("spire_codex", raw_path)
     binder = _require_binder(
         GameId.SLAY_THE_SPIRE_2,
@@ -680,6 +694,7 @@ def run_spire_codex(raw_path: Path | None) -> None:
 
 
 def run_hearthstonejson(raw_path: Path | None) -> None:
+    """Runtime: about 4 s (measured 2026-10-08)."""
     _reject_raw_path("hearthstonejson", raw_path)
     binder = _require_binder(
         GameId.HEARTHSTONE,
@@ -718,7 +733,10 @@ def _require_published_deck_box(game: GameId) -> DeckBox:
 def run_play_gwent(raw_path: Path | None) -> None:
     """Leader masked from deck over guides.jsonl. Reads the published
     Gwent box and never writes or saves it (run deck box ingestion for
-    play_gwent first)."""
+    play_gwent first).
+
+    Runtime: about 1 min (measured 2026-10-08).
+    """
     effective_raw_path = raw_path or PLAY_GWENT_DEFAULT_RAW_PATH
     binder = _require_binder(
         GameId.GWENT,
@@ -737,7 +755,10 @@ def run_play_gwent(raw_path: Path | None) -> None:
 
 def run_fabtcg_decklists(raw_path: Path | None) -> None:
     """Hero mask and card inclusion rates over the raw decklist files.
-    Reads the published FaB deck box and never writes or saves it."""
+    Reads the published FaB deck box and never writes or saves it.
+
+    Runtime: about 25 s (measured 2026-10-08).
+    """
     effective_raw_path = raw_path or FABTCG_DECKLISTS_DEFAULT_RAW_PATH
     binder = _require_binder(
         GameId.FLESH_AND_BLOOD,
@@ -759,7 +780,10 @@ def run_fabtcg_decklists(raw_path: Path | None) -> None:
 def run_play_gwent_guides(raw_path: Path | None) -> None:
     """Card inclusion rates and guide votes over guides.jsonl. Like
     run_play_gwent, this reads the published box and never writes or
-    saves it."""
+    saves it.
+
+    Runtime: about 1 min 10 s (measured 2026-10-08).
+    """
     effective_raw_path = raw_path or PLAY_GWENT_DEFAULT_RAW_PATH
     binder = _require_binder(
         GameId.GWENT,
@@ -809,12 +833,16 @@ def _isotropic_archive_paths(raw_path: Path | None, pattern: str) -> list[Path]:
 
 
 def _load_isotropic_deck_box() -> DeckBox:
-    return DeckBox.load(
-        [ISOTROPIC_DECK_BOX_PATH] if ISOTROPIC_DECK_BOX_PATH.exists() else []
-    )
+    """The shared isotropic box, file-backed (created if missing) so it
+    commits batch by batch instead of growing in memory."""
+    return DeckBox.load([ISOTROPIC_DECK_BOX_PATH])
 
 
 def run_isotropic_summary(raw_path: Path | None) -> None:
+    """Runtime: about 55 min for both summary archives (2010: 21 days, about 10
+    min; 2013: 15 days at about 3 min per day), run alongside sts2_runs
+    (measured 2026-10-08).
+    """
     archive_paths = _isotropic_archive_paths(raw_path, _ISOTROPIC_SUMMARY_GLOB)
     binder = _require_binder(GameId.DOMINION, _DOMINION_BINDER_HINT)
     deck_box = _load_isotropic_deck_box()
@@ -844,6 +872,8 @@ def run_isotropic_summary(raw_path: Path | None) -> None:
 
 
 def run_isotropic_games(raw_path: Path | None) -> None:
+    """Runtime: about 16 min for both game-log archives (measured 2026-10-08).
+    """
     archive_paths = _isotropic_archive_paths(raw_path, _ISOTROPIC_GAME_LOG_GLOB)
     binder = _require_binder(GameId.DOMINION, _DOMINION_BINDER_HINT)
     deck_box = _load_isotropic_deck_box()
@@ -1271,15 +1301,20 @@ def _deck_box_path(default_path: Path | None, output_root: Path | None) -> Path 
 
 
 def _load_family_deck_box(path: Path | None) -> DeckBox | None:
-    """The family deck box at path (empty if the file doesn't exist
-    yet), or None for a family without one.
+    """The family deck box at path (created empty if the file doesn't
+    exist yet), or None for a family without one.
+
+    Always file-backed, never ":memory:": the box commits to path batch
+    by batch, so a full-corpus run's memory stays flat (an in-memory
+    replay_data box outgrew a 32 GB machine a quarter of the way in).
 
     Inputs: path. Output: DeckBox or None.
-    Side effects: reads path if it exists. Exceptions: DeckBox.load's.
+    Side effects: connects to path, creating it if missing.
+    Exceptions: DeckBox.load's.
     """
     if path is None:
         return None
-    return DeckBox.load([path] if path.exists() else [])
+    return DeckBox.load([path])
 
 
 class _ChunkParserFactory(Protocol):
@@ -1340,6 +1375,9 @@ def run_seventeenlands_draft_data(
 
     Example:
         >>> run_seventeenlands_draft_data(None)
+
+    Runtime: about 3 h 20 min for all 70 draft_data CSVs (244 GB, 6 outputs
+    each, 6.1 GB written), peak memory about 5 GB (measured 2026-10-09).
     """
     _run_seventeenlands_family(
         _SeventeenLandsFamily(
@@ -1372,6 +1410,9 @@ def run_seventeenlands_game_data(
         >>> run_seventeenlands_game_data(
         ...     Path("data/raw/17lands/game_data/KTK.TradDraft.csv"),
         ...     output_root=Path("scratch/parity"))
+
+    Runtime: about 1 h 20 min for all 133 game_data CSVs (85 GB, 12 outputs
+    each, 1.9 GB written) (measured 2026-10-09).
     """
     _run_seventeenlands_family(
         _SeventeenLandsFamily(

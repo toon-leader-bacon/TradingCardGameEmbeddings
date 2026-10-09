@@ -26,6 +26,21 @@
   private `data/metrics/isotropic/deck_box.db` holds 1.7M decks,
   4.4 GB). Run heavy jobs one at a time; two in parallel ran the
   machine out of memory.
+- [ ] **Re-run `seventeenlands_replay_data` (2026-10-09 regen).** The run
+  was stopped at 26 of 100 CSVs: with no box file on disk, the family's
+  deck box started in `:memory:` and reached about 14.5 GB at 45 of 149
+  GB (on course for about 45 GB on a 32 GB machine). Fixed in
+  `scripts/run_metrics.py`: `_load_family_deck_box` and
+  `_load_isotropic_deck_box` now always connect to the box file, which
+  commits in batches. Re-run with
+  `scripts/run_metrics.py --source seventeenlands_replay_data` (it
+  rewrites every partition) and watch memory on the first few files.
+- **`isotropic_summary` segfaulted once (2026-10-08 regen).** It exited
+  with rc 139 and no Python traceback on day 2 of the 2013 summary
+  archive, about 11 min in. An identical re-run under `python -X
+  faulthandler` passed (56 min, memory flat at about 215 MB), so the cause
+  is unknown and may be flaky. If it recurs, the faulthandler output will
+  show the native frame. Logs: `logs/regen_2026-10-08/25_*` and `25b_*`.
 - [x] **`WinningDeckMaskedCardMetric` no longer raises on a game with
   no usable winner** (2026-09-29). `../generic/deck_card_mask_metric.py`'s
   `DeckCardMaskMetric.accumulate()` and its `_deck_uuid_for_row()`

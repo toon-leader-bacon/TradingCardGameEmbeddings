@@ -113,6 +113,9 @@ class PlayGwentDeckExtractionStage:
     src/data_refinement/metrics/play_gwent/'s deck-masking metrics, so
     every raw guide row becomes a deck the same way regardless of
     caller — see those two methods' own docstrings.
+
+    Runtime: about 2 min for 60,292 decks (4.9 GB of guides) into a fresh box
+    (measured 2026-10-08).
     """
 
     SOURCE_GAME: ClassVar[GameId] = GameId.GWENT

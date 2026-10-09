@@ -98,10 +98,11 @@ class DeckLabelDataConstructor:
         # otherwise-resolvable deck.
         for _, row in chunk.iterrows():
             raw_label = row[self._label_column]
-            if raw_label is None:
+            if raw_label is None or raw_label is pd.NA:
                 # A null in a string column (e.g. sts_gg's KilledByMetric
                 # on a won run) reads back as None, not NaN; str() would
-                # turn it into the label "None"
+                # turn it into the label "None". Through FileManagerParquet's
+                # ArrowDtype reads, a null in any column reads back as pd.NA
                 continue
             if isinstance(raw_label, float) and math.isnan(raw_label):
                 # A metric's own nullable-output convention (e.g.

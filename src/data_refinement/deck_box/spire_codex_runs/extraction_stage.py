@@ -67,7 +67,11 @@ _CARD_ID_PREFIX = "CARD."
 
 
 class SpireCodexRunsDeckExtractionStage:
-    """spire-codex run export pages -> final GenericDecks (StS2)."""
+    """spire-codex run export pages -> final GenericDecks (StS2).
+
+    Runtime: about 85 min for 40 run pages (6.1 GB, 470,687 decks) into the
+    existing 12 GB StS2 box, about 2 min per page (measured 2026-10-08).
+    """
 
     SOURCE_GAME: ClassVar[GameId] = GameId.SLAY_THE_SPIRE_2
     DEFAULT_RAW_PATH: ClassVar[Path] = SpireCodexRunDownloader.DEFAULT_RAW_DATA_DIR

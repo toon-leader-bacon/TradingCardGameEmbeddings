@@ -24,7 +24,10 @@ _BIG_BOX_MAX_DECKS = 500_000
 
 
 class PokemonHeldOutCardMetric(HeldOutDeckCardMetric):
-    """Pokemon deck minus one card -> which of 8 candidates (188 decks)."""
+    """Pokemon deck minus one card -> which of 8 candidates (188 decks).
+
+    Runtime: about 5 s for the 188-deck box (measured 2026-10-08).
+    """
 
     SOURCE_GAME = GameId.POKEMON
     DEFAULT_OUTPUT_PATH = _OUTPUT_DIRECTORY / "held_out_card_pokemon.parquet"
@@ -34,7 +37,10 @@ class PokemonHeldOutCardMetric(HeldOutDeckCardMetric):
 
 
 class FleshAndBloodHeldOutCardMetric(HeldOutDeckCardMetric):
-    """FaB deck minus one card -> which of 8 candidates (4.2k decks)."""
+    """FaB deck minus one card -> which of 8 candidates (4.2k decks).
+
+    Runtime: about 10 s for the 4,172-deck box (measured 2026-10-08).
+    """
 
     SOURCE_GAME = GameId.FLESH_AND_BLOOD
     DEFAULT_OUTPUT_PATH = _OUTPUT_DIRECTORY / "held_out_card_flesh_and_blood.parquet"
@@ -44,7 +50,10 @@ class FleshAndBloodHeldOutCardMetric(HeldOutDeckCardMetric):
 
 
 class GwentHeldOutCardMetric(HeldOutDeckCardMetric):
-    """Gwent deck minus one card -> which of 8 candidates (60k decks)."""
+    """Gwent deck minus one card -> which of 8 candidates (60k decks).
+
+    Runtime: about 40 s for the 60,292-deck box (measured 2026-10-08).
+    """
 
     SOURCE_GAME = GameId.GWENT
     DEFAULT_OUTPUT_PATH = _OUTPUT_DIRECTORY / "held_out_card_gwent.parquet"
@@ -54,7 +63,10 @@ class GwentHeldOutCardMetric(HeldOutDeckCardMetric):
 
 
 class DominionHeldOutCardMetric(HeldOutDeckCardMetric):
-    """Dominion deck minus one card -> which of 8 candidates (532k decks)."""
+    """Dominion deck minus one card -> which of 8 candidates (532k decks).
+
+    Runtime: about 3.5 min for the 531,675-deck box (measured 2026-10-08).
+    """
 
     SOURCE_GAME = GameId.DOMINION
     DEFAULT_OUTPUT_PATH = _OUTPUT_DIRECTORY / "held_out_card_dominion.parquet"
@@ -64,7 +76,10 @@ class DominionHeldOutCardMetric(HeldOutDeckCardMetric):
 
 
 class SlayTheSpire2HeldOutCardMetric(HeldOutDeckCardMetric):
-    """StS2 deck minus one card -> which of 8 candidates (500k of 2.8M decks)."""
+    """StS2 deck minus one card -> which of 8 candidates (500k of 2.8M decks).
+
+    Runtime: about 6.5 min for the 12 GB box (measured 2026-10-08).
+    """
 
     SOURCE_GAME = GameId.SLAY_THE_SPIRE_2
     DEFAULT_OUTPUT_PATH = _OUTPUT_DIRECTORY / "held_out_card_slay_the_spire_2.parquet"
@@ -74,7 +89,10 @@ class SlayTheSpire2HeldOutCardMetric(HeldOutDeckCardMetric):
 
 
 class MtgHeldOutCardMetric(HeldOutDeckCardMetric):
-    """MTG limited deck minus one card -> which of 8 candidates (500k of 4.8M decks)."""
+    """MTG limited deck minus one card -> which of 8 candidates (500k of 4.8M decks).
+
+    Runtime: about 7 min for the 6.9M-deck, 40 GB box (measured 2026-10-08).
+    """
 
     SOURCE_GAME = GameId.MTG
     DEFAULT_OUTPUT_PATH = _OUTPUT_DIRECTORY / "held_out_card_mtg.parquet"

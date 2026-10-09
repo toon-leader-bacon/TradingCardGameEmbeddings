@@ -44,7 +44,11 @@ _SUMMARY_ARCHIVE_GLOB = "*-summary.tar.bz2"
 
 
 class IsotropicDeckExtractionStage:
-    """isotropic game summaries -> final GenericDecks (Dominion)."""
+    """isotropic game summaries -> final GenericDecks (Dominion).
+
+    Runtime: about 8.5 min for 531,675 decks into a fresh box (measured
+    2026-10-08).
+    """
 
     SOURCE_GAME: ClassVar[GameId] = GameId.DOMINION
     DEFAULT_RAW_PATH: ClassVar[Path] = Path("data/raw/isotropic")

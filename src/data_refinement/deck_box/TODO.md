@@ -34,6 +34,16 @@ not decks).
   decks. Ids by count (sts2runs + sts_gg): `CARD.FOLLOW_THROUGH`
   126+26, `CARD.GRAPPLE` 41+12, `CARD.PREPARE` 40+0,
   `CARD.ABUNDANCE` 0+4, `CARD.UNDERWORLD` 0+1, `CARD.SIDESTEP` 0+1.
+  The 2026-10-08 spire_codex_runs ingest (40 pages, 470,687 decks) logged
+  459,509 Unknown slots over 9,613 distinct ids. 6,670 of the ids are
+  mod cards (`CARD.<MOD>-<NAME>`, mostly seen once). The bulk are vanilla
+  cards newer than `data/raw/spire_codex/cards.json`: `FOLLOW_THROUGH`
+  32k, `ABUNDANCE` 24k, `SIDESTEP` 23k, `BLADE_SYMPHONY` 22k, `CONCOCT`
+  22k, `HIBERNATE` 22k, `MIDNIGHT` 21k, and more. None of these is in
+  `cards.json` (downloaded 2026-10-02). Possible fix, unverified: a fresh
+  spire_codex card list (if it has them), then re-ingest the StS2 binder
+  and the runs.
+  Log: `logs/regen_2026-10-08/06_deck_box_spire_codex_runs.log`.
 - Deck-size outliers, probably faithful to the source data: 5 FaB
   decklists hold 1 card (e.g. `soh-zheng-chane-deck-the-imaginarium-skirmish-270621`),
   and 90 hold fewer than 40. sts2runs run 5330 player 0 has 0 cards,
