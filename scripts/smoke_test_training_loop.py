@@ -108,7 +108,7 @@ def main() -> None:
         ColorMaskDojo(card_binder, holdout, _EMBED_DIM, rng_seed=0),
         FactionMaskDojo(card_binder, holdout, _EMBED_DIM, rng_seed=0),
     ]
-    model = LinearProjectionCardModel(embed_dim=_EMBED_DIM)
+    model = LinearProjectionCardModel(card_embedding_size=_EMBED_DIM)
     plan = build_plan(tuple(dojo.name for dojo in dojos), holdout)
 
     print("[3/3] Running Trainer.run()")

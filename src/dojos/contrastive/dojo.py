@@ -1,4 +1,4 @@
-"""ContrastiveDojo: the single-card contrastive dojo, this slice's vertical spine.
+"""ContrastiveDojo: the one dojo every contrastive style runs in.
 
 See src/dojos/README.md's contrastive section. Implements the shared
 `Dojo` contract (src/dojos/dojo.py): a "batch" is
@@ -21,8 +21,9 @@ from src.data_refinement.card_binder.visible_card_lookup import VisibleCardLooku
 from src.dojos.contrastive.contrastive_batch import ContrastiveBatch
 from src.dojos.contrastive.contrastive_loss import (
     ContrastiveLoss,
-    SingleCardInfoNCELoss,
+    DegenerateBatchError,
 )
+from src.dojos.contrastive.styles.single_card import SingleCardInfoNCELoss
 from src.dojos.contrastive.pair_constructor import ContrastivePairConstructor
 from src.dojos.dojo import BatchBudget, DojoBatch
 from src.dojos.file_managers.deck_box_dealer import DeckBoxDealer
@@ -113,9 +114,10 @@ class ContrastiveDojo:
         Inputs: split (Split), budget (BatchBudget), max_examples (int |
             None): stop after this many source decks have been dealt.
         Output: iterator of ContrastiveBatch. A degenerate batch (no
-            positive clique of size >= 2, e.g. every deck in that sample
-            was skipped by the pair constructor for having too few
-            visible cards) is logged and skipped rather than yielded.
+            anchor with both a positive and a negative, so no defined
+            loss or baseline: e.g. the pair constructor skipped every
+            deck but one for having too few visible cards) is logged and
+            skipped rather than yielded.
             Only the TRAIN split reshuffles its decks; TEST/VALIDATION
             deal in fixed order. Item sampling inside the pair
             constructor still advances its own RNG, so a capped pass is
@@ -137,10 +139,10 @@ class ContrastiveDojo:
                     return
                 max_examples -= len(deck_sample)
             batch = self._pair_constructor.build(deck_sample, self._lookups[split])
-            if not any(len(group) >= 2 for group in batch.positive_cliques):
+            if not self._has_usable_baseline(batch):
                 _logger.warning(
-                    "Skipping a degenerate ContrastiveBatch (no positive "
-                    "clique with >= 2 items) built from %d deck(s)",
+                    "Skipping a degenerate ContrastiveBatch (no anchor with "
+                    "both a positive and a negative) built from %d deck(s)",
                     len(deck_sample),
                 )
                 continue
@@ -239,6 +241,26 @@ class ContrastiveDojo:
         )
         inputs = cast(BatchedTrainingInput, [item for item, _ in data])
         return dataclasses.replace(batch, inputs=inputs)
+
+    def _has_usable_baseline(self, batch: ContrastiveBatch) -> bool:
+        """Whether batch has an anchor with a positive and a negative, i.e.
+        its loss and baseline are defined. False e.g. when every deck but
+        one was skipped, or (missing card) every deck misses the same card.
+
+        Private helper - single caller is batches().
+        Inputs: batch, as the pair constructor built it.
+        Output: bool.
+        Side effects: none.
+        Exceptions: whatever the loss raises for a malformed batch (a
+            pair-constructor bug); DegenerateBatchError means False.
+        """
+        try:
+            self._contrastive_loss.constant_logit_loss(
+                batch.identities, batch.positive_cliques
+            )
+        except DegenerateBatchError:
+            return False
+        return True
 
     def _decks_within(self, budget: BatchBudget) -> int:
         """Decks per sample so a batch fits budget, assuming unit card cost."""

@@ -34,7 +34,20 @@ class ContrastiveBatch:
         non-redundant representation rather than a derived (i, j) edge
         list). A group of size 1 contributes no positive pair at all -
         an accepted efficiency cost, not a correctness one (see
-        pair_constructor.py's skip-a-too-small-deck policy).
+        pair_constructor.py's skip-a-too-small-deck policy). A style's
+        loss may also read meaning into the order within a clique: the
+        missing-card style's cliques are [context, card] pairs, defined
+        by MissingCardPairConstructor alone.
+
+    A style's loss may likewise read meaning into a card's position within
+    an item (odd one out: the intruder is last; card in contexts: the
+    anchor is first). That leaks nothing to the model only while every
+    encoder is permutation-equivariant within a group: MultiCardModel's
+    self-attention has no positional encoding, SingleCardModel embeds each
+    card alone, and no mod a contrastive dojo may take reorders cards
+    (deck mods are refused outside DECK_MOD_GROUPS). An encoder with
+    positional encodings would make those styles trivially solvable;
+    tests/encoder_model pins the equivariance.
     """
 
     inputs: BatchedTrainingInput

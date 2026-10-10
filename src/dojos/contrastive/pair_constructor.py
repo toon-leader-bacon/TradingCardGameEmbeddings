@@ -1,20 +1,23 @@
 """The swappable research surface: raw decks -> a ContrastiveBatch.
 
 See src/dojos/README.md's contrastive section. Strategy (PATTERNS.md) -
-ContrastiveDojo owns one of these
-privately and delegates to it, so a different positive-pair definition
-or item shape (single-card vs. multi-card group) is a new class in this
-file, not a change to ContrastiveDojo's own constructor shape.
+ContrastiveDojo owns one of these privately and delegates to it, so a
+different positive-pair definition or item shape is a new style in
+styles/ (its pair constructor, its loss and its ContrastiveStyle), not a
+change to ContrastiveDojo's own constructor shape.
 
-`_known_card_uuids`/`_card_for_known_uuid` below are module-level, shared
-by every concrete implementation in this file (PRINCIPLES.md section 2
-- identical logic, not superficially similar), rather than duplicated
-per class.
+This module holds the Protocol and what every style in styles/ shares
+(PRINCIPLES.md section 2 - identical logic, not superficially similar):
+`SliceSampler` (a deck's candidate cards, staple thinning, slice draws,
+held-out draws and the skip-logging policy), `consecutive_slices`,
+`contrastive_batch_from_deck_items` and the card lookups
+`known_card_uuids`/`card_for_known_uuid`/`cards_for_known_uuids`.
 """
 
 import logging
 import random
-from typing import Protocol
+from dataclasses import dataclass
+from typing import Protocol, Sequence
 from uuid import UUID
 
 from src.data_refinement.card_binder.card_binder import CardBinder
@@ -26,12 +29,12 @@ from src.schema.card import GenericCard, GenericDeck
 _logger = logging.getLogger(__name__)
 
 
-def _known_card_uuids(deck: GenericDeck, card_lookup: CardLookup) -> list[UUID]:
+def known_card_uuids(deck: GenericDeck, card_lookup: CardLookup) -> list[UUID]:
     """The subset of deck.card_nocab_uuids that card_lookup has an entry for,
     minus the game's Unknown sentinel (a stand-in for cards the binder
     lacks, not a card to embed).
 
-    Shared by every concrete ContrastivePairConstructor in this file.
+    Shared by every style's ContrastivePairConstructor (styles/).
 
     Inputs:
         deck: the deck whose card uuids to filter.
@@ -49,16 +52,16 @@ def _known_card_uuids(deck: GenericDeck, card_lookup: CardLookup) -> list[UUID]:
     ]
 
 
-def _card_for_known_uuid(card_uuid: UUID, card_lookup: CardLookup) -> GenericCard:
-    """Look up a uuid _known_card_uuids already confirmed card_lookup has.
+def card_for_known_uuid(card_uuid: UUID, card_lookup: CardLookup) -> GenericCard:
+    """Look up a uuid known_card_uuids already confirmed card_lookup has.
 
-    Shared by every concrete ContrastivePairConstructor in this file.
+    Shared by every style's ContrastivePairConstructor (styles/).
 
     Inputs:
-        card_uuid: a uuid drawn from a prior _known_card_uuids() result
+        card_uuid: a uuid drawn from a prior known_card_uuids() result
             for this same card_lookup, moments earlier in the same
             build() call.
-        card_lookup: the same card_lookup _known_card_uuids() was called
+        card_lookup: the same card_lookup known_card_uuids() was called
             with.
     Output: the matching GenericCard.
     Side effects: none.
@@ -75,6 +78,84 @@ def _card_for_known_uuid(card_uuid: UUID, card_lookup: CardLookup) -> GenericCar
             "having one moments earlier in this same build() call"
         )
     return card
+
+
+def cards_for_known_uuids(
+    card_uuids: Sequence[UUID], card_lookup: CardLookup
+) -> list[GenericCard]:
+    """card_for_known_uuid over a slice, in order.
+
+    Shared by every slice-based style's ContrastivePairConstructor (styles/).
+    Inputs: card_uuids (from SliceSampler), card_lookup (the same one).
+    Output: list[GenericCard], same order and length.
+    Side effects: none.
+    Exceptions: RuntimeError - see card_for_known_uuid().
+    """
+    return [card_for_known_uuid(card_uuid, card_lookup) for card_uuid in card_uuids]
+
+
+def consecutive_slices(
+    card_uuids: Sequence[UUID], slice_size: int
+) -> list[tuple[UUID, ...]]:
+    """card_uuids cut into consecutive slices of slice_size, in order.
+
+    Shared by the styles that draw several disjoint slices in one draw
+    (deck slices, card in contexts).
+
+    Inputs: card_uuids (length a multiple of slice_size), slice_size (> 0).
+    Output: len(card_uuids) // slice_size tuples.
+    Side effects: none.
+    Exceptions: ValueError if slice_size <= 0 or the length isn't a
+        multiple of it.
+
+    Example:
+        >>> consecutive_slices([a, b, c, d], 2)
+        [(a, b), (c, d)]
+    """
+    if slice_size <= 0 or len(card_uuids) % slice_size:
+        raise ValueError(
+            f"cannot cut {len(card_uuids)} cards into slices of {slice_size}"
+        )
+    return [
+        tuple(card_uuids[start : start + slice_size])
+        for start in range(0, len(card_uuids), slice_size)
+    ]
+
+
+def contrastive_batch_from_deck_items(
+    deck_items: list[list[tuple[UUID, ...]]], card_lookup: CardLookup
+) -> ContrastiveBatch:
+    """Assemble a batch of multi-card items: one inner list per surviving
+    deck, each of its uuid tuples one item (in order), and the deck's
+    items one positive clique (in the same order, so a style may give
+    the order within a clique meaning).
+
+    Shared by every slice-based ContrastivePairConstructor in this
+    package: each computes its decks' item uuids, then hands them here.
+
+    Inputs: deck_items (decks with no item are simply absent), card_lookup
+        (the one the uuids were drawn through).
+    Output: ContrastiveBatch; empty if deck_items is.
+    Side effects: none.
+    Exceptions: RuntimeError - see card_for_known_uuid(); whatever
+        ContrastiveBatch.__post_init__() raises.
+
+    Example:
+        >>> contrastive_batch_from_deck_items([[(a1, a2), (a3,)]], lookup).positive_cliques
+        [[0, 1]]
+    """
+    items: list[list[GenericCard]] = []
+    identities: list[tuple[UUID, ...]] = []
+    positive_cliques: list[list[int]] = []
+    for item_uuids_of_deck in deck_items:
+        start_index = len(items)
+        for item_uuids in item_uuids_of_deck:
+            items.append(cards_for_known_uuids(item_uuids, card_lookup))
+            identities.append(item_uuids)
+        positive_cliques.append(list(range(start_index, len(items))))
+    return ContrastiveBatch(
+        inputs=items, identities=identities, positive_cliques=positive_cliques
+    )
 
 
 class ContrastivePairConstructor(Protocol):
@@ -109,236 +190,204 @@ class ContrastivePairConstructor(Protocol):
         ...
 
 
-class SingleCardPairConstructor:
-    """Concrete ContrastivePairConstructor for this slice: single-card
-    items only, drawn evenly across the given decks. A deck with fewer
-    known cards than items_per_deck is skipped outright (its
-    nocab_uuid logged) rather than partially sampled - a sampling
-    *count* per deck, never full combinatorial enumeration of a deck's
-    possible subsets (see plan)."""
+class SliceSampler:
+    """Seeded draws of card slices from decks, shared by every slice-based
+    pair constructor so each style samples a deck the same way: the
+    deck's known cards (duplicates kept), thinned by optional staple
+    subsampling, then drawn without replacement.
+
+    Owns no RNG of its own: it advances the one its constructor is given,
+    so a pair constructor's whole draw sequence comes from one seed.
+    """
 
     def __init__(
         self,
-        items_per_deck: int,
-        rng_seed: int | None = None,
+        rng: random.Random,
         staple_subsampling: StapleSubsampling | None = None,
     ) -> None:
         """
         Inputs:
-            items_per_deck: how many single-card items to sample from
-                each deck that has at least this many known cards.
-            rng_seed: seed for item sampling. None means
-                non-deterministic.
-            staple_subsampling: when given, each deck's known cards are
-                first thinned (each occurrence kept with probability
-                min(1, sqrt(t / df)), see staple_subsampling.py), and a
-                deck left with fewer than items_per_deck cards is skipped
-                like a deck with too few known cards: falling back to the
-                unthinned deck would put staple pairs back exactly where
-                staples dominate. None (the default, t = inf) samples
-                as before and draws nothing extra from the RNG.
+            rng: the owning pair constructor's random stream.
+            staple_subsampling: thins each deck's known cards before any
+                draw (see SingleCardPairConstructor.__init__); None means
+                t = inf and draws nothing extra from rng.
         Output: none (constructor).
         Side effects: none.
-        Exceptions: ValueError if items_per_deck <= 0.
+        Exceptions: none.
         """
-        if items_per_deck <= 0:
-            raise ValueError("items_per_deck must be positive")
-        self._items_per_deck = items_per_deck
-        self._rng = random.Random(rng_seed)
+        self._rng = rng
         self._staple_subsampling = staple_subsampling
 
-    @property
-    def cards_per_deck(self) -> int:
-        """One card per item."""
-        return self._items_per_deck
+    def candidate_uuids(
+        self, deck: GenericDeck, card_lookup: CardLookup, minimum: int
+    ) -> list[UUID] | None:
+        """The deck's cards a slice may draw from: its known card uuids
+        (known_card_uuids), after staple subsampling when there is one;
+        None when fewer than minimum remain.
 
-    def build(
-        self, decks: list[GenericDeck], card_lookup: CardLookup
-    ) -> ContrastiveBatch:
-        """Sample items_per_deck single-card items from each deck, and
-        mark every same-deck item pair as positive.
+        Owns the skip-logging policy for every style, so the two skip
+        reasons stay distinct: too few known cards is a data problem
+        (warning); too few left after staple subsampling is expected at a
+        small t (debug).
 
-        Inputs: see ContrastivePairConstructor.build().
-        Output: a ContrastiveBatch of single-card items. If every given
-            deck is skipped (too few known cards, or too few left after
-            staple subsampling), items/identities/positive_cliques are
-            all empty.
-        Side effects: emits one logging.warning() per deck skipped for
-            too few known cards, and one logging.debug() per deck skipped
-            only after staple subsampling (common for a tiny t).
-        Exceptions: RuntimeError if card_lookup stops resolving a uuid
-            it had just resolved moments earlier in this same call (an
-            environment invariant violation, not expected/dirty-data
-            territory). Also whatever ContrastiveBatch.__post_init__()
-            raises, if this method's own bookkeeping produces an
-            inconsistent batch (a bug, not an expected runtime
-            condition).
+        Inputs: deck, card_lookup (the split's visible-card lookup),
+            minimum (cards the caller needs, > 0).
+        Output: list[UUID] in deck order, duplicates kept, at least
+            minimum long; or None (logged).
+        Side effects: advances the rng when subsampling; one log line on
+            a skip.
+        Exceptions: none.
 
         Example:
-            >>> constructor = SingleCardPairConstructor(items_per_deck=11)
-            >>> batch = constructor.build(deck_sample, card_lookup)
+            >>> sampler.candidate_uuids(deck, card_lookup, minimum=9)
+            [UUID('...'), UUID('...'), ...]
         """
-        items: list[GenericCard] = []
-        identities: list[tuple[UUID, ...]] = []
-        positive_cliques: list[list[int]] = []
+        # Known cards first: too few is a data problem, worth a warning
+        known_uuids = known_card_uuids(deck, card_lookup)
+        if len(known_uuids) < minimum:
+            _logger.warning(
+                "Skipping deck %s: %d known card(s), need %d",
+                deck.nocab_uuid,
+                len(known_uuids),
+                minimum,
+            )
+            return None
 
-        # Sample each deck independently, tracking this deck's index
-        # range in the flat `items` pool - that whole range is one
-        # positive clique, since every item drawn from the same deck is
-        # mutually positive.
-        for deck in decks:
-            known_uuids = _known_card_uuids(deck, card_lookup)
-            if len(known_uuids) < self._items_per_deck:
-                _logger.warning(
-                    "Skipping deck %s: %d known card(s), need %d",
-                    deck.nocab_uuid,
-                    len(known_uuids),
-                    self._items_per_deck,
-                )
-                continue
-            candidates = self._thinned(known_uuids)
-            if len(candidates) < self._items_per_deck:
-                _logger.debug(
-                    "Skipping deck %s: %d card(s) left after staple subsampling",
-                    deck.nocab_uuid,
-                    len(candidates),
-                )
-                continue
-
-            sampled_uuids = self._rng.sample(candidates, self._items_per_deck)
-            start_index = len(items)
-            for card_uuid in sampled_uuids:
-                items.append(_card_for_known_uuid(card_uuid, card_lookup))
-                identities.append((card_uuid,))
-            positive_cliques.append(list(range(start_index, len(items))))
-
-        return ContrastiveBatch(
-            inputs=items, identities=identities, positive_cliques=positive_cliques
-        )
+        # Then staple subsampling: too few left is expected at a small t
+        kept_uuids = self._thinned(known_uuids)
+        if len(kept_uuids) < minimum:
+            _logger.debug(
+                "Skipping deck %s: %d card(s) left after staple subsampling",
+                deck.nocab_uuid,
+                len(kept_uuids),
+            )
+            return None
+        return kept_uuids
 
     def _thinned(self, known_uuids: list[UUID]) -> list[UUID]:
         """known_uuids after staple subsampling, or known_uuids itself when
-        there is none (no RNG draw).
+        there is none (no rng draw).
 
-        Private helper - single caller is build().
+        Private helper - single caller is candidate_uuids().
         Inputs: known_uuids. Output: list[UUID].
-        Side effects: advances self._rng when subsampling.
+        Side effects: advances the rng when subsampling.
         Exceptions: none.
         """
         if self._staple_subsampling is None:
             return known_uuids
         return self._staple_subsampling.kept(known_uuids, self._rng)
 
+    def draw(
+        self,
+        candidates: Sequence[UUID],
+        slice_size: int,
+        excluded: frozenset[UUID] = frozenset(),
+    ) -> list[UUID] | None:
+        """slice_size uuids drawn without replacement from candidates,
+        leaving out every occurrence of an excluded uuid.
 
-class MultiCardPairConstructor:
-    """Concrete ContrastivePairConstructor for the multi-card slice: each
-    item is a fixed-size group of cards_per_item cards, sampled together
-    but never pooled into one embedding - MultiCardInfoNCELoss compares
-    individual cards within an item, not a whole-item vector (see
-    contrastive_loss.py). A deck with fewer known cards than
-    cards_per_item is skipped outright (its nocab_uuid logged); a
-    surviving deck's items_per_deck items are each sampled independently
-    (without replacement within one item, but items from the same deck
-    may overlap in card membership - an accepted sampling-noise cost,
-    same spirit as SingleCardPairConstructor). Mirrors
-    SingleCardPairConstructor's skip-and-log/clique-range bookkeeping,
-    one level up (items instead of individual cards)."""
-
-    def __init__(
-        self, cards_per_item: int, items_per_deck: int, rng_seed: int | None = None
-    ) -> None:
-        """
-        Inputs:
-            cards_per_item: how many distinct known cards make up one
-                item.
-            items_per_deck: how many items to sample from each deck that
-                has at least cards_per_item known cards.
-            rng_seed: seed for item/card sampling. None means
-                non-deterministic.
-        Output: none (constructor).
-        Side effects: none.
-        Exceptions: ValueError if cards_per_item <= 0 or items_per_deck <= 0.
-        """
-        if cards_per_item <= 0:
-            raise ValueError("cards_per_item must be positive")
-        if items_per_deck <= 0:
-            raise ValueError("items_per_deck must be positive")
-        self._cards_per_item = cards_per_item
-        self._items_per_deck = items_per_deck
-        self._rng = random.Random(rng_seed)
-
-    @property
-    def cards_per_deck(self) -> int:
-        """cards_per_item cards in each of items_per_deck items."""
-        return self._cards_per_item * self._items_per_deck
-
-    def build(
-        self, decks: list[GenericDeck], card_lookup: CardLookup
-    ) -> ContrastiveBatch:
-        """Sample items_per_deck multi-card items from each deck, and
-        mark every same-deck item mutually positive.
-
-        Inputs: see ContrastivePairConstructor.build().
-        Output: a ContrastiveBatch of multi-card items (each item a
-            list[GenericCard] of length cards_per_item, each identity a
-            same-order tuple of that item's card uuids - see
-            ContrastiveBatch.identities). If every given deck is skipped
-            (too few known cards), items/identities/positive_cliques are
-            all empty.
-        Side effects: emits one logging.warning() per skipped deck.
-        Exceptions: RuntimeError if card_lookup stops resolving a uuid
-            it had just resolved moments earlier in this same call. Also
-            whatever ContrastiveBatch.__post_init__() raises, if this
-            method's own bookkeeping produces an inconsistent batch.
+        Inputs: candidates (from candidate_uuids), slice_size (> 0),
+            excluded (uuids no copy of which may appear in the slice).
+        Output: list[UUID] of length slice_size, in draw order (a card the
+            deck holds twice can appear twice); None if fewer than
+            slice_size candidates remain after the exclusion.
+        Side effects: advances the rng (only when a slice is drawn).
+        Exceptions: ValueError if slice_size <= 0.
 
         Example:
-            >>> constructor = MultiCardPairConstructor(cards_per_item=5, items_per_deck=5)
-            >>> batch = constructor.build(deck_sample, card_lookup)
+            >>> sampler.draw(candidates, 8, excluded=frozenset({missing_uuid}))
         """
-        items: list[list[GenericCard]] = []
-        identities: list[tuple[UUID, ...]] = []
-        positive_cliques: list[list[int]] = []
+        # Validate inputs
+        if slice_size <= 0:
+            raise ValueError("slice_size must be positive")
 
-        # Sample each deck independently, tracking this deck's ITEM-index
-        # range in the flat `items` pool - mirrors SingleCardPairConstructor,
-        # one level up (a range of items, not individual cards).
-        for deck in decks:
-            known_uuids = _known_card_uuids(deck, card_lookup)
-            if len(known_uuids) < self._cards_per_item:
-                _logger.warning(
-                    "Skipping deck %s: %d known card(s), need %d",
-                    deck.nocab_uuid,
-                    len(known_uuids),
-                    self._cards_per_item,
-                )
-                continue
+        # Drop every copy of an excluded card, then check there's enough left
+        remaining = [uuid for uuid in candidates if uuid not in excluded]
+        if len(remaining) < slice_size:
+            return None
 
-            start_index = len(items)
-            for _ in range(self._items_per_deck):
-                sampled_cards = self._sample_one_item(known_uuids, card_lookup)
-                items.append(sampled_cards)
-                identities.append(tuple(card.nocab_uuid for card in sampled_cards))
-            positive_cliques.append(list(range(start_index, len(items))))
+        # Draw; with no exclusion this is the same rng.sample call
+        # SingleCardPairConstructor makes, so the two stay draw-compatible
+        return self._rng.sample(remaining, slice_size)
 
-        return ContrastiveBatch(
-            inputs=items, identities=identities, positive_cliques=positive_cliques
-        )
+    def full_draw(
+        self, deck: GenericDeck, candidates: Sequence[UUID], slice_size: int
+    ) -> list[UUID]:
+        """draw() for candidates that candidate_uuids(..., minimum >=
+        slice_size) just returned, so the draw cannot come up short.
 
-    def _sample_one_item(
-        self, known_uuids: list[UUID], card_lookup: CardLookup
-    ) -> list[GenericCard]:
-        """Sample this item's cards_per_item distinct cards.
+        Inputs: deck (for the error message), candidates, slice_size (> 0).
+        Output: list[UUID] of length slice_size, in draw order.
+        Side effects: advances the rng.
+        Exceptions: RuntimeError if the draw comes up short anyway (an
+            invariant violation, so not a plain assert, which -O strips);
+            ValueError if slice_size <= 0.
 
-        Private helper - single caller is build().
-
-        Inputs:
-            known_uuids: this deck's known card uuids (see
-                _known_card_uuids()) - already confirmed to have at
-                least cards_per_item entries by build().
-            card_lookup: the same card_lookup known_uuids was derived
-                from, moments earlier in the same build() call.
-        Output: cards_per_item distinct GenericCard, in sampled order.
-        Side effects: none.
-        Exceptions: RuntimeError - see _card_for_known_uuid().
+        Example:
+            >>> sampler.full_draw(deck, sampler.candidate_uuids(deck, lookup, 8), 8)
         """
-        raise NotImplementedError
+        result = self.draw(candidates, slice_size)
+        if result is None:
+            raise RuntimeError(
+                f"deck {deck.nocab_uuid}: no draw of {slice_size} from "
+                f"{len(candidates)} candidates"
+            )
+        return result
+
+    def held_out_draw(
+        self, deck: GenericDeck, candidates: list[UUID], rest_size: int
+    ) -> "HeldOutDraw | None":
+        """Pick one card (uniform over candidate occurrences), then draw
+        rest_size more with every copy of the picked card left out.
+
+        Shared by every style built around one card and the cards around
+        it: the missing-card style (the picked card is held out of its
+        slice) and the card-across-contexts style (the picked card is the
+        anchor, the rest its contexts).
+
+        Inputs: deck (for the skip log), candidates (from
+            candidate_uuids), rest_size (> 0).
+        Output: HeldOutDraw, or None (logged at debug) when the picked
+            card's copies leave fewer than rest_size others.
+        Side effects: advances the rng; one log line on a skip.
+        Exceptions: ValueError if rest_size <= 0 or candidates is empty.
+
+        Example:
+            >>> sampler.held_out_draw(deck, candidates, rest_size=8).held_out
+            UUID('...')
+        """
+        # Validate inputs before touching the rng
+        if not candidates:
+            raise ValueError("no candidates to pick from")
+        if rest_size <= 0:
+            raise ValueError("rest_size must be positive")
+
+        # Pick, then draw the rest around it
+        held_out = self._rng.choice(candidates)
+        rest = self.draw(candidates, rest_size, excluded=frozenset({held_out}))
+        if rest is None:
+            _logger.debug(
+                "Skipping deck %s: too few cards left once every copy of %s is out",
+                deck.nocab_uuid,
+                held_out,
+            )
+            return None
+        return HeldOutDraw(held_out, tuple(rest))
+
+
+@dataclass(frozen=True)
+class HeldOutDraw:
+    """One card picked from a deck, and the cards drawn around it (no copy
+    of the picked card among them). See SliceSampler.held_out_draw."""
+
+    held_out: UUID
+    rest: tuple[UUID, ...]
+
+    def __post_init__(self) -> None:
+        """Enforce the invariant: the picked card is not in the rest.
+
+        Inputs: none. Output: none. Side effects: none.
+        Exceptions: ValueError if held_out is in rest.
+        """
+        if self.held_out in self.rest:
+            raise ValueError(f"held-out card {self.held_out} is among the rest")

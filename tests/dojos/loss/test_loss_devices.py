@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import torch
 
-from src.dojos.contrastive.contrastive_loss import _valid_negative_mask
+from src.dojos.contrastive.contrastive_loss import identity_negative_mask
 from src.dojos.loss.bce_loss import BceLoss
 from src.dojos.loss.fixed_classification_loss import FixedClassificationLoss
 from src.dojos.loss.masked_vector_regression_loss import MaskedVectorRegressionLoss
@@ -64,7 +64,7 @@ def test_pick_prediction_loss_follows_each_logits_device() -> None:
 def test_contrastive_negative_mask_is_built_on_the_similarity_device() -> None:
     # The full loss reads mask entries back as Python bools, which meta
     # tensors cannot do; the mask was its only CPU-built tensor
-    mask = _valid_negative_mask([uuid4(), uuid4()], META)
+    mask = identity_negative_mask([uuid4(), uuid4()], META)
     assert mask.device == META
 
 

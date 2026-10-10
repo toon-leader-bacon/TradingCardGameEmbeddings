@@ -118,7 +118,7 @@ def format_row(key: str, survey: BaselineSurvey) -> str:
 def main() -> int:
     """Survey the chosen keys (all by default), printing a CSV to stdout.
 
-    Inputs: command line (--keys, --batches, --max-batch-cost, --embed-dim).
+    Inputs: command line (--keys, --batches, --max-batch-cost, --card-embedding-size).
     Output: 0.
     Side effects: builds dojos (may create split files); prints.
     Exceptions: none for a single key's failure (printed as an error row).
@@ -127,7 +127,7 @@ def main() -> int:
     parser.add_argument("--keys", nargs="*", default=sorted(DOJO_CATALOG))
     parser.add_argument("--batches", type=int, default=20)
     parser.add_argument("--max-batch-cost", type=int, default=256)
-    parser.add_argument("--embed-dim", type=int, default=32)
+    parser.add_argument("--card-embedding-size", type=int, default=32)
     parser.add_argument(
         "--regression-loss",
         type=RegressionLossKind,
@@ -142,7 +142,7 @@ def main() -> int:
     context = DojoBuildContext(
         shelf=CardShelf(),
         holdout=HoldoutSpec.no_holdout(),
-        card_embedding_size=args.embed_dim,
+        card_embedding_size=args.card_embedding_size,
         rng_seed=0,
         regression_objective=RegressionObjective.for_kind(args.regression_loss),
     )
@@ -152,7 +152,7 @@ def main() -> int:
     for key in args.keys:
         try:
             dojo = build_dojos([key], context)[0]
-            survey = survey_dojo(dojo, budget, args.batches, args.embed_dim)
+            survey = survey_dojo(dojo, budget, args.batches, args.card_embedding_size)
             print(format_row(key, survey), flush=True)
         except Exception as error:
             message = f"{type(error).__name__}: {error}".replace(",", ";")

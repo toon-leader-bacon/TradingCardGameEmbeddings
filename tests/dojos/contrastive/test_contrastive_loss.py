@@ -5,12 +5,12 @@ import pytest
 import torch
 
 from src.dojos.contrastive.contrastive_loss import (
-    MultiCardInfoNCELoss,
-    SingleCardInfoNCELoss,
-    _anchor_loss,
-    _pairwise_cosine_similarity,
-    _valid_negative_mask,
+    anchor_loss,
+    pairwise_cosine_similarity,
+    identity_negative_mask,
 )
+from src.dojos.contrastive.styles.cross_slice_card import CrossSliceCardInfoNCELoss
+from src.dojos.contrastive.styles.single_card import SingleCardInfoNCELoss
 
 
 class TestInit:
@@ -23,21 +23,21 @@ class TestPairwiseCosineSimilarity:
     def test_identical_vectors_have_similarity_one(self) -> None:
         embeddings = [torch.tensor([1.0, 0.0]), torch.tensor([2.0, 0.0])]
 
-        similarity = _pairwise_cosine_similarity(embeddings)
+        similarity = pairwise_cosine_similarity(embeddings)
 
         assert similarity[0, 1].item() == pytest.approx(1.0)
 
     def test_orthogonal_vectors_have_similarity_zero(self) -> None:
         embeddings = [torch.tensor([1.0, 0.0]), torch.tensor([0.0, 1.0])]
 
-        similarity = _pairwise_cosine_similarity(embeddings)
+        similarity = pairwise_cosine_similarity(embeddings)
 
         assert similarity[0, 1].item() == pytest.approx(0.0)
 
     def test_diagonal_is_self_similarity_of_one(self) -> None:
         embeddings = [torch.randn(4) for _ in range(3)]
 
-        similarity = _pairwise_cosine_similarity(embeddings)
+        similarity = pairwise_cosine_similarity(embeddings)
 
         assert torch.allclose(torch.diagonal(similarity), torch.ones(3))
 
@@ -46,7 +46,7 @@ class TestValidNegativeMask:
     def test_excludes_the_diagonal(self) -> None:
         identities = [(uuid4(),), (uuid4(),), (uuid4(),)]
 
-        mask = _valid_negative_mask(identities, torch.device("cpu"))
+        mask = identity_negative_mask(identities, torch.device("cpu"))
 
         assert not mask.diagonal().any()
 
@@ -54,7 +54,7 @@ class TestValidNegativeMask:
         duplicate_uuid = uuid4()
         identities = [(duplicate_uuid,), (uuid4(),), (duplicate_uuid,)]
 
-        mask = _valid_negative_mask(identities, torch.device("cpu"))
+        mask = identity_negative_mask(identities, torch.device("cpu"))
 
         assert not mask[0, 2]
         assert not mask[2, 0]
@@ -62,7 +62,7 @@ class TestValidNegativeMask:
     def test_allows_a_non_duplicate_pair(self) -> None:
         identities = [(uuid4(),), (uuid4(),)]
 
-        mask = _valid_negative_mask(identities, torch.device("cpu"))
+        mask = identity_negative_mask(identities, torch.device("cpu"))
 
         assert mask[0, 1]
         assert mask[1, 0]
@@ -195,7 +195,7 @@ class TestAnchorLoss:
             ]
         )
 
-        result = _anchor_loss(0, [1, 2], set(), similarity, valid_negative_mask, 1.0)
+        result = anchor_loss(0, [1, 2], set(), similarity, valid_negative_mask, 1.0)
 
         # positive=1: candidates' similarities [2.0, 0.0] (vs. negative 3)
         loss_for_positive_1 = math.log(math.exp(2.0) + math.exp(0.0)) - 2.0
@@ -251,10 +251,10 @@ class TestSingleCardConstantLogitLoss:
             SingleCardInfoNCELoss().constant_logit_loss(_single_identities(2), [[0, 1]])
 
 
-class TestMultiCardInfoNCELoss:
+class TestCrossSliceCardInfoNCELoss:
     def test_closed_form_for_three_decks_of_two_five_card_items(self) -> None:
         # Each card: 5 positives, 4 own-item exclusions, 30 - 10 = 20 negatives
-        baseline = MultiCardInfoNCELoss().constant_logit_loss(
+        baseline = CrossSliceCardInfoNCELoss().constant_logit_loss(
             _multi_identities(6, 5), [[0, 1], [2, 3], [4, 5]]
         )
         assert baseline == pytest.approx(math.log(21))
@@ -263,10 +263,10 @@ class TestMultiCardInfoNCELoss:
         identities = _multi_identities(5, 2)
         cliques = [[0, 1, 2], [3, 4]]
         same = torch.ones(4)
-        loss = MultiCardInfoNCELoss().calculate(
+        loss = CrossSliceCardInfoNCELoss().calculate(
             [[same, same] for _ in range(5)], identities, cliques
         )
-        baseline = MultiCardInfoNCELoss().constant_logit_loss(identities, cliques)
+        baseline = CrossSliceCardInfoNCELoss().constant_logit_loss(identities, cliques)
         assert loss.item() == pytest.approx(baseline)
 
     def test_own_item_cards_are_neither_positive_nor_negative(self) -> None:
@@ -276,13 +276,13 @@ class TestMultiCardInfoNCELoss:
         # its own sibling, which must not count as a negative
         a, b = torch.tensor([1.0, 0.0]), torch.tensor([0.0, 1.0])
         embeddings = [[a, b], [a, a], [b, b]]
-        loss = MultiCardInfoNCELoss(temperature=1.0).calculate(
+        loss = CrossSliceCardInfoNCELoss(temperature=1.0).calculate(
             embeddings, identities, cliques
         )
         assert torch.isfinite(loss)
 
     def test_raises_on_a_single_card_shaped_input(self) -> None:
         with pytest.raises(ValueError, match="multi-card"):
-            MultiCardInfoNCELoss().calculate(
+            CrossSliceCardInfoNCELoss().calculate(
                 [torch.randn(4), torch.randn(4)], _multi_identities(2, 1), [[0, 1]]
             )

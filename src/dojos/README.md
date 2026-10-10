@@ -126,6 +126,18 @@ rows never straddle TRAIN and TEST.
 - **`file_managers/`** - split management. `FileManagerParquet` splits a
   metric's parquet into train/test/validation files and streams them in
   chunks (`splits_exist()` lets a repeat construction reuse them).
+  The rows are in uniformly random order across the whole file, so any
+  prefix of a split is a fair sample (calibration reads one). Metric
+  files are often sorted (17lands by set), and a split too big for memory
+  is shuffled in two passes (`bucket_shuffle.py`): rows are scattered at
+  random into bucket files of about 256 MB in memory (estimated from a
+  sample of decoded rows, not parquet's dictionary-encoded size), then each bucket
+  is shuffled whole and appended to the splits. Temporaries live in
+  `<split directory>/.shuffle_tmp/`, and a split only gets its final
+  name once every split is complete. Each split file carries the schema
+  metadata `nocab_split_order: uniform_shuffle`; `splits_exist()` treats
+  a file without it as missing, so splits written before this rule are
+  rebuilt on the next construction.
   `DeckBoxDealer` does the same for a `DeckBox`: a seeded, exact-ratio
   split assignment kept in its own small SQLite index, and fixed-size
   deck samples per split read straight from SQLite.
@@ -177,25 +189,140 @@ rows never straddle TRAIN and TEST.
 
 ## `contrastive/` - InfoNCE over deck co-occurrence
 
-Trains embeddings directly on "these cards appear in the same deck",
-sourced from a `DeckBox` through a `DeckBoxDealer`: no metric, no parquet
-file, no learned decoder head. It doesn't fit the generic cells because
-InfoNCE needs every item's embedding in a batch jointly, not a
-row-independent `(output, label) -> loss`.
+Trains embeddings directly on how cards sit together in decks, sourced
+from a `DeckBox` through a `DeckBoxDealer`: no metric, no parquet file, no
+learned decoder head. It doesn't fit the generic cells because InfoNCE
+needs every item's embedding in a batch jointly, not a row-independent
+`(output, label) -> loss`.
 
-- `pair_constructor.py` - `ContrastivePairConstructor` Strategy: one deck
-  sample -> one `ContrastiveBatch`, deciding what counts as a positive
-  pair. This is the research surface. `SingleCardPairConstructor`
-  samples single cards (every same-deck card is a positive);
-  `MultiCardPairConstructor` samples fixed-size groups of cards.
-- `staple_subsampling.py` - optional staple thinning for
-  `SingleCardPairConstructor`. Before sampling, each card occurrence is
+Each **style** is a matched pair constructor and loss, with one catalog
+key per style and game (`<prefix>.<game>`, for the six games with a deck
+box). They teach different lessons about how cards sit in a deck:
+
+| Style | Key prefix | What attends together | Compared unit | Teaches |
+|---|---|---|---|---|
+| Single card | `contrastive` | nothing | each card | "these cards share a deck" |
+| Missing card | `contrastive_missing_card` | the slice; the missing card alone | slice mean vs. lone card | "which card is missing from this slice" |
+| Odd one out | `contrastive_odd_one_out` | the slice, intruder included | each card vs. the rest | "which card doesn't belong here" |
+| Cross-slice card match | `contrastive_cross_slice` | each slice | each card | "my card and your cards share a deck" |
+| Slice match | `contrastive_slice_match` | each slice | slice mean | "these two slices share a deck" |
+| Card in contexts | `contrastive_card_in_contexts` | each slice, same anchor in each | the anchor in each slice | "a card stays itself in any context" |
+
+The examples use two decks, A = {a1 … a6} and B = {b1 … b6}. Brackets
+mark what is embedded together: only cards inside the same bracket attend
+to each other. A real batch holds more decks (up to 16, fewer when the
+batch budget is tight).
+
+**Single card** (2 cards per deck). Every card is embedded alone:
+
+```
+[a1]  [a4]  [b2]  [b5]      → a1: positive a4; negatives b2 b5
+```
+
+**Missing card** (slice 8, +1 card). Per deck, one card is picked and a
+slice drawn with every copy of it removed. The slice attends and is
+averaged; the missing card is embedded alone, the same path as the stored
+card embeddings:
+
+```
+[a1 a2 a3] → context_A      [a4] → card_A
+[b1 b2 b3] → context_B      [b4] → card_B
+```
+
+|  | card_A | card_B |
+|---|---|---|
+| **context_A** | positive | negative |
+| **context_B** | negative | positive |
+
+Both directions count, CLIP-style. Contexts are never compared with each
+other, nor cards with cards, and two decks missing the same card are each
+other's right answers, not negatives. A card from deck B can still be in
+deck A outside A's slice and count as a negative: the batch carries no
+deck membership, so that noise is accepted.
+
+**Odd one out** (7 cards + 1 intruder). Per deck, a slice plus one card
+from another deck in the batch that the host deck doesn't hold at all.
+Each card's fit is the cosine of its contextual embedding with the mean of
+the item's other cards; the loss is the cross-entropy of the intruder
+fitting worst (baseline ln 8):
+
+```
+[a1 a2 a3 b3]   intruder: b3        [b1 b2 b4 a5]   intruder: a5
+```
+
+**Cross-slice card match** (2 disjoint slices of 4). A card's positives
+are the other slice's cards; its own slice's cards are ignored:
+
+```
+[a1 a2 a3]  [a4 a5 a6]  [b1 b2 b3]  [b4 b5 b6]
+a1: positives a4 a5 a6; ignored a2 a3; negatives b1 … b6
+```
+
+**Slice match** (the same batches). Each slice is averaged after
+attention and compared like a single card: `[a1 a2 a3] → A1`, positive
+A2, negatives B1 B2. Two slices of the same cards in another order count
+as one identity, so neither is the other's negative.
+
+**Card in contexts** (an anchor + 7 cards, twice). The same anchor card
+fronts two disjoint slices of its deck; only its output is kept:
+
+```
+[a1 a2 a3] → a1 (context 1)    [a1 a4 a5] → a1 (context 2)
+a1 (context 1): positive a1 (context 2); negatives both b1s
+```
+
+It is primarily an evaluation dojo, not for training diets: attention
+that ignores context wins it outright, and for `SingleCardModel` it is
+trivially solved. Run on TEST batches, it measures identity retention
+(see `src/evaluation/TODO.md`).
+
+None of these teach copy counts (how many of a card a deck should run):
+the missing card and the intruder are never cards still in the slice or
+host deck. Count quality is a claim about winning, left to the
+outcome-labelled deck dojos.
+
+Batch budget: a deck costs its style's cards per deck (single card 2,
+missing card 9, odd one out 8, cross-slice and slice match 8, card in
+contexts 16), and `ContrastiveDojo` fits as many decks as `max_batch_cost`
+allows, up to 16 and never fewer than 2.
+
+Files:
+
+- `contrastive_style.py` - the `ContrastiveStyle` Protocol (Abstract
+  Factory): `pair_constructor(rng_seed, staple_subsampling)` and
+  `contrastive_loss()`, built as a matched set so the two can't be mixed
+  up. The catalog's `ContrastiveDojoRecipe` takes a style; its
+  `_CONTRASTIVE_STYLES` maps each key prefix to one.
+- `styles/` - one module per style, each holding its pair constructor,
+  its loss and its style: `single_card.py`, `missing_card.py`,
+  `odd_one_out.py`, `cross_slice_card.py`, `slice_match.py`,
+  `card_in_contexts.py`, and `deck_slices.py` (`DeckSlicesPairConstructor`,
+  shared by cross-slice card match and slice match). Slice match's loss
+  and card in contexts' loss are Decorators over `SingleCardInfoNCELoss`
+  (`PooledItemsLoss` averages each item, `AnchorCardLoss` keeps each
+  item's anchor). Odd one out's `OddOneOutLoss` is the only loss that
+  isn't InfoNCE: its candidates are positions within one item.
+- `pair_constructor.py` - the `ContrastivePairConstructor` Protocol
+  (Strategy: one deck sample -> one `ContrastiveBatch`) and what every
+  style shares. `SliceSampler`: a deck's known cards, staple thinning,
+  draws without replacement (optionally leaving out every copy of some
+  cards), `full_draw` (a draw that can't come up short, or a
+  `RuntimeError`), `held_out_draw` (pick a card, draw others around it),
+  and the
+  skip logging (warning for too few known cards, debug for too few after
+  thinning or once a pick's copies are out). `consecutive_slices` cuts one
+  draw into disjoint slices. `contrastive_batch_from_deck_items` turns each
+  deck's item card ids into a batch, the deck's items one clique in order.
+  `known_card_uuids`, `card_for_known_uuid`, `cards_for_known_uuids` look
+  cards up.
+- `staple_subsampling.py` - optional staple thinning, applied by
+  `SliceSampler` for every style. Before sampling, each card occurrence is
   kept with probability `min(1, sqrt(t / df))` (word2vec subsampling),
   where `df` is the card's share of decks (`DocumentFrequency`).
   `df` is counted once over the first 20,000 TRAIN decks, in the
   dealer's seeded order. It is cached as JSON under `data/splits/` and
   keyed by the box's CardBinder version and the sample size. The deck box
-  is only read. A deck thinned below `items_per_deck` is skipped. No
+  is only read. A deck thinned below what its style needs is skipped. No
   subsampling (`t = inf`, the default) is the old path and draws nothing
   extra from the RNG. A run config's `staple_subsampling:` sets `t` per
   contrastive dojo.
@@ -203,30 +330,41 @@ row-independent `(output, label) -> loss`.
   (every item is both anchor and candidate), per-item card
   `identities` (so exact duplicate cards are excluded from an anchor's
   negatives), and `positive_cliques` (index sets that are mutually
-  positive, one per source deck).
-- `contrastive_loss.py` - `ContrastiveLoss` Strategy (batch-level, unlike
-  `NocabLoss`). `SingleCardInfoNCELoss`: InfoNCE over one cosine
-  similarity matrix of the whole pool. `MultiCardInfoNCELoss`: the same,
-  but a card's own item is excluded from both its positives and
-  negatives. Each validates its expected item shape and raises on a
-  mismatch. `constant_logit_loss(identities, positive_cliques)` is the
-  loss with every similarity equal, computed from the batch shape alone:
-  each anchor with a positive scores ln(1 + its valid negatives), averaged
-  over anchors (single-card, no duplicates, N items in cliques of k_c:
-  sum k_c ln(N - k_c + 1) / sum k_c).
+  positive, one per source deck). A style's loss may read meaning into
+  the order within a clique (missing card: `[context, card]`) or a card's
+  position within an item (odd one out: the intruder is last; card in
+  contexts: the anchor is first). That leaks nothing because every
+  encoder is permutation-equivariant within a group (pinned by
+  `tests/encoder_model`'s `test_a_group_is_permutation_equivariant`) and
+  contrastive dojos take no deck mods.
+- `contrastive_loss.py` - the `ContrastiveLoss` Protocol (Strategy,
+  batch-level, unlike `NocabLoss`), `DegenerateBatchError` (a well-formed
+  batch whose loss is undefined: no positive, or no negative), and the
+  shared InfoNCE math every InfoNCE style reduces to:
+  `pairwise_cosine_similarity`, `identity_negative_mask`, `anchor_loss`,
+  `mean_anchor_loss`, `mean_item_embeddings`, `check_item_embeddings` and
+  `mean_constant_logit_loss`. Each loss's
+  `constant_logit_loss(identities, positive_cliques)` is its loss with
+  every similarity equal, computed from the batch shape alone: each
+  anchor with a positive scores ln(1 + its valid negatives), averaged over
+  anchors (single card, no duplicates, N items in cliques of k_c:
+  sum k_c ln(N - k_c + 1) / sum k_c; missing card with P pairs: ln P;
+  odd one out: ln(item size)).
 - `dojo.py` - `ContrastiveDojo`: wires dealer + pair constructor + card
   lookup into `Dojo`. An example is one source deck, so the budget
-  becomes a deck count per batch; a batch with no positive clique of
-  size >= 2 is skipped and logged. It has no trainable parameters.
-  Defaults to `SingleCardInfoNCELoss`; the pair constructor and loss
-  must agree on item shape. An optional `ModPipeline` runs over every
-  item card after the pair constructor builds a batch (identities and
-  positive cliques are kept: a modded card is still the same card);
-  train-only mods run on TRAIN batches only. `mod_tallies()` exposes the
-  mods' tallies, as every `Dojo` does. `baseline_loss(batch)` is the
-  loss's `constant_logit_loss` for that batch: per batch, since the
-  item count follows the trainer's budget and each deck's visible cards,
-  and duplicate cards shrink a batch's negatives.
+  becomes a deck count per batch. A batch whose loss is undefined (the
+  loss raises `DegenerateBatchError`, e.g. one surviving deck) is skipped
+  and logged, so training and evaluation never see one; a malformed batch
+  (any other error from the loss) still raises. It has no trainable
+  parameters. Defaults to `SingleCardInfoNCELoss`. An optional
+  `ModPipeline` runs over every item card after the pair constructor
+  builds a batch (identities and positive cliques are kept: a modded card
+  is still the same card); train-only mods run on TRAIN batches only.
+  `mod_tallies()` exposes the mods' tallies, as every `Dojo` does.
+  `baseline_loss(batch)` is the loss's `constant_logit_loss` for that
+  batch: per batch, since the item count follows the trainer's budget and
+  each deck's visible cards, and duplicate cards shrink a batch's
+  negatives.
 
 Augmentation defaults: `augmentation_defaults.py` (at the top of
 `dojos/`) holds each game's default train-only augmentations as
@@ -244,8 +382,8 @@ mods only remove information and never move a card, so a mask stays masked
 and an option-selection dojo keeps its groups and option order. A run
 config's `mods:` replaces a dojo's defaults (an empty list turns them off).
 
-Not built yet: multi-positive SupCon, a pooling `ContrastiveLoss`
-Decorator, and mixed contrastive + label-based training in one step.
+Not built yet: multi-positive SupCon, and mixed contrastive + label-based
+training in one step.
 
 ## How to run
 

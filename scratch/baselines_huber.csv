@@ -1,0 +1,84 @@
+key,baseline_min,baseline_median,baseline_max,unusable_batches,batches,mean_raw_loss,baseline_seconds,error
+dominiontabs.cost_regression,0.85267,0.85267,0.85267,0,3,1.06325,1.43e-06,
+scryfall.cmc_regression,,,,,,,,ValueError: scryfall.cmc_regression: data\metrics\scryfall\cmc_regression.parquet was built from CardBinder version 'b9e3b23efa82ce3fc32d7c3c566fc496d
+scryfall.power_regression,,,,,,,,ValueError: scryfall.power_regression: data\metrics\scryfall\power_regression.parquet was built from CardBinder version 'b9e3b23efa82ce3fc32d7c3c566fc
+scryfall.toughness_regression,,,,,,,,ValueError: scryfall.toughness_regression: data\metrics\scryfall\toughness_regression.parquet was built from CardBinder version 'b9e3b23efa82ce3fc32d7
+pokemon_tcg.hp_regression,,,,,,,,ValueError: pokemon_tcg.hp_regression: data\metrics\pokemon_tcg\hp_regression.parquet was built from CardBinder version '8975877be73d99bd3aaabb8a04dde
+pokemon_tcg.retreat_cost_regression,,,,,,,,ValueError: pokemon_tcg.retreat_cost_regression: data\metrics\pokemon_tcg\retreat_cost_regression.parquet was built from CardBinder version '8975877be
+cardvault_fabtcg.cost_regression,0.855784,0.855784,0.855784,0,13,0.902966,1.36e-06,
+cardvault_fabtcg.power_regression,0.925723,0.925723,0.925723,0,7,0.980426,1.26e-06,
+cardvault_fabtcg.defense_regression,0.823785,0.823785,0.823785,0,14,0.87082,1.41e-06,
+hearthstonejson.cost_regression,0.897123,0.897123,0.897123,0,20,0.94534,1.49e-06,
+hearthstonejson.attack_regression,0.868621,0.868621,0.868621,0,13,0.89331,3.13e-06,
+hearthstonejson.health_regression,0.867098,0.867098,0.867098,0,13,0.882704,1.39e-06,
+isotropic.average_copies_bought,0.95991,0.95991,0.95991,0,1,1.09608,3e-06,
+isotropic.opening_buy_rate,0.873509,0.873509,0.873509,0,1,0.91853,1.6e-06,
+isotropic.pile_exhaustion_rate,0.730612,0.730612,0.730612,0,1,0.808504,1.7e-06,
+isotropic.turn_count_association,0.78511,0.78511,0.78511,0,1,1.0307,1.3e-06,
+isotropic.kingdom_game_length,0.897008,0.897008,0.897008,0,20,0.897302,1.09e-06,
+isotropic.mid_game_next_turn_action_count,0.674732,0.674732,0.674732,0,20,0.754723,6.4e-07,
+isotropic.veto_rate,0.806865,0.806865,0.806865,0,1,0.819923,1.4e-06,
+isotropic.winning_deck_count,0.803735,0.803735,0.803735,0,20,0.837726,8.8e-07,
+isotropic.deck_card_set_copy_count,0.842753,0.842753,0.842753,0,20,0.88999,1.03e-06,
+sts_gg.ascension_prediction,0.98985,0.98985,0.98985,0,20,1.02212,7.65e-07,
+sts_gg.card_deck_size,0.523029,0.523029,0.523029,0,2,0.548359,1.1e-06,
+sts_gg.card_elites_killed,0.863793,0.863793,0.863793,0,2,0.919708,1.35e-06,
+sts_gg.card_floors_cleared,0.784151,0.784151,0.784151,0,2,0.827149,1.65e-06,
+sts_gg.card_relic_count,0.894688,0.894688,0.894688,0,2,0.911734,1.05e-06,
+sts_gg.card_total_cards_picked,0.853848,0.853848,0.853848,0,2,0.950397,1e-06,
+sts_gg.card_total_combats,0.851531,0.851531,0.851531,0,2,0.898046,1.6e-06,
+sts_gg.card_total_damage_taken,0.917975,0.917975,0.917975,0,2,1.07358,1.7e-06,
+sts_gg.card_total_turns,0.910607,0.910607,0.910607,0,2,0.952335,1.25e-06,
+sts_gg.card_upgrade_rate,0.914371,0.914371,0.914371,0,2,0.970623,1.5e-06,
+sts_gg.elites_killed,0.739762,0.739762,0.739762,0,20,0.630874,8.05e-07,
+sts_gg.floors_cleared,0.943953,0.943953,0.943953,0,20,0.99383,8.4e-07,
+sts_gg.relic_count,0.828002,0.828002,0.828002,0,20,0.829266,7.65e-07,
+sts_gg.total_cards_picked,0.894095,0.894095,0.894095,0,20,0.91336,8.85e-07,
+sts_gg.total_cards_skipped,0.892931,0.892931,0.892931,0,20,0.869978,8.1e-07,
+sts_gg.total_combats,0.903046,0.903046,0.903046,0,20,0.916205,8e-07,
+sts_gg.total_damage_taken,0.890835,0.890835,0.890835,0,20,1.04691,8.65e-07,
+sts_gg.total_turns,0.888545,0.888545,0.888545,0,20,0.825678,8.6e-07,
+sts2_runs.ascension_prediction,0.999857,0.999857,0.999857,0,20,0.811172,7.55e-07,
+sts2_runs.card_deck_size,0.494722,0.494722,0.494722,0,2,0.535202,1.25e-06,
+sts2_runs.card_elites_killed,0.688919,0.688919,0.688919,0,2,0.725331,1.4e-06,
+sts2_runs.card_floors_cleared,0.654487,0.654487,0.654487,0,2,0.679798,1.25e-06,
+sts2_runs.card_relic_count,0.559122,0.559122,0.559122,0,2,0.647128,9.5e-07,
+sts2_runs.card_total_cards_picked,0.638111,0.638111,0.638111,0,2,0.664584,1.05e-06,
+sts2_runs.card_total_combats,0.631086,0.631086,0.631086,0,2,0.7381,1.35e-06,
+sts2_runs.card_total_damage_taken,0.905511,0.905511,0.905511,0,2,0.938042,1.25e-06,
+sts2_runs.card_total_turns,0.611159,0.611159,0.611159,0,2,0.684932,1.15e-06,
+sts2_runs.card_upgrade_rate,0.859135,0.859135,0.859135,0,2,0.971242,9.5e-07,
+sts2_runs.card_win_rate,0.781408,0.781408,0.781408,0,2,0.824298,1.1e-06,
+sts2_runs.card_win_rate_at_act2,0.67363,0.67363,0.67363,0,2,0.706845,1.1e-06,
+sts2_runs.elites_killed,0.94583,0.94583,0.94583,0,20,1.0329,2.94e-06,
+sts2_runs.floors_cleared,0.975629,0.975629,0.975629,0,20,1.08403,8.05e-07,
+sts2_runs.relic_count,0.950882,0.950882,0.950882,0,20,0.943816,7.35e-07,
+sts2_runs.total_cards_picked,0.927023,0.927023,0.927023,0,20,0.943203,7.75e-07,
+sts2_runs.total_cards_skipped,0.914619,0.914619,0.914619,0,20,0.995097,1.09e-06,
+sts2_runs.total_combats,0.976753,0.976753,0.976753,0,20,1.13782,8.2e-07,
+sts2_runs.total_damage_taken,0.910974,0.910974,0.910974,0,20,0.918057,8.2e-07,
+sts2_runs.total_turns,0.959925,0.959925,0.959925,0,20,1.08332,7.45e-07,
+fabtcg_decklists.card_inclusion_rate,0.782826,0.782826,0.782826,0,8,0.843667,1.37e-06,
+play_gwent.card_inclusion_rate,0.83403,0.83403,0.83403,0,4,0.87912,2.03e-06,
+play_gwent.guide_votes,0.874749,0.874749,0.874749,0,20,1.03117,8.45e-07,
+seventeenlands_draft_data.card_take_rate,,,,,,,,ValueError: seventeenlands_draft_data.card_take_rate: data\metrics\seventeenlands\draft_data\slices\card_take_rate.all.parquet was built from CardBind
+seventeenlands_draft_data.first_pick_rate,,,,,,,,ValueError: seventeenlands_draft_data.first_pick_rate: data\metrics\seventeenlands\draft_data\slices\first_pick_rate.all.parquet was built from CardBi
+seventeenlands_draft_data.rank_stratified_take_rate,,,,,,,,ValueError: seventeenlands_draft_data.rank_stratified_take_rate: data\metrics\seventeenlands\draft_data\slices\rank_stratified_take_rate.all.parquet w
+seventeenlands_game_data.win_rate_when_in_deck,,,,,,,,ValueError: seventeenlands_game_data.win_rate_when_in_deck: data\metrics\seventeenlands\game_data\slices\win_rate_when_in_deck.all.parquet was built f
+seventeenlands_game_data.opening_hand_win_rate,,,,,,,,ValueError: seventeenlands_game_data.opening_hand_win_rate: data\metrics\seventeenlands\game_data\slices\opening_hand_win_rate.all.parquet was built f
+seventeenlands_game_data.drawn_win_rate,,,,,,,,ValueError: seventeenlands_game_data.drawn_win_rate: data\metrics\seventeenlands\game_data\slices\drawn_win_rate.all.parquet was built from CardBinder
+seventeenlands_game_data.game_length_association,,,,,,,,ValueError: seventeenlands_game_data.game_length_association: data\metrics\seventeenlands\game_data\slices\game_length_association.all.parquet was bui
+seventeenlands_game_data.on_play_win_rate_delta,,,,,,,,ValueError: seventeenlands_game_data.on_play_win_rate_delta: data\metrics\seventeenlands\game_data\slices\on_play_win_rate_delta.all.parquet was built
+seventeenlands_game_data.tutor_target_rate,,,,,,,,ValueError: seventeenlands_game_data.tutor_target_rate: data\metrics\seventeenlands\game_data\slices\tutor_target_rate.all.parquet was built from Card
+seventeenlands_game_data.tutor_choice_rate,,,,,,,,ValueError: seventeenlands_game_data.tutor_choice_rate: data\metrics\seventeenlands\game_data\slices\tutor_choice_rate.all.parquet was built from Card
+seventeenlands_game_data.deck_game_length_prediction,,,,,,,,ValueError: seventeenlands_game_data.deck_game_length_prediction: data\metrics\seventeenlands\game_data\slices\deck_game_length_prediction.all.parquet
+seventeenlands_game_data.on_play_win_rate_sensitivity_by_deck,,,,,,,,ValueError: seventeenlands_game_data.on_play_win_rate_sensitivity_by_deck: data\metrics\seventeenlands\game_data\slices\on_play_win_rate_sensitivity_b
+seventeenlands_replay_data.average_turn_cast,,,,,,,,ValueError: seventeenlands_replay_data.average_turn_cast: data\metrics\seventeenlands\replay_data\slices\average_turn_cast.all.parquet was built from 
+seventeenlands_replay_data.cast_rate,,,,,,,,ValueError: seventeenlands_replay_data.cast_rate: data\metrics\seventeenlands\replay_data\slices\cast_rate.all.parquet was built from CardBinder versi
+seventeenlands_replay_data.turns_to_game_end_after_cast,,,,,,,,ValueError: seventeenlands_replay_data.turns_to_game_end_after_cast: data\metrics\seventeenlands\replay_data\slices\turns_to_game_end_after_cast.all.p
+seventeenlands_replay_data.discard_rate,,,,,,,,ValueError: seventeenlands_replay_data.discard_rate: data\metrics\seventeenlands\replay_data\slices\discard_rate.all.parquet was built from CardBinder
+seventeenlands_replay_data.tutor_target_rate,,,,,,,,ValueError: seventeenlands_replay_data.tutor_target_rate: data\metrics\seventeenlands\replay_data\slices\tutor_target_rate.all.parquet was built from 
+seventeenlands_replay_data.combat_kill_involvement_rate,,,,,,,,ValueError: seventeenlands_replay_data.combat_kill_involvement_rate: data\metrics\seventeenlands\replay_data\slices\combat_kill_involvement_rate.all.p
+seventeenlands_replay_data.combat_damage_push_through_rate,,,,,,,,ValueError: seventeenlands_replay_data.combat_damage_push_through_rate: data\metrics\seventeenlands\replay_data\slices\combat_damage_push_through_rate
+seventeenlands_replay_data.combat_aggression_profile,,,,,,,,FileNotFoundError: no deck box at data\metrics\seventeenlands\replay_data\deck_box.db; run scripts/run_metrics.py for the metric source that writes it
+seventeenlands_replay_data.attacker_blocker_combat_outcome,,,,,,,,ArrowInvalid: Parquet file size is 4 bytes; smaller than the minimum file footer (8 bytes)

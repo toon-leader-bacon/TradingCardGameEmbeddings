@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.dojos.contrastive.pair_constructor import SingleCardPairConstructor
+from src.dojos.contrastive.styles.single_card import SingleCardPairConstructor
 from src.dojos.contrastive.staple_subsampling import (
     DocumentFrequency,
     StapleSubsampling,

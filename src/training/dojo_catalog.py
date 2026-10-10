@@ -47,7 +47,13 @@ from src.data_refinement.metrics.sts2_runs import deck_label_metrics as sts2_dec
 from src.data_refinement.metrics.sts_gg.deck_box_path import STS_GG_DECK_BOX_PATH
 from src.dojos.augmentation_defaults import default_augmentations_for
 from src.dojos.contrastive.dojo import ContrastiveDojo
-from src.dojos.contrastive.pair_constructor import SingleCardPairConstructor
+from src.dojos.contrastive.contrastive_style import ContrastiveStyle
+from src.dojos.contrastive.styles.card_in_contexts import CardInContextsStyle
+from src.dojos.contrastive.styles.cross_slice_card import CrossSliceCardStyle
+from src.dojos.contrastive.styles.missing_card import MissingCardStyle
+from src.dojos.contrastive.styles.odd_one_out import OddOneOutStyle
+from src.dojos.contrastive.styles.slice_match import SliceMatchStyle
+from src.dojos.contrastive.styles.single_card import SingleCardStyle
 from src.dojos.contrastive.staple_subsampling import (
     StapleSubsampling,
     cached_document_frequency,
@@ -143,6 +149,26 @@ from src.schema.holdout import HoldoutSpec
 
 # Contrastive dojos keep their deck split index here (see DeckBoxDealer)
 _CONTRASTIVE_INDEX_DIRECTORY = Path("data/splits/contrastive")
+
+# Games with a final deck box, so each can have contrastive dojos
+_CONTRASTIVE_GAMES = (
+    GameId.GWENT,
+    GameId.FLESH_AND_BLOOD,
+    GameId.SLAY_THE_SPIRE_2,
+    GameId.MTG,
+    GameId.POKEMON,
+    GameId.DOMINION,
+)
+
+# Each contrastive style's catalog key prefix (see src/dojos/README.md)
+_CONTRASTIVE_STYLES: Mapping[str, ContrastiveStyle] = {
+    "contrastive": SingleCardStyle(),
+    "contrastive_missing_card": MissingCardStyle(),
+    "contrastive_odd_one_out": OddOneOutStyle(),
+    "contrastive_cross_slice": CrossSliceCardStyle(),
+    "contrastive_slice_match": SliceMatchStyle(),
+    "contrastive_card_in_contexts": CardInContextsStyle(),
+}
 
 # TRAIN decks a staple-subsampling document frequency is counted over
 _DOCUMENT_FREQUENCY_SAMPLE_DECKS = 20_000
@@ -253,8 +279,8 @@ class DojoBuildContext:
 
     shelf: loaded card data. holdout: the plan's HoldoutSpec (the trainer
     requires every dojo to share it). card_embedding_size: the model's
-    embed_dim. rng_seed: seeds each dojo's split shuffling, so a first
-    split build is reproducible. mod_overrides: per dojo name,
+    output embedding width. rng_seed: seeds each dojo's split shuffling, so
+    a first split build is reproducible. mod_overrides: per dojo name,
     augmentation specs replacing that dojo's game defaults (an empty tuple
     means no augmentation); build_dojos rejects a name that is not built,
     and a deck spec on a dojo or group DECK_MOD_GROUPS does not allow.
@@ -420,17 +446,18 @@ class DeckDojoRecipe:
 
 @dataclass(frozen=True)
 class ContrastiveDojoRecipe:
-    """A single-card contrastive dojo over one game's final deck box:
-    positives are cards drawn from the same deck.
+    """A contrastive dojo over one game's final deck box, in one
+    contrastive style (contrastive_style.py).
 
     game: whose binder and deck box. deck_box_path: the game's
-    data/final/decks/<game>.db. items_per_deck / decks_per_sample: see
-    SingleCardPairConstructor / ContrastiveDojo.
+    data/final/decks/<game>.db. style: builds the matched pair
+    constructor and loss (default: single cards, every same-deck card a
+    positive). decks_per_sample: see ContrastiveDojo.
     """
 
     game: GameId
     deck_box_path: Path
-    items_per_deck: int = 2
+    style: ContrastiveStyle = SingleCardStyle()
     decks_per_sample: int = 16
 
     def build(self, name: str, context: DojoBuildContext) -> Dojo:
@@ -447,10 +474,9 @@ class ContrastiveDojoRecipe:
             _contrastive_index_path(name),
             seed=context.rng_seed,
         )
-        pair_constructor = SingleCardPairConstructor(
-            self.items_per_deck,
-            rng_seed=context.rng_seed,
-            staple_subsampling=_staple_subsampling(name, dealer, context),
+        # The style builds the pair constructor and loss as a matched set
+        pair_constructor = self.style.pair_constructor(
+            context.rng_seed, _staple_subsampling(name, dealer, context)
         )
         return ContrastiveDojo(
             dealer,
@@ -458,6 +484,7 @@ class ContrastiveDojoRecipe:
             binder,
             context.holdout,
             decks_per_sample=self.decks_per_sample,
+            contrastive_loss=self.style.contrastive_loss(),
             name=name,
             mod_pipeline=_augmentation_pipeline(name, self.game, context),
         )
@@ -527,14 +554,16 @@ def _with_augmentations(
     return dojo
 
 
-def _recipe_for_contrastive(game: GameId) -> ContrastiveDojoRecipe:
+def _recipe_for_contrastive(
+    game: GameId, style: ContrastiveStyle = SingleCardStyle()
+) -> ContrastiveDojoRecipe:
     """The contrastive recipe over game's final deck box, at
-    DeckBox.default_output_path(game).
+    DeckBox.default_output_path(game), in style.
 
-    Inputs: game. Output: ContrastiveDojoRecipe. Side effects: none.
-    Exceptions: none.
+    Inputs: game, style (default: single cards). Output:
+    ContrastiveDojoRecipe. Side effects: none. Exceptions: none.
     """
-    return ContrastiveDojoRecipe(game, DeckBox.default_output_path(game))
+    return ContrastiveDojoRecipe(game, DeckBox.default_output_path(game), style)
 
 
 def _recipe_for_gwent_one(dojo_class: CardDojoConstructor) -> CardDojoRecipe:
@@ -1053,12 +1082,14 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
     "seventeenlands_replay_data.attacker_blocker_combat_outcome": (
         _recipe_for_seventeenlands_card(AttackerBlockerCombatOutcomeDojo)
     ),
-    "contrastive.gwent": _recipe_for_contrastive(GameId.GWENT),
-    "contrastive.flesh_and_blood": _recipe_for_contrastive(GameId.FLESH_AND_BLOOD),
-    "contrastive.slay_the_spire_2": _recipe_for_contrastive(GameId.SLAY_THE_SPIRE_2),
-    "contrastive.mtg": _recipe_for_contrastive(GameId.MTG),
-    "contrastive.pokemon": _recipe_for_contrastive(GameId.POKEMON),
-    "contrastive.dominion": _recipe_for_contrastive(GameId.DOMINION),
+    # Contrastive dojos: one key per (style, game), "<prefix>.<game>".
+    # (each style in src/dojos/contrastive/styles/; "contrastive" is
+    # single cards)
+    **{
+        f"{prefix}.{game.value}": _recipe_for_contrastive(game, style)
+        for prefix, style in _CONTRASTIVE_STYLES.items()
+        for game in _CONTRASTIVE_GAMES
+    },
 }
 
 

@@ -1,14 +1,18 @@
 import contextlib
 import hashlib
 import random
+import re
+import shutil
+import tempfile
 from pathlib import Path
-from typing import List
+from typing import Iterator, List
 
 import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from src.dojos.file_managers.bucket_shuffle import ShufflePlan, scatter_into_buckets
 from src.schema.splits import Split
 from src.schema.ttv_splits import TTVSplits
 
@@ -17,17 +21,135 @@ MAX_INT = 2**31 - 1
 # Split file order written by make_splits (see _split_file_postfix).
 _SPLIT_INDEX = {Split.TRAIN: 0, Split.TEST: 1, Split.VALIDATION: 2}
 
+# Schema metadata every split file make_splits writes carries: its rows are
+# in uniformly random order. splits_exist() treats a file without it (an
+# older, order-preserving split) as missing, so it is rebuilt.
+_SPLIT_ORDER_KEY = b"nocab_split_order"
+_UNIFORM_SHUFFLE = b"uniform_shuffle"
+
+# Uncompressed bytes per shuffle bucket: one bucket is in memory at a time,
+# a few copies of it while it is shuffled and written
+_DEFAULT_BUCKET_BYTES = 256 * 2**20
+
+# Rows per row group in a split file. A reader decodes one row group at a
+# time, so this bounds each open reader's memory (one per dojo in a run)
+_SPLIT_ROW_GROUP_ROWS = 8_000
+
+# make_splits' temporaries (bucket directories, partial split files) live in
+# this subdirectory of the output directory, out of the way of the splits
+# and on the same disk, so a partial file is renamed into place, not copied
+_SHUFFLE_TEMP_DIRECTORY = ".shuffle_tmp"
+_PARTIAL = ".partial"
+_BUCKETS = "_buckets_"
+
+# The single list of named split-file postfixes, by split index; any later
+# index is "split_<index>". _split_file_postfix and _SPLIT_FILE_NAME both
+# derive from it
+_NAMED_POSTFIXES = ("train", "test", "validation")
+
+# A split file's name, given its escaped prefix (see _split_file_postfix)
+_SPLIT_FILE_NAME = (
+    r"{}_(?:" + "|".join(map(re.escape, _NAMED_POSTFIXES)) + r"|split_\d+)\.parquet"
+)
+
 
 def _split_file_postfix(split_index: int) -> str:
     """Filename postfix for one split file.
 
     Inputs: split_index (int), position in make_splits' split_ratios.
-    Output: str, "train"/"test"/"validation" for 0/1/2, else
-        "split_{index}".
+    Output: str, _NAMED_POSTFIXES[split_index] ("train"/"test"/
+        "validation" for 0/1/2), else "split_{index}".
     Side effects: none. Exceptions: none.
     """
-    names = {0: "train", 1: "test", 2: "validation"}
-    return names.get(split_index, f"split_{split_index}")
+    if split_index < len(_NAMED_POSTFIXES):
+        return _NAMED_POSTFIXES[split_index]
+    return f"split_{split_index}"
+
+
+def _is_split_file_name(name: str, prefix: str) -> bool:
+    """Whether name is exactly a split file of prefix,
+    "<prefix>_<postfix>.parquet" with a _split_file_postfix postfix. Exact,
+    so prefix "a.win_rate" never claims "a.win_rate_at_act2_train.parquet"
+    (another dojo's split).
+
+    Inputs: name (a file name), prefix. Output: bool.
+    Side effects: none. Exceptions: none.
+
+    Example:
+        >>> _is_split_file_name("x_train.parquet", "x")
+        True
+        >>> _is_split_file_name("x_y_train.parquet", "x")
+        False
+    """
+    return re.fullmatch(_SPLIT_FILE_NAME.format(re.escape(prefix)), name) is not None
+
+
+def _read_whole(path: Path) -> pd.DataFrame:
+    """A whole parquet file (a bucket, or a source small enough for one
+    bucket) as a DataFrame with ArrowDtype columns, so nullable ints keep
+    their nulls (see ParquetChunkReader.__next__).
+
+    Inputs: path. Output: pd.DataFrame. Side effects: reads the file.
+    Exceptions: whatever pyarrow raises for a missing or corrupt file.
+    """
+    return pq.read_table(path).to_pandas(types_mapper=pd.ArrowDtype)
+
+
+def _partial_path_of(split_path: Path) -> Path:
+    """Where make_splits writes split_path before it is complete:
+    "<name>.partial" in the output directory's _SHUFFLE_TEMP_DIRECTORY,
+    where neither splits_exist() nor the split-file cleanup looks.
+
+    Inputs: split_path. Output: Path. Side effects: none. Exceptions: none.
+
+    Example:
+        >>> _partial_path_of(Path("out/x_train.parquet"))
+        PosixPath('out/.shuffle_tmp/x_train.parquet.partial')
+    """
+    return split_path.parent / _SHUFFLE_TEMP_DIRECTORY / f"{split_path.name}{_PARTIAL}"
+
+
+@contextlib.contextmanager
+def _deleted_on_failure(paths: List[Path]) -> Iterator[None]:
+    """Context manager: if the block raises any BaseException (so Ctrl-C's
+    KeyboardInterrupt too, not only Exception), delete whichever of paths
+    exist, then re-raise; on success, keep them.
+
+    Inputs: paths. Output: a context manager yielding None.
+    Side effects: on failure, deletes files.
+    Exceptions: re-raises the block's exception.
+    """
+    try:
+        yield
+    except BaseException:
+        for path in paths:
+            path.unlink(missing_ok=True)
+        raise
+
+
+def _remove_if_empty(directory: Path) -> None:
+    """Delete directory if it is empty (make_splits' temporary directory
+    after a clean run); leave it otherwise.
+
+    Inputs: directory (exists). Output: none.
+    Side effects: may delete the directory. Exceptions: none.
+    """
+    if not any(directory.iterdir()):
+        directory.rmdir()
+
+
+def _has_uniform_order(split_path: Path) -> bool:
+    """Whether split_path exists and its schema metadata carries
+    _SPLIT_ORDER_KEY: _UNIFORM_SHUFFLE (written by the current make_splits).
+
+    Inputs: split_path. Output: bool (False for a missing file).
+    Side effects: reads the file's footer.
+    Exceptions: whatever pyarrow raises for a corrupt file.
+    """
+    if not split_path.exists():
+        return False
+    metadata = pq.read_schema(split_path).metadata or {}
+    return metadata.get(_SPLIT_ORDER_KEY) == _UNIFORM_SHUFFLE
 
 
 def _group_split_positions(
@@ -140,7 +262,8 @@ class FileManagerParquet:
         Output: none (constructor).
         Side effects: opens path_to_training_data as a pyarrow ParquetFile
             to confirm it's actually readable, and caches its schema on
-            self._schema for reuse by _stream_source_into_splits.
+            self._schema (the bucket files' schema, and the split files'
+            before _split_schema adds its stamp).
         Exceptions:
             FileNotFoundError if path_to_training_data doesn't exist.
             ValueError if it doesn't have a .parquet suffix, is empty, or
@@ -153,8 +276,8 @@ class FileManagerParquet:
         self.output_directory = output_directory
         self.output_file_prefix = output_file_prefix
         self._split_group_column = split_group_column
-        # From seed directly, not self.rng, so row-by-row shuffles stay
-        # exactly what they were before group splits existed.
+        # From seed directly, not self.rng: a group's split depends only on
+        # (seed, value), never on how many shuffle draws came before.
         self._group_salt = str(seed) if seed is not None else str(random.random())
 
         if not self.path_to_training_data.exists():
@@ -190,62 +313,126 @@ class FileManagerParquet:
         caller (e.g. GenericDojo's version-metadata check) can read it
         without reaching into a private attribute or re-opening the
         file. Every split file make_splits() writes carries this same
-        schema (metadata included), since _stream_source_into_splits
-        constructs each split's ParquetWriter with self._schema
-        directly.
+        schema plus one metadata key, _SPLIT_ORDER_KEY (_split_schema).
         """
         return self._schema
+
+    @property
+    def _split_schema(self) -> pa.Schema:
+        """self._schema with _SPLIT_ORDER_KEY: _UNIFORM_SHUFFLE added to its
+        metadata; what every split file is written with.
+
+        Inputs: none. Output: pa.Schema. Side effects: none.
+        Exceptions: none.
+        """
+        metadata = dict(self._schema.metadata or {})
+        metadata[_SPLIT_ORDER_KEY] = _UNIFORM_SHUFFLE
+        return self._schema.with_metadata(metadata)
+
+    @property
+    def _shuffle_temp_directory(self) -> Path:
+        """output_directory / _SHUFFLE_TEMP_DIRECTORY, where make_splits'
+        temporaries live. Inputs: none. Output: Path. Side effects: none.
+        Exceptions: none."""
+        return self.output_directory / _SHUFFLE_TEMP_DIRECTORY
 
     def make_splits(
         self,
         split_ratios: List[float] = [8, 1, 1],
         delete_old_splits: bool = True,
-        shuffle: bool = True,
         batch_size: int = 32,
         load_row_group_batch_size: int = 10_000,
+        bucket_bytes: int = _DEFAULT_BUCKET_BYTES,
     ) -> List[ParquetChunkReader]:
-        """Stream the source parquet file in row-group batches, split each
-        batch by ratio, append each slice to the matching split's parquet
-        file, then return one ParquetChunkReader per split.
+        """Write the source's rows, in uniformly random order, into one
+        parquet file per split, then return a ParquetChunkReader per split.
+
+        The shuffle is over the whole file in bounded memory: a source
+        bigger than bucket_bytes in memory is first scattered into
+        temporary bucket files at random (bucket_shuffle.py), then each
+        bucket is shuffled whole and appended to the splits; a smaller one
+        is shuffled whole directly. Rows split by ratio, or by
+        split_group_column's hash (_split_slices).
+
+        A stamped split file is always a complete one: the splits are
+        written as partial files in output_directory/.shuffle_tmp and
+        renamed into place only after every one of them finished. A
+        failure (or Ctrl-C) while writing deletes the partial files and
+        leaves the old splits untouched. A failure or kill while swapping
+        (deleting the old splits, then renaming) can leave a final name
+        missing and partial files behind; splits_exist() is then False,
+        and the next build sweeps the partials and starts over.
 
         Inputs:
             split_ratios: unnormalized ratios, see TTVSplits.from_unnormalized.
-            delete_old_splits: remove pre-existing split files first.
-            shuffle: shuffle the rows within each streamed batch before
-                splitting (this shuffles within a batch, not across the
-                whole file).
+            delete_old_splits: also remove this prefix's other split files
+                ("<prefix>_split_3.parquet" from an older 4-way split); the
+                splits being replaced always go.
             batch_size: rows per chunk in the returned readers.
-            load_row_group_batch_size: rows read from the source file at
-                a time while streaming.
+            load_row_group_batch_size: the fewest source rows read per
+                scatter step (>= 1; ShufflePlan raises it for many
+                buckets).
+            bucket_bytes: Arrow (in-memory) bytes per bucket (> 0),
+                estimated from a sample of rows; bounds memory.
         Output: one ParquetChunkReader per split, in split_ratios order.
-        Side effects: creates/overwrites this instance's split files under
-            output_directory.
-        Exceptions: whatever pyarrow raises for a malformed source file.
+        Side effects: replaces this instance's split files under
+            output_directory, each stamped _SPLIT_ORDER_KEY; creates and
+            removes partial files and a bucket directory in
+            output_directory/.shuffle_tmp (the directory too, once empty),
+            and removes this prefix's temporaries a killed earlier run left.
+        Exceptions: ValueError if bucket_bytes <= 0 or
+            load_row_group_batch_size < 1; whatever pyarrow raises for a
+            malformed source file; OSError if an old split cannot be
+            deleted or a partial file renamed (e.g. an old split still
+            open in a reader, on Windows).
 
-        Composed of: _prepare_split_output_files, then
-        _stream_source_into_splits (which itself calls
-        _write_batch_to_splits per streamed batch).
+        Example:
+            >>> readers = FileManagerParquet(source, out, seed=0).make_splits([8, 1, 1])
+            >>> len(readers)
+            3
         """
+        result: List[ParquetChunkReader]
+
+        # Plan the shuffle from a sample of the source (validates the sizes)
         splits: TTVSplits = TTVSplits.from_unnormalized(split_ratios)
-        output_paths = self._prepare_split_output_files(
-            splits.num_splits, delete_old_splits
+        plan = ShufflePlan.for_source(
+            pq.ParquetFile(self.path_to_training_data),
+            bucket_bytes,
+            load_row_group_batch_size,
         )
-        self._stream_source_into_splits(
-            output_paths, splits, shuffle, load_row_group_batch_size
-        )
-        return [ParquetChunkReader(path, batch_size) for path in output_paths]
+
+        # Write every split under its partial name (deleted on failure)
+        self._shuffle_temp_directory.mkdir(parents=True, exist_ok=True)
+        self._remove_stale_temporaries()
+        final_paths = [self._split_path(index) for index in range(splits.num_splits)]
+        partial_paths = [_partial_path_of(path) for path in final_paths]
+        self._write_shuffled_splits(partial_paths, splits, plan)
+
+        # Only now replace the old splits: the stamp implies "complete"
+        self._delete_old_splits(final_paths, every_prefixed_file=delete_old_splits)
+        for partial_path, final_path in zip(partial_paths, final_paths):
+            partial_path.replace(final_path)
+        _remove_if_empty(self._shuffle_temp_directory)
+        result = [ParquetChunkReader(path, batch_size) for path in final_paths]
+        return result
 
     def splits_exist(self) -> bool:
         """Whether this instance's train/test/validation split files are
-        already on disk under output_directory/output_file_prefix.
+        on disk under output_directory/output_file_prefix, written by the
+        current make_splits (stamped _SPLIT_ORDER_KEY: _UNIFORM_SHUFFLE).
 
-        Output: True only if all three split files exist. False if any
-            are missing (including "make_splits has never run for this
-            output_directory/output_file_prefix").
-        Side effects: none (stats the files, does not read them).
-        Exceptions: none.
+        Output: True only if all three split files exist and are stamped.
+            False if any is missing (including "make_splits has never run
+            for this output_directory/output_file_prefix") or unstamped (an
+            older split that kept the source's order, rebuilt by the
+            caller).
+        Side effects: reads each split file's footer (schema metadata).
+        Exceptions: whatever pyarrow raises for a corrupt split file.
         """
-        return all(self._split_path(index).exists() for index in _SPLIT_INDEX.values())
+        return all(
+            _has_uniform_order(self._split_path(index))
+            for index in _SPLIT_INDEX.values()
+        )
 
     def reader_for(self, split: Split, batch_size: int = 32) -> ParquetChunkReader:
         """Open a fresh chunked reader over one already-written split file.
@@ -319,7 +506,10 @@ class FileManagerParquet:
 
         Reads with dtype_backend="pyarrow" (ArrowDtype columns) so the
         shuffle-and-rewrite round trip can't drift the file's on-disk
-        schema away from self._schema over repeated epochs.
+        schema away from self._schema over repeated epochs. Note: the
+        rewrite drops make_splits' _SPLIT_ORDER_KEY stamp (and its row-group
+        size), so splits_exist() then reports the splits missing and the
+        next dojo build re-splits. Only tests call it today.
         """
         target_file = self._split_path(split_index)
         df = pd.read_parquet(target_file, dtype_backend="pyarrow")
@@ -329,126 +519,154 @@ class FileManagerParquet:
         df.to_parquet(target_file, index=False)
         return ParquetChunkReader(target_file, batch_size)
 
-    def _prepare_split_output_files(
-        self, num_splits: int, delete_old_splits: bool = True
-    ) -> List[Path]:
-        """Compute each split's output path, deleting any pre-existing
-        split files first when requested.
-
-        Inputs:
-            num_splits: how many split files to plan for.
-            delete_old_splits: remove files matching this instance's
-                output_file_prefix under output_directory first.
-        Output: one Path per split, in split order (not yet written to —
-            parquet has no header row to pre-write), named via
-            _split_file_postfix.
-        Side effects: creates output_directory if missing; deletes old
-            split files when delete_old_splits is True.
-        Exceptions: none expected.
-        """
-        self.output_directory.mkdir(parents=True, exist_ok=True)
-        if delete_old_splits:
-            for path in self.output_directory.glob(
-                f"{self.output_file_prefix}*.parquet"
-            ):
-                path.unlink()
-        return [
-            self.output_directory
-            / f"{self.output_file_prefix}_{_split_file_postfix(i)}.parquet"
-            for i in range(num_splits)
-        ]
-
-    def _stream_source_into_splits(
-        self,
-        output_paths: List[Path],
-        splits: TTVSplits,
-        shuffle: bool,
-        load_row_group_batch_size: int,
+    def _delete_old_splits(
+        self, final_paths: List[Path], every_prefixed_file: bool
     ) -> None:
-        """Stream self.path_to_training_data in row-group batches and
-        write each batch's split-ratio slices into the matching split's
-        parquet file.
+        """Remove the split files about to be replaced plus all three
+        standard train/test/validation paths (so a one-split run never
+        leaves an older stamped test file beside its new train file), and
+        with every_prefixed_file, every other split file of this prefix
+        (_is_split_file_name: exact names, so another dojo whose name
+        starts with this prefix keeps its splits).
 
-        A ParquetWriter is a stateful resource — it only writes a valid
-        parquet footer once closed, so a writer left open after an
-        exception produces a corrupt, unreadable file. This method opens
-        every split's writer through a single contextlib.ExitStack, so
-        all of them are guaranteed to close together on the way out,
-        success or failure — the parquet analog of CSV's simpler
-        to_csv(mode="a") append, since parquet can't be appended to
-        directly.
-
-        Inputs:
-            output_paths: this instance's split file paths, in split order.
-            splits: precomputed split ratios/indices.
-            shuffle: shuffle each streamed batch's rows before slicing.
-            load_row_group_batch_size: rows read from the source file at
-                a time while streaming.
-        Output: none.
-        Side effects: creates/writes every path in output_paths.
-        Exceptions: whatever pyarrow raises for a malformed source file.
-
-        Calls _write_batch_to_splits once per streamed batch.
+        Private helper - single caller is make_splits(), after the new
+        splits are complete.
+        Inputs: final_paths (this run's split paths), every_prefixed_file.
+        Output: none. Side effects: deletes files. Exceptions: OSError if
+            a file cannot be deleted.
         """
-        source_file = pq.ParquetFile(self.path_to_training_data)
-        with contextlib.ExitStack() as stack:
+        doomed = set(final_paths)
+        doomed.update(self._split_path(index) for index in _SPLIT_INDEX.values())
+        if every_prefixed_file:
+            doomed.update(
+                path
+                for path in self.output_directory.iterdir()
+                if _is_split_file_name(path.name, self.output_file_prefix)
+            )
+        for path in doomed:
+            path.unlink(missing_ok=True)
+
+    def _remove_stale_temporaries(self) -> None:
+        """Delete what a killed earlier make_splits left in
+        output_directory/.shuffle_tmp (an exception already removes its
+        own): this prefix's "<prefix>_buckets_*" directories (many GB for
+        the 17lands sources) and partial split files.
+
+        Private helper - single caller is make_splits().
+        Inputs: none. Output: none. Side effects: deletes directories and
+            files.
+        Exceptions: OSError if one cannot be deleted.
+        """
+        prefix = self.output_file_prefix
+        for entry in self._shuffle_temp_directory.iterdir():
+            if entry.is_dir() and entry.name.startswith(f"{prefix}{_BUCKETS}"):
+                shutil.rmtree(entry)
+            elif entry.name.endswith(_PARTIAL) and _is_split_file_name(
+                entry.name.removesuffix(_PARTIAL), prefix
+            ):
+                entry.unlink()
+
+    def _write_shuffled_splits(
+        self, output_paths: List[Path], splits: TTVSplits, plan: ShufflePlan
+    ) -> None:
+        """Pass 2 of the shuffle: every bucket (or the whole source, for a
+        one-bucket plan) loaded, shuffled whole and appended to the splits.
+
+        A ParquetWriter only writes a valid footer once closed, so every
+        split writer, and the temporary bucket directory, is opened through
+        one contextlib.ExitStack: all close (and the buckets are deleted)
+        on the way out, success or failure. On failure the files at
+        output_paths are deleted too (_deleted_on_failure): a closed
+        writer's file is valid and stamped, but incomplete.
+
+        Private helper - single caller is make_splits().
+        Inputs: output_paths (the splits' partial paths, in split order),
+            splits, plan.
+        Output: none.
+        Side effects: writes every path in output_paths (deleting them on
+            failure); for a plan of more than one bucket, creates bucket
+            files in a temporary directory under output_directory and
+            removes it.
+        Exceptions: whatever pyarrow raises for a malformed source file.
+        """
+        with _deleted_on_failure(output_paths), contextlib.ExitStack() as stack:
             writers = [
-                stack.enter_context(pq.ParquetWriter(path, self._schema))
+                stack.enter_context(pq.ParquetWriter(path, self._split_schema))
                 for path in output_paths
             ]
-            for record_batch in source_file.iter_batches(
-                batch_size=load_row_group_batch_size
-            ):
-                batch = record_batch.to_pandas(types_mapper=pd.ArrowDtype)
-                self._write_batch_to_splits(batch, writers, splits, shuffle)
 
-    def _write_batch_to_splits(
+            # A source that fits in one bucket is shuffled whole, no buckets
+            if plan.bucket_count == 1:
+                source = _read_whole(self.path_to_training_data)
+                self._write_bucket_to_splits(source, writers, splits)
+                return
+
+            # Pass 1: scatter rows into buckets at random (same disk as the
+            # splits; the system temp drive may be too small)
+            bucket_directory = Path(
+                stack.enter_context(
+                    tempfile.TemporaryDirectory(
+                        dir=self._shuffle_temp_directory,
+                        prefix=f"{self.output_file_prefix}{_BUCKETS}",
+                    )
+                )
+            )
+            bucket_paths = scatter_into_buckets(
+                self.path_to_training_data,
+                plan,
+                self._schema,
+                bucket_directory,
+                seed=self.rng.randint(0, MAX_INT),
+            )
+
+            # Pass 2: each bucket shuffled whole, then split
+            for bucket_path in bucket_paths:
+                bucket = _read_whole(bucket_path)
+                self._write_bucket_to_splits(bucket, writers, splits)
+
+    def _write_bucket_to_splits(
         self,
-        batch: pd.DataFrame,
+        bucket: pd.DataFrame,
         writers: List[pq.ParquetWriter],
         splits: TTVSplits,
-        shuffle: bool,
     ) -> None:
-        """Split one streamed batch by ratio and write each non-empty
-        slice to its corresponding open writer.
+        """Shuffle one whole bucket (or source), cut it into its per-split
+        rows (_split_slices: by ratio, or by group hash), and write each
+        non-empty slice to its open writer in row groups of
+        _SPLIT_ROW_GROUP_ROWS.
 
         Inputs:
-            batch: one row-group-sized chunk read from the source file.
+            bucket: one bucket's rows (or the whole source's), ArrowDtype
+                columns.
             writers: this instance's open per-split writers, same order
                 as splits.
-            splits: precomputed split ratios/indices for this batch.
-            shuffle: shuffle batch's rows before slicing.
+            splits: precomputed split ratios/indices.
         Output: none.
-        Side effects: writes to each writer in `writers`.
+        Side effects: writes to each writer in `writers`; advances self.rng.
         Exceptions: pyarrow.lib.ArrowInvalid if a slice's dtypes can't be
-            cast to self._schema — shouldn't occur in normal use, since
-            `batch` arrives with ArrowDtype columns (see
-            _stream_source_into_splits) that already match the source
-            schema exactly, nulls included.
+            cast to self._split_schema — shouldn't occur in normal use,
+            since `bucket` arrives with ArrowDtype columns (_read_whole)
+            that already match the source schema exactly, nulls included.
         """
-        if shuffle:
-            batch = batch.sample(
-                frac=1,
-                random_state=self.rng.randint(0, MAX_INT),
-            ).reset_index(drop=True)
-
-        for i, slice_df in enumerate(self._split_slices(batch, splits)):
+        shuffled = bucket.sample(
+            frac=1, random_state=self.rng.randint(0, MAX_INT)
+        ).reset_index(drop=True)
+        for writer, slice_df in zip(writers, self._split_slices(shuffled, splits)):
             if slice_df.empty:
                 continue
-            writers[i].write_table(
+            writer.write_table(
                 pa.Table.from_pandas(
-                    slice_df,
-                    schema=self._schema,
-                    preserve_index=False,
-                )
+                    slice_df, schema=self._split_schema, preserve_index=False
+                ),
+                row_group_size=_SPLIT_ROW_GROUP_ROWS,
             )
 
     def _split_slices(
         self, batch: pd.DataFrame, splits: TTVSplits
     ) -> List[pd.DataFrame]:
-        """One batch cut into its per-split rows.
+        """One bucket cut into its per-split rows.
 
-        Inputs: batch (already shuffled if requested), splits.
+        Inputs: batch (a whole bucket, already shuffled), splits.
         Output: one DataFrame per split, in split order (possibly
             empty). Row by row: contiguous slices by ratio. With a
             split group column: each row goes where its group hashes

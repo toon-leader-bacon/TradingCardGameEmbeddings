@@ -112,7 +112,7 @@ def build_encoders(args: argparse.Namespace) -> list[EncoderUnderTest]:
     extrinsic dojo heads follow it there (Trainer.run moves them)."""
     result: list[EncoderUnderTest] = []
     if args.single_checkpoint:
-        model = LinearProjectionCardModel(embed_dim=_EMBED_DIM)
+        model = LinearProjectionCardModel(card_embedding_size=_EMBED_DIM)
         load_encoder_weights(args.single_checkpoint, model)
         model.to(args.device)
         result.append(EncoderUnderTest("single", model, args.single_checkpoint))
@@ -123,7 +123,7 @@ def build_encoders(args: argparse.Namespace) -> list[EncoderUnderTest]:
         result.append(EncoderUnderTest("multi", multi, args.multi_checkpoint))
     # The untrained baseline: same architecture, pretrained text encoder,
     # randomly initialised head - what training has to beat
-    untrained = LinearProjectionCardModel(embed_dim=_EMBED_DIM)
+    untrained = LinearProjectionCardModel(card_embedding_size=_EMBED_DIM)
     untrained.to(args.device)
     result.append(EncoderUnderTest("untrained", untrained, None))
     return result

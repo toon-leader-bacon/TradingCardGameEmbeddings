@@ -187,6 +187,21 @@ def test_multi_card_model_contextualizes_within_a_multi_card_input() -> None:
     assert not _close(in_deck_ab, alone)
 
 
+@pytest.mark.parametrize("make_model", MODELS)
+def test_a_group_is_permutation_equivariant(make_model: Any) -> None:
+    """Reordering a group's cards only reorders its embeddings. The odd-one-
+    out and card-in-contexts contrastive styles put their intruder and
+    anchor at a fixed position (see ContrastiveBatch); a positional
+    encoding would leak that position, so this test must then fail."""
+    model = make_model()
+    with torch.no_grad():
+        in_order = model.forward_multi_card([A, B, C, D])
+        reordered = model.forward_multi_card([D, B, A, C])
+
+    for original, moved in ((0, 2), (1, 1), (2, 3), (3, 0)):
+        assert _close(in_order[original], reordered[moved])
+
+
 def test_multi_card_model_batched_decks_never_see_each_other() -> None:
     model = _multi_model()
     with torch.no_grad():
@@ -238,7 +253,9 @@ def test_encoder_only_state_dict_is_every_weight(make_model: Any) -> None:
 
 def test_gradients_flow_through_batched_single_cards() -> None:
     model = _multi_model().train()
-    loss = torch.stack(model([A, B])).sum()  # type: ignore[arg-type]
+    embeddings = torch.stack(model([A, B]))  # type: ignore[arg-type]
+    # A plain sum is constant: normalized embeddings sum to 0
+    loss = (embeddings * torch.arange(embeddings.shape[-1])).sum()
 
     loss.backward()
 
@@ -367,6 +384,28 @@ def test_every_head_reports_the_width_it_produces(head: EmbeddingHead) -> None:
     assert head(encoding).shape == (2, 5)
 
 
+@pytest.mark.parametrize(
+    "head",
+    [
+        LinearEmbeddingHead(HIDDEN, 5),
+        ResidualMlpEmbeddingHead(HIDDEN, 5, hidden_dim=4, num_blocks=1),
+        AttentionPoolingEmbeddingHead(HIDDEN, 5),
+    ],
+)
+def test_every_head_outputs_a_fixed_scale_embedding(head: EmbeddingHead) -> None:
+    embeddings = head(FakeTextEncoder().encode(["Alpha", "Bravo"]))
+    # Mean 0, variance 1 across the coordinates: L2 norm sqrt(width)
+    assert torch.allclose(embeddings.mean(dim=1), torch.zeros(2), atol=1e-5)
+    assert torch.allclose(embeddings.norm(dim=1), torch.full((2,), 5**0.5), atol=1e-3)
+
+
+@pytest.mark.parametrize("make_model", MODELS)
+def test_every_model_outputs_a_fixed_scale_embedding(make_model: Any) -> None:
+    model = make_model()
+    for embedding in model.forward_multi_card([A, B, C]):
+        assert embedding.norm().item() == pytest.approx(_EMBED**0.5, abs=1e-3)
+
+
 @pytest.mark.parametrize("make_model", MODELS)
 def test_embedding_dim_is_the_real_output_width(make_model: Any) -> None:
     model = make_model()
@@ -379,6 +418,24 @@ def test_multi_card_attention_is_sized_by_its_head() -> None:
         FakeTextEncoder(), LinearEmbeddingHead(HIDDEN, 6), num_heads=2, num_layers=1
     )
     assert model.embedding_dim == 6
+    assert model.forward_multi_card([A, B])[0].shape == (6,)
+
+
+def test_multi_card_attention_layers_take_their_settings() -> None:
+    model = MultiCardModel(
+        FakeTextEncoder(),
+        LinearEmbeddingHead(HIDDEN, 6),
+        num_heads=2,
+        num_layers=3,
+        ffn_dim=10,
+        dropout=0.0,
+        norm_first=True,
+    )
+    layers = model.self_attention.layers
+    assert len(layers) == 3
+    assert layers[0].linear1.out_features == 10
+    assert layers[0].norm_first
+    assert layers[0].dropout.p == 0.0
     assert model.forward_multi_card([A, B])[0].shape == (6,)
 
 

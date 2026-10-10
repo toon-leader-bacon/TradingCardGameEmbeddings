@@ -12,6 +12,7 @@ import torch
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.dojos.contrastive.contrastive_batch import ContrastiveBatch
+from src.dojos.contrastive.styles.missing_card import MissingCardInfoNCELoss
 from src.dojos.contrastive.dojo import ContrastiveDojo
 from src.dojos.dojo import BatchBudget, Dojo
 from src.dojos.file_managers.deck_box_dealer import DeckBoxDealer
@@ -92,21 +93,26 @@ class TestBatches:
     def test_skips_a_degenerate_batch_and_logs_a_warning(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        good_card_a, good_card_b = _card("a"), _card("b")
-        degenerate_card = _card("c")
         good_batch = ContrastiveBatch(
-            inputs=[good_card_a, good_card_b],
+            inputs=[_card(name) for name in "abcd"],
+            identities=[(uuid4(),) for _ in range(4)],
+            positive_cliques=[[0, 1], [2, 3]],
+        )
+        # No positive pair at all
+        no_positive_batch = ContrastiveBatch(
+            inputs=[_card("e")], identities=[(uuid4(),)], positive_cliques=[[0]]
+        )
+        # One surviving deck: a positive but no negative
+        no_negative_batch = ContrastiveBatch(
+            inputs=[_card("f"), _card("g")],
             identities=[(uuid4(),), (uuid4(),)],
             positive_cliques=[[0, 1]],
         )
-        degenerate_batch = ContrastiveBatch(
-            inputs=[degenerate_card], identities=[(uuid4(),)], positive_cliques=[[0]]
-        )
         pair_constructor = _ScriptedPairConstructor(
-            [good_batch, degenerate_batch, good_batch]
+            [good_batch, no_positive_batch, no_negative_batch, good_batch]
         )
         dojo = ContrastiveDojo(
-            dealer=_dealer_with_decks(6),
+            dealer=_dealer_with_decks(8),
             pair_constructor=pair_constructor,
             card_lookup=CardBinder(),
             holdout=HoldoutSpec.no_holdout(),
@@ -119,6 +125,29 @@ class TestBatches:
 
         assert batches == [good_batch, good_batch]
         assert "degenerate" in caplog.text
+
+
+class TestMalformedBatch:
+    def test_a_malformed_batch_raises_instead_of_being_skipped(self) -> None:
+        # A pair-constructor bug (a clique that isn't a [context, card]
+        # pair) must surface, not pass as a degenerate batch
+        malformed = ContrastiveBatch(
+            inputs=[[_card("a"), _card("b")], [_card("c")], [_card("d")]],
+            identities=[(uuid4(), uuid4()), (uuid4(),), (uuid4(),)],
+            positive_cliques=[[0, 1, 2]],
+        )
+        dojo = ContrastiveDojo(
+            dealer=_dealer_with_decks(4),
+            pair_constructor=_ScriptedPairConstructor([malformed]),
+            card_lookup=CardBinder(),
+            holdout=HoldoutSpec.no_holdout(),
+            strict_version_check=False,
+            decks_per_sample=2,
+            contrastive_loss=MissingCardInfoNCELoss(),
+        )
+
+        with pytest.raises(ValueError, match="pair"):
+            list(dojo.batches(Split.TRAIN, _BUDGET))
 
 
 class TestComputeLoss:
@@ -184,7 +213,7 @@ class TestBudget:
         heavy = ContrastiveBatch(
             inputs=cards,  # type: ignore[arg-type]
             identities=[(c.nocab_uuid,) for c in cards],
-            positive_cliques=[[0, 1, 2]],
+            positive_cliques=[[0, 1], [2]],  # card 2 is 0 and 1's negative
         )
         dojo = ContrastiveDojo(
             dealer=_dealer_with_decks(6),
@@ -200,9 +229,9 @@ class TestBudget:
 
     def test_max_examples_stops_after_that_many_decks(self) -> None:
         good = ContrastiveBatch(
-            inputs=[_card(), _card()],
-            identities=[(uuid4(),), (uuid4(),)],
-            positive_cliques=[[0, 1]],
+            inputs=[_card() for _ in range(4)],
+            identities=[(uuid4(),) for _ in range(4)],
+            positive_cliques=[[0, 1], [2, 3]],
         )
         dojo = ContrastiveDojo(
             dealer=_dealer_with_decks(6),

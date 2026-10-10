@@ -6,6 +6,7 @@ HardwareLimits because they change per machine, not per experiment (they
 affect results but are not yet written to the checkpoint manifest).
 """
 
+import math
 import re
 from dataclasses import dataclass
 from typing import get_args
@@ -37,7 +38,154 @@ class Temperature:
             raise ValueError(f"alpha must be >= 0, got {self.alpha}")
 
 
-DietRule = Proportional | Uniform | Temperature
+# The rules that weigh a flat list of dojos by TRAIN count alone
+FlatDietRule = Proportional | Uniform | Temperature
+
+
+@dataclass(frozen=True)
+class DojoRow:
+    """A diet table row naming one dojo.
+
+    weight: the row's relative chance among its siblings (finite, >= 0).
+    dojo_name: a run dojo, not held out.
+    """
+
+    weight: float
+    dojo_name: str
+
+    def __post_init__(self) -> None:
+        _check_row_weight(self.weight)
+
+
+@dataclass(frozen=True)
+class DojoGroupRow:
+    """A diet table row over several dojos, weighted among themselves by a
+    flat rule (a config `dojos:` row: its name patterns already matched
+    against the run's dojos).
+
+    weight: the whole group's relative chance among its siblings.
+    dojo_names: the matched dojos, in run order, at least one.
+    within: how the group splits its share (by TRAIN count ** alpha).
+    """
+
+    weight: float
+    dojo_names: tuple[str, ...]
+    within: FlatDietRule
+
+    def __post_init__(self) -> None:
+        _check_row_weight(self.weight)
+        if not self.dojo_names:
+            raise ValueError("a dojo group row needs at least one dojo")
+
+
+@dataclass(frozen=True)
+class SubTableRow:
+    """A diet table row that rolls again on its own rows.
+
+    weight: the sub-table's relative chance among its siblings.
+    rows: the sub-table, at least one row with a positive weight.
+    """
+
+    weight: float
+    rows: tuple["DietTableRow", ...]
+
+    def __post_init__(self) -> None:
+        _check_row_weight(self.weight)
+        _check_rows_pullable(self.rows)
+
+
+DietTableRow = DojoRow | DojoGroupRow | SubTableRow
+
+
+@dataclass(frozen=True)
+class TableDiet:
+    """Sample dojos from a nested drop table (src/utils/drop_table.py).
+
+    Saturated and quarantined dojos drop out of their own sub-table, so
+    their share goes to their siblings; a row left with no active dojo
+    drops out and its share goes to the rows beside it.
+
+    rows: the top-level table, at least one row with a positive weight.
+        No dojo appears under two rows.
+    """
+
+    rows: tuple[DietTableRow, ...]
+
+    def __post_init__(self) -> None:
+        _check_rows_pullable(self.rows)
+        duplicates = sorted(
+            {name for name in self.dojo_names if self.dojo_names.count(name) > 1}
+        )
+        if duplicates:
+            raise ValueError(f"diet table lists {duplicates} more than once")
+
+    @property
+    def dojo_names(self) -> tuple[str, ...]:
+        """Every dojo under the table, in row order (depth first).
+
+        Inputs: none. Output: tuple[str, ...]. Side effects: none.
+        Exceptions: none.
+
+        Example:
+            >>> TableDiet((DojoRow(1, "a"), DojoRow(1, "b"))).dojo_names
+            ('a', 'b')
+        """
+        return leaf_dojo_names(self.rows)
+
+
+DietRule = FlatDietRule | TableDiet
+
+
+def _check_row_weight(weight: float) -> None:
+    """Raise unless weight is finite and >= 0.
+
+    Inputs: weight. Output: none. Side effects: none.
+    Exceptions: ValueError (also for NaN).
+    """
+    # `not x >= 0` also rejects NaN
+    if not (math.isfinite(weight) and weight >= 0):
+        raise ValueError(f"row weight must be finite and >= 0, got {weight}")
+
+
+def _check_rows_pullable(rows: tuple[DietTableRow, ...]) -> None:
+    """Raise unless rows is non-empty with at least one positive weight
+    (the same rule DropTable enforces, checked at parse time so a bad table
+    fails before any dojo is built).
+
+    Inputs: rows. Output: none. Side effects: none.
+    Exceptions: ValueError.
+    """
+    if not rows:
+        raise ValueError("a diet table needs at least one row")
+    if not any(row.weight > 0 for row in rows):
+        raise ValueError("a diet table needs at least one positive weight")
+
+
+def leaf_dojo_names(rows: tuple[DietTableRow, ...]) -> tuple[str, ...]:
+    """Every dojo under rows, depth first in row order. A loop with an
+    explicit stack of rows still to visit, not recursion.
+
+    Inputs: rows. Output: tuple[str, ...] (duplicates kept, so the caller
+    can report them). Side effects: none. Exceptions: none.
+
+    Example:
+        >>> leaf_dojo_names((DojoRow(1, "a"), SubTableRow(1, (DojoRow(1, "b"),))))
+        ('a', 'b')
+    """
+    result: list[str] = []
+    # Reversed onto the stack so rows pop in their written order
+    stack: list[DietTableRow] = list(reversed(rows))
+
+    # Visit each row; a sub-table pushes its own rows to visit next
+    while stack:
+        row = stack.pop()
+        if isinstance(row, DojoRow):
+            result.append(row.dojo_name)
+        elif isinstance(row, DojoGroupRow):
+            result.extend(row.dojo_names)
+        else:
+            stack.extend(reversed(row.rows))
+    return tuple(result)
 
 
 @dataclass(frozen=True)
@@ -106,6 +254,7 @@ class Phase:
 
     dojo_names: the dojos in this phase's diet; every name must match a
         registered Dojo.name and none may be in TrainingPlan.held_out_dojos.
+        With a TableDiet, exactly the table's dojos.
     encoder_trainable: False freezes the whole encoder (head-only stage).
     encoder_lr / head_lr: learning rates of the encoder and of every
         dojo's decoder head.
@@ -138,6 +287,13 @@ class Phase:
             raise ValueError("learning rates must be >= 0 and max_grad_norm > 0")
         if not _PHASE_NAME.fullmatch(self.name):
             raise ValueError(f"phase name {self.name!r} must match [A-Za-z0-9_.-]+")
+        # A table diet names its own dojos: the phase's list must be the same
+        if isinstance(self.diet_rule, TableDiet) and set(self.dojo_names) != set(
+            self.diet_rule.dojo_names
+        ):
+            raise ValueError(
+                f"phase {self.name!r} dojos differ from its diet table's dojos"
+            )
 
 
 @dataclass(frozen=True)

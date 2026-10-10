@@ -582,7 +582,7 @@ class TestCalibration:
         assert dojo.label_stats is None
         assert dojo.baseline_loss(next(dojo.batches(Split.TEST, _BUDGET))) == 2.0
 
-    def test_a_large_train_split_is_sampled_evenly_up_to_the_cap(
+    def test_a_large_train_split_is_sampled_as_a_prefix_up_to_the_cap(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(generic_dojo_module, "_CALIBRATION_SAMPLE_CAP", 10)
@@ -597,8 +597,8 @@ class TestCalibration:
             for label in batch.labels
         ]
 
-        # 80 TRAIN rows, cap 10: every 8th row, counted across chunks
-        assert [label for _, label in calibration.sample] == train_labels[::8]
+        # 80 shuffled TRAIN rows, cap 10: the first 10, cut mid-chunk
+        assert [label for _, label in calibration.sample] == train_labels[:10]
 
     def test_an_empty_train_sample_is_a_construction_error(
         self, tmp_path: Path

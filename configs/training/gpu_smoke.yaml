@@ -11,9 +11,9 @@ device: cuda
 seed: 0
 
 model:
-  kind: linear_projection
+  embedding_head: linear_projection
   checkpoint: answerdotai/ModernBERT-base
-  embed_dim: 256
+  card_embedding_size: 256
 
 # Catalog keys (src/training/dojo_catalog.py). STS card dojos are left out
 # of this first run: their raw-scale regression losses (up to ~1e5) would

@@ -103,3 +103,25 @@ class TestFiltered:
         filtered = DropTable.of([(1, None), (1, "b")]).filtered(lambda o: o is None)
         assert filtered is not None
         assert filtered.pull(random.Random(0)) is None
+
+
+class TestOutcomeProbabilities:
+    def test_nested_tables_multiply_down(self) -> None:
+        table = DropTable.of([(3, "a"), (1, DropTable.uniform(["b", "c"]))])
+        assert table.outcome_probabilities() == pytest.approx(
+            {"a": 0.75, "b": 0.125, "c": 0.125}
+        )
+
+    def test_zero_weight_outcomes_are_absent(self) -> None:
+        assert DropTable.of([(1, "a"), (0, "b")]).outcome_probabilities() == {"a": 1.0}
+
+    def test_a_repeated_outcome_sums_its_rows(self) -> None:
+        table = DropTable.of([(1, "a"), (1, DropTable.of([(1, "a"), (1, "b")]))])
+        assert table.outcome_probabilities() == pytest.approx({"a": 0.75, "b": 0.25})
+
+    def test_matches_pull_frequencies(self) -> None:
+        table = DropTable.of([(1, "a"), (3, DropTable.of([(1, "b"), (2, "c")]))])
+        rng = random.Random(0)
+        counts = Counter(table.pull(rng) for _ in range(6000))
+        for outcome, probability in table.outcome_probabilities().items():
+            assert abs(counts[outcome] / 6000 - probability) < 0.03

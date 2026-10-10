@@ -136,6 +136,43 @@ class DropTable(Generic[T]):
                 return outcome
             table = outcome
 
+    def outcome_probabilities(self) -> dict[T, float]:
+        """Each plain outcome's chance of being pulled: its entry's weight
+        over its table's total, times the chance of reaching that table.
+        An outcome listed under several rows sums their chances.
+
+        A loop with an explicit stack of (table, chance of reaching it),
+        not recursion. Outcomes must be hashable.
+
+        Inputs: none.
+        Output: dict outcome -> probability (zero-weight outcomes absent),
+            summing to 1.
+        Side effects: none.
+        Exceptions: TypeError for an unhashable outcome.
+
+        Example:
+            >>> DropTable.of([(3, "a"), (1, DropTable.uniform(["b", "c"]))])
+            ...     .outcome_probabilities()
+            {'a': 0.75, 'b': 0.125, 'c': 0.125}
+        """
+        result: dict[T, float] = {}
+        stack: list[tuple[DropTable[T], float]] = [(self, 1.0)]
+
+        # Spread each table's chance over its positive entries
+        while stack:
+            table, reach = stack.pop()
+            total = table.total_weight
+            for entry in table.entries:
+                if entry.weight <= 0:
+                    continue
+                chance = reach * entry.weight / total
+                if isinstance(entry.outcome, DropTable):
+                    stack.append((entry.outcome, chance))
+                else:
+                    outcome = cast(T, entry.outcome)
+                    result[outcome] = result.get(outcome, 0.0) + chance
+        return result
+
     def filtered(self, keep: Callable[[T], bool]) -> "DropTable[T] | None":
         """A new table holding only the outcomes keep() accepts.
 

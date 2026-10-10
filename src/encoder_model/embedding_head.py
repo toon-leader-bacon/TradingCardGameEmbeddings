@@ -33,6 +33,12 @@ class EmbeddingHead(nn.Module, ABC):
     """Strategy interface: one TextEncoder output in, one embedding per
     card out.
 
+    Template method: each head's _embed does the architecture-specific
+    step, and forward then applies a LayerNorm without learnable gain or
+    bias. Every embedding therefore has mean 0 and variance 1 across its
+    coordinates (L2 norm sqrt(output_dim)), so its scale cannot drift
+    during training.
+
     output_dim: the width of every embedding this head produces (its
         forward's last dimension). Set once by each head's constructor, so
         a model can report its embedding size without running a forward
@@ -42,6 +48,9 @@ class EmbeddingHead(nn.Module, ABC):
     def __init__(self, output_dim: int) -> None:
         super().__init__()
         self._output_dim = output_dim
+        # No gain or bias: a learned bias would be one vector added to
+        # every card, a shared direction the contrastive loss must undo
+        self.output_norm = nn.LayerNorm(output_dim, elementwise_affine=False)
 
     @property
     def output_dim(self) -> int:
@@ -49,26 +58,31 @@ class EmbeddingHead(nn.Module, ABC):
         Output: int. Side effects: none. Exceptions: none."""
         return self._output_dim
 
-    @abstractmethod
     def forward(self, encoding: TokenEncoding) -> torch.Tensor:
         """
         Inputs: encoding, one TextEncoder's output for a batch of cards.
-        Output: (batch, output_dim) tensor, one embedding per input card,
-            same order as encoding.
+        Output: (batch, output_dim) tensor, one normalized embedding per
+            input card, same order as encoding.
         Side effects: none.
         Exceptions: none expected.
         """
+        return self.output_norm(self._embed(encoding))
+
+    @abstractmethod
+    def _embed(self, encoding: TokenEncoding) -> torch.Tensor:
+        """The head's own step, before normalization. Inputs and output
+        as forward. Side effects: none. Exceptions: none expected."""
         raise NotImplementedError
 
 
 class LinearEmbeddingHead(EmbeddingHead):
     """Baseline head: mean-pool tokens, then a single linear projection."""
 
-    def __init__(self, input_dim: int, embed_dim: int):
-        super().__init__(output_dim=embed_dim)
-        self.projection = nn.Linear(input_dim, embed_dim)
+    def __init__(self, input_dim: int, card_embedding_size: int):
+        super().__init__(output_dim=card_embedding_size)
+        self.projection = nn.Linear(input_dim, card_embedding_size)
 
-    def forward(self, encoding: TokenEncoding) -> torch.Tensor:
+    def _embed(self, encoding: TokenEncoding) -> torch.Tensor:
         pooled = _mean_pool_tokens(encoding)
         return self.projection(pooled)
 
@@ -89,23 +103,23 @@ class _ResidualBlock(nn.Module):
 
 class ResidualMlpEmbeddingHead(EmbeddingHead):
     """Mean-pool tokens, project into hidden_dim, then stack num_blocks
-    residual bottleneck blocks before a final projection to embed_dim."""
+    residual bottleneck blocks before a final projection to card_embedding_size."""
 
     def __init__(
         self,
         input_dim: int,
-        embed_dim: int,
+        card_embedding_size: int,
         hidden_dim: int = 512,
         num_blocks: int = 3,
     ):
-        super().__init__(output_dim=embed_dim)
+        super().__init__(output_dim=card_embedding_size)
         self.input_projection = nn.Linear(input_dim, hidden_dim)
         self.blocks = nn.ModuleList(
             [_ResidualBlock(hidden_dim) for _ in range(num_blocks)]
         )
-        self.output_projection = nn.Linear(hidden_dim, embed_dim)
+        self.output_projection = nn.Linear(hidden_dim, card_embedding_size)
 
-    def forward(self, encoding: TokenEncoding) -> torch.Tensor:
+    def _embed(self, encoding: TokenEncoding) -> torch.Tensor:
         pooled = _mean_pool_tokens(encoding)
         hidden = self.input_projection(pooled)
         for block in self.blocks:
@@ -119,12 +133,12 @@ class AttentionPoolingEmbeddingHead(EmbeddingHead):
     vs. its cost) matter most to the final embedding, rather than
     weighting every token equally the way _mean_pool_tokens does."""
 
-    def __init__(self, input_dim: int, embed_dim: int):
-        super().__init__(output_dim=embed_dim)
+    def __init__(self, input_dim: int, card_embedding_size: int):
+        super().__init__(output_dim=card_embedding_size)
         self.query = nn.Parameter(torch.randn(input_dim))
-        self.projection = nn.Linear(input_dim, embed_dim)
+        self.projection = nn.Linear(input_dim, card_embedding_size)
 
-    def forward(self, encoding: TokenEncoding) -> torch.Tensor:
+    def _embed(self, encoding: TokenEncoding) -> torch.Tensor:
         # (batch, seq_len): how well each token matches the learned query.
         scores = encoding.hidden_states @ self.query
         scores = scores.masked_fill(encoding.attention_mask == 0, float("-inf"))

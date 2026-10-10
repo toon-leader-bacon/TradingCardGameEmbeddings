@@ -2,19 +2,20 @@
 
 Strategy: DietSampler is the swappable policy. Proportional, Uniform and
 Temperature(alpha) are one family (example_count ** alpha with alpha = 1,
-0, alpha), so one sampler implements them all; the DietRule union stays in
-plan.py for a readable manifest.
+0, alpha), so one sampler implements them all; TableDiet has its own
+sampler (table_diet.py). Flat rules keep their own rng.choices draw rather
+than going through a one-row table, so a flat-rule run's random stream (and
+so its results) stays what it was before tables existed. The DietRule
+union stays in plan.py for a readable manifest.
 """
 
-import logging
 import random
 from typing import Protocol, Sequence
 
 from src.dojos.dojo import Dojo
-from src.schema.splits import Split
-from src.training.plan import DietRule, Proportional, Temperature, Uniform
-
-logger = logging.getLogger(__name__)
+from src.training.diet.count_weighting import TrainCountCache, alpha_of, count_weight
+from src.training.diet.table_diet import TableDietSampler
+from src.training.plan import DietRule, TableDiet
 
 
 class DietSampler(Protocol):
@@ -37,7 +38,7 @@ class TemperatureDietSampler:
 
     def __init__(self, alpha: float) -> None:
         self._alpha = alpha
-        self._counts: dict[str, int] = {}  # TRAIN counts are fixed per dojo
+        self._counts = TrainCountCache()
 
     def next_dojo(self, active: Sequence[Dojo], rng: random.Random) -> Dojo:
         """Draw one dojo.
@@ -55,42 +56,25 @@ class TemperatureDietSampler:
         if not active:
             raise ValueError("no active dojos to sample from")
         # Weigh each dojo by its TRAIN example count ** alpha
-        counts = [self._train_count(dojo) for dojo in active]
-        weights = [count**self._alpha if count > 0 else 0.0 for count in counts]
+        weights = [count_weight(self._counts.count(d), self._alpha) for d in active]
         if sum(weights) <= 0:
             raise ValueError("active dojos have no TRAIN examples")
         # Draw one
         return rng.choices(list(active), weights=weights, k=1)[0]
 
-    def _train_count(self, dojo: Dojo) -> int:
-        if dojo.name not in self._counts:
-            try:
-                self._counts[dojo.name] = dojo.example_count(Split.TRAIN)
-            except Exception:
-                # An unreadable dojo is never drawn (weight 0) rather than
-                # making every draw fail; logged once since the count is cached
-                logger.error(
-                    "cannot count %r's TRAIN examples", dojo.name, exc_info=True
-                )
-                self._counts[dojo.name] = 0
-        return self._counts[dojo.name]
-
 
 def diet_sampler_for(rule: DietRule) -> DietSampler:
     """Factory Method: build the sampler that implements a DietRule.
 
-    Inputs: rule (Proportional | Uniform | Temperature).
-    Output: DietSampler (alpha 1, 0, or the rule's alpha respectively).
+    Inputs: rule (Proportional | Uniform | Temperature | TableDiet).
+    Output: DietSampler: a TemperatureDietSampler at alpha_of(rule) for a
+        flat rule, a TableDietSampler for a TableDiet.
     Side effects: none.
-    Exceptions: none.
+    Exceptions: TypeError for an unknown rule.
 
     Example:
         >>> diet_sampler_for(Temperature(alpha=0.5))
     """
-    if isinstance(rule, Proportional):
-        return TemperatureDietSampler(alpha=1.0)
-    if isinstance(rule, Uniform):
-        return TemperatureDietSampler(alpha=0.0)
-    if isinstance(rule, Temperature):
-        return TemperatureDietSampler(alpha=rule.alpha)
-    raise TypeError(f"unknown DietRule: {rule!r}")
+    if isinstance(rule, TableDiet):
+        return TableDietSampler(rule)
+    return TemperatureDietSampler(alpha=alpha_of(rule))

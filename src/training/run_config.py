@@ -14,6 +14,7 @@ back to a default. Every error names its location ("phases.0.saturation").
 
 import copy
 import dataclasses
+import fnmatch
 import math
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -48,11 +49,17 @@ from src.dojos.loss.regression_objective import RegressionLossKind
 from src.training.loss_weighting import DEFAULT_BASELINE_FLOOR, LossWeighting
 from src.training.plan import (
     DietRule,
+    DietTableRow,
+    DojoGroupRow,
+    DojoRow,
     FaultPolicy,
+    FlatDietRule,
     HardwareLimits,
     Phase,
     Proportional,
     SaturationSpec,
+    SubTableRow,
+    TableDiet,
     Temperature,
     TrainingPlan,
     Uniform,
@@ -66,16 +73,18 @@ ConfigDocument = dict[str, Any]
 _T = TypeVar("_T")
 
 # Diet rules that take no parameters, by their config name
-_PARAMETERLESS_DIETS: dict[str, Callable[[], DietRule]] = {
+_PARAMETERLESS_DIETS: dict[str, Callable[[], FlatDietRule]] = {
     "uniform": Uniform,
     "proportional": Proportional,
 }
 _TEMPERATURE_DIET = "temperature"
+_TABLE_DIET = "table"
 _TIER_COUNT = 3
 
 
-class ModelKind(StrEnum):
-    """Which reference single-card model to build (reference_singlecard_models.py)."""
+class EmbeddingHeadKind(StrEnum):
+    """Which EmbeddingHead (src/encoder_model/embedding_head.py) turns the
+    text encoder's tokens into one card embedding."""
 
     LINEAR_PROJECTION = "linear_projection"
     RESIDUAL_MLP = "residual_mlp"
@@ -83,21 +92,65 @@ class ModelKind(StrEnum):
 
 
 @dataclass(frozen=True)
-class ModelSpec:
-    """The encoder to build.
+class GroupAttentionSpec:
+    """The self-attention layers a multi-card model stacks on the
+    embedding head (MultiCardModel), so cards in a group see each other.
 
-    kind: which reference model class.
-    checkpoint: Hugging Face checkpoint of its pretrained text encoder.
-    embed_dim: output embedding width; every dojo head is built for it.
+    num_layers, num_heads: Transformer encoder layers and attention heads
+        per layer (num_heads must divide card_embedding_size).
+    ffn_dim: each layer's feed-forward width.
+    dropout: dropout inside each layer.
+    norm_first: pre-norm (LayerNorm before attention and feed-forward)
+        rather than torch's default post-norm.
     """
 
-    kind: ModelKind
-    checkpoint: str
-    embed_dim: int
+    num_layers: int = 2
+    num_heads: int = 4
+    ffn_dim: int = 1024
+    dropout: float = 0.1
+    norm_first: bool = True
 
     def __post_init__(self) -> None:
-        if self.embed_dim < 1:
-            raise ValueError("embed_dim must be >= 1")
+        for name in ("num_layers", "num_heads", "ffn_dim"):
+            if getattr(self, name) < 1:
+                raise ValueError(f"{name} must be >= 1")
+        if not 0 <= self.dropout < 1:
+            raise ValueError(f"dropout must be in [0, 1), got {self.dropout}")
+
+
+@dataclass(frozen=True)
+class ModelSpec:
+    """The encoder to build: a frozen pretrained text encoder, an embedding
+    head, and for a multi-card model, group attention on top.
+
+    embedding_head: which EmbeddingHead.
+    checkpoint: Hugging Face checkpoint of the pretrained text encoder.
+    card_embedding_size: output embedding width; every dojo head is built
+        for it.
+    mlp_hidden_dim, mlp_num_blocks: the residual-MLP head's width and
+        block count (read only for EmbeddingHeadKind.RESIDUAL_MLP).
+    group_attention: None for a single-card model (each card embedded
+        alone); otherwise the MultiCardModel's self-attention layers.
+    """
+
+    embedding_head: EmbeddingHeadKind
+    checkpoint: str
+    card_embedding_size: int
+    mlp_hidden_dim: int = 512
+    mlp_num_blocks: int = 3
+    group_attention: GroupAttentionSpec | None = None
+
+    def __post_init__(self) -> None:
+        if self.card_embedding_size < 1:
+            raise ValueError("card_embedding_size must be >= 1")
+        if self.mlp_hidden_dim < 1 or self.mlp_num_blocks < 0:
+            raise ValueError("mlp_hidden_dim must be >= 1, mlp_num_blocks >= 0")
+        attention = self.group_attention
+        if attention is not None and self.card_embedding_size % attention.num_heads:
+            raise ValueError(
+                f"group_attention.num_heads ({attention.num_heads}) must divide "
+                f"card_embedding_size ({self.card_embedding_size})"
+            )
 
 
 @dataclass(frozen=True)
@@ -210,8 +263,16 @@ def apply_overrides(
     return result
 
 
-def parse_run_config(document: ConfigDocument) -> RunConfig:
+def parse_run_config(
+    document: ConfigDocument, catalog_names: Sequence[str] = ()
+) -> RunConfig:
     """Parse a raw config document into a validated RunConfig.
+
+    "dojos" and "held_out_dojos" entries are dojo names or fnmatch
+    patterns ("sts2_runs.*"), expanded against catalog_names
+    (_expanded_dojo_entries); a "dojos" entry "!pattern" (quoted in YAML)
+    drops the names matched so far. Held-out dojos are run dojos too:
+    any not already in "dojos" are appended to the run's dojo_names.
 
     Expected top-level keys: run_directory, device, seed, model, dojos,
     held_out_dojos (optional), holdout, hardware, eval_examples_per_dojo,
@@ -223,20 +284,33 @@ def parse_run_config(document: ConfigDocument) -> RunConfig:
     see _parse_regression_loss).
     A phase without a "dojos" key trains every run dojo that is not held out.
 
-    Inputs: document (ConfigDocument).
+    Inputs: document (ConfigDocument), catalog_names (every dojo name a
+        pattern may match, in the order matches are listed; the driver
+        passes DOJO_CATALOG's keys; empty means patterns match nothing).
     Output: RunConfig.
     Side effects: none.
     Exceptions: ValueError for a missing or unknown key, a wrongly typed
-        value, or anything the frozen types' own validation rejects.
+        value, a pattern matching no dojo, or anything the frozen types'
+        own validation rejects.
 
     Example:
-        >>> config = parse_run_config(read_config_document(path))
+        >>> config = parse_run_config(read_config_document(path), tuple(DOJO_CATALOG))
         >>> config.plan.phases[0].name
         'frozen'
     """
     top = ConfigSection(document, "config")
-    dojo_names = top.required_str_list("dojos")
-    held_out = frozenset(top.optional_str_list("held_out_dojos"))
+    listed_names = _expanded_dojo_entries(
+        top.required_str_list("dojos"), catalog_names, top.location_of("dojos")
+    )
+    held_out_names = _expanded_dojo_entries(
+        top.optional_str_list("held_out_dojos"),
+        catalog_names,
+        top.location_of("held_out_dojos"),
+    )
+    dojo_names = listed_names + tuple(
+        name for name in held_out_names if name not in listed_names
+    )
+    held_out = frozenset(held_out_names)
     trainable_names = tuple(name for name in dojo_names if name not in held_out)
 
     # Build the plan from its parts
@@ -451,21 +525,21 @@ class ConfigSection:
 
 
 def _parse_phase(section: ConfigSection, default_dojos: tuple[str, ...]) -> Phase:
-    """One phases[] entry -> Phase; "dojos" defaults to default_dojos.
+    """One phases[] entry -> Phase; "dojos" defaults to default_dojos. A
+    table diet names the phase's dojos itself, so "dojos" is then an error.
 
     Inputs: section (one phases[] entry), default_dojos (the run's
-        non-held-out dojos).
+        non-held-out dojos; also what a table's name patterns match).
     Output: Phase.
     Side effects: none.
     Exceptions: ValueError as parse_run_config.
     """
-    dojo_names = (
-        section.required_str_list("dojos") if section.has("dojos") else default_dojos
-    )
+    diet_rule = _parse_diet(section.required_section("diet"), default_dojos)
+    dojo_names = _phase_dojo_names(section, diet_rule, default_dojos)
     fields: dict[str, Any] = {
         "name": section.required("name", str),
         "dojo_names": dojo_names,
-        "diet_rule": _parse_diet(section.required_section("diet")),
+        "diet_rule": diet_rule,
         "encoder_trainable": section.required("encoder_trainable", bool),
         "encoder_lr": section.required("encoder_lr", float),
         "head_lr": section.required("head_lr", float),
@@ -483,23 +557,231 @@ def _parse_phase(section: ConfigSection, default_dojos: tuple[str, ...]) -> Phas
     return _construct_at(section.where, lambda: Phase(**fields))
 
 
-def _parse_diet(section: ConfigSection) -> DietRule:
-    """{"rule": "uniform" | "proportional" | "temperature", "alpha": ...}
-    -> the matching DietRule; alpha only (and required) for temperature.
+def _phase_dojo_names(
+    section: ConfigSection, diet_rule: DietRule, default_dojos: tuple[str, ...]
+) -> tuple[str, ...]:
+    """A phase's dojos: its table diet's, else its "dojos" key, else
+    default_dojos.
 
-    Inputs: section (a phase's "diet"). Output: DietRule.
+    Inputs: section (the phases[] entry), diet_rule (already parsed),
+        default_dojos.
+    Output: tuple[str, ...].
+    Side effects: marks "dojos" read.
+    Exceptions: ValueError if a table-diet phase also lists "dojos".
+    """
+    if isinstance(diet_rule, TableDiet):
+        if section.has("dojos"):
+            raise ValueError(
+                f"{section.location_of('dojos')}: a table diet names the "
+                "phase's dojos itself; drop this list"
+            )
+        return diet_rule.dojo_names
+    if section.has("dojos"):
+        return section.required_str_list("dojos")
+    return default_dojos
+
+
+def _parse_diet(section: ConfigSection, run_dojos: tuple[str, ...]) -> DietRule:
+    """A phase's "diet" -> DietRule: {"rule": "table", "table": [<rows>]}
+    (see _parse_table_rows), or a flat rule (see _parse_flat_diet).
+
+    Inputs: section (a phase's "diet"), run_dojos (the run's non-held-out
+        dojos, which a table's name patterns match).
+    Output: DietRule.
+    Side effects: none.
+    Exceptions: ValueError as _parse_flat_diet and _parse_table_rows.
+
+    Example:
+        >>> _parse_diet(ConfigSection({"rule": "uniform"}, "diet"), ("a",))
+        Uniform()
+    """
+    if section.has("rule") and section.required("rule", str) == _TABLE_DIET:
+        rows = _parse_table_rows(section.required_section_list("table"), run_dojos)
+        section.reject_unread_keys()
+        return _construct_at(section.where, lambda: TableDiet(rows))
+    return _parse_flat_diet(section, other_choices=(_TABLE_DIET,))
+
+
+def _parse_table_rows(
+    rows: list[ConfigSection], run_dojos: tuple[str, ...]
+) -> tuple[DietTableRow, ...]:
+    """A diet `table:` list -> its rows. Each row has a weight and exactly
+    one of:
+
+        {weight: 1, dojo: contrastive.mtg}             DojoRow
+        {weight: 1, dojos: ["gwent_one.*"],            DojoGroupRow; within
+         within: {rule: temperature, alpha: 0.3}}      optional (uniform)
+        {weight: 50, table: [<rows>]}                  SubTableRow
+
+    Recursive over nested tables, mirroring the YAML's own shape (as
+    _parse_mask_table).
+
+    Inputs: rows (each a ConfigSection located at its index), run_dojos.
+    Output: tuple[DietTableRow, ...].
+    Side effects: none.
+    Exceptions: ValueError for a row with none or several of dojo/dojos/
+        table, a bad weight, a pattern matching no run dojo, or a bad
+        within rule.
+    """
+    result: list[DietTableRow] = []
+
+    # Each row is one dojo, a matched group, or a sub-table
+    for row in rows:
+        weight = row.required("weight", float)
+        kind = _table_row_kind(row)
+        if kind == "dojo":
+            entry: DietTableRow = _construct_at(
+                row.where, lambda: DojoRow(weight, row.required("dojo", str))
+            )
+        elif kind == "dojos":
+            entry = _parse_dojo_group_row(row, weight, run_dojos)
+        else:
+            sub_rows = _parse_table_rows(row.required_section_list("table"), run_dojos)
+            entry = _construct_at(row.where, lambda: SubTableRow(weight, sub_rows))
+        row.reject_unread_keys()
+        result.append(entry)
+    return tuple(result)
+
+
+def _table_row_kind(row: ConfigSection) -> Literal["dojo", "dojos", "table"]:
+    """Which one of dojo/dojos/table a diet table row has.
+
+    Inputs: row. Output: the key present.
+    Side effects: none.
+    Exceptions: ValueError if none or more than one is present.
+    """
+    kinds: tuple[Literal["dojo", "dojos", "table"], ...] = ("dojo", "dojos", "table")
+    present = [kind for kind in kinds if row.has(kind)]
+    if len(present) != 1:
+        raise ValueError(
+            f"{row.where} needs exactly one of dojo, dojos or table; has {present}"
+        )
+    return present[0]
+
+
+def _parse_dojo_group_row(
+    row: ConfigSection, weight: float, run_dojos: tuple[str, ...]
+) -> DojoGroupRow:
+    """A `dojos:` row -> DojoGroupRow: its patterns matched against
+    run_dojos (_matching_dojos), its optional "within" a flat rule
+    (default uniform).
+
+    Inputs: row, weight (already read), run_dojos.
+    Output: DojoGroupRow.
+    Side effects: marks "dojos" and "within" read.
+    Exceptions: ValueError as _matching_dojos and _parse_flat_diet.
+    """
+    dojo_names = _matching_dojos(
+        row.required_str_list("dojos"), run_dojos, row.location_of("dojos")
+    )
+    within: FlatDietRule = Uniform()
+    if row.has("within"):
+        within = _parse_flat_diet(row.required_section("within"))
+    return _construct_at(row.where, lambda: DojoGroupRow(weight, dojo_names, within))
+
+
+_EXCLUDE_PREFIX = "!"
+_PATTERN_CHARACTERS = frozenset("*?[")
+
+
+def _expanded_dojo_entries(
+    entries: tuple[str, ...], catalog_names: Sequence[str], where: str
+) -> tuple[str, ...]:
+    """A dojos list with its patterns expanded, applied in order:
+    a plain name is added unless already there (written twice it is kept
+    twice, so RunConfig's duplicate check catches the copy-paste slip);
+    a pattern ("*", "?", "[...]", case
+    sensitive) adds every catalog name it matches, in catalog order, that
+    is not already in the list; "!pattern" removes every name in the list
+    so far that it matches.
+
+    Inputs: entries, catalog_names, where (for errors).
+    Output: tuple[str, ...].
+    Side effects: none.
+    Exceptions: ValueError naming an entry (pattern or exclusion) that
+        matches nothing.
+
+    Example:
+        >>> _expanded_dojo_entries(
+        ...     ("contrastive.*", "!*.gwent"), ("contrastive.mtg", "contrastive.gwent"), "dojos"
+        ... )
+        ('contrastive.mtg',)
+    """
+    result: list[str] = []
+    written_names: set[str] = set()
+    # Apply each entry in order, so an exclusion sees what came before it
+    for index, entry in enumerate(entries):
+        if entry.startswith(_EXCLUDE_PREFIX):
+            pattern = entry.removeprefix(_EXCLUDE_PREFIX)
+            kept = [name for name in result if not fnmatch.fnmatchcase(name, pattern)]
+            if len(kept) == len(result):
+                raise ValueError(f"{where}.{index}: {entry!r} excludes nothing")
+            result = kept
+        elif _PATTERN_CHARACTERS.isdisjoint(entry):
+            if entry in written_names or entry not in result:
+                result.append(entry)
+            written_names.add(entry)
+        else:
+            matches = [
+                name for name in catalog_names if fnmatch.fnmatchcase(name, entry)
+            ]
+            if not matches:
+                raise ValueError(f"{where}.{index}: {entry!r} matches no dojo")
+            result.extend(name for name in matches if name not in result)
+    return tuple(result)
+
+
+def _matching_dojos(
+    patterns: tuple[str, ...], run_dojos: tuple[str, ...], where: str
+) -> tuple[str, ...]:
+    """Every run dojo matching any pattern (fnmatch-style, case sensitive:
+    "*", "?", "[...]"), in run_dojos order, each once.
+
+    Inputs: patterns, run_dojos, where (for errors).
+    Output: tuple[str, ...], non-empty.
+    Side effects: none.
+    Exceptions: ValueError naming any pattern that matches no run dojo
+        (a typo, or a held-out dojo).
+    """
+    unmatched = [
+        pattern
+        for pattern in patterns
+        if not any(fnmatch.fnmatchcase(name, pattern) for name in run_dojos)
+    ]
+    if unmatched:
+        raise ValueError(
+            f"{where}: {unmatched} match no dojo in dojos (held-out dojos "
+            "are not matched)"
+        )
+    return tuple(
+        name
+        for name in run_dojos
+        if any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns)
+    )
+
+
+def _parse_flat_diet(
+    section: ConfigSection, other_choices: tuple[str, ...] = ()
+) -> FlatDietRule:
+    """{"rule": "uniform" | "proportional" | "temperature", "alpha": ...}
+    -> the matching rule; alpha only (and required) for temperature.
+
+    Inputs: section (a phase's "diet", or a table row's "within"),
+        other_choices (rules valid where section sits that are not flat,
+        named in the unknown-rule error).
+    Output: FlatDietRule.
     Side effects: none.
     Exceptions: ValueError for an unknown rule or a misplaced/missing alpha.
     """
     rule = section.required("rule", str)
-    result: DietRule
+    result: FlatDietRule
     if rule == _TEMPERATURE_DIET:
         alpha = section.required("alpha", float)
         result = _construct_at(section.where, lambda: Temperature(alpha=alpha))
     elif rule in _PARAMETERLESS_DIETS:
         result = _PARAMETERLESS_DIETS[rule]()
     else:
-        choices = sorted([*_PARAMETERLESS_DIETS, _TEMPERATURE_DIET])
+        choices = sorted([*_PARAMETERLESS_DIETS, _TEMPERATURE_DIET, *other_choices])
         raise ValueError(
             f"{section.location_of('rule')} is {rule!r}, want one of {choices}"
         )
@@ -555,24 +837,71 @@ def _parse_game(value: str, where: str) -> GameId:
 
 
 def _parse_model(section: ConfigSection) -> ModelSpec:
-    """{"kind", "checkpoint", "embed_dim"} -> ModelSpec.
+    """{"embedding_head", "checkpoint", "card_embedding_size",
+    ["mlp_hidden_dim", "mlp_num_blocks"], ["group_attention"]} -> ModelSpec.
 
     Inputs: section ("model"). Output: ModelSpec.
     Side effects: none.
-    Exceptions: ValueError for an unknown kind or embed_dim < 1.
+    Exceptions: ValueError for an unknown embedding_head, mlp_* keys on a
+        head other than residual_mlp, or an invalid size.
     """
-    kind_text = section.required("kind", str)
-    if kind_text not in {kind.value for kind in ModelKind}:
-        choices = [kind.value for kind in ModelKind]
+    # Which head; the mlp_* sizes only mean something for the residual MLP
+    head_text = section.required("embedding_head", str)
+    if head_text not in {kind.value for kind in EmbeddingHeadKind}:
+        choices = [kind.value for kind in EmbeddingHeadKind]
         raise ValueError(
-            f"{section.location_of('kind')} is {kind_text!r}, want one of {choices}"
+            f"{section.location_of('embedding_head')} is {head_text!r}, "
+            f"want one of {choices}"
         )
+    head = EmbeddingHeadKind(head_text)
+    mlp_keys = [key for key in ("mlp_hidden_dim", "mlp_num_blocks") if section.has(key)]
+    if mlp_keys and head is not EmbeddingHeadKind.RESIDUAL_MLP:
+        raise ValueError(
+            f"{section.where}: {mlp_keys} apply only to embedding_head: residual_mlp"
+        )
+
+    # Sizes, then group attention (absent = a single-card model)
     checkpoint = section.required("checkpoint", str)
-    embed_dim = section.required("embed_dim", int)
+    card_embedding_size = section.required("card_embedding_size", int)
+    mlp_hidden_dim = section.optional("mlp_hidden_dim", int, ModelSpec.mlp_hidden_dim)
+    mlp_num_blocks = section.optional("mlp_num_blocks", int, ModelSpec.mlp_num_blocks)
+    group_attention = None
+    if section.has("group_attention"):
+        group_attention = _parse_group_attention(
+            section.required_section("group_attention")
+        )
     section.reject_unread_keys()
     return _construct_at(
         section.where,
-        lambda: ModelSpec(ModelKind(kind_text), checkpoint, embed_dim),
+        lambda: ModelSpec(
+            head,
+            checkpoint,
+            card_embedding_size,
+            mlp_hidden_dim,
+            mlp_num_blocks,
+            group_attention,
+        ),
+    )
+
+
+def _parse_group_attention(section: ConfigSection) -> GroupAttentionSpec:
+    """`model.group_attention` -> GroupAttentionSpec; an absent key keeps
+    the dataclass default.
+
+    Private helper - single caller is _parse_model().
+    Inputs: section. Output: GroupAttentionSpec. Side effects: none.
+    Exceptions: ValueError for a wrongly typed, unknown or invalid value.
+    """
+    defaults = GroupAttentionSpec()
+    num_layers = section.optional("num_layers", int, defaults.num_layers)
+    num_heads = section.optional("num_heads", int, defaults.num_heads)
+    ffn_dim = section.optional("ffn_dim", int, defaults.ffn_dim)
+    dropout = section.optional("dropout", float, defaults.dropout)
+    norm_first = section.optional("norm_first", bool, defaults.norm_first)
+    section.reject_unread_keys()
+    return _construct_at(
+        section.where,
+        lambda: GroupAttentionSpec(num_layers, num_heads, ffn_dim, dropout, norm_first),
     )
 
 

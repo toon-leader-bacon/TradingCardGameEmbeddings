@@ -1,0 +1,76 @@
+# ~10-minute GPU smoke run: frozen ModernBERT, head-only phase, fp16.
+# Checks that the full loop runs on real data on the RX 6800, not that the
+# model learns anything useful. Run with (ROCm venv):
+#   PYTHONPATH=. python scripts/run_training.py configs/training/gpu_smoke.yaml
+#
+# Floats: write 1.0e-3, not 1e-3 (PyYAML reads the latter as a string;
+# run_config accepts both for float fields, but other YAML tools may not).
+
+run_directory: data/runs/preflight_17lands_small
+device: cuda
+seed: 0
+
+model:
+  embedding_head: linear_projection
+  checkpoint: answerdotai/ModernBERT-base
+  card_embedding_size: 256
+
+# Catalog keys (src/training/dojo_catalog.py). STS card dojos are left out
+# of this first run: their raw-scale regression losses (up to ~1e5) would
+# dominate the best-checkpoint mean.
+dojos:
+  - seventeenlands_draft_data.card_take_rate
+  - seventeenlands_draft_data.first_pick_rate
+  - seventeenlands_draft_data.pick_number_decay_curve
+  - seventeenlands_draft_data.rank_stratified_take_rate
+  - seventeenlands_game_data.deck_game_length_prediction
+  - seventeenlands_game_data.deck_rank_tier_prediction
+  - seventeenlands_game_data.deck_win_prediction
+  - seventeenlands_game_data.drawn_win_rate
+  - seventeenlands_game_data.game_length_association
+  - seventeenlands_game_data.on_play_win_rate_delta
+  - seventeenlands_game_data.on_play_win_rate_sensitivity_by_deck
+  - seventeenlands_game_data.opening_hand_win_rate
+  - seventeenlands_game_data.tutor_choice_rate
+  - seventeenlands_game_data.tutor_target_rate
+  - seventeenlands_game_data.win_rate_when_in_deck
+  - seventeenlands_replay_data.attacker_blocker_combat_outcome
+  - seventeenlands_replay_data.average_turn_cast
+  - seventeenlands_replay_data.cast_rate
+  - seventeenlands_replay_data.combat_aggression_profile
+  - seventeenlands_replay_data.combat_damage_push_through_rate
+  - seventeenlands_replay_data.combat_kill_involvement_rate
+  - seventeenlands_replay_data.discard_rate
+  - seventeenlands_replay_data.turns_to_game_end_after_cast
+  - seventeenlands_replay_data.tutor_target_rate
+held_out_dojos: []
+
+holdout:
+  seed: 0
+  tier_ratios: [8, 1, 1]
+  held_out_games: []
+
+hardware:
+  max_batch_cost: 32
+  precision: fp16
+
+eval_examples_per_dojo: 128
+
+phases:
+  - name: frozen
+    # no "dojos" key: trains every non-held-out run dojo
+    diet: {rule: uniform}
+    # "encoder" = the card model's trainable parameters: the projection
+    # head only (ModernBERT is frozen by the model itself)
+    encoder_trainable: true
+    encoder_lr: 1.0e-3
+    head_lr: 1.0e-3
+    # ~0.3-0.5 s/step frozen at batch 32 -> ~100 s of steps per round, plus
+    # a TEST pass of 8 x 128 examples
+    steps_per_round: 200
+    max_rounds: 5
+    saturation:
+      epsilon: 0.001
+      patience_rounds: 3
+      reactivation_delta: 0.05
+      target_saturated_fraction: 1.0

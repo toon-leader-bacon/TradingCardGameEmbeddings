@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.dojos.contrastive.pair_constructor import SingleCardPairConstructor
+from src.dojos.contrastive.styles.single_card import SingleCardPairConstructor
 from src.schema.card import GenericCard, GenericDeck, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId

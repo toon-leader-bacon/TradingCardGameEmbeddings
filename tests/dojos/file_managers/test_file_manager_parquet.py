@@ -105,7 +105,8 @@ class TestMakeSplits:
 
         fm = FileManagerParquet(source, out_dir, seed=0)
         fm.make_splits(split_ratios=[8, 1, 1], batch_size=8)
-        stale_file = out_dir / "split__stale.parquet"
+        # A fourth split left by an older 4-way split
+        stale_file = out_dir / "split__split_3.parquet"
         stale_file.write_text("stale")
 
         fm.make_splits(split_ratios=[8, 1, 1], batch_size=8, delete_old_splits=True)
@@ -119,7 +120,7 @@ class TestMakeSplits:
 
         fm = FileManagerParquet(source, out_dir, seed=0)
         fm.make_splits(split_ratios=[8, 1, 1], batch_size=8)
-        stale_file = out_dir / "split__stale.parquet"
+        stale_file = out_dir / "split__split_3.parquet"
         stale_file.write_text("stale")
 
         fm.make_splits(split_ratios=[8, 1, 1], batch_size=8, delete_old_splits=False)
@@ -148,7 +149,7 @@ class TestMakeSplits:
         assert result["value"].isna().sum() == sum(1 for i in range(50) if i % 7 == 0)
         assert len(result) == 50
 
-    def test_split_writers_all_close_even_if_one_batch_write_fails(
+    def test_a_failure_mid_write_keeps_the_old_splits_and_no_temporaries(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -156,30 +157,29 @@ class TestMakeSplits:
         source = tmp_path / "source.parquet"
         _write_source(source, num_rows=100)
         out_dir = tmp_path / "out"
-
         fm = FileManagerParquet(source, out_dir, seed=0)
+        fm.make_splits(split_ratios=[8, 1, 1])
+        old_train = _read_all(fm.reader_for(Split.TRAIN))
 
-        real_write_batch = fm._write_batch_to_splits
+        real_write_bucket = fm._write_bucket_to_splits
         call_count = {"n": 0}
 
-        def _flaky_write_batch(batch, writers, splits, shuffle):
+        def _flaky_write_bucket(bucket, writers, splits):  # type: ignore[no-untyped-def]
             call_count["n"] += 1
             if call_count["n"] == 2:
                 raise RuntimeError("simulated failure mid-stream")
-            return real_write_batch(batch, writers, splits, shuffle)
+            return real_write_bucket(bucket, writers, splits)
 
-        monkeypatch.setattr(fm, "_write_batch_to_splits", _flaky_write_batch)
+        monkeypatch.setattr(fm, "_write_bucket_to_splits", _flaky_write_bucket)
 
+        # Tiny buckets: several pass-2 writes, the second one fails
         with pytest.raises(RuntimeError, match="simulated failure mid-stream"):
-            fm.make_splits(
-                split_ratios=[8, 1, 1], batch_size=8, load_row_group_batch_size=10
-            )
+            fm.make_splits(split_ratios=[8, 1, 1], bucket_bytes=100)
 
-        for split_file in out_dir.glob(f"{fm.output_file_prefix}*.parquet"):
-            # A writer left open by an unhandled exception never writes a
-            # valid footer; ExitStack must have closed every writer
-            # regardless of which one was mid-write when the error hit.
-            pq.ParquetFile(split_file).schema_arrow
+        # The old, complete splits are still the ones on disk
+        assert fm.splits_exist()
+        pd.testing.assert_frame_equal(_read_all(fm.reader_for(Split.TRAIN)), old_train)
+        assert not list((out_dir / ".shuffle_tmp").rglob("*"))
 
 
 class TestSplitPath:
@@ -345,3 +345,139 @@ class TestGroupSplits:
 
         with pytest.raises(ValueError, match="split_group_column"):
             FileManagerParquet(source, tmp_path / "out", split_group_column="nope")
+
+
+def _write_sorted_source(path: Path, num_sets: int, rows_per_set: int) -> None:
+    """Rows sorted by set, like the 17lands metric files."""
+    df = pd.DataFrame(
+        {
+            "set": [f"set{s}" for s in range(num_sets) for _ in range(rows_per_set)],
+            "value": range(num_sets * rows_per_set),
+        }
+    )
+    df.to_parquet(path, index=False)
+
+
+class TestUniformShuffle:
+    @pytest.mark.parametrize("bucket_bytes", [256 * 2**20, 2_000])
+    def test_a_set_sorted_source_is_mixed_from_the_first_rows(
+        self, tmp_path: Path, bucket_bytes: int
+    ) -> None:
+        # One bucket (whole-file shuffle) and many buckets (two passes)
+        source = tmp_path / "source.parquet"
+        _write_sorted_source(source, num_sets=10, rows_per_set=1_000)
+        fm = FileManagerParquet(source, tmp_path / "out", seed=0)
+
+        train = _read_all(fm.make_splits([8, 1, 1], bucket_bytes=bucket_bytes)[0])
+
+        # Within-10k-batch shuffling would give only set0 here
+        assert train["set"].iloc[:200].nunique() == 10
+
+    def test_many_buckets_lose_and_duplicate_no_row(self, tmp_path: Path) -> None:
+        source = tmp_path / "source.parquet"
+        _write_sorted_source(source, num_sets=5, rows_per_set=400)
+        fm = FileManagerParquet(source, tmp_path / "out", seed=2)
+
+        readers = fm.make_splits([8, 1, 1], bucket_bytes=1_000)
+
+        values = sorted(v for reader in readers for v in _read_all(reader)["value"])
+        assert values == list(range(2_000))
+
+    def test_the_same_seed_gives_the_same_order(self, tmp_path: Path) -> None:
+        source = tmp_path / "source.parquet"
+        _write_sorted_source(source, num_sets=4, rows_per_set=500)
+
+        def train_values(output_name: str) -> list[int]:
+            fm = FileManagerParquet(source, tmp_path / output_name, seed=9)
+            reader = fm.make_splits([8, 1, 1], bucket_bytes=2_000)[0]
+            return list(_read_all(reader)["value"])
+
+        assert train_values("first") == train_values("second")
+
+    def test_split_files_keep_small_row_groups(self, tmp_path: Path) -> None:
+        source = tmp_path / "source.parquet"
+        _write_source(source, num_rows=20_000)
+        fm = FileManagerParquet(source, tmp_path / "out", seed=0)
+
+        fm.make_splits([1])
+
+        metadata = pq.ParquetFile(fm.split_path(Split.TRAIN)).metadata
+        assert metadata.num_row_groups == 3
+        assert metadata.row_group(0).num_rows == 8_000
+
+    def test_temporaries_are_removed_after_a_clean_run(self, tmp_path: Path) -> None:
+        source = tmp_path / "source.parquet"
+        _write_source(source, num_rows=500)
+        out_dir = tmp_path / "out"
+        fm = FileManagerParquet(source, out_dir, seed=0)
+
+        fm.make_splits([8, 1, 1], bucket_bytes=500)
+
+        assert not (out_dir / ".shuffle_tmp").exists()
+        assert sorted(p.name for p in out_dir.iterdir()) == [
+            "split__test.parquet",
+            "split__train.parquet",
+            "split__validation.parquet",
+        ]
+
+    def test_a_killed_runs_temporaries_are_swept_but_not_other_prefixes(
+        self, tmp_path: Path
+    ) -> None:
+        source = tmp_path / "source.parquet"
+        _write_source(source, num_rows=50)
+        temp = tmp_path / "out" / ".shuffle_tmp"
+        (temp / "a_buckets_x1y2").mkdir(parents=True)
+        (temp / "a_buckets_x1y2" / "bucket_00000.parquet").write_text("stale")
+        (temp / "a_train.parquet.partial").write_text("stale")
+        (temp / "a_b_train.parquet.partial").write_text("another dojo")
+
+        FileManagerParquet(source, tmp_path / "out", "a", seed=0).make_splits([8, 1, 1])
+
+        assert [p.name for p in temp.iterdir()] == ["a_b_train.parquet.partial"]
+
+    def test_re_splitting_a_prefix_keeps_a_longer_prefix_splits(
+        self, tmp_path: Path
+    ) -> None:
+        # e.g. sts2_runs.card_win_rate vs sts2_runs.card_win_rate_at_act2
+        source = tmp_path / "source.parquet"
+        _write_source(source, num_rows=50)
+        out_dir = tmp_path / "out"
+        longer = FileManagerParquet(source, out_dir, "win_rate_at_act2", seed=0)
+        longer.make_splits([8, 1, 1])
+
+        FileManagerParquet(source, out_dir, "win_rate", seed=0).make_splits([8, 1, 1])
+
+        assert longer.splits_exist()
+
+
+class TestSplitOrderStamp:
+    def test_every_split_file_is_stamped(self, tmp_path: Path) -> None:
+        source = tmp_path / "source.parquet"
+        _write_source(source, num_rows=30)
+        fm = FileManagerParquet(source, tmp_path / "out", seed=0)
+
+        fm.make_splits([8, 1, 1])
+
+        for split in Split:
+            metadata = pq.read_schema(fm.split_path(split)).metadata
+            assert metadata[b"nocab_split_order"] == b"uniform_shuffle"
+
+    def test_unstamped_older_splits_count_as_missing(self, tmp_path: Path) -> None:
+        source = tmp_path / "source.parquet"
+        _write_source(source, num_rows=30)
+        fm = FileManagerParquet(source, tmp_path / "out", seed=0)
+        (tmp_path / "out").mkdir()
+        for split in Split:
+            _write_source(fm.split_path(split), num_rows=10)
+
+        assert fm.splits_exist() is False
+
+    def test_the_source_metadata_is_kept_beside_the_stamp(self, tmp_path: Path) -> None:
+        source = tmp_path / "source.parquet"
+        _write_source(source, num_rows=30)
+        fm = FileManagerParquet(source, tmp_path / "out", seed=0)
+
+        fm.make_splits([8, 1, 1])
+
+        split_metadata = pq.read_schema(fm.split_path(Split.TRAIN)).metadata
+        assert set(fm.schema.metadata or {}) < set(split_metadata)

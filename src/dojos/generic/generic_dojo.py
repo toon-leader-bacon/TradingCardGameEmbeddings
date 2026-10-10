@@ -8,7 +8,6 @@ filtering, example counts and head management.
 
 import copy
 import logging
-import math
 import random
 import time
 from pathlib import Path
@@ -46,10 +45,12 @@ _logger = logging.getLogger(__name__)
 # Rows converted to examples at a time; independent of the batch budget.
 ROWS_PER_CHUNK = 256
 
-# Most TRAIN rows the calibration pass converts to examples: an evenly
-# strided sample across the whole TRAIN file (not a prefix - make_splits
-# only shuffles within 10k-row blocks, so a prefix inherits the source
-# file's order). Small dojos use every TRAIN row.
+# Most TRAIN rows the calibration pass converts to examples: the first rows
+# _chunks yields. By default that is the start of the TRAIN file, a uniform
+# random sample because make_splits shuffles the whole file (and
+# splits_exist() rejects older, unshuffled splits); a dojo overriding
+# _chunks (the cross-game one) is calibrated on the start of its own draw.
+# Small dojos use every TRAIN row.
 _CALIBRATION_SAMPLE_CAP = 20_000
 
 
@@ -101,9 +102,9 @@ class GenericDojo:
               - config.split_group_column goes to FileManagerParquet
                 unchanged (None splits row by row).
     Output: n/a.
-    Side effects: reads a strided sample of the TRAIN split (at most
-        _CALIBRATION_SAMPLE_CAP rows, unmodded) through data_constructor
-        to calibrate the loss. Creates this dojo's split files under
+    Side effects: reads the first _CALIBRATION_SAMPLE_CAP rows of the
+        TRAIN split (unmodded) through data_constructor to calibrate the
+        loss. Creates this dojo's split files under
         config.output_directory (see FileManagerParquet.make_splits)
         unless they already exist and config.force_resplit is False, in
         which case the existing files are left untouched and reused.
@@ -149,7 +150,7 @@ class GenericDojo:
             path_to_training_data, card_lookup, deck_box, config.strict_version_check
         )
         if config.force_resplit or not self.file_manager.splits_exist():
-            self.file_manager.make_splits(split_ratios=[8, 1, 1], shuffle=True)
+            self.file_manager.make_splits(split_ratios=[8, 1, 1])
 
         self.data_constructor = data_constructor
         self.data_mod_pipeline = mod_pipeline or ModPipeline([])
@@ -323,37 +324,36 @@ class GenericDojo:
         return self.file_manager.reader_for(split, ROWS_PER_CHUNK)
 
     def _calibration_sample(self) -> List[TrainingDatum]:
-        """An evenly strided, unmodded sample of the TRAIN split's examples.
+        """An unmodded sample of the TRAIN split's examples: its first
+        _CALIBRATION_SAMPLE_CAP rows in _chunks() order.
 
-        Private helper - single caller is __init__. Reads the TRAIN split
-        file in chunks, keeps every k-th row (k = ceil(TRAIN rows /
-        _CALIBRATION_SAMPLE_CAP), counted across chunks), and builds only
-        the kept rows through data_constructor with the TRAIN lookup, so the
-        cost is bounded by the cap, not the split size (213k rows -> ~20k
-        builds). No mods run: labels are what calibration needs, and a mod
-        would advance its RNG and tally before training starts.
+        Private helper - single caller is __init__. A prefix is a uniform
+        random sample because make_splits shuffles the whole file, so only
+        the cap's rows are read and built, however big the split (the
+        141M-row 17lands splits took ~10 minutes as a strided read). No
+        mods run: labels are what calibration needs, and a mod would
+        advance its RNG and tally before training starts.
 
         Inputs: none (reads self.file_manager, self.data_constructor and
             self._lookups[Split.TRAIN], all set before the call).
         Output: List[TrainingDatum], in file order; rows the constructor
             skips (unknown or held-out cards) are simply absent.
-        Side effects: reads the TRAIN split file.
+        Side effects: reads the start of the TRAIN split file.
         Exceptions: ValueError if no TRAIN example survives (an empty or
             fully held-out TRAIN split cannot be calibrated); whatever
             data_constructor.build raises.
         """
         result: List[TrainingDatum] = []
-        stride = _calibration_stride(self.file_manager.row_count(Split.TRAIN))
         lookup = self._lookups[Split.TRAIN]
 
-        # Keep every stride-th row, counting rows across chunk boundaries
-        rows_before_chunk = 0
+        # Build chunks until the cap's rows are read, cutting the last one
+        rows_read = 0
         for chunk in self._chunks(Split.TRAIN):
-            first_kept = -rows_before_chunk % stride
-            kept_rows = chunk.iloc[first_kept::stride]
-            rows_before_chunk += len(chunk)
-            if len(kept_rows):
-                result.extend(self.data_constructor.build(kept_rows, lookup))
+            kept_rows = chunk.iloc[: _CALIBRATION_SAMPLE_CAP - rows_read]
+            rows_read += len(kept_rows)
+            result.extend(self.data_constructor.build(kept_rows, lookup))
+            if rows_read >= _CALIBRATION_SAMPLE_CAP:
+                break
 
         if not result:
             raise ValueError(
@@ -491,16 +491,6 @@ class GenericDojo:
                 f"{actual_deck_box_binder_version!r} for {metadata.game} - "
                 "regenerate the deck box or this metric"
             )
-
-
-def _calibration_stride(train_rows: int) -> int:
-    """Keep every k-th TRAIN row so at most _CALIBRATION_SAMPLE_CAP remain.
-
-    Inputs: train_rows (int >= 0).
-    Output: k = ceil(train_rows / cap), at least 1.
-    Side effects: none. Exceptions: none.
-    """
-    return max(1, math.ceil(train_rows / _CALIBRATION_SAMPLE_CAP))
 
 
 def _label_stats_note(label_stats: LabelStats | None) -> str:

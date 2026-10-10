@@ -10,6 +10,7 @@ run_directory, which must not exist yet:
         rounds.csv          one row per (round, dojo)
         checkpoints.csv     one row per best checkpoint written (only the
                             last best per phase is still on disk)
+        diet_shares.csv     each phase's expected share of steps per dojo
         <phase>_roundNNNN/  the phase's best checkpoint (state.pt, encoder.pt, ...)
         latest/             the most recent round, rewritten every round
 
@@ -28,7 +29,7 @@ import argparse
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Protocol
+from typing import Mapping
 
 import torch
 import yaml
@@ -37,13 +38,27 @@ from src.dojos.dojo import BatchBudget, Dojo
 from src.dojos.loss.regression_objective import RegressionObjective
 from src.dojos.mods.mod import ModTally
 from src.encoder_model.card_encoder_model import CardEncoderModel
-from src.encoder_model.reference_singlecard_models import (
-    AttentionPoolingCardModel,
-    LinearProjectionCardModel,
-    ResidualMlpCardModel,
+from src.encoder_model.embedding_head import (
+    AttentionPoolingEmbeddingHead,
+    EmbeddingHead,
+    LinearEmbeddingHead,
+    ResidualMlpEmbeddingHead,
 )
+from src.encoder_model.multi_card_model import MultiCardModel
+from src.encoder_model.single_card_model import SingleCardModel
+from src.encoder_model.text_encoder import PretrainedTextEncoder
 from src.schema.card import GenericCard
-from src.training.dojo_catalog import CardShelf, DojoBuildContext, build_dojos
+from src.training.diet.diet_shares import (
+    format_diet_shares,
+    plan_diet_shares,
+    write_diet_shares_csv,
+)
+from src.training.dojo_catalog import (
+    DOJO_CATALOG,
+    CardShelf,
+    DojoBuildContext,
+    build_dojos,
+)
 from src.training.preflight import preflight_dojo
 from src.training.recording.checkpointer import DirectoryCheckpointer
 from src.training.recording.reports import TrainingResult
@@ -54,7 +69,7 @@ from src.training.recording.run_listener import (
 )
 from src.training.run_config import (
     ConfigDocument,
-    ModelKind,
+    EmbeddingHeadKind,
     ModelSpec,
     RunConfig,
     apply_overrides,
@@ -66,6 +81,7 @@ from src.training.trainer import Trainer
 _CONFIG_COPY_NAME = "run_config.yaml"
 _ROUNDS_CSV_NAME = "rounds.csv"
 _CHECKPOINTS_CSV_NAME = "checkpoints.csv"
+_DIET_SHARES_CSV_NAME = "diet_shares.csv"
 
 
 def card_cost(card: GenericCard) -> int:
@@ -79,19 +95,6 @@ def card_cost(card: GenericCard) -> int:
         1
     """
     return 1
-
-
-class ModelConstructor(Protocol):
-    """A reference model class, built from its checkpoint and width."""
-
-    def __call__(self, checkpoint: str, embed_dim: int) -> CardEncoderModel: ...
-
-
-_MODEL_CONSTRUCTORS: Mapping[ModelKind, ModelConstructor] = {
-    ModelKind.LINEAR_PROJECTION: LinearProjectionCardModel,
-    ModelKind.RESIDUAL_MLP: ResidualMlpCardModel,
-    ModelKind.ATTENTION_POOLING: AttentionPoolingCardModel,
-}
 
 
 @dataclass(frozen=True)
@@ -167,7 +170,7 @@ def main() -> int:
     document = apply_overrides(
         read_config_document(command_line.config), command_line.overrides
     )
-    config = parse_run_config(document)
+    config = parse_run_config(document, tuple(DOJO_CATALOG))
     _require_device(config.device)
     if not command_line.check_only:
         _require_new_run_directory(config.run_directory)
@@ -176,7 +179,7 @@ def main() -> int:
     context = DojoBuildContext(
         shelf=CardShelf(),
         holdout=config.plan.holdout,
-        card_embedding_size=config.model.embed_dim,
+        card_embedding_size=config.model.card_embedding_size,
         rng_seed=config.plan.seed,
         mod_overrides=config.mod_overrides,
         staple_thresholds=config.staple_thresholds,
@@ -185,7 +188,12 @@ def main() -> int:
     dojos = build_dojos(config.dojo_names, context)
     if not preflight_passes(dojos, config):
         return 1
+    # Each phase's expected diet, checked by eye before any GPU time
+    shares = plan_diet_shares(config.plan, dojos)
+    for line in format_diet_shares(shares):
+        print(line)
     model = build_model(config.model).to(config.device)
+    print(f"Model: {trainable_parameter_count(model):,} trainable parameters")
     if command_line.check_only:
         # Constructing a Trainer validates the plan against the model and
         # dojos (e.g. a phase with nothing trainable) without training
@@ -194,31 +202,83 @@ def main() -> int:
         return 0
 
     # Train, recording into a fresh run directory
-    _create_run_directory(config.run_directory, document)
+    _create_run_directory(config.run_directory, _with_expanded_dojos(document, config))
+    write_diet_shares_csv(shares, config.run_directory / _DIET_SHARES_CSV_NAME)
     result = train(model, dojos, config)
     print_summary(result, config.run_directory)
     return 0
 
 
 def build_model(spec: ModelSpec) -> CardEncoderModel:
-    """Construct the reference model spec names (on the CPU), through
-    _MODEL_CONSTRUCTORS.
+    """Construct the model spec describes (on the CPU): a frozen pretrained
+    text encoder and an embedding head, as a SingleCardModel, or as a
+    MultiCardModel when spec has group attention.
 
     Inputs: spec (ModelSpec). Output: CardEncoderModel.
     Side effects: may download the pretrained checkpoint.
-    Exceptions: whatever the model constructor raises.
+    Exceptions: whatever the text encoder or model constructors raise.
 
     Example:
-        >>> build_model(ModelSpec(ModelKind.LINEAR_PROJECTION, "answerdotai/ModernBERT-base", 256))
+        >>> build_model(ModelSpec(EmbeddingHeadKind.RESIDUAL_MLP, "answerdotai/ModernBERT-base", 256))
     """
-    constructor = _MODEL_CONSTRUCTORS[spec.kind]
-    return constructor(checkpoint=spec.checkpoint, embed_dim=spec.embed_dim)
+    text_encoder = PretrainedTextEncoder(checkpoint=spec.checkpoint, trainable=False)
+    head = build_embedding_head(spec, text_encoder.model.config.hidden_size)
+    attention = spec.group_attention
+    if attention is None:
+        return SingleCardModel(text_encoder=text_encoder, embedding_head=head)
+    return MultiCardModel(
+        text_encoder=text_encoder,
+        embedding_head=head,
+        num_heads=attention.num_heads,
+        num_layers=attention.num_layers,
+        ffn_dim=attention.ffn_dim,
+        dropout=attention.dropout,
+        norm_first=attention.norm_first,
+    )
+
+
+def build_embedding_head(spec: ModelSpec, input_dim: int) -> EmbeddingHead:
+    """The EmbeddingHead spec.embedding_head names, from input_dim (the text
+    encoder's hidden size) to spec.card_embedding_size.
+
+    Inputs: spec, input_dim. Output: EmbeddingHead.
+    Side effects: none. Exceptions: none.
+
+    Example:
+        >>> build_embedding_head(spec, 768).output_dim
+        256
+    """
+    match spec.embedding_head:
+        case EmbeddingHeadKind.LINEAR_PROJECTION:
+            return LinearEmbeddingHead(input_dim, spec.card_embedding_size)
+        case EmbeddingHeadKind.RESIDUAL_MLP:
+            return ResidualMlpEmbeddingHead(
+                input_dim,
+                spec.card_embedding_size,
+                hidden_dim=spec.mlp_hidden_dim,
+                num_blocks=spec.mlp_num_blocks,
+            )
+        case EmbeddingHeadKind.ATTENTION_POOLING:
+            return AttentionPoolingEmbeddingHead(input_dim, spec.card_embedding_size)
+
+
+def trainable_parameter_count(model: torch.nn.Module) -> int:
+    """How many parameters training updates (the frozen text encoder's are
+    not counted), for comparing model sizes across runs.
+
+    Inputs: model. Output: int. Side effects: none. Exceptions: none.
+
+    Example:
+        >>> trainable_parameter_count(torch.nn.Linear(2, 3))
+        9
+    """
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
 def preflight_passes(dojos: list[Dojo], config: RunConfig) -> bool:
     """Run preflight_dojo on every dojo and print one line each.
 
-    Inputs: dojos (built dojos), config (for the batch budget and embed_dim).
+    Inputs: dojos (built dojos), config (for the batch budget and card_embedding_size).
     Output: True if every dojo passed.
     Side effects: prints a report; reads one TRAIN batch per dojo.
     Exceptions: none (a failing dojo is reported, not raised).
@@ -231,7 +291,7 @@ def preflight_passes(dojos: list[Dojo], config: RunConfig) -> bool:
     print(f"Preflight: {len(dojos)} dojos")
     passed = 0
     for dojo in dojos:
-        check = preflight_dojo(dojo, budget, config.model.embed_dim)
+        check = preflight_dojo(dojo, budget, config.model.card_embedding_size)
         if check.ok:
             passed += 1
             print(
@@ -354,6 +414,21 @@ def _require_new_run_directory(run_directory: Path) -> None:
             f"run directory {run_directory} already exists; pick a new "
             "run_directory (e.g. --set run_directory=data/runs/<name>)"
         )
+
+
+def _with_expanded_dojos(document: ConfigDocument, config: RunConfig) -> ConfigDocument:
+    """document with "dojos" and "held_out_dojos" replaced by the names
+    their patterns expanded to, so the run's config copy still names the
+    same dojos after the catalog grows.
+
+    Inputs: document (not modified), config (parsed from it).
+    Output: a shallow copy of document. Side effects: none. Exceptions: none.
+    """
+    held_out = config.plan.held_out_dojos
+    result = dict(document)
+    result["dojos"] = list(config.dojo_names)
+    result["held_out_dojos"] = [name for name in config.dojo_names if name in held_out]
+    return result
 
 
 def _create_run_directory(run_directory: Path, document: ConfigDocument) -> None:

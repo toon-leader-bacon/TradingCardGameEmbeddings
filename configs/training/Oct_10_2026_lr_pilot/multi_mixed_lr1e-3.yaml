@@ -1,0 +1,137 @@
+# encoder_lr pilot: multi_mixed (configs/training/Oct_9_2026) with the
+# embedding LayerNorm, encoder_lr 1.0e-3 and 3 rounds. Only those differ.
+# Run with (ROCm venv):
+#   PYTHONPATH=. python scripts/run_training.py configs/training/Oct_10_2026_lr_pilot/multi_mixed_lr1e-3.yaml
+
+run_directory: data/runs/Oct_10_2026_lr_pilot/multi_mixed_lr1e-3
+device: cuda
+seed: 0
+
+model:
+  embedding_head: residual_mlp
+  checkpoint: answerdotai/ModernBERT-base
+  card_embedding_size: 256
+  mlp_hidden_dim: 512
+  # 3 blocks + 2 attention layers: 2,895,616 trainable parameters,
+  # matching the single-card arm
+  mlp_num_blocks: 3
+  group_attention:
+    num_layers: 2
+    num_heads: 4
+    ffn_dim: 1024
+    dropout: 0.1
+    norm_first: true
+
+# 149 trained dojos (held-out ones below join them). Entries are
+# names or patterns (*, ?, [...]); a quoted "!pattern" drops what it
+# matches from the names so far.
+dojos:
+  # contrastive, five styles x five games (card_in_contexts is eval-only)
+  - contrastive.*
+  - contrastive_cross_slice.*
+  - contrastive_slice_match.*
+  - contrastive_missing_card.*
+  - contrastive_odd_one_out.*
+  # metric, by source (held-out ones are dropped from training below)
+  - cardvault_fabtcg.*
+  - dominiontabs.*
+  - fabtcg_decklists.*
+  - final_decks.*
+  - hearthstonejson.*
+  - isotropic.*
+  - pokemon_tcg.*
+  - scryfall.*
+  - seventeenlands_draft_data.*
+  - seventeenlands_game_data.*
+  - seventeenlands_replay_data.*
+  - spire_codex.*
+  - sts2_runs.*
+  - sts_gg.*
+  # Gwent is the held-out game (holdout.held_out_games): none of its dojos
+  - "!*gwent*"
+
+# Never trained; scored every round with untrained heads, and trained
+# fresh on the frozen encoder by the extrinsic evaluation. The same set
+# in every series-1 cell. Each joins the run's dojos (no need to list
+# them above too).
+held_out_dojos:
+  - cross_game.rarity_tier
+  - cardvault_fabtcg.pitch_mask
+  - fabtcg_decklists.hero_masked_from_deck
+  - hearthstonejson.class_mask
+  - isotropic.kingdom_veto_prediction
+  - pokemon_tcg.hp_regression
+  - scryfall.cmc_regression
+  - seventeenlands_game_data.deck_win_prediction
+  - seventeenlands_replay_data.average_turn_cast
+  - spire_codex.card_type_mask
+  - sts2_runs.card_reward_pick
+  - sts2_runs.card_win_rate
+  - sts2_runs.card_win_rate_at_act2
+
+holdout:
+  seed: 0
+  tier_ratios: [8, 1, 1]
+  # Every Gwent card is VALIDATION-tier: the unseen game for evaluation
+  held_out_games: [gwent]
+
+regression_loss: huber
+
+# Counts cards; the largest examples (two full decks) need ~120-200
+hardware:
+  max_batch_cost: 256
+  precision: fp16
+
+eval_examples_per_dojo: 128
+
+phases:
+  - name: train
+    # Half the steps to the contrastive dojos (each style equally, then
+    # each game equally), half to the metric dojos (TRAIN count ** 0.3)
+    diet:
+      rule: table
+      table:
+        - weight: 1
+          table:
+            - weight: 1  # single card: two cards from one deck
+              dojos: ["contrastive.*"]
+            - weight: 1  # cross-slice card match
+              dojos: ["contrastive_cross_slice.*"]
+            - weight: 1  # slice match
+              dojos: ["contrastive_slice_match.*"]
+            - weight: 1  # missing card: a deck minus one card vs. that card
+              dojos: ["contrastive_missing_card.*"]
+            - weight: 1  # odd one out
+              dojos: ["contrastive_odd_one_out.*"]
+        - weight: 1
+          dojos:
+          - "cardvault_fabtcg.*"
+          - "dominiontabs.*"
+          - "fabtcg_decklists.*"
+          - "final_decks.*"
+          - "hearthstonejson.*"
+          - "isotropic.*"
+          - "pokemon_tcg.*"
+          - "scryfall.*"
+          - "seventeenlands_draft_data.*"
+          - "seventeenlands_game_data.*"
+          - "seventeenlands_replay_data.*"
+          - "spire_codex.*"
+          - "sts2_runs.*"
+          - "sts_gg.*"
+          within: {rule: temperature, alpha: 0.3}
+    # "encoder" = the card model's trainable parameters (embedding
+    # head and group attention); ModernBERT itself is frozen
+    encoder_trainable: true
+    encoder_lr: 1.0e-3
+    head_lr: 1.0e-3
+    # Pilot budget: 3 rounds x 1000 steps = 3,000 steps
+    steps_per_round: 1000
+    max_rounds: 3
+    # patience_rounds > max_rounds: no dojo ever saturates, so the diet
+    # never changes and no cell ends early
+    saturation:
+      epsilon: 0.001
+      patience_rounds: 1000
+      reactivation_delta: 0.05
+      target_saturated_fraction: 1.0

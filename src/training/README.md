@@ -52,7 +52,22 @@ Top level:
 - [run_config.py](run_config.py): reads a YAML run config, applies
   `--set key.path=value` overrides, and parses it into a `RunConfig`: the
   `TrainingPlan`, `HardwareLimits`, device, `ModelSpec` and dojo list.
-  Unknown keys raise, with their dotted location.
+  Unknown keys raise, with their dotted location. `dojos:` and
+  `held_out_dojos:` entries are names or fnmatch patterns
+  (`"sts2_runs.*"`) matched against the catalog keys, applied in order; a
+  quoted `"!pattern"` entry in `dojos:` drops the names matched so far,
+  and a pattern or exclusion that matches nothing raises. Held-out dojos
+  join the run's dojos without being listed in `dojos:`. The `model:` section
+  describes the encoder `scripts/run_training.py` assembles: a frozen
+  pretrained text encoder (`checkpoint`), an `embedding_head`
+  (`linear_projection`, `residual_mlp` with optional `mlp_hidden_dim` /
+  `mlp_num_blocks`, or `attention_pooling`) producing
+  `card_embedding_size`-wide embeddings, and for a multi-card model a
+  `group_attention:` block (`num_layers`, `num_heads`, `ffn_dim`,
+  `dropout`, `norm_first`; defaults 2, 4, 1024, 0.1, true) of
+  self-attention over each group. Without `group_attention` it is a
+  single-card model. The driver prints the trainable parameter count, so
+  arms meant to be the same size can be checked under `--check`.
 - [dojo_catalog.py](dojo_catalog.py): `DOJO_CATALOG`, every dojo a config
   can name, keyed `"<metric source>.<metric stem>"` (e.g.
   `gwent_one.color_mask`). The key becomes the dojo's `name`, so same-stem
@@ -258,7 +273,8 @@ stops the run. A config's optional `mods:` section replaces a dojo's
 default augmentations (see `configs/training/gwent_contrastive.yaml`);
 dojo names contain ".", so `--set` cannot reach them (nor `loss_weights:`). The run
 directory must not already exist; it receives `run_config.yaml` (the
-config with overrides applied; defaults it left out are not written),
+config with overrides applied and dojo patterns expanded to names;
+defaults it left out are not written),
 `rounds.csv`, `checkpoints.csv` and the checkpoint directories. Batch cost
 is one per card, for preflight and training alike (`card_cost`).
 

@@ -43,7 +43,7 @@ class LinearProjectionMultiCardModel(MultiCardModel):
         text_encoder = PretrainedTextEncoder(checkpoint=checkpoint, trainable=False)
         hidden_dim = text_encoder.model.config.hidden_size
         embedding_head = LinearEmbeddingHead(
-            input_dim=hidden_dim, embed_dim=card_embedding_size
+            input_dim=hidden_dim, card_embedding_size=card_embedding_size
         )
         super().__init__(
             text_encoder=text_encoder,
@@ -70,7 +70,7 @@ class ResidualMlpMultiCardModel(MultiCardModel):
         encoder_hidden_dim = text_encoder.model.config.hidden_size
         embedding_head = ResidualMlpEmbeddingHead(
             input_dim=encoder_hidden_dim,
-            embed_dim=card_embedding_size,
+            card_embedding_size=card_embedding_size,
             hidden_dim=hidden_dim,
             num_blocks=num_blocks,
         )
@@ -97,7 +97,7 @@ class AttentionPoolingMultiCardModel(MultiCardModel):
         text_encoder = PretrainedTextEncoder(checkpoint=checkpoint, trainable=False)
         hidden_dim = text_encoder.model.config.hidden_size
         embedding_head = AttentionPoolingEmbeddingHead(
-            input_dim=hidden_dim, embed_dim=card_embedding_size
+            input_dim=hidden_dim, card_embedding_size=card_embedding_size
         )
         super().__init__(
             text_encoder=text_encoder,
@@ -128,7 +128,7 @@ class FromScratchMultiCardModel(MultiCardModel):
             embedding_dim=token_embedding_dim,
         )
         embedding_head = ResidualMlpEmbeddingHead(
-            input_dim=token_embedding_dim, embed_dim=card_embedding_size
+            input_dim=token_embedding_dim, card_embedding_size=card_embedding_size
         )
         super().__init__(
             text_encoder=text_encoder,

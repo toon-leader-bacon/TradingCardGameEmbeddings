@@ -6,7 +6,7 @@ import pytest
 import torch
 import yaml
 
-from src.training.run_config import ModelKind
+from src.training.run_config import EmbeddingHeadKind, ModelSpec
 
 _SCRIPT = Path("scripts/run_training.py")
 
@@ -19,9 +19,26 @@ def _load_script() -> ModuleType:
     return module
 
 
-def test_every_model_kind_has_a_constructor() -> None:
+@pytest.mark.parametrize("head", list(EmbeddingHeadKind))
+def test_every_embedding_head_kind_builds(head: EmbeddingHeadKind) -> None:
     script = _load_script()
-    assert set(script._MODEL_CONSTRUCTORS) == set(ModelKind)
+    built = script.build_embedding_head(ModelSpec(head, "ckpt", 16), input_dim=8)
+    assert built.output_dim == 16
+
+
+def test_the_residual_mlp_head_takes_its_sizes() -> None:
+    script = _load_script()
+    spec = ModelSpec(EmbeddingHeadKind.RESIDUAL_MLP, "ckpt", 16, 32, 5)
+    built = script.build_embedding_head(spec, input_dim=8)
+    assert len(built.blocks) == 5
+    assert built.input_projection.out_features == 32
+
+
+def test_trainable_parameter_count_skips_frozen_parameters() -> None:
+    script = _load_script()
+    model = torch.nn.Sequential(torch.nn.Linear(2, 3), torch.nn.Linear(3, 1))
+    model[0].requires_grad_(False)
+    assert script.trainable_parameter_count(model) == 4
 
 
 def test_an_existing_run_directory_is_refused(tmp_path: Path) -> None:

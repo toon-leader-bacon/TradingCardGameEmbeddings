@@ -35,11 +35,15 @@ class LinearProjectionCardModel(SingleCardModel):
     linear projection head. Any richer combination should beat this."""
 
     def __init__(
-        self, checkpoint: str = _DEFAULT_PRETRAINED_CHECKPOINT, embed_dim: int = 256
+        self,
+        checkpoint: str = _DEFAULT_PRETRAINED_CHECKPOINT,
+        card_embedding_size: int = 256,
     ):
         text_encoder = PretrainedTextEncoder(checkpoint=checkpoint, trainable=False)
         hidden_dim = text_encoder.model.config.hidden_size
-        embedding_head = LinearEmbeddingHead(input_dim=hidden_dim, embed_dim=embed_dim)
+        embedding_head = LinearEmbeddingHead(
+            input_dim=hidden_dim, card_embedding_size=card_embedding_size
+        )
         super().__init__(text_encoder=text_encoder, embedding_head=embedding_head)
 
 
@@ -49,7 +53,7 @@ class ResidualMlpCardModel(SingleCardModel):
     def __init__(
         self,
         checkpoint: str = _DEFAULT_PRETRAINED_CHECKPOINT,
-        embed_dim: int = 256,
+        card_embedding_size: int = 256,
         hidden_dim: int = 512,
         num_blocks: int = 3,
     ):
@@ -57,7 +61,7 @@ class ResidualMlpCardModel(SingleCardModel):
         encoder_hidden_dim = text_encoder.model.config.hidden_size
         embedding_head = ResidualMlpEmbeddingHead(
             input_dim=encoder_hidden_dim,
-            embed_dim=embed_dim,
+            card_embedding_size=card_embedding_size,
             hidden_dim=hidden_dim,
             num_blocks=num_blocks,
         )
@@ -69,12 +73,14 @@ class AttentionPoolingCardModel(SingleCardModel):
     head, instead of the other two presets' naive mean pooling."""
 
     def __init__(
-        self, checkpoint: str = _DEFAULT_PRETRAINED_CHECKPOINT, embed_dim: int = 256
+        self,
+        checkpoint: str = _DEFAULT_PRETRAINED_CHECKPOINT,
+        card_embedding_size: int = 256,
     ):
         text_encoder = PretrainedTextEncoder(checkpoint=checkpoint, trainable=False)
         hidden_dim = text_encoder.model.config.hidden_size
         embedding_head = AttentionPoolingEmbeddingHead(
-            input_dim=hidden_dim, embed_dim=embed_dim
+            input_dim=hidden_dim, card_embedding_size=card_embedding_size
         )
         super().__init__(text_encoder=text_encoder, embedding_head=embedding_head)
 
@@ -90,13 +96,13 @@ class FromScratchCardModel(SingleCardModel):
         self,
         tokenizer_checkpoint: str = _DEFAULT_PRETRAINED_CHECKPOINT,
         token_embedding_dim: int = 256,
-        embed_dim: int = 256,
+        card_embedding_size: int = 256,
     ):
         text_encoder = StaticEmbeddingTextEncoder(
             tokenizer_checkpoint=tokenizer_checkpoint,
             embedding_dim=token_embedding_dim,
         )
         embedding_head = ResidualMlpEmbeddingHead(
-            input_dim=token_embedding_dim, embed_dim=embed_dim
+            input_dim=token_embedding_dim, card_embedding_size=card_embedding_size
         )
         super().__init__(text_encoder=text_encoder, embedding_head=embedding_head)

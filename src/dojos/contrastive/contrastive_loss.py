@@ -4,41 +4,49 @@ See src/dojos/README.md's contrastive section. A new Protocol, sibling
 to but distinct from NocabLoss
 (src/dojos/loss/nocab_loss.py) - it cannot satisfy NocabLoss.calculate
 (decoder_output, labels)'s row-independent shape, since InfoNCE/SupCon
-need every item's embedding in the batch jointly. Out of scope for this
-slice: a SupCon-style multi-positive variant.
+need every item's embedding in the batch jointly. Out of scope: a
+SupCon-style multi-positive variant.
 
-The module-level `_pairwise_cosine_similarity`/`_valid_negative_mask`/
-`_anchor_loss` functions below are the shared single-positive InfoNCE
-math both SingleCardInfoNCELoss and MultiCardInfoNCELoss reduce to -
-identical logic (PRINCIPLES.md section 2), not two classes that happen
-to look alike. What differs between the two is only how each derives,
-from its own item-level input shape, the flat embedding/identity pool
-and the anchor -> positives/exclusions mapping these functions expect;
-that derivation stays private to each class.
+This module holds the Protocol, DegenerateBatchError, and the shared
+single-positive InfoNCE math (`check_item_embeddings`,
+`pairwise_cosine_similarity`, `identity_negative_mask`, `anchor_loss`,
+`mean_anchor_loss`, `mean_item_embeddings`, `mean_constant_logit_loss`)
+that every InfoNCE style in styles/ reduces to - identical logic
+(PRINCIPLES.md section 2), not classes that happen to look alike. What
+differs between those styles is only how each derives, from its own
+item-level input shape, the flat embedding/identity pool and the anchor
+-> positives/exclusions mapping these functions expect; that derivation
+stays private to each loss. Odd one out's loss is not InfoNCE (its
+candidates are positions within one item) and uses only
+`check_item_embeddings` and DegenerateBatchError.
 """
 
 import math
-from typing import Hashable, Mapping, Protocol, Sequence, cast
+from typing import (
+    Hashable,
+    Mapping,
+    Protocol,
+    Sequence,
+)
 from uuid import UUID
 
 import torch
 
 from src.schema.type_hints import (
-    BatchedModelOutput,
     BatchedMultiCardEmbedding,
-    BatchedSingleCardEmbedding,
+    BatchedModelOutput,
     Embedding,
     InputShape,
     output_shape_of,
 )
 
 
-def _pairwise_cosine_similarity(embeddings: list[Embedding]) -> torch.Tensor:
+def pairwise_cosine_similarity(embeddings: list[Embedding]) -> torch.Tensor:
     """All-pairs cosine similarity over a flat pool of embeddings.
 
-    Shared by every concrete ContrastiveLoss in this file - the pool is
+    Shared by every InfoNCE style's loss (styles/) - the pool is
     "one embedding per item" for SingleCardInfoNCELoss, or "one
-    embedding per flattened card" for MultiCardInfoNCELoss; this
+    embedding per flattened card" for CrossSliceCardInfoNCELoss; this
     function doesn't need to know which.
 
     Inputs:
@@ -53,21 +61,41 @@ def _pairwise_cosine_similarity(embeddings: list[Embedding]) -> torch.Tensor:
     return normalized @ normalized.T
 
 
-def _valid_negative_mask(
+def mean_item_embeddings(item_embeddings: BatchedMultiCardEmbedding) -> list[Embedding]:
+    """One vector per multi-card item: the mean of its card embeddings
+    (for a one-card item, that card's embedding itself).
+
+    Shared by every concrete ContrastiveLoss that compares whole items
+    (the missing-card context, the slice-match slice).
+
+    Inputs: item_embeddings, every item non-empty.
+    Output: list[Embedding], one per item, same order.
+    Side effects: none beyond autograd.
+    Exceptions: none expected.
+
+    Example:
+        >>> mean_item_embeddings([[torch.ones(2), torch.zeros(2)]])
+        [tensor([0.5000, 0.5000])]
+    """
+    return [torch.stack(item).mean(dim=0) for item in item_embeddings]
+
+
+def identity_negative_mask(
     identities: Sequence[Hashable], device: torch.device
 ) -> torch.Tensor:
     """Which (i, j) pairs may ever serve as anchor/negative.
 
-    Shared by every concrete ContrastiveLoss in this file. Excludes
+    Shared by every InfoNCE style's loss (styles/). Excludes
     i == j and any pair sharing an identical identity (the structural
     false-negative case - see this module's docstring). `identities`
     is whatever hashable key identifies "the same real-world thing" for
     one comparison unit - a whole ContrastiveBatch.identities tuple for
-    a single-card item, or one bare card uuid for a flattened card.
+    a single-card item or a missing-card style item, or one bare card
+    uuid for a flattened card.
 
     Inputs:
         identities: one hashable identity per comparison unit, same
-            order as the embeddings _pairwise_cosine_similarity() was
+            order as the embeddings pairwise_cosine_similarity() was
             given.
         device: where the similarity matrix lives; the mask is moved there.
     Output: an (N, N) boolean tensor on device, N = len(identities); True where
@@ -90,7 +118,7 @@ def _valid_negative_mask(
     return mask.to(device)
 
 
-def _anchor_loss(
+def anchor_loss(
     anchor_index: int,
     anchor_positives: list[int],
     excluded_indices: set[int],
@@ -101,7 +129,7 @@ def _anchor_loss(
     """One anchor's own single-positive InfoNCE loss, averaged over its
     positives if it has more than one.
 
-    Shared by every concrete ContrastiveLoss in this file, called once
+    Shared by every InfoNCE style's loss (styles/), called once
     per anchor unit that has at least one positive.
 
     Inputs:
@@ -114,9 +142,9 @@ def _anchor_loss(
             anchor's own-item sibling cards. Empty for a ContrastiveLoss
             with no such notion (e.g. SingleCardInfoNCELoss).
         similarity: the full (N, N) pairwise cosine similarity matrix
-            from _pairwise_cosine_similarity().
+            from pairwise_cosine_similarity().
         valid_negative_mask: the full (N, N) mask from
-            _valid_negative_mask().
+            identity_negative_mask().
         temperature: InfoNCE's softmax temperature.
     Output: a scalar loss tensor for this anchor: for each of its
         positives, -log(softmax(similarity[anchor] / temperature)
@@ -151,24 +179,100 @@ def _anchor_loss(
     return torch.stack(per_positive_losses).mean()
 
 
-def _mean_constant_logit_loss(
+class DegenerateBatchError(ValueError):
+    """A well-formed batch whose loss is undefined: no unit has a positive,
+    or no anchor has a negative (e.g. one surviving deck). Distinct from a
+    malformed batch (a ValueError from a loss's own parsing), which is a
+    pair-constructor bug; ContrastiveDojo skips only this one."""
+
+
+def check_item_embeddings(
+    item_embeddings: BatchedModelOutput,
+    identities: Sequence[tuple[UUID, ...]],
+    expected_shape: InputShape,
+    loss_name: str,
+) -> None:
+    """The input checks every concrete ContrastiveLoss.calculate() starts
+    with: each item has expected_shape, and one identity per item.
+
+    Shared by every style's loss (styles/), odd one out included.
+
+    Inputs: item_embeddings, identities (see ContrastiveLoss.calculate()),
+        expected_shape (the item shape this loss reads), loss_name (for
+        the error message).
+    Output: none.
+    Side effects: none.
+    Exceptions: ValueError on a shape or length mismatch.
+    """
+    if item_embeddings and output_shape_of(item_embeddings[0]) != expected_shape:
+        # e.g. InputShape.MULTI_CARD -> "multi-card"
+        shape_text = expected_shape.name.lower().replace("_", "-")
+        raise ValueError(
+            f"{loss_name} expects {shape_text} item embeddings "
+            f"(got shape {output_shape_of(item_embeddings[0])} for the first item)"
+        )
+    if len(item_embeddings) != len(identities):
+        raise ValueError(
+            f"item_embeddings ({len(item_embeddings)}) and identities "
+            f"({len(identities)}) must be the same length"
+        )
+
+
+def mean_anchor_loss(
+    positives_by_anchor: Mapping[int, list[int]],
+    excluded_by_anchor: Mapping[int, set[int]],
+    similarity: torch.Tensor,
+    valid_negative_mask: torch.Tensor,
+    temperature: float,
+) -> torch.Tensor:
+    """anchor_loss for every anchor, averaged: the reduction every
+    concrete ContrastiveLoss.calculate() ends with.
+
+    Shared by every InfoNCE style's loss (styles/).
+
+    Inputs: positives_by_anchor (non-empty lists), excluded_by_anchor (a
+        missing key means no extra exclusions), similarity and
+        valid_negative_mask (see anchor_loss), temperature.
+    Output: a scalar loss tensor.
+    Side effects: none.
+    Exceptions: DegenerateBatchError (a ValueError) if positives_by_anchor
+        is empty (no anchor, loss undefined).
+    """
+    if not positives_by_anchor:
+        raise DegenerateBatchError("no unit in this batch has a positive pair")
+    per_anchor_losses = [
+        anchor_loss(
+            anchor_index,
+            anchor_positives,
+            excluded_by_anchor.get(anchor_index, set()),
+            similarity,
+            valid_negative_mask,
+            temperature,
+        )
+        for anchor_index, anchor_positives in positives_by_anchor.items()
+    ]
+    return torch.stack(per_anchor_losses).mean()
+
+
+def mean_constant_logit_loss(
     identities: Sequence[Hashable],
     positives_by_anchor: Mapping[int, list[int]],
     excluded_by_anchor: Mapping[int, set[int]],
 ) -> float:
-    """The batch loss _anchor_loss would give if every similarity were
+    """The batch loss anchor_loss would give if every similarity were
     equal: the InfoNCE baseline for this batch shape (encoder-free).
 
-    Shared by every concrete ContrastiveLoss in this file, exactly as
-    _anchor_loss is. With constant logits, each of an anchor's per-positive
+    Shared by every InfoNCE style's loss (styles/), exactly as
+    anchor_loss is. With constant logits, each of an anchor's per-positive
     terms is -log(1 / (1 + |N(a)|)) whatever the temperature, so
 
         baseline = mean over anchors a with P(a) non-empty of ln(1 + |N(a)|)
         N(a) = units - {a} - P(a) - E(a) - D(a)
 
     where P(a) = a's positives, E(a) = its extra exclusions (a multi-card
-    anchor's own-item siblings), D(a) = exact-identity duplicates of a
-    (_valid_negative_mask). Closed forms for duplicate-free batches with
+    anchor's own-item siblings; for a missing-card anchor, the other
+    same-role units and decks missing the same card), D(a) = exact-identity duplicates of a
+    (identity_negative_mask). Closed forms for duplicate-free batches with
     clique sizes k_c (items), N items in all:
         single-card: sum_c k_c ln(N - k_c + 1) / sum_c k_c
         multi-card, m cards per item: sum_c k_c ln(m (N - k_c) + 1) / sum_c k_c
@@ -177,7 +281,7 @@ def _mean_constant_logit_loss(
 
     Inputs:
         identities: one identity per comparison unit, as for
-            _valid_negative_mask.
+            identity_negative_mask.
         positives_by_anchor: anchor unit -> its positives (non-empty
             lists only), as each class's calculate() derives it.
         excluded_by_anchor: anchor unit -> extra exclusions; a missing
@@ -189,7 +293,7 @@ def _mean_constant_logit_loss(
         normalized loss undefined).
     """
     if not positives_by_anchor:
-        raise ValueError("no unit in this batch has a positive pair")
+        raise DegenerateBatchError("no unit in this batch has a positive pair")
     unit_count = len(identities)
     per_anchor_losses: list[float] = []
     for anchor, positives in positives_by_anchor.items():
@@ -204,7 +308,9 @@ def _mean_constant_logit_loss(
         per_anchor_losses.append(math.log(1 + negative_count))
     result = math.fsum(per_anchor_losses) / len(per_anchor_losses)
     if result <= 0.0:
-        raise ValueError("no anchor in this batch has a negative; baseline is 0")
+        raise DegenerateBatchError(
+            "no anchor in this batch has a negative; baseline is 0"
+        )
     return result
 
 
@@ -252,372 +358,6 @@ class ContrastiveLoss(Protocol):
         Output: float > 0.
         Side effects: none.
         Exceptions: ValueError if no unit has a positive, or no anchor
-            has a negative (see _mean_constant_logit_loss).
+            has a negative (see mean_constant_logit_loss).
         """
         ...
-
-
-class SingleCardInfoNCELoss:
-    """Concrete ContrastiveLoss for the single-card slice: single-positive
-    InfoNCE over cosine similarity, computed once across the whole flat
-    item pool (so every A-B/A-C/B-C deck-pair comparison falls out of
-    one pairwise similarity matrix, never special-cased per deck pair).
-    Exact-identity duplicates (see ContrastiveBatch.identities) are
-    excluded from a given anchor's negative pool at this step, per the
-    plan's deferred-to-loss-time policy - never precomputed or stored
-    on the batch itself."""
-
-    def __init__(self, temperature: float = 0.07) -> None:
-        """
-        Inputs:
-            temperature: InfoNCE's softmax temperature - lower sharpens
-                the similarity distribution. 0.07 is CLIP's commonly
-                cited default.
-        Output: none (constructor).
-        Side effects: none.
-        Exceptions: ValueError if temperature <= 0.
-        """
-        if temperature <= 0:
-            raise ValueError("temperature must be positive")
-        self._temperature = temperature
-
-    def calculate(
-        self,
-        item_embeddings: BatchedModelOutput,
-        identities: list[tuple[UUID, ...]],
-        positive_cliques: list[list[int]],
-    ) -> torch.Tensor:
-        """Mean anchor-wise single-positive InfoNCE loss over the batch.
-
-        Inputs: see ContrastiveLoss.calculate(). item_embeddings must be
-            single-card-shaped (one bare Embedding per item).
-        Output: a scalar loss tensor - the mean, over every item that
-            has at least one positive, of that item's own InfoNCE loss
-            (its true positive scored against every valid negative -
-            every other item, excluding itself and any exact-identity
-            duplicate).
-        Side effects: none.
-        Exceptions: ValueError if len(item_embeddings) != len(identities),
-            if item_embeddings isn't single-card-shaped, or if no item
-            in the batch has a positive pair (loss is undefined).
-
-        Example:
-            >>> loss_fn = SingleCardInfoNCELoss()
-            >>> loss_fn.calculate(item_embeddings, identities, positive_cliques)
-        """
-        if (
-            item_embeddings
-            and output_shape_of(item_embeddings[0]) != InputShape.SINGLE_CARD
-        ):
-            raise ValueError(
-                "SingleCardInfoNCELoss expects single-card item embeddings "
-                f"(got shape {output_shape_of(item_embeddings[0])} for the first item)"
-            )
-        if len(item_embeddings) != len(identities):
-            raise ValueError(
-                f"item_embeddings ({len(item_embeddings)}) and identities "
-                f"({len(identities)}) must be the same length"
-            )
-        # Runtime shape already validated above - narrow the wide
-        # ContrastiveLoss.calculate() parameter type back to the
-        # concrete shape this class actually handles.
-        single_card_embeddings = cast(BatchedSingleCardEmbedding, item_embeddings)
-
-        similarity = _pairwise_cosine_similarity(single_card_embeddings)
-        valid_negative_mask = _valid_negative_mask(identities, similarity.device)
-        positives_by_anchor = self._positives_by_anchor(positive_cliques)
-
-        # Accumulate each anchor's own InfoNCE loss, then average - an
-        # anchor with no positive in this batch contributes nothing. No
-        # item has an "excluded" group of its own in the single-card
-        # shape (unlike MultiCardInfoNCELoss's own-item siblings), so
-        # that argument is always empty here.
-        per_anchor_losses: list[torch.Tensor] = []
-        for anchor_index, anchor_positives in positives_by_anchor.items():
-            per_anchor_losses.append(
-                _anchor_loss(
-                    anchor_index,
-                    anchor_positives,
-                    set(),
-                    similarity,
-                    valid_negative_mask,
-                    self._temperature,
-                )
-            )
-
-        if not per_anchor_losses:
-            raise ValueError("No item in this batch has a positive pair")
-        return torch.stack(per_anchor_losses).mean()
-
-    def constant_logit_loss(
-        self,
-        identities: list[tuple[UUID, ...]],
-        positive_cliques: list[list[int]],
-    ) -> float:
-        """See ContrastiveLoss.constant_logit_loss. The comparison unit is
-        the item; there are no extra exclusions.
-
-        Example:
-            >>> # 3 decks x 2 items, no duplicates: ln(6 - 2 + 1) = ln 5
-            >>> SingleCardInfoNCELoss().constant_logit_loss(
-            ...     identities, [[0, 1], [2, 3], [4, 5]])
-            1.609...
-        """
-        result: float
-        # Same anchor -> positives expansion calculate() uses
-        positives_by_anchor = self._positives_by_anchor(positive_cliques)
-        result = _mean_constant_logit_loss(identities, positives_by_anchor, {})
-        return result
-
-    def _positives_by_anchor(
-        self, positive_cliques: list[list[int]]
-    ) -> dict[int, list[int]]:
-        """Expand positive_cliques into a per-anchor positives mapping.
-
-        Private helper - callers are calculate() and
-        constant_logit_loss(). Every index in a
-        clique is a positive for every other index in that same clique -
-        each clique is a mutually-positive group, not a directed
-        relation, so this is a pure expansion, not a derivation from
-        any pairwise data.
-
-        Inputs:
-            positive_cliques: see calculate().
-        Output: a mapping from anchor index to the list of item indices
-            that are positives for that anchor. An index whose clique
-            has no other member (size-1 clique) is simply absent as a
-            key.
-        Side effects: none.
-        Exceptions: none.
-        """
-        result: dict[int, list[int]] = {}
-        for group in positive_cliques:
-            for index in group:
-                other_indices = [other for other in group if other != index]
-                if other_indices:
-                    result[index] = other_indices
-        return result
-
-
-class MultiCardInfoNCELoss:
-    """Concrete ContrastiveLoss for the multi-card slice: each item is a
-    group of cards (see MultiCardPairConstructor), but the comparison
-    unit is still the individual card, never a pooled whole-item vector.
-    A card's positives are every card in a *different* item of its own
-    item's positive clique (same source deck); cards in the anchor's own
-    item are excluded entirely (neither positive nor negative), per the
-    plan's explicit "an anchor is not a valid pair with other cards in
-    its own set grouping" requirement - this is the one behavior
-    genuinely new relative to SingleCardInfoNCELoss, expressed via
-    _anchor_loss's excluded_indices argument."""
-
-    def __init__(self, temperature: float = 0.07) -> None:
-        """
-        Inputs:
-            temperature: InfoNCE's softmax temperature - see
-                SingleCardInfoNCELoss.__init__.
-        Output: none (constructor).
-        Side effects: none.
-        Exceptions: ValueError if temperature <= 0.
-        """
-        if temperature <= 0:
-            raise ValueError("temperature must be positive")
-        self._temperature = temperature
-
-    def calculate(
-        self,
-        item_embeddings: BatchedModelOutput,
-        identities: list[tuple[UUID, ...]],
-        positive_cliques: list[list[int]],
-    ) -> torch.Tensor:
-        """Mean per-card single-positive InfoNCE loss over the batch.
-
-        Inputs: see ContrastiveLoss.calculate(). item_embeddings must be
-            multi-card-shaped (one MultiCardEmbedding - a list of
-            per-card Embedding - per item).
-        Output: a scalar loss tensor - the mean, over every card that
-            has at least one cross-item positive, of that card's own
-            InfoNCE loss.
-        Side effects: none.
-        Exceptions: ValueError if len(item_embeddings) != len(identities),
-            if item_embeddings isn't multi-card-shaped, or if no card in
-            the batch has a positive pair (loss is undefined).
-
-        Example:
-            >>> loss_fn = MultiCardInfoNCELoss()
-            >>> loss_fn.calculate(item_embeddings, identities, positive_cliques)
-        """
-        if (
-            item_embeddings
-            and output_shape_of(item_embeddings[0]) != InputShape.MULTI_CARD
-        ):
-            raise ValueError(
-                "MultiCardInfoNCELoss expects multi-card item embeddings "
-                f"(got shape {output_shape_of(item_embeddings[0])} for the first item)"
-            )
-        if len(item_embeddings) != len(identities):
-            raise ValueError(
-                f"item_embeddings ({len(item_embeddings)}) and identities "
-                f"({len(identities)}) must be the same length"
-            )
-        # Runtime shape already validated above - narrow the wide
-        # ContrastiveLoss.calculate() parameter type back to the
-        # concrete shape this class actually handles.
-        multi_card_embeddings = cast(BatchedMultiCardEmbedding, item_embeddings)
-
-        flat_embeddings, flat_identities, item_of_card = self._flatten_items(
-            multi_card_embeddings, identities
-        )
-        similarity = _pairwise_cosine_similarity(flat_embeddings)
-        valid_negative_mask = _valid_negative_mask(flat_identities, similarity.device)
-        positives_by_anchor, excluded_by_anchor = (
-            self._positives_and_exclusions_by_anchor(item_of_card, positive_cliques)
-        )
-
-        # Accumulate each anchor card's own InfoNCE loss, then average -
-        # a card with no cross-item positive in this batch contributes
-        # nothing.
-        per_card_losses: list[torch.Tensor] = []
-        for anchor_index, anchor_positives in positives_by_anchor.items():
-            per_card_losses.append(
-                _anchor_loss(
-                    anchor_index,
-                    anchor_positives,
-                    excluded_by_anchor[anchor_index],
-                    similarity,
-                    valid_negative_mask,
-                    self._temperature,
-                )
-            )
-
-        if not per_card_losses:
-            raise ValueError("No card in this batch has a positive pair")
-        return torch.stack(per_card_losses).mean()
-
-    def constant_logit_loss(
-        self,
-        identities: list[tuple[UUID, ...]],
-        positive_cliques: list[list[int]],
-    ) -> float:
-        """See ContrastiveLoss.constant_logit_loss. The comparison unit is
-        the flattened card; an anchor's own-item siblings are excluded, as
-        in calculate().
-
-        Example:
-            >>> # 3 decks x 2 items x 5 cards: ln(5 * (6 - 2) + 1) = ln 21
-            >>> MultiCardInfoNCELoss().constant_logit_loss(
-            ...     identities, [[0, 1], [2, 3], [4, 5]])
-            3.044...
-        """
-        result: float
-        # Flatten identities to cards, then the same expansion calculate() uses
-        flat_identities, item_of_card = self._flat_card_identities(identities)
-        positives_by_anchor, excluded_by_anchor = (
-            self._positives_and_exclusions_by_anchor(item_of_card, positive_cliques)
-        )
-        result = _mean_constant_logit_loss(
-            flat_identities, positives_by_anchor, excluded_by_anchor
-        )
-        return result
-
-    def _flat_card_identities(
-        self, identities: list[tuple[UUID, ...]]
-    ) -> tuple[list[UUID], list[int]]:
-        """Flatten per-item identity tuples to one uuid per card, tracking
-        each card's item index - _flatten_items without the embeddings.
-
-        Private helper - callers are constant_logit_loss() and
-        _flatten_items().
-        Inputs: identities - see calculate().
-        Output: (flat_identities, item_of_card), both one entry per card,
-            in item-then-position order.
-        Side effects: none. Exceptions: none.
-        """
-        flat_identities: list[UUID] = []
-        item_of_card: list[int] = []
-        for item_index, item_identities in enumerate(identities):
-            for card_identity in item_identities:
-                flat_identities.append(card_identity)
-                item_of_card.append(item_index)
-        return flat_identities, item_of_card
-
-    def _flatten_items(
-        self,
-        item_embeddings: BatchedMultiCardEmbedding,
-        identities: list[tuple[UUID, ...]],
-    ) -> tuple[list[Embedding], list[UUID], list[int]]:
-        """Flatten every item's per-card embeddings/uuids into one flat
-        card-level pool, tracking which item index each card came from.
-
-        Private helper - single caller is calculate(). Builds its identity
-        half with _flat_card_identities() (shared with
-        constant_logit_loss()), adding only the embeddings.
-
-        Inputs:
-            item_embeddings: see calculate() - one MultiCardEmbedding
-                per item.
-            identities: see calculate() - identities[i] is positionally
-                parallel to item_embeddings[i] (ContrastiveBatch's own
-                contract), so identities[i][k] is the uuid of the card
-                at item_embeddings[i][k].
-        Output: (flat_embeddings, flat_identities, item_of_card), all
-            the same length (total card count across every item):
-            flat_embeddings[k] and flat_identities[k] are one card's
-            embedding/uuid, and item_of_card[k] is the item index (into
-            item_embeddings/identities) that card came from.
-        Side effects: none.
-        Exceptions: none expected (identities[i] is assumed the same
-            length as item_embeddings[i] - a ContrastiveBatch/
-            MultiCardPairConstructor invariant, not re-validated here).
-        """
-        flat_identities, item_of_card = self._flat_card_identities(identities)
-        flat_embeddings = [embedding for item in item_embeddings for embedding in item]
-        return flat_embeddings, flat_identities, item_of_card
-
-    def _positives_and_exclusions_by_anchor(
-        self, item_of_card: list[int], positive_cliques: list[list[int]]
-    ) -> tuple[dict[int, list[int]], dict[int, set[int]]]:
-        """Expand item-level positive_cliques down to card-level
-        positive/excluded index sets for every flattened card.
-
-        Private helper - callers are calculate() and
-        constant_logit_loss(). For a card at
-        flat index k belonging to item i: its positives are every card
-        belonging to a *different* item j in i's positive clique; its
-        exclusions are every other card belonging to item i itself (see
-        this class's own docstring).
-
-        Inputs:
-            item_of_card: item_of_card[k] is the item index flat card k
-                came from - see _flatten_items().
-            positive_cliques: see calculate().
-        Output: (positives_by_anchor, excluded_by_anchor), both keyed by
-            flat card index. A card with no cross-item positive in its
-            clique is simply absent from positives_by_anchor (and
-            _anchor_loss is never called for it, so excluded_by_anchor
-            need not have an entry for it either).
-        Side effects: none.
-        Exceptions: none.
-        """
-        cards_of_item: dict[int, list[int]] = {}
-        for card_index, item_index in enumerate(item_of_card):
-            cards_of_item.setdefault(item_index, []).append(card_index)
-        positives_by_anchor: dict[int, list[int]] = {}
-        excluded_by_anchor: dict[int, set[int]] = {}
-        for clique in positive_cliques:
-            for item_index in clique:
-                own_cards = cards_of_item.get(item_index, [])
-                other_cards = [
-                    card
-                    for other_item in clique
-                    if other_item != item_index
-                    for card in cards_of_item.get(other_item, [])
-                ]
-                if not other_cards:
-                    continue
-                for card in own_cards:
-                    positives_by_anchor[card] = other_cards
-                    excluded_by_anchor[card] = {
-                        other for other in own_cards if other != card
-                    }
-        return positives_by_anchor, excluded_by_anchor

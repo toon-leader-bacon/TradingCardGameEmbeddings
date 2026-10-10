@@ -30,11 +30,19 @@ class MultiCardModel(CardEncoderModel):
         embedding_head: EmbeddingHead,
         num_heads: int = 4,
         num_layers: int = 2,
+        ffn_dim: int = 2048,
+        dropout: float = 0.1,
+        norm_first: bool = False,
     ):
         """Inputs: text_encoder, embedding_head (its output_dim is the
             model's embedding width and self-attention's d_model),
-            num_heads, num_layers.
-        Side effects: builds the self-attention layers.
+            num_heads, num_layers, ffn_dim (each layer's feed-forward
+            width), dropout, norm_first (pre-norm: LayerNorm before
+            attention and feed-forward rather than after). The defaults
+            are torch's TransformerEncoderLayer defaults; the activation
+            is ReLU.
+        Side effects: builds the self-attention layers, which end in a
+            LayerNorm without gain or bias (L2 norm sqrt(embedding_dim)).
         Exceptions: AssertionError from torch if embedding_head.output_dim
             is not divisible by num_heads.
         """
@@ -50,10 +58,20 @@ class MultiCardModel(CardEncoderModel):
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=embedding_head.output_dim,
             nhead=num_heads,
+            dim_feedforward=ffn_dim,
+            dropout=dropout,
+            norm_first=norm_first,
             batch_first=True,
         )
+        # Nested tensors are a padding speed-up; groups here are unpadded,
+        # and torch warns that pre-norm layers cannot use them anyway. The
+        # final LayerNorm (no gain or bias, as in EmbeddingHead) closes the
+        # stack: pre-norm layers leave their residual stream unnormalized
         self.self_attention = nn.TransformerEncoder(
-            encoder_layer, num_layers=num_layers
+            encoder_layer,
+            num_layers=num_layers,
+            norm=nn.LayerNorm(embedding_head.output_dim, elementwise_affine=False),
+            enable_nested_tensor=False,
         )
 
     @property

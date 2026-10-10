@@ -275,6 +275,22 @@ a median of ~200 tokens and FaB to ~570.
   dojo's stats into the run directory (manifest or `validation.json`) and
   read them back for evaluation, so predictions convert to label units
   reliably.
+- [x] **Shuffle split files uniformly; calibrate from a prefix**
+  (2026-10-09). Split files used to keep their metric file's order
+  (`make_splits` shuffled only within 10k-row batches): 17lands
+  `pool_conditioned_pick` TRAIN ran AFR first to WOE last, so training
+  and per-round TEST scoring read only AFR, and calibration had to read
+  whole files for a fair sample (~61 minutes over the 142 dojos of a
+  series-1 config). `make_splits` now shuffles the whole file in two
+  passes (`src/dojos/README.md`, `file_managers/`), and calibration reads
+  the first 20k TRAIN rows. Still to do: **re-split once.** Every
+  existing split file lacks the new order stamp, so the next dojo build
+  (a run or `--check`) rebuilds all of them; the two 141M-row 17lands
+  splits dominate that time. Run one `--check` of a series-1 config to do
+  it before the series. A baseline cache is no longer needed for speed.
+- [ ] **Cache calibrated baselines** (only if startup is still slow after
+  the re-split). Keyed by split-file identity, stored beside the splits,
+  together with `LabelStats` (item above).
 - [ ] **Two-level diet sampling: game, then dojo.** Today the diet
   sampler (`src/training/diet/diet_sampler.py`) picks one dojo per step
   with probability proportional to its TRAIN count^alpha. alpha = 0 means
@@ -292,10 +308,12 @@ a median of ~200 tokens and FaB to ~570.
   Neural Machine Translation in the Wild", and Conneau et al. 2020,
   XLM-R, alpha = 0.3.
 
-  Needs a game per dojo (the catalog recipes know it) and a new
-  DietRule, e.g. `{rule: per_game, game_alpha: 0.0, dojo_alpha: 0.3}`.
-  Saturated and quarantined dojos drop out within their game; a game
-  with no active dojos drops out.
+  Needs a game per dojo (the catalog recipes know it). The table diet
+  (`rule: table`, `src/training/diet/README.md`, built 2026-10-09) already
+  does this when the per-game sub-tables are written by hand, and already
+  drops saturated dojos within their sub-table and an emptied sub-table
+  as a whole. What remains is a `group_by: game` option on a `dojos:` row
+  that builds one sub-table per game from the catalog.
 - [ ] **Decide the first-run dojo set.** Ready today: Gwent masks, STS
   metrics. Contrastive on FaB / Gwent / STS2 needs no metric. Add MSH draft
   and KTK game dojos after the split fixes below.
@@ -440,13 +458,27 @@ a median of ~200 tokens and FaB to ~570.
   plots rather than a CSV.
 - [ ] **Decide about resume.** Not supported (tracker and RNG state are not
   saved); accept that for the first run or scope it.
+- [x] **Multi-card models in the run config** (2026-10-09). `model:` takes
+  `embedding_head`, its sizes, and an optional `group_attention:` block
+  (`src/training/README.md`); the driver assembles the model and prints
+  its trainable parameter count. Size-matched `residual_mlp` arms for
+  series 1 (card_embedding_size 256, mlp_hidden_dim 512, ModernBERT-base):
+  single-card `mlp_num_blocks: 9` = 2,898,176 trainable parameters;
+  multi-card `mlp_num_blocks: 3` plus 2 attention layers at `ffn_dim:
+  1024` = 2,895,616.
+- [ ] **Learn pre-norm vs post-norm** (`group_attention.norm_first`).
+  Defaulted to pre-norm (`true`): LayerNorm before attention and the
+  feed-forward block rather than after, the usual choice now because it
+  trains stably without a learning-rate warmup, which the trainer does
+  not have. torch's own default is post-norm. Read up on it, or ask for an
+  explanation, and decide whether it deserves an ablation.
 
 ## E. Shakedown
 
 - [x] **CPU tiny run** (2026-09-24): `scripts/smoke_test_training_loop.py`
   (new - distinct from the existing, pipeline-only `scripts/smoke_test.py`,
   which still needs the Section F fix/removal). A frozen
-  `LinearProjectionCardModel` (ModernBERT-base + linear head, embed_dim
+  `LinearProjectionCardModel` (ModernBERT-base + linear head, card_embedding_size
   32) against two real gwent_one dojos (`ColorMaskDojo`, `FactionMaskDojo`),
   `HoldoutSpec.no_holdout()`, 5 steps/round, 3 rounds. First time this
   project's `Trainer` has run against anything but fake dojos/a fake

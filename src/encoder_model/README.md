@@ -20,7 +20,11 @@ each card's embedding is contextualized by the rest of its group.
 - `embedding_head.py` - `EmbeddingHead` Strategy, `TokenEncoding` -> one
   vector per card: `LinearEmbeddingHead`, `ResidualMlpEmbeddingHead`,
   `AttentionPoolingEmbeddingHead`. Every head reports its `output_dim`,
-  the one source of a model's embedding width.
+  the one source of a model's embedding width. Every head's output ends
+  in a LayerNorm with no gain or bias (mean 0, variance 1 across the
+  coordinates, L2 norm sqrt(`output_dim`)), so the embedding scale
+  cannot drift; the multi-card model's self-attention stack ends in the
+  same norm.
 - `card_encoder_model.py` - `CardEncoderModel`, the Template Method base
   of both models. A subclass supplies `embed_together(cards)`, for cards
   of one group that may see each other, and `embed_apart(cards)`, for
@@ -65,7 +69,7 @@ explicit method for its shape.
 ```python
 from src.encoder_model.reference_singlecard_models import LinearProjectionCardModel
 
-model = LinearProjectionCardModel(embed_dim=256)
+model = LinearProjectionCardModel(card_embedding_size=256)
 embeddings = model([card_a, card_b])        # batch of single cards -> one tensor each
 embedding = model.forward_single_card(card)  # one unbatched card -> one tensor
 deck = model.forward_multi_card([a, b, c])   # one deck, cards contextualized together

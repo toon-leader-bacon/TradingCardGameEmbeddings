@@ -6,6 +6,16 @@ from typing import Any
 import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.dojos.contrastive.styles.card_in_contexts import CardInContextsStyle
+from src.dojos.contrastive.styles.cross_slice_card import CrossSliceCardStyle
+from src.dojos.contrastive.styles.missing_card import (
+    MissingCardInfoNCELoss,
+    MissingCardPairConstructor,
+    MissingCardStyle,
+)
+from src.dojos.contrastive.styles.odd_one_out import OddOneOutStyle
+from src.dojos.contrastive.styles.single_card import SingleCardStyle
+from src.dojos.contrastive.styles.slice_match import SliceMatchStyle
 from src.dojos.generic.generic_dojo import GenericDojo
 from src.dojos.generic.multi_card_binary_classification.dojo import (
     MultiCardBinaryClassificationDojo,
@@ -107,6 +117,7 @@ from src.dojos.seventeenlands.replay_data.attacker_blocker_combat_outcome_dojo i
 from src.dojos.sts_gg import deck_label_dojos
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
+from src.training import dojo_catalog
 from src.training.dojo_catalog import (
     DECK_MOD_GROUPS,
     DOJO_CATALOG,
@@ -423,22 +434,64 @@ class TestCardShelf:
 
 
 class TestContrastiveEntries:
-    def test_one_per_game_with_a_deck_box(self) -> None:
+    def test_one_per_style_and_game_with_a_deck_box(self) -> None:
         contrastive = {
             key: recipe
             for key, recipe in DOJO_CATALOG.items()
             if isinstance(recipe, ContrastiveDojoRecipe)
         }
+        games = {
+            "gwent",
+            "flesh_and_blood",
+            "slay_the_spire_2",
+            "mtg",
+            "pokemon",
+            "dominion",
+        }
+        prefixes = {
+            "contrastive": SingleCardStyle,
+            "contrastive_missing_card": MissingCardStyle,
+            "contrastive_odd_one_out": OddOneOutStyle,
+            "contrastive_cross_slice": CrossSliceCardStyle,
+            "contrastive_slice_match": SliceMatchStyle,
+            "contrastive_card_in_contexts": CardInContextsStyle,
+        }
         assert set(contrastive) == {
-            "contrastive.gwent",
-            "contrastive.flesh_and_blood",
-            "contrastive.slay_the_spire_2",
-            "contrastive.mtg",
-            "contrastive.pokemon",
-            "contrastive.dominion",
+            f"{prefix}.{game}" for prefix in prefixes for game in games
         }
         for key, recipe in contrastive.items():
-            assert key == f"contrastive.{recipe.game.value}"
+            prefix, game = key.split(".")
+            assert game == recipe.game.value
+            assert isinstance(recipe.style, prefixes[prefix])
+
+    def test_a_style_reaches_the_dojo_as_a_matched_pair(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Record what the recipe hands ContrastiveDojo, without deck data
+        built: dict[str, Any] = {}
+
+        def fake_dojo(
+            dealer: Any, pair_constructor: Any, *args: Any, **kwargs: Any
+        ) -> str:
+            built["pair_constructor"] = pair_constructor
+            built["loss"] = kwargs["contrastive_loss"]
+            return "dojo"
+
+        monkeypatch.setattr(dojo_catalog, "DeckBoxDealer", lambda *a, **k: "dealer")
+        monkeypatch.setattr(dojo_catalog, "ContrastiveDojo", fake_dojo)
+        context = DojoBuildContext(
+            shelf=_RecordingShelf(),
+            holdout=HoldoutSpec.no_holdout(),
+            card_embedding_size=32,
+            rng_seed=0,
+        )
+
+        DOJO_CATALOG["contrastive_missing_card.gwent"].build(
+            "contrastive_missing_card.gwent", context
+        )
+
+        assert isinstance(built["pair_constructor"], MissingCardPairConstructor)
+        assert isinstance(built["loss"], MissingCardInfoNCELoss)
 
     def test_every_metric_dojo_is_a_generic_dojo(self) -> None:
         # _with_augmentations appends to a GenericDojo's pipeline
