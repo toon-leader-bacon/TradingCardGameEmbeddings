@@ -39,6 +39,7 @@ session, without `lab_technician`.
 | [2026-10-10_lr_pilot](2026-10-10_lr_pilot/NOTEBOOK.md) | 10-10 | Problem + hypothesis: unstable metric losses; the output LayerNorm alone fixes them | concluded | problem met; hypothesis supported (one seed); `encoder_lr` 1e-4 adopted; contrastive still at chance | model_by_diet |
 | [2026-10-10_pooling_probe](2026-10-10_pooling_probe/NOTEBOOK.md) | 10-10 | Problem: how much deck signal can cosine see in frozen features, and with which choices? | concluded | fixed-feature ceiling ~0.65 deck AUC via whitening (control 0.54); centering alone barely helps | lr_pilot |
 | [2026-10-10_pooling_pilot](2026-10-10_pooling_pilot/NOTEBOOK.md) | 10-10 - 10-11 | Problem + hypothesis: contrastive at chance; the shared offset causes it; whitening and/or trainable pooling fixes it | halted | problem largely met by whitening (0.81-0.86); offset as the cause not established; trainable pooling adds little; 2 of 8 variants open | pooling_probe |
+| [2026-10-11_model_by_diet_r2](2026-10-11_model_by_diet_r2/NOTEBOOK.md) | 10-11 - | Problem + hypotheses: which model × diet trains the best embedding, now that it is stable (whitening, mean pooling, `encoder_lr` 1e-4)? | proposed | - | model_by_diet |
 
 ### Migrated experiments
 

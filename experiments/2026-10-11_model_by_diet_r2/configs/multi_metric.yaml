@@ -1,0 +1,78 @@
+run_directory: data/runs/2026-10-11_model_by_diet_r2/multi_metric
+device: cuda
+seed: 0
+model:
+  embedding_head: residual_mlp
+  checkpoint: answerdotai/ModernBERT-base
+  card_embedding_size: 256
+  mlp_hidden_dim: 512
+  mlp_num_blocks: 3
+  group_attention:
+    num_layers: 2
+    num_heads: 4
+    ffn_dim: 1024
+    dropout: 0.1
+    norm_first: true
+  pooling:
+    kind: mean
+  enrichment:
+    kind: whitening
+    stats_path: data/whitening/modernbert_tokens_holdout_seed0.pt
+dojos:
+- cardvault_fabtcg.*
+- dominiontabs.*
+- fabtcg_decklists.*
+- final_decks.*
+- hearthstonejson.*
+- isotropic.*
+- pokemon_tcg.*
+- scryfall.*
+- seventeenlands_draft_data.*
+- seventeenlands_game_data.*
+- seventeenlands_replay_data.*
+- spire_codex.*
+- sts2_runs.*
+- sts_gg.*
+- '!*gwent*'
+held_out_dojos:
+- cross_game.rarity_tier
+- cardvault_fabtcg.pitch_mask
+- fabtcg_decklists.hero_masked_from_deck
+- hearthstonejson.class_mask
+- isotropic.kingdom_veto_prediction
+- pokemon_tcg.hp_regression
+- scryfall.cmc_regression
+- seventeenlands_game_data.deck_win_prediction
+- seventeenlands_replay_data.average_turn_cast
+- spire_codex.card_type_mask
+- sts2_runs.card_reward_pick
+- sts2_runs.card_win_rate
+- sts2_runs.card_win_rate_at_act2
+holdout:
+  seed: 0
+  tier_ratios:
+  - 8
+  - 1
+  - 1
+  held_out_games:
+  - gwent
+regression_loss: huber
+hardware:
+  max_batch_cost: 256
+  precision: fp16
+eval_examples_per_dojo: 128
+phases:
+- name: train
+  diet:
+    rule: temperature
+    alpha: 0.3
+  encoder_trainable: true
+  encoder_lr: 0.0001
+  head_lr: 0.001
+  steps_per_round: 5000
+  max_rounds: 4
+  saturation:
+    epsilon: 0.001
+    patience_rounds: 1000
+    reactivation_delta: 0.05
+    target_saturated_fraction: 1.0
