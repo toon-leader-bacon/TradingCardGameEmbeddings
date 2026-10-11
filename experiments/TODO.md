@@ -1,6 +1,8 @@
 # Experiments TODO
 
-Training experiments to run, roughly in order. Code work an experiment
+Training experiments to run, roughly in order, plus ideas not yet
+scheduled. Experiments already started have their own folder and
+notebook, listed in [`README.md`](README.md). Code work an experiment
 needs lives in the relevant container's `TODO.md` or a `plans/` file;
 this list is about runs and comparisons.
 
@@ -24,7 +26,7 @@ this list is about runs and comparisons.
   `residual_mlp` head, both models about 2.9M trainable parameters (sizes
   in `src/training/TODO.md`, section D). Both models get the same
   contrastive dojos: all five training styles, each style equally often
-  (series 2 then separates them). Configs: `configs/training/Oct_9_2026/`. 6 runs
+  (series 2 then separates them). Configs and notebook: [2026-10-09_model_by_diet](2026-10-09_model_by_diet/NOTEBOOK.md). 6 runs
   plus 2 controls, evaluated together (8 encoders fit the learning-curve
   plots).
 - [ ] **2. Contrastive styles against each other.** Single-card,
@@ -38,7 +40,7 @@ this list is about runs and comparisons.
 - [ ] **Pooling and whitening** (code built: `model.pooling` / `model.enrichment`
   in `src/training/README.md`; stats from `scripts/fit_whitening.py`).
   Fixed-feature bar from the offline probe
-  (`logs/pooling_probe/findings.md`): same-deck AUC ~0.65 (today's
+  ([2026-10-10_pooling_probe](2026-10-10_pooling_probe/NOTEBOOK.md)): same-deck AUC ~0.65 (today's
   mean-pooled JSON: 0.54). Arms, all with the same text encoder, head
   and diet:
 
@@ -62,8 +64,8 @@ this list is about runs and comparisons.
   multi-query concatenation widens the head's input.
 
   **Pilot 2026-10-10** (multi-card, reduced mixed diet, 3 x 1000 steps,
-  4 queries; configs `configs/training/Oct_10_2026_pooling_pilot/`,
-  findings `logs/pooling_pilot/findings.md`): arms 1-4, 6, 7 done; arm 5
+  4 queries; notebook
+  [2026-10-10_pooling_pilot](2026-10-10_pooling_pilot/NOTEBOOK.md)): arms 1-4, 6, 7 done; arm 5
   trained but not probed (the probe exhausted system memory twice); arm
   8 not run. Whitening is what moves contrastive off chance (0.81-0.86
   vs 1.00) and lifts deck AUC (0.66-0.70 vs 0.53-0.56); trainable
@@ -91,8 +93,8 @@ to the relevant `TODO.md`.
 ### What the runs so far show
 
 From the first `multi_mixed` run (archived in
-`logs/archive/2026-10-10_multi_mixed_before_layernorm/`) and the
-LayerNorm + `encoder_lr` pilot (`logs/lr_pilot/findings.md`):
+[2026-10-09_model_by_diet](2026-10-09_model_by_diet/NOTEBOOK.md)) and the
+LayerNorm + `encoder_lr` pilot ([2026-10-10_lr_pilot](2026-10-10_lr_pilot/NOTEBOOK.md)):
 
 - **Most metric heads barely train.** One optimizer step trains one
   batch from one dojo. With 149 trained dojos and the 50/50 diet
@@ -129,7 +131,7 @@ LayerNorm + `encoder_lr` pilot (`logs/lr_pilot/findings.md`):
   adds a large constant vector: final cos 0.999, with the card-specific
   part 0.40 of norm 16. Metric heads don't care about a constant offset;
   cosine-based contrastive losses do, and every contrastive dojo sits at
-  chance. Details: `logs/lr_pilot/findings.md`.
+  chance. Details: [2026-10-10_lr_pilot](2026-10-10_lr_pilot/NOTEBOOK.md).
 - **TEST is expensive.** About 14 of each round's ~37 minutes go to
   scoring all 162 dojos on 128 examples each.
 
@@ -151,7 +153,7 @@ LayerNorm + `encoder_lr` pilot (`logs/lr_pilot/findings.md`):
   `logit_scale`: the loss can sharpen itself when cosines are bunched.
 - **Track geometry every round** (code, small). Log raw and centered
   cos, same-game vs. cross-game, over a fixed card set at each TEST pass
-  (`logs/lr_pilot/embedding_scale.py` does it offline).
+  (`2026-10-09_model_by_diet/analysis/embedding_scale.py` does it offline).
 
 ### Getting more steps to each head
 
@@ -237,7 +239,7 @@ LayerNorm + `encoder_lr` pilot (`logs/lr_pilot/findings.md`):
   but does not stop all cards sharing one direction. One fix: center
   the pooled ModernBERT features with a running mean before the head,
   as in whitening / "all-but-the-top". Track it with mean pairwise cos
-  (`logs/lr_pilot/embedding_scale.py`).
+  (`2026-10-09_model_by_diet/analysis/embedding_scale.py`).
 - **Token-level head; thawing ModernBERT's top layers**: see
   `src/encoder_model/TODO.md` and series 3.
 
@@ -247,4 +249,4 @@ LayerNorm + `encoder_lr` pilot (`logs/lr_pilot/findings.md`):
   (above), or raise `eval_examples_per_dojo` for the final round only.
   At 128 examples, one dojo's ratio can swing by tens of percent from
   sampling alone. Compare single rounds by medians and counts across
-  dojos instead, as `logs/lr_pilot/compare.py` does.
+  dojos instead, as `2026-10-10_lr_pilot/analysis/compare.py` does.

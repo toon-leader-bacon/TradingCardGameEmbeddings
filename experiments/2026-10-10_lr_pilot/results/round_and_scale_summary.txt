@@ -1,0 +1,90 @@
+== multi_mixed_lr3e-4 (exit 0)
+init       head norm   16.00 | final norm   16.00 cos 0.985 | shared-mean norm   15.89 spread   1.83
+train_round0002 head norm   16.00 | final norm   16.00 cos 1.000 | shared-mean norm   16.00 spread   0.20
+latest     head norm   16.00 | final norm   16.00 cos 1.000 | shared-mean norm   16.00 spread   0.20
+round end (min): {0: 36.7, 1: 74.2, 2: 111.5}
+round durations (min): {0: 36.7, 1: 37.4, 2: 37.3}
+kind         contrastive  held_out  metric  trained_below_1
+round_index                                                
+0                  1.000     1.087   1.134               40
+1                  0.999     1.085   1.072               49
+2                  1.000     1.078   1.066               50
+worst now:
+round_index                           0     1     2
+dojo                                               
+sts2_runs.card_elites_killed       4.00  3.45  3.56
+sts2_runs.card_floors_cleared      2.53  3.71  3.03
+sts2_runs.card_relic_count         3.10  2.40  2.55
+sts2_runs.card_total_turns         2.37  3.04  2.52
+sts2_runs.card_total_cards_picked  2.46  2.98  2.47
+sts2_runs.card_total_combats       2.58  2.64  2.36
+sts_gg.card_deck_size              2.28  2.34  2.33
+isotropic.opening_buy_rate         1.77  1.69  2.03
+most worsened since last round:
+dojo
+sts2_runs.card_relic_count      0.15
+sts_gg.floors_cleared           0.27
+sts_gg.ascension_prediction     0.33
+isotropic.opening_buy_rate      0.34
+sts2_runs.total_cards_picked    0.95
+
+== multi_mixed_lr1e-4 (exit 0)
+init       head norm   16.00 | final norm   16.00 cos 0.985 | shared-mean norm   15.89 spread   1.83
+train_round0002 head norm   16.00 | final norm   16.00 cos 0.997 | shared-mean norm   15.98 spread   0.76
+latest     head norm   16.00 | final norm   16.00 cos 0.997 | shared-mean norm   15.98 spread   0.76
+round end (min): {0: 35.7, 1: 71.9, 2: 107.4}
+round durations (min): {0: 35.7, 1: 36.2, 2: 35.5}
+kind         contrastive  held_out  metric  trained_below_1
+round_index                                                
+0                  0.999     1.082   1.171               39
+1                  0.999     1.105   1.082               47
+2                  0.999     1.078   1.080               52
+worst now:
+round_index                           0     1     2
+dojo                                               
+sts2_runs.card_floors_cleared      2.76  4.55  3.62
+sts2_runs.card_total_combats       2.50  2.64  2.83
+sts2_runs.card_total_cards_picked  2.75  2.41  2.79
+sts2_runs.card_relic_count         4.34  2.92  2.70
+sts2_runs.card_elites_killed       2.56  2.38  2.42
+sts2_runs.card_total_turns         2.42  3.06  2.37
+sts_gg.card_deck_size              2.18  2.22  2.32
+isotropic.opening_buy_rate         2.16  2.35  2.28
+most worsened since last round:
+dojo
+final_decks.held_out_card_dominion                0.32
+seventeenlands_game_data.win_rate_when_in_deck    0.37
+sts2_runs.card_total_cards_picked                 0.38
+final_decks.held_out_card_flesh_and_blood         0.43
+seventeenlands_game_data.tutor_target_rate        0.74
+
+== multi_mixed_lr1e-3 (exit 0)
+init       head norm   16.00 | final norm   16.00 cos 0.985 | shared-mean norm   15.89 spread   1.83
+train_round0002 head norm   16.00 | final norm   16.00 cos 1.000 | shared-mean norm   16.00 spread   0.00
+latest     head norm   16.00 | final norm   16.00 cos 1.000 | shared-mean norm   16.00 spread   0.00
+round end (min): {0: 35.6, 1: 71.6, 2: 115.4}
+round durations (min): {0: 35.6, 1: 36.0, 2: 43.8}
+kind         contrastive  held_out  metric  trained_below_1
+round_index                                                
+0                    1.0     1.093   1.124               40
+1                    1.0     1.087   1.095               47
+2                    1.0     1.098   1.074               51
+worst now:
+round_index                           0     1     2
+dojo                                               
+sts2_runs.card_total_combats       2.55  2.41  4.02
+sts2_runs.card_floors_cleared      2.70  2.96  2.77
+sts2_runs.card_total_cards_picked  2.41  2.95  2.53
+sts2_runs.card_total_turns         2.38  3.17  2.52
+sts2_runs.card_relic_count         2.95  2.65  2.43
+sts2_runs.card_elites_killed       2.42  2.36  2.38
+isotropic.opening_buy_rate         1.66  1.67  2.23
+sts_gg.card_deck_size              2.16  2.23  2.19
+most worsened since last round:
+dojo
+hearthstonejson.cost_regression            0.18
+seventeenlands_game_data.drawn_win_rate    0.40
+sts2_runs.total_cards_picked               0.54
+isotropic.opening_buy_rate                 0.57
+sts2_runs.card_total_combats               1.61
+

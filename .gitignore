@@ -497,5 +497,5 @@ FodyWeavers.xsd
 .mypy_cache/
 .pytest_cache/
 data/
-# Trained model checkpoints (large; see plans/first_train_shakeout.md)
+# Trained model checkpoints (large; see experiments/2026-09-30_first_train_shakeout/NOTEBOOK.md)
 models/

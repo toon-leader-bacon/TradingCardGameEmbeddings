@@ -510,7 +510,7 @@ a median of ~200 tokens and FaB to ~570.
   15 steps, heads on `cuda:0`, loss fell every round, no quarantines.
 - [x] **GPU run** (2026-09-30): `gwent_contrastive.yaml` trained end to end
   and was evaluated; findings, fixes and open items in
-  `plans/archive/first_train_shakeout.md`. Frozen ModernBERT, head-only phase; inspect loss curves
+  `experiments/2026-09-30_first_train_shakeout/NOTEBOOK.md`. Frozen ModernBERT, head-only phase; inspect loss curves
   and saturation behavior. First candidate (decided 2026-09-30):
   `configs/training/gwent_contrastive.yaml`, one single-card contrastive
   dojo with Gwent's default augmentations; `--check` passes on real data

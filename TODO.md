@@ -29,7 +29,7 @@
   `src/dojos/README.md` and `src/data_refinement/`. The glossary should
   link to those READMEs for depth, not repeat them. Low priority.
 - [ ] **Adopt token whitening; test raw + whitened tokens together.**
-  From the 2026-10-10 pooling pilot (`logs/pooling_pilot/findings.md`):
+  From the 2026-10-10 pooling pilot (`experiments/2026-10-10_pooling_pilot/NOTEBOOK.md`):
   make token whitening the default, with mean pooling as the cheap
   baseline and whitened 4-query attention as the candidate for longer
   runs. The next idea worth testing is giving the pooling both raw and
