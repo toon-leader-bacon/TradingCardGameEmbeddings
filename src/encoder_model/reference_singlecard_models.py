@@ -1,108 +1,91 @@
-"""A handful of concrete SingleCardModel presets, each fixing one
-TextEncoder + EmbeddingHead pair, to demonstrate how the two Strategy
-seams (text_encoder.py, embedding_head.py) mix and match.
+"""A handful of concrete SingleCardModel presets, each a SingleCardModel
+around one preset CardEmbeddingPipeline (reference_card_pipelines.py).
 
 These are reference examples, not the primary way to construct a
-SingleCardModel - a real experiment should inject a TextEncoder/
-EmbeddingHead pair directly, not add a new preset class per combination
-tried. SingleCardModel itself still takes both collaborators injected;
-these subclasses just fix a specific choice of both in their own
-__init__ for convenience/demonstration.
+SingleCardModel - a real experiment injects its own CardEmbeddingPipeline, not a
+new preset class per combination tried.
 """
 
-from src.encoder_model.embedding_head import (
-    AttentionPoolingEmbeddingHead,
-    LinearEmbeddingHead,
-    ResidualMlpEmbeddingHead,
+from src.encoder_model.reference_card_pipelines import (
+    DEFAULT_PRETRAINED_CHECKPOINT,
+    build_attention_pooling_pipeline,
+    build_from_scratch_pipeline,
+    build_linear_projection_pipeline,
+    build_residual_mlp_pipeline,
 )
 from src.encoder_model.single_card_model import SingleCardModel
-from src.encoder_model.text_encoder import (
-    PretrainedTextEncoder,
-    StaticEmbeddingTextEncoder,
-)
-
-# Cased and code-heavy-pretrained (card text is JSON), 8192-token native
-# context (this project truncates well below that - see text_encoder.py's
-# _DEFAULT_MAX_LENGTH) and Apache-2.0. No open checkpoint is JSON-tuned;
-# this is the closest available - see src/training/Notes.md section 4 for
-# the alternatives considered. Loads with attn_implementation="sdpa" by
-# default (confirmed, no override needed).
-_DEFAULT_PRETRAINED_CHECKPOINT = "answerdotai/ModernBERT-base"
 
 
 class LinearProjectionCardModel(SingleCardModel):
-    """Floor baseline: a frozen pretrained text encoder + a single
-    linear projection head. Any richer combination should beat this."""
+    """Floor baseline: frozen text encoder, mean pooling, linear head."""
 
     def __init__(
         self,
-        checkpoint: str = _DEFAULT_PRETRAINED_CHECKPOINT,
+        checkpoint: str = DEFAULT_PRETRAINED_CHECKPOINT,
         card_embedding_size: int = 256,
     ):
-        text_encoder = PretrainedTextEncoder(checkpoint=checkpoint, trainable=False)
-        hidden_dim = text_encoder.model.config.hidden_size
-        embedding_head = LinearEmbeddingHead(
-            input_dim=hidden_dim, card_embedding_size=card_embedding_size
+        """Inputs: see build_linear_projection_pipeline.
+        Output: none (constructor). Side effects: may download the
+        checkpoint. Exceptions: as build_linear_projection_pipeline."""
+        super().__init__(
+            build_linear_projection_pipeline(checkpoint, card_embedding_size)
         )
-        super().__init__(text_encoder=text_encoder, embedding_head=embedding_head)
 
 
 class ResidualMlpCardModel(SingleCardModel):
-    """A frozen pretrained text encoder + a deeper residual-MLP head."""
+    """Frozen text encoder, mean pooling, residual-MLP head."""
 
     def __init__(
         self,
-        checkpoint: str = _DEFAULT_PRETRAINED_CHECKPOINT,
+        checkpoint: str = DEFAULT_PRETRAINED_CHECKPOINT,
         card_embedding_size: int = 256,
         hidden_dim: int = 512,
         num_blocks: int = 3,
     ):
-        text_encoder = PretrainedTextEncoder(checkpoint=checkpoint, trainable=False)
-        encoder_hidden_dim = text_encoder.model.config.hidden_size
-        embedding_head = ResidualMlpEmbeddingHead(
-            input_dim=encoder_hidden_dim,
-            card_embedding_size=card_embedding_size,
-            hidden_dim=hidden_dim,
-            num_blocks=num_blocks,
+        """Inputs: see build_residual_mlp_pipeline.
+        Output: none (constructor). Side effects: may download the
+        checkpoint. Exceptions: as build_residual_mlp_pipeline."""
+        super().__init__(
+            build_residual_mlp_pipeline(
+                checkpoint, card_embedding_size, hidden_dim, num_blocks
+            )
         )
-        super().__init__(text_encoder=text_encoder, embedding_head=embedding_head)
 
 
 class AttentionPoolingCardModel(SingleCardModel):
-    """A frozen pretrained text encoder + a learned attention-pooling
-    head, instead of the other two presets' naive mean pooling."""
+    """Frozen text encoder, learned attention pooling, linear head."""
 
     def __init__(
         self,
-        checkpoint: str = _DEFAULT_PRETRAINED_CHECKPOINT,
+        checkpoint: str = DEFAULT_PRETRAINED_CHECKPOINT,
         card_embedding_size: int = 256,
+        num_queries: int = 1,
     ):
-        text_encoder = PretrainedTextEncoder(checkpoint=checkpoint, trainable=False)
-        hidden_dim = text_encoder.model.config.hidden_size
-        embedding_head = AttentionPoolingEmbeddingHead(
-            input_dim=hidden_dim, card_embedding_size=card_embedding_size
+        """Inputs: see build_attention_pooling_pipeline.
+        Output: none (constructor). Side effects: may download the
+        checkpoint. Exceptions: as build_attention_pooling_pipeline."""
+        super().__init__(
+            build_attention_pooling_pipeline(
+                checkpoint, card_embedding_size, num_queries
+            )
         )
-        super().__init__(text_encoder=text_encoder, embedding_head=embedding_head)
 
 
 class FromScratchCardModel(SingleCardModel):
-    """No pretrained weights anywhere: a from-scratch-trainable static
-    token embedding table + a residual-MLP head, both trained purely
-    from this project's own dojos. The cheapest fully-from-scratch
-    starting point - swap in a richer TextEncoder later for real
-    cross-token contextualization."""
+    """No pretrained weights anywhere: a trainable static token-embedding
+    table, mean pooling and a residual-MLP head."""
 
     def __init__(
         self,
-        tokenizer_checkpoint: str = _DEFAULT_PRETRAINED_CHECKPOINT,
+        tokenizer_checkpoint: str = DEFAULT_PRETRAINED_CHECKPOINT,
         token_embedding_dim: int = 256,
         card_embedding_size: int = 256,
     ):
-        text_encoder = StaticEmbeddingTextEncoder(
-            tokenizer_checkpoint=tokenizer_checkpoint,
-            embedding_dim=token_embedding_dim,
+        """Inputs: see build_from_scratch_pipeline.
+        Output: none (constructor). Side effects: may download the
+        checkpoint. Exceptions: as build_from_scratch_pipeline."""
+        super().__init__(
+            build_from_scratch_pipeline(
+                tokenizer_checkpoint, token_embedding_dim, card_embedding_size
+            )
         )
-        embedding_head = ResidualMlpEmbeddingHead(
-            input_dim=token_embedding_dim, card_embedding_size=card_embedding_size
-        )
-        super().__init__(text_encoder=text_encoder, embedding_head=embedding_head)

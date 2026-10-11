@@ -27,6 +27,7 @@ Usage (from the project root, in the ROCm venv for a GPU run):
 
 import argparse
 import logging
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
@@ -37,17 +38,24 @@ import yaml
 from src.dojos.dojo import BatchBudget, Dojo
 from src.dojos.loss.regression_objective import RegressionObjective
 from src.dojos.mods.mod import ModTally
+from src.encoder_model.card_embedding_pipeline import CardEmbeddingPipeline
 from src.encoder_model.card_encoder_model import CardEncoderModel
 from src.encoder_model.embedding_head import (
-    AttentionPoolingEmbeddingHead,
     EmbeddingHead,
     LinearEmbeddingHead,
     ResidualMlpEmbeddingHead,
 )
 from src.encoder_model.multi_card_model import MultiCardModel
+from src.encoder_model.pooling.attention_pooling import AttentionPooling
+from src.encoder_model.pooling.mean_pooling import MeanPooling
+from src.encoder_model.pooling.token_pooling import TokenPooling
+from src.encoder_model.pooling.transformer_pooling import TransformerPooling
+from src.encoder_model.enrichment.token_whitening import TokenWhitening
+from src.encoder_model.whitening.whitening_stats import WhiteningStats
 from src.encoder_model.single_card_model import SingleCardModel
-from src.encoder_model.text_encoder import PretrainedTextEncoder
+from src.encoder_model.text_encoder import PretrainedTextEncoder, TextEncoder
 from src.schema.card import GenericCard
+from src.schema.holdout import HoldoutSpec
 from src.training.diet.diet_shares import (
     format_diet_shares,
     plan_diet_shares,
@@ -68,10 +76,15 @@ from src.training.recording.run_listener import (
     RunListener,
 )
 from src.training.run_config import (
+    AttentionPoolingSpec,
     ConfigDocument,
     EmbeddingHeadKind,
+    MeanPoolingSpec,
     ModelSpec,
+    PoolingSpec,
     RunConfig,
+    TokenWhiteningSpec,
+    TransformerPoolingSpec,
     apply_overrides,
     parse_run_config,
     read_config_document,
@@ -79,6 +92,7 @@ from src.training.run_config import (
 from src.training.trainer import Trainer
 
 _CONFIG_COPY_NAME = "run_config.yaml"
+_WHITENING_STATS_COPY_NAME = "whitening_stats.pt"
 _ROUNDS_CSV_NAME = "rounds.csv"
 _CHECKPOINTS_CSV_NAME = "checkpoints.csv"
 _DIET_SHARES_CSV_NAME = "diet_shares.csv"
@@ -172,6 +186,7 @@ def main() -> int:
     )
     config = parse_run_config(document, tuple(DOJO_CATALOG))
     _require_device(config.device)
+    require_whitening_fits_run(config.model, config.plan.holdout)
     if not command_line.check_only:
         _require_new_run_directory(config.run_directory)
 
@@ -202,7 +217,9 @@ def main() -> int:
         return 0
 
     # Train, recording into a fresh run directory
-    _create_run_directory(config.run_directory, _with_expanded_dojos(document, config))
+    recorded = _with_run_whitening_stats(_with_expanded_dojos(document, config), config)
+    _create_run_directory(config.run_directory, recorded)
+    _copy_whitening_stats(config)
     write_diet_shares_csv(shares, config.run_directory / _DIET_SHARES_CSV_NAME)
     result = train(model, dojos, config)
     print_summary(result, config.run_directory)
@@ -210,9 +227,9 @@ def main() -> int:
 
 
 def build_model(spec: ModelSpec) -> CardEncoderModel:
-    """Construct the model spec describes (on the CPU): a frozen pretrained
-    text encoder and an embedding head, as a SingleCardModel, or as a
-    MultiCardModel when spec has group attention.
+    """Construct the model spec describes (on the CPU): a CardEmbeddingPipeline
+    (frozen pretrained text encoder, pooling, embedding head) as a
+    SingleCardModel, or as a MultiCardModel when spec has group attention.
 
     Inputs: spec (ModelSpec). Output: CardEncoderModel.
     Side effects: may download the pretrained checkpoint.
@@ -222,13 +239,12 @@ def build_model(spec: ModelSpec) -> CardEncoderModel:
         >>> build_model(ModelSpec(EmbeddingHeadKind.RESIDUAL_MLP, "answerdotai/ModernBERT-base", 256))
     """
     text_encoder = PretrainedTextEncoder(checkpoint=spec.checkpoint, trainable=False)
-    head = build_embedding_head(spec, text_encoder.model.config.hidden_size)
+    card_pipeline = build_card_pipeline(spec, text_encoder)
     attention = spec.group_attention
     if attention is None:
-        return SingleCardModel(text_encoder=text_encoder, embedding_head=head)
+        return SingleCardModel(card_pipeline)
     return MultiCardModel(
-        text_encoder=text_encoder,
-        embedding_head=head,
+        card_pipeline,
         num_heads=attention.num_heads,
         num_layers=attention.num_layers,
         ffn_dim=attention.ffn_dim,
@@ -237,29 +253,165 @@ def build_model(spec: ModelSpec) -> CardEncoderModel:
     )
 
 
-def build_embedding_head(spec: ModelSpec, input_dim: int) -> EmbeddingHead:
-    """The EmbeddingHead spec.embedding_head names, from input_dim (the text
-    encoder's hidden size) to spec.card_embedding_size.
+def build_card_pipeline(
+    spec: ModelSpec, text_encoder: TextEncoder
+) -> CardEmbeddingPipeline:
+    """The CardEmbeddingPipeline spec describes, around the given text
+    encoder: spec.enrichment (if any), spec.pooling, then the head
+    spec.embedding_head names, each built from the previous stage's
+    output_dim, ending at spec.card_embedding_size.
 
-    Inputs: spec, input_dim. Output: EmbeddingHead.
-    Side effects: none. Exceptions: none.
+    Inputs: spec, text_encoder (built by the caller, so tests can inject a
+        fake). Output: CardEmbeddingPipeline.
+    Side effects: reads the whitening stats file when spec has token
+        whitening.
+    Exceptions: ValueError if the whitening stats were fitted on another
+        checkpoint than spec.checkpoint, or a stage rejects its width
+        (e.g. transformer heads that do not divide it); FileNotFoundError
+        for a missing stats file.
 
     Example:
-        >>> build_embedding_head(spec, 768).output_dim
+        >>> build_card_pipeline(spec, text_encoder).output_dim
         256
+    """
+    # Each stage reads the width the previous one produces
+    enrichment = None
+    token_width = text_encoder.output_dim
+    if spec.enrichment is not None:
+        enrichment = _build_token_whitening(spec.enrichment, spec.checkpoint)
+        token_width = enrichment.output_dim
+    pooling = _build_pooling(spec.pooling, token_width)
+    head = _build_head(spec, pooling.output_dim)
+    return CardEmbeddingPipeline(text_encoder, enrichment, pooling, head)
+
+
+def _build_token_whitening(spec: TokenWhiteningSpec, checkpoint: str) -> TokenWhitening:
+    """Private helper - single consumer is build_card_pipeline.
+
+    Inputs: spec, checkpoint (the run's text encoder).
+    Output: TokenWhitening from the stats at spec.stats_path.
+    Side effects: reads the stats file.
+    Exceptions: FileNotFoundError; ValueError if the stats were fitted on
+        another checkpoint.
+    """
+    stats = WhiteningStats.load(spec.stats_path)
+    stats.require_fitted_on(checkpoint)
+    return TokenWhitening(stats)
+
+
+def _build_pooling(spec: PoolingSpec, token_width: int) -> TokenPooling:
+    """Private helper - single consumer is build_card_pipeline. A
+    transformer's inner pooling is built by _build_simple_pooling, so
+    there is no recursion (the spec type forbids nesting).
+
+    Inputs: spec, token_width. Output: the TokenPooling spec names.
+    Side effects: none. Exceptions: ValueError from the pooling.
+    """
+    if isinstance(spec, TransformerPoolingSpec):
+        return TransformerPooling(
+            token_width,
+            inner=_build_simple_pooling(spec.inner, token_width),
+            num_layers=spec.num_layers,
+            num_heads=spec.num_heads,
+            ffn_dim=spec.ffn_dim,
+            dropout=spec.dropout,
+        )
+    return _build_simple_pooling(spec, token_width)
+
+
+def _build_simple_pooling(
+    spec: MeanPoolingSpec | AttentionPoolingSpec, token_width: int
+) -> MeanPooling | AttentionPooling:
+    """Private helper - consumers are _build_pooling (a top-level pooling
+    and a transformer's inner one).
+
+    Inputs: spec, token_width. Output: MeanPooling or AttentionPooling.
+    Side effects: none. Exceptions: ValueError from the pooling.
+    """
+    if isinstance(spec, AttentionPoolingSpec):
+        return AttentionPooling(token_width, num_queries=spec.num_queries)
+    return MeanPooling(token_width)
+
+
+def _build_head(spec: ModelSpec, pooled_width: int) -> EmbeddingHead:
+    """Private helper - single consumer is build_card_pipeline.
+
+    Inputs: spec (embedding_head, card_embedding_size, mlp_*),
+        pooled_width. Output: the EmbeddingHead spec.embedding_head names.
+    Side effects: none. Exceptions: none.
     """
     match spec.embedding_head:
         case EmbeddingHeadKind.LINEAR_PROJECTION:
-            return LinearEmbeddingHead(input_dim, spec.card_embedding_size)
+            return LinearEmbeddingHead(pooled_width, spec.card_embedding_size)
         case EmbeddingHeadKind.RESIDUAL_MLP:
             return ResidualMlpEmbeddingHead(
-                input_dim,
+                pooled_width,
                 spec.card_embedding_size,
                 hidden_dim=spec.mlp_hidden_dim,
                 num_blocks=spec.mlp_num_blocks,
             )
-        case EmbeddingHeadKind.ATTENTION_POOLING:
-            return AttentionPoolingEmbeddingHead(input_dim, spec.card_embedding_size)
+
+
+def require_whitening_fits_run(spec: ModelSpec, holdout: HoldoutSpec) -> None:
+    """Refuse token-whitening stats the run cannot use, before any dojo is
+    built: fitted on another text encoder than spec.checkpoint, or under
+    another holdout than the run's (their sample may include this run's
+    TEST or VALIDATION cards). No-op without token whitening.
+
+    Inputs: spec (the run's model), holdout (the run's).
+    Output: none.
+    Side effects: reads the stats file when spec has token whitening.
+    Exceptions: ValueError on either mismatch; FileNotFoundError for a
+        missing stats file.
+
+    Example:
+        >>> require_whitening_fits_run(config.model, config.plan.holdout)
+    """
+    if spec.enrichment is None:
+        return
+    stats = WhiteningStats.load(spec.enrichment.stats_path)
+    stats.require_fitted_on(spec.checkpoint)
+    if stats.holdout != holdout:
+        raise ValueError(
+            f"{spec.enrichment.stats_path} was fitted under holdout "
+            f"{stats.holdout}, but this run uses {holdout}; refit it with "
+            "scripts/fit_whitening.py --holdout-from <this config>"
+        )
+
+
+def _with_run_whitening_stats(
+    document: ConfigDocument, config: RunConfig
+) -> ConfigDocument:
+    """document with model.enrichment.stats_path pointing at the run
+    directory's own copy (_WHITENING_STATS_COPY_NAME), when the run has
+    token whitening; otherwise document itself. So a run directory stays
+    self-contained (see _copy_whitening_stats).
+
+    Inputs: document (not modified), config (parsed from it).
+    Output: a copy of document with the one path replaced, or document.
+    Side effects: none. Exceptions: none.
+    """
+    if config.model.enrichment is None:
+        return document
+    copy_path = config.run_directory / _WHITENING_STATS_COPY_NAME
+    model = dict(document["model"])
+    model["enrichment"] = {**model["enrichment"], "stats_path": copy_path.as_posix()}
+    return {**document, "model": model}
+
+
+def _copy_whitening_stats(config: RunConfig) -> None:
+    """Copy the run's whitening stats file into its run directory, when the
+    run has token whitening.
+
+    Inputs: config. Output: none.
+    Side effects: writes one file into config.run_directory.
+    Exceptions: OSError from the filesystem.
+    """
+    if config.model.enrichment is not None:
+        shutil.copyfile(
+            config.model.enrichment.stats_path,
+            config.run_directory / _WHITENING_STATS_COPY_NAME,
+        )
 
 
 def trainable_parameter_count(model: torch.nn.Module) -> int:

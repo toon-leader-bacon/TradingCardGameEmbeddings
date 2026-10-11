@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 import torch
 
-from src.encoder_model.embedding_head import LinearEmbeddingHead
 from src.encoder_model.multi_card_model import MultiCardModel
 from src.encoder_model.single_card_model import SingleCardModel
 from src.evaluation.card_row import CardRow
@@ -14,7 +13,7 @@ from src.evaluation.embedding.embed_corpus import CardEmbedder, embed_corpus
 from src.evaluation.embedding.embedding_table import EmbeddingTable
 from src.evaluation.embedding.embedding_table_metadata import EmbeddingTableMetadata
 from src.schema.game_id import GameId
-from tests.encoder_model.fakes import HIDDEN, FakeTextEncoder
+from tests.encoder_model.fakes import fake_card_pipeline
 from tests.evaluation.fakes import WIDTH, FakeEmbedder, make_card, vector_for
 
 
@@ -147,11 +146,11 @@ def test_a_card_of_another_game_propagates_and_keeps_earlier_batches(
 @pytest.mark.parametrize("model_class", [SingleCardModel, MultiCardModel])
 def test_both_encoder_models_embed_a_corpus(tmp_path: Path, model_class: type) -> None:
     torch.manual_seed(0)
-    head = LinearEmbeddingHead(HIDDEN, 8)
+    pipeline = fake_card_pipeline(8)
     if model_class is MultiCardModel:
-        model = MultiCardModel(FakeTextEncoder(), head, num_heads=2, num_layers=1)
+        model = MultiCardModel(pipeline, num_heads=2, num_layers=1)
     else:
-        model = SingleCardModel(FakeTextEncoder(), head)
+        model = SingleCardModel(pipeline)
     embedder: CardEmbedder = model
     with _table(tmp_path, width=8) as table:
         assert embed_corpus(embedder, _CARDS, table, batch_size=4) == 7

@@ -17,7 +17,6 @@ import torch
 
 from src.encoder_model.card_encoder_model import CardEncoderModel
 from src.encoder_model.embedding_head import (
-    AttentionPoolingEmbeddingHead,
     EmbeddingHead,
     LinearEmbeddingHead,
     ResidualMlpEmbeddingHead,
@@ -27,7 +26,7 @@ from src.encoder_model.single_card_model import SingleCardModel
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
-from tests.encoder_model.fakes import HIDDEN, FakeTextEncoder
+from tests.encoder_model.fakes import HIDDEN, fake_card_pipeline
 
 _EMBED = 8
 
@@ -46,16 +45,13 @@ def _card(name: str) -> GenericCard:
 
 def _single_model() -> SingleCardModel:
     torch.manual_seed(0)
-    return SingleCardModel(
-        FakeTextEncoder(), LinearEmbeddingHead(HIDDEN, _EMBED)
-    ).eval()
+    return SingleCardModel(fake_card_pipeline(_EMBED)).eval()
 
 
 def _multi_model() -> MultiCardModel:
     torch.manual_seed(0)
     model = MultiCardModel(
-        FakeTextEncoder(),
-        LinearEmbeddingHead(HIDDEN, _EMBED),
+        fake_card_pipeline(_EMBED),
         num_heads=2,
         num_layers=1,
     )
@@ -315,7 +311,7 @@ def test_train_mode_batched_single_cards_get_no_gradient_from_batch_mates() -> N
         output.retain_grad()
         captured.append(output)
 
-    hook = model.embedding_head.register_forward_hook(keep_head_output)
+    hook = model.card_pipeline.embedding_head.register_forward_hook(keep_head_output)
     try:
         embeddings = model([A, B])
     finally:
@@ -340,7 +336,7 @@ def test_train_mode_multi_card_input_does_mix_cards() -> None:
         output.retain_grad()
         captured.append(output)
 
-    hook = model.embedding_head.register_forward_hook(keep_head_output)
+    hook = model.card_pipeline.embedding_head.register_forward_hook(keep_head_output)
     try:
         embeddings = model.forward_multi_card([A, B])
     finally:
@@ -370,30 +366,24 @@ def test_forward_rejects_an_empty_first_group_or_example(make_model: Any) -> Non
 # --- embedding_dim and isolated_embeddings ----------------------------------
 
 
-@pytest.mark.parametrize(
-    "head",
-    [
-        LinearEmbeddingHead(HIDDEN, 5),
-        ResidualMlpEmbeddingHead(HIDDEN, 5, hidden_dim=4, num_blocks=1),
-        AttentionPoolingEmbeddingHead(HIDDEN, 5),
-    ],
-)
-def test_every_head_reports_the_width_it_produces(head: EmbeddingHead) -> None:
-    encoding = FakeTextEncoder().encode(["Alpha", "Bravo"])
+_HEADS = [
+    LinearEmbeddingHead(HIDDEN, 5),
+    ResidualMlpEmbeddingHead(HIDDEN, 5, hidden_dim=4, num_blocks=1),
+]
+
+
+@pytest.mark.parametrize("head", _HEADS)
+def test_every_head_reports_the_widths_it_reads_and_produces(
+    head: EmbeddingHead,
+) -> None:
+    assert head.input_dim == HIDDEN
     assert head.output_dim == 5
-    assert head(encoding).shape == (2, 5)
+    assert head(torch.randn(2, HIDDEN)).shape == (2, 5)
 
 
-@pytest.mark.parametrize(
-    "head",
-    [
-        LinearEmbeddingHead(HIDDEN, 5),
-        ResidualMlpEmbeddingHead(HIDDEN, 5, hidden_dim=4, num_blocks=1),
-        AttentionPoolingEmbeddingHead(HIDDEN, 5),
-    ],
-)
+@pytest.mark.parametrize("head", _HEADS)
 def test_every_head_outputs_a_fixed_scale_embedding(head: EmbeddingHead) -> None:
-    embeddings = head(FakeTextEncoder().encode(["Alpha", "Bravo"]))
+    embeddings = head(torch.randn(2, HIDDEN))
     # Mean 0, variance 1 across the coordinates: L2 norm sqrt(width)
     assert torch.allclose(embeddings.mean(dim=1), torch.zeros(2), atol=1e-5)
     assert torch.allclose(embeddings.norm(dim=1), torch.full((2,), 5**0.5), atol=1e-3)
@@ -413,18 +403,15 @@ def test_embedding_dim_is_the_real_output_width(make_model: Any) -> None:
     assert model.forward_single_card(A).shape == (model.embedding_dim,)
 
 
-def test_multi_card_attention_is_sized_by_its_head() -> None:
-    model = MultiCardModel(
-        FakeTextEncoder(), LinearEmbeddingHead(HIDDEN, 6), num_heads=2, num_layers=1
-    )
+def test_multi_card_attention_is_sized_by_its_card_pipeline() -> None:
+    model = MultiCardModel(fake_card_pipeline(6), num_heads=2, num_layers=1)
     assert model.embedding_dim == 6
     assert model.forward_multi_card([A, B])[0].shape == (6,)
 
 
 def test_multi_card_attention_layers_take_their_settings() -> None:
     model = MultiCardModel(
-        FakeTextEncoder(),
-        LinearEmbeddingHead(HIDDEN, 6),
+        fake_card_pipeline(6),
         num_heads=2,
         num_layers=3,
         ffn_dim=10,

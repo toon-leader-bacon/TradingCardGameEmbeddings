@@ -83,12 +83,69 @@ _TIER_COUNT = 3
 
 
 class EmbeddingHeadKind(StrEnum):
-    """Which EmbeddingHead (src/encoder_model/embedding_head.py) turns the
-    text encoder's tokens into one card embedding."""
+    """Which EmbeddingHead (src/encoder_model/embedding_head.py) projects
+    each card's pooled vector to its embedding."""
 
     LINEAR_PROJECTION = "linear_projection"
     RESIDUAL_MLP = "residual_mlp"
-    ATTENTION_POOLING = "attention_pooling"
+
+
+@dataclass(frozen=True)
+class TokenWhiteningSpec:
+    """`model.enrichment: {kind: whitening, stats_path: ...}`: whiten every
+    token with the WhiteningStats at stats_path
+    (src/encoder_model/enrichment/token_whitening.py; fitted by
+    scripts/fit_whitening.py)."""
+
+    stats_path: Path
+
+
+@dataclass(frozen=True)
+class MeanPoolingSpec:
+    """`model.pooling: {kind: mean}`: the average of the real tokens."""
+
+
+@dataclass(frozen=True)
+class AttentionPoolingSpec:
+    """`model.pooling: {kind: attention, num_queries: 4}`: learned queries,
+    outputs concatenated (src/encoder_model/pooling/attention_pooling.py)."""
+
+    num_queries: int = 1
+
+    def __post_init__(self) -> None:
+        """Exceptions: ValueError if num_queries < 1."""
+        if self.num_queries < 1:
+            raise ValueError(f"num_queries must be >= 1, got {self.num_queries}")
+
+
+@dataclass(frozen=True)
+class TransformerPoolingSpec:
+    """`model.pooling: {kind: transformer, num_layers: 1, inner: {kind:
+    attention}}`: trainable transformer layers over the tokens, then the
+    inner pooling (src/encoder_model/pooling/transformer_pooling.py).
+    num_heads must divide the token width; that is checked when the model
+    is built, since token whitening may change the width."""
+
+    inner: MeanPoolingSpec | AttentionPoolingSpec = AttentionPoolingSpec()
+    num_layers: int = 1
+    num_heads: int = 8
+    ffn_dim: int | None = None  # None: 2 * the token width
+    dropout: float = 0.1
+
+    def __post_init__(self) -> None:
+        """Exceptions: ValueError if num_layers, num_heads or ffn_dim (when
+        given) < 1, or dropout outside [0, 1)."""
+        sizes = {"num_layers": self.num_layers, "num_heads": self.num_heads}
+        if self.ffn_dim is not None:
+            sizes["ffn_dim"] = self.ffn_dim
+        for name, size in sizes.items():
+            if size < 1:
+                raise ValueError(f"{name} must be >= 1, got {size}")
+        if not 0 <= self.dropout < 1:
+            raise ValueError(f"dropout must be in [0, 1), got {self.dropout}")
+
+
+PoolingSpec = MeanPoolingSpec | AttentionPoolingSpec | TransformerPoolingSpec
 
 
 @dataclass(frozen=True)
@@ -120,8 +177,9 @@ class GroupAttentionSpec:
 
 @dataclass(frozen=True)
 class ModelSpec:
-    """The encoder to build: a frozen pretrained text encoder, an embedding
-    head, and for a multi-card model, group attention on top.
+    """The encoder to build: a CardEmbeddingPipeline (frozen pretrained text
+    encoder, optional token enrichment, pooling, embedding head), and for
+    a multi-card model, group attention on top.
 
     embedding_head: which EmbeddingHead.
     checkpoint: Hugging Face checkpoint of the pretrained text encoder.
@@ -131,6 +189,8 @@ class ModelSpec:
         block count (read only for EmbeddingHeadKind.RESIDUAL_MLP).
     group_attention: None for a single-card model (each card embedded
         alone); otherwise the MultiCardModel's self-attention layers.
+    pooling: how each card's tokens become one vector (mean by default).
+    enrichment: None, or token whitening before the pooling.
     """
 
     embedding_head: EmbeddingHeadKind
@@ -139,6 +199,10 @@ class ModelSpec:
     mlp_hidden_dim: int = 512
     mlp_num_blocks: int = 3
     group_attention: GroupAttentionSpec | None = None
+    # pooling and enrichment come last so older positional constructions
+    # (ModelSpec(head, checkpoint, size, hidden, blocks)) keep their meaning
+    pooling: PoolingSpec = MeanPoolingSpec()
+    enrichment: TokenWhiteningSpec | None = None
 
     def __post_init__(self) -> None:
         if self.card_embedding_size < 1:
@@ -838,12 +902,14 @@ def _parse_game(value: str, where: str) -> GameId:
 
 def _parse_model(section: ConfigSection) -> ModelSpec:
     """{"embedding_head", "checkpoint", "card_embedding_size",
-    ["mlp_hidden_dim", "mlp_num_blocks"], ["group_attention"]} -> ModelSpec.
+    ["mlp_hidden_dim", "mlp_num_blocks"], ["group_attention"], ["pooling"],
+    ["enrichment"]} -> ModelSpec.
 
     Inputs: section ("model"). Output: ModelSpec.
     Side effects: none.
     Exceptions: ValueError for an unknown embedding_head, mlp_* keys on a
-        head other than residual_mlp, or an invalid size.
+        head other than residual_mlp, an unknown pooling or enrichment
+        kind, or an invalid size.
     """
     # Which head; the mlp_* sizes only mean something for the residual MLP
     head_text = section.required("embedding_head", str)
@@ -870,18 +936,99 @@ def _parse_model(section: ConfigSection) -> ModelSpec:
         group_attention = _parse_group_attention(
             section.required_section("group_attention")
         )
+
+    # Pooling (mean when absent) and the optional token enrichment
+    pooling: PoolingSpec = MeanPoolingSpec()
+    if section.has("pooling"):
+        pooling = _parse_by_kind(section.required_section("pooling"), _POOLING_PARSERS)
+    enrichment = None
+    if section.has("enrichment"):
+        enrichment = _parse_by_kind(
+            section.required_section("enrichment"), _ENRICHMENT_PARSERS
+        )
     section.reject_unread_keys()
     return _construct_at(
         section.where,
         lambda: ModelSpec(
-            head,
-            checkpoint,
-            card_embedding_size,
-            mlp_hidden_dim,
-            mlp_num_blocks,
-            group_attention,
+            embedding_head=head,
+            checkpoint=checkpoint,
+            card_embedding_size=card_embedding_size,
+            mlp_hidden_dim=mlp_hidden_dim,
+            mlp_num_blocks=mlp_num_blocks,
+            group_attention=group_attention,
+            pooling=pooling,
+            enrichment=enrichment,
         ),
     )
+
+
+def _parse_by_kind(
+    section: ConfigSection, parsers: Mapping[str, Callable[[ConfigSection], _T]]
+) -> _T:
+    """A `{kind: ..., <its keys>}` section -> the spec its kind's parser
+    returns. Shared by mods, pooling and enrichment: a kind -> parser
+    table, not an if-chain.
+
+    Inputs: section, parsers (kind name -> parser of the remaining keys).
+    Output: the parser's spec.
+    Side effects: none.
+    Exceptions: ValueError for an unknown kind, a malformed entry, or an
+        unknown key (reject_unread_keys).
+    """
+    kind = section.required("kind", str)
+    parser = parsers.get(kind)
+    if parser is None:
+        raise ValueError(
+            f"{section.location_of('kind')} is {kind!r}, want one of {sorted(parsers)}"
+        )
+    result = _construct_at(section.where, lambda: parser(section))
+    section.reject_unread_keys()
+    return result
+
+
+def _parse_transformer_pooling(section: ConfigSection) -> TransformerPoolingSpec:
+    """`{kind: transformer, [inner], [num_layers], [num_heads], [ffn_dim],
+    [dropout]}` -> TransformerPoolingSpec; inner is a mean or attention
+    pooling section (attention when absent), never another transformer.
+
+    Private helper - single consumer is _POOLING_PARSERS.
+    Inputs: section. Output: TransformerPoolingSpec. Side effects: none.
+    Exceptions: ValueError for a nested transformer inner or a bad value.
+    """
+    defaults = TransformerPoolingSpec()
+    inner = defaults.inner
+    if section.has("inner"):
+        parsed = _parse_by_kind(section.required_section("inner"), _POOLING_PARSERS)
+        if not isinstance(parsed, (MeanPoolingSpec, AttentionPoolingSpec)):
+            raise ValueError(
+                f"{section.location_of('inner')} must be a mean or attention pooling"
+            )
+        inner = parsed
+    ffn_dim = section.required("ffn_dim", int) if section.has("ffn_dim") else None
+    return TransformerPoolingSpec(
+        inner=inner,
+        num_layers=section.optional("num_layers", int, defaults.num_layers),
+        num_heads=section.optional("num_heads", int, defaults.num_heads),
+        ffn_dim=ffn_dim,
+        dropout=section.optional("dropout", float, defaults.dropout),
+    )
+
+
+# Each pooling kind's parser, by its config name
+_POOLING_PARSERS: dict[str, Callable[[ConfigSection], PoolingSpec]] = {
+    "mean": lambda section: MeanPoolingSpec(),
+    "attention": lambda section: AttentionPoolingSpec(
+        section.optional("num_queries", int, AttentionPoolingSpec.num_queries)
+    ),
+    "transformer": _parse_transformer_pooling,
+}
+
+# Each enrichment kind's parser, by its config name
+_ENRICHMENT_PARSERS: dict[str, Callable[[ConfigSection], TokenWhiteningSpec]] = {
+    "whitening": lambda section: TokenWhiteningSpec(
+        Path(section.required("stats_path", str))
+    ),
+}
 
 
 def _parse_group_attention(section: ConfigSection) -> GroupAttentionSpec:
@@ -1050,23 +1197,14 @@ def _parse_mod_spec(section: ConfigSection) -> ModSpec:
     dojos in dojo_catalog.DECK_MOD_GROUPS take them, for the groups listed
     there.
 
-    Dispatch is a kind -> parser table, not an if-chain.
+    Dispatch is a kind -> parser table (_parse_by_kind), not an if-chain.
 
     Inputs: section (one entry). Output: ModSpec.
     Side effects: none.
     Exceptions: ValueError for an unknown kind, or a malformed entry
         (including unknown keys).
     """
-    kind = section.required("kind", str)
-    parser = _MOD_PARSERS.get(kind)
-    if parser is None:
-        raise ValueError(
-            f"{section.location_of('kind')} is {kind!r}, "
-            f"want one of {sorted(_MOD_PARSERS)}"
-        )
-    result = _construct_at(section.where, lambda: parser(section))
-    section.reject_unread_keys()
-    return result
+    return _parse_by_kind(section, _MOD_PARSERS)
 
 
 def _parse_mask_table(rows: list[ConfigSection], where: str) -> DropTable[FieldMask]:

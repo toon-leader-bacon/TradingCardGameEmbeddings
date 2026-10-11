@@ -1,9 +1,13 @@
-"""A tiny deterministic stand-in for a real language-model text encoder."""
+"""A tiny deterministic stand-in for a real language-model text encoder,
+and a CardEmbeddingPipeline built on it."""
 
 from typing import List
 
 import torch
 
+from src.encoder_model.card_embedding_pipeline import CardEmbeddingPipeline
+from src.encoder_model.embedding_head import LinearEmbeddingHead
+from src.encoder_model.pooling.mean_pooling import MeanPooling
 from src.encoder_model.text_encoder import TextEncoder, TokenEncoding
 
 HIDDEN = 8
@@ -13,6 +17,10 @@ class FakeTextEncoder(TextEncoder):
     """Two tokens per text. Each token's features come from the text's
     characters, so equal texts always encode equally, whatever else is in
     the batch."""
+
+    @property
+    def output_dim(self) -> int:
+        return HIDDEN
 
     def encode(self, texts: List[str]) -> TokenEncoding:
         rows = []
@@ -29,3 +37,13 @@ class FakeTextEncoder(TextEncoder):
         return TokenEncoding(
             hidden_states=hidden, attention_mask=torch.ones(len(texts), 2)
         )
+
+
+def fake_card_pipeline(embedding_width: int) -> CardEmbeddingPipeline:
+    """FakeTextEncoder, mean pooling and a linear head to embedding_width."""
+    return CardEmbeddingPipeline(
+        FakeTextEncoder(),
+        None,
+        MeanPooling(HIDDEN),
+        LinearEmbeddingHead(HIDDEN, embedding_width),
+    )

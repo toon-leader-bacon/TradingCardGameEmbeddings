@@ -27,9 +27,13 @@ from src.training.plan import (
     Uniform,
 )
 from src.training.run_config import (
+    AttentionPoolingSpec,
     ConfigDocument,
     EmbeddingHeadKind,
     GroupAttentionSpec,
+    MeanPoolingSpec,
+    TokenWhiteningSpec,
+    TransformerPoolingSpec,
     apply_overrides,
     parse_run_config,
     read_config_document,
@@ -700,3 +704,66 @@ class TestModelSpec:
     ) -> None:
         with pytest.raises(ValueError, match=message):
             parse_run_config(_with(["model", "group_attention"], attention))
+
+
+class TestPoolingAndEnrichment:
+    def test_mean_pooling_and_no_enrichment_by_default(self) -> None:
+        model = parse_run_config(_document()).model
+        assert model.pooling == MeanPoolingSpec()
+        assert model.enrichment is None
+
+    @pytest.mark.parametrize(
+        ("section", "expected"),
+        [
+            ({"kind": "mean"}, MeanPoolingSpec()),
+            ({"kind": "attention"}, AttentionPoolingSpec(1)),
+            ({"kind": "attention", "num_queries": 4}, AttentionPoolingSpec(4)),
+            ({"kind": "transformer"}, TransformerPoolingSpec()),
+            (
+                {
+                    "kind": "transformer",
+                    "num_layers": 2,
+                    "num_heads": 4,
+                    "ffn_dim": 64,
+                    "dropout": 0.0,
+                    "inner": {"kind": "mean"},
+                },
+                TransformerPoolingSpec(MeanPoolingSpec(), 2, 4, 64, 0.0),
+            ),
+        ],
+    )
+    def test_each_pooling_kind_parses(self, section: Any, expected: Any) -> None:
+        model = parse_run_config(_with(["model", "pooling"], section)).model
+        assert model.pooling == expected
+
+    def test_token_whitening_parses(self) -> None:
+        section = {"kind": "whitening", "stats_path": "data/whitening/w.pt"}
+        model = parse_run_config(_with(["model", "enrichment"], section)).model
+        assert model.enrichment == TokenWhiteningSpec(Path("data/whitening/w.pt"))
+
+    @pytest.mark.parametrize(
+        ("path", "value", "message"),
+        [
+            (["model", "pooling"], {"kind": "max"}, "config.model.pooling.kind"),
+            (
+                ["model", "pooling"],
+                {"kind": "attention", "num_queries": 0},
+                "num_queries",
+            ),
+            (["model", "pooling"], {"kind": "mean", "num_queries": 2}, "num_queries"),
+            (
+                ["model", "pooling"],
+                {"kind": "transformer", "inner": {"kind": "transformer"}},
+                "mean or attention",
+            ),
+            (["model", "pooling"], {"kind": "transformer", "dropout": 1.0}, "dropout"),
+            (["model", "enrichment"], {"kind": "whitening"}, "stats_path"),
+            (["model", "enrichment"], {"kind": "pca"}, "config.model.enrichment.kind"),
+            (["model", "embedding_head"], "attention_pooling", "embedding_head"),
+        ],
+    )
+    def test_bad_pooling_or_enrichment_raises(
+        self, path: list[Any], value: Any, message: str
+    ) -> None:
+        with pytest.raises(ValueError, match=message):
+            parse_run_config(_with(path, value))

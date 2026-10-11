@@ -35,6 +35,42 @@ this list is about runs and comparisons.
   the language model trainable; needs VRAM measurement and likely
   gradient checkpointing (`src/training/TODO.md`, section E).
 
+- [ ] **Pooling and whitening** (code built: `model.pooling` / `model.enrichment`
+  in `src/training/README.md`; stats from `scripts/fit_whitening.py`).
+  Fixed-feature bar from the offline probe
+  (`logs/pooling_probe/findings.md`): same-deck AUC ~0.65 (today's
+  mean-pooled JSON: 0.54). Arms, all with the same text encoder, head
+  and diet:
+
+  | arm | enrichment | pooling | trained? |
+  |---|---|---|---|
+  | 1 | - | mean (today) | no |
+  | 2 | token whitening | mean | no |
+  | 3 | - | attention, 1 query | yes |
+  | 4 | - | attention, 4-8 queries | yes |
+  | 5 | - | transformer (1-2 layers) -> attention | yes |
+  | 6 | token whitening | attention, 1 query | yes |
+  | 7 | token whitening | attention, 4-8 queries | yes |
+  | 8 | token whitening | transformer -> attention | yes |
+
+  Arms 1-2 can be scored offline first (the 0.65 bar is pooled-vector
+  whitening; token whitening is not yet measured). To
+  decide: diet (contrastive + a few field dojos keeps TEST cheap),
+  single- vs. multi-card model (single-card isolates pooling from the
+  attention stack's offset), rounds, and the scoring (probe
+  `--checkpoint` mode plus TEST loss). Report trainable parameter counts:
+  multi-query concatenation widens the head's input.
+
+  **Pilot 2026-10-10** (multi-card, reduced mixed diet, 3 x 1000 steps,
+  4 queries; configs `configs/training/Oct_10_2026_pooling_pilot/`,
+  findings `logs/pooling_pilot/findings.md`): arms 1-4, 6, 7 done; arm 5
+  trained but not probed (the probe exhausted system memory twice); arm
+  8 not run. Whitening is what moves contrastive off chance (0.81-0.86
+  vs 1.00) and lifts deck AUC (0.66-0.70 vs 0.53-0.56); trainable
+  pooling adds little on top. Unwhitened 4-query attention alone keeps
+  numeric fields (R^2 0.57). Next: arms 5 and 8, then raw + whitened
+  tokens (root `TODO.md`).
+
 ## Ablations, when a series raises the question
 
 - [ ] Contrastive share of the mixed diet (e.g. 25 / 50 / 75%).
@@ -85,8 +121,37 @@ LayerNorm + `encoder_lr` pilot (`logs/lr_pilot/findings.md`):
   predictor, and 17-42 dojos were above 5x every round. A final
   LayerNorm (no gain, no bias) fixed the scale. Round 0 of the pilot:
   median 1.13x and no dojo above 5x.
+- **...but one shared offset still dominates.** Frozen ModernBERT is
+  anisotropic: mean-pooled features of cards from five games are at cos
+  ~0.98. Once mean-centered they carry real structure (same-game cos
+  0.31 vs cross-game -0.15), and by round 1 of the pilot the trained head
+  has sharpened it (same-game 0.54). The multi-card attention stack then
+  adds a large constant vector: final cos 0.999, with the card-specific
+  part 0.40 of norm 16. Metric heads don't care about a constant offset;
+  cosine-based contrastive losses do, and every contrastive dojo sits at
+  chance. Details: `logs/lr_pilot/findings.md`.
 - **TEST is expensive.** About 14 of each round's ~37 minutes go to
   scoring all 162 dojos on 128 examples each.
+
+### The shared offset and the contrastive dojos
+
+- **Contrastive-only control first** (config-only). `multi_contrastive`
+  with the LayerNorm, 2-3 rounds. If contrastive cannot leave chance
+  even alone, mixing is not the cause; if it can, the mixed diet is
+  starving it (20 steps per contrastive dojo per round today).
+- **Center the frozen features** (code, small). ModernBERT is frozen, so
+  its mean pooled vector over the card binder is a constant: compute it
+  once and subtract it (optionally whiten, "all-but-the-top") before the
+  head. Removes the anisotropy at the source.
+- **Center before the cosine** (code, small). Subtract the batch mean
+  (or a running mean, as DINO does) from the embeddings inside the
+  contrastive losses, so a shared offset added later (the attention
+  stack's) cannot hide card differences from them.
+- **Learnable contrastive temperature** (code, small). CLIP's
+  `logit_scale`: the loss can sharpen itself when cosines are bunched.
+- **Track geometry every round** (code, small). Log raw and centered
+  cos, same-game vs. cross-game, over a fixed card set at each TEST pass
+  (`logs/lr_pilot/embedding_scale.py` does it offline).
 
 ### Getting more steps to each head
 

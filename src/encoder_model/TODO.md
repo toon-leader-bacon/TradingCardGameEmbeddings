@@ -1,13 +1,13 @@
 # TODO (encoder_model): beyond the frozen linear baseline
 
-Started 2026-09-29. Today every reference single-card model is a frozen
-pretrained text encoder (`answerdotai/ModernBERT-base`) plus a small head,
-and both "rich" heads see little of the frozen encoder's output:
-`ResidualMlpEmbeddingHead` mean-pools the token states before its MLP, and
-`AttentionPoolingEmbeddingHead` is one learned query plus one linear layer.
+Started 2026-09-29. Every run so far uses a frozen pretrained text
+encoder (`answerdotai/ModernBERT-base`), mean pooling and a small head.
 Mean pooling a masked-LM's token states blurs exactly the details cards
 turn on (a 7 vs an 8, which keyword attaches to which clause, negation),
-and no depth after the pool can recover them.
+and no depth after the pool can recover them. The trainable poolings in
+`pooling/` (multi-query attention, transformer layers over the tokens)
+exist but are not yet compared; see `README.md` and
+`EXPERIMENTS_TODO.md`.
 
 - [ ] **Consider alternative text encoders.** ModernBERT-base was chosen
   in `src/training/TODO.md` section B (license, 8k context, code-heavy
@@ -18,22 +18,30 @@ and no depth after the pool can recover them.
   `trust_remote_code`), ModernBERT-large if VRAM allows, and a small
   decoder model's hidden states. Re-run `scripts/report_card_content.py`
   for token counts under any new tokenizer.
-- [ ] **Consider different head architectures.** Beyond linear, residual
-  MLP and single-query attention pooling: multi-query attention pooling
-  (several learned queries, concatenated or mixed), and the token-level
-  head below. Compare every head against `LinearProjectionCardModel` (the
-  floor baseline) on the same run config.
-- [ ] **Design a token-level head.** A head that works on the frozen
-  token sequence (`TokenEncoding.hidden_states` plus `attention_mask`)
-  rather than its mean: e.g. 1-2 small transformer layers over the frozen
-  states, then pooling (a CLS-style learned token or attention pooling).
-  New class, so it goes through design-recipe-skeleton. Pairs naturally
-  with caching frozen encoder outputs (`src/training/TODO.md` notes the
-  cache is not built): with the LM frozen, its per-card token states never
-  change, so caching them makes head training far faster (fp16 token
-  states: gwent ~175 MB, MTG ~9 GB). Caching only covers cards the dojo
-  passes through unmodified; mods that change card text (masking, key
-  shuffles) bypass it.
+- [ ] **Cache frozen token states for the trainable poolings.**
+  `AttentionPooling` and `TransformerPooling` read every card's token
+  states each step. With the LM frozen those never change, so caching
+  them makes pooling training far faster (fp16 token states: gwent
+  ~175 MB, MTG ~9 GB; `src/training/TODO.md` notes the cache is not
+  built). Caching only covers cards the dojo passes through unmodified;
+  mods that change card text (masking, key shuffles) bypass it.
+- [ ] **Whitening after pooling.** `TokenWhitening` whitens
+  tokens before pooling only. Offline, whitening the mean-pooled card
+  vector instead scored best (`logs/pooling_probe/findings.md`). After a
+  fixed pooling it is fit once (`CovarianceAccumulator` on pooled
+  vectors); after a trainable pooling its statistics drift as the
+  pooling trains, so it needs a recalibration policy: every N steps or
+  rounds, at phase boundaries, or a running estimate (BatchNorm-style).
+  Decide the cadence, and whether a trainable head right after it makes
+  it redundant.
+- [ ] **A card encoder that reads the token sequence directly.** Shelved
+  2026-10-10 when the model was split into text
+  encoder -> optional token enrichment -> token pooling -> embedding
+  head. The alternative skips pooling: the card encoder (or the
+  multi-card attention stack) consumes every card's token states, so no
+  detail is averaged away before cards meet each other. Much more
+  compute per group (cards x tokens instead of cards). Revisit once the
+  pooling arms are measured.
 - [ ] **Train a model with a thawed text encoder.** `PretrainedTextEncoder`
   already takes `trainable`, and `Phase.encoder_trainable` / `encoder_lr`
   exist, but no reference model or run config sets them. Build one (likely

@@ -264,7 +264,7 @@ def load_encoder_weights(checkpoint_dir: Path, model: nn.Module) -> None:
         its keys or shapes do not match model (strict load).
 
     Example:
-        >>> model = SingleCardModel(text_encoder, head)
+        >>> model = SingleCardModel(card_pipeline)
         >>> load_encoder_weights(Path("runs/a/pretrain_round0007"), model)
     """
     # Read on the CPU with weights_only (no pickled code), then strict-load

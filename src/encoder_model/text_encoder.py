@@ -1,11 +1,11 @@
 """Turns serialized card text into per-token contextualized embeddings.
 
-TextEncoder is a Strategy injected into SingleCardModel: a pretrained
-transformer today, possibly a from-scratch-trained encoder later, without
-SingleCardModel itself needing to change. It always returns token-level
-output (never pre-pooled) so that swapping the pooling/head architecture
-(mean pooling, attention pooling, ...) never requires touching this
-contract - see EmbeddingHead in embedding_head.py, which owns pooling.
+TextEncoder is the first Strategy injected into a CardEmbeddingPipeline
+(card_embedding_pipeline.py): a pretrained transformer today, possibly a
+from-scratch-trained encoder later, without the rest of the model needing
+to change. It always returns token-level output (never pre-pooled) so
+that swapping the pooling (mean, attention, ...; see pooling/) never
+requires touching this contract.
 """
 
 from abc import ABC, abstractmethod
@@ -52,6 +52,14 @@ class TokenEncoding:
 
 class TextEncoder(nn.Module, ABC):
     """Strategy interface: batch of card text in, per-token embeddings out."""
+
+    @property
+    @abstractmethod
+    def output_dim(self) -> int:
+        """hidden_dim of every TokenEncoding this encoder returns: the
+        first width in a CardEmbeddingPipeline's chain. Inputs: none. Output: int.
+        Side effects: none. Exceptions: none."""
+        raise NotImplementedError
 
     @abstractmethod
     def encode(self, texts: List[str]) -> TokenEncoding:
@@ -126,6 +134,12 @@ class PretrainedTextEncoder(TextEncoder):
             self.model.eval()
             for parameter in self.model.parameters():
                 parameter.requires_grad = False
+
+    @property
+    def output_dim(self) -> int:
+        """The wrapped model's hidden size. Inputs: none. Output: int.
+        Side effects: none. Exceptions: none."""
+        return int(self.model.config.hidden_size)
 
     def train(self, mode: bool = True) -> "PretrainedTextEncoder":
         """Set train/eval mode, but keep a frozen LM in eval so its dropout
@@ -285,6 +299,12 @@ class StaticEmbeddingTextEncoder(TextEncoder):
             embedding_dim=embedding_dim,
             padding_idx=self.tokenizer.pad_token_id,
         )
+
+    @property
+    def output_dim(self) -> int:
+        """The embedding table's width. Inputs: none. Output: int.
+        Side effects: none. Exceptions: none."""
+        return self.embedding_dim
 
     def encode(self, texts: List[str]) -> TokenEncoding:
         device = self.token_embedding.weight.device

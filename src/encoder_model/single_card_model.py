@@ -4,34 +4,32 @@ from typing import List
 
 import torch
 
+from src.encoder_model.card_embedding_pipeline import CardEmbeddingPipeline
 from src.encoder_model.card_encoder_model import CardEncoderModel
-from src.encoder_model.card_serialization import serialize_card_to_json
-from src.encoder_model.embedding_head import EmbeddingHead
-from src.encoder_model.text_encoder import TextEncoder
 from src.schema.card import GenericCard
 
 
 class SingleCardModel(CardEncoderModel):
-    """Embeds every card on its own: text encoder, then embedding head.
+    """Embeds every card on its own, with the injected CardEmbeddingPipeline.
 
     Cards never see each other, so embed_together and embed_apart are the
     same computation. All shape handling is in CardEncoderModel.
     """
 
-    def __init__(self, text_encoder: TextEncoder, embedding_head: EmbeddingHead):
+    def __init__(self, card_pipeline: CardEmbeddingPipeline):
+        """Inputs: card_pipeline (its four stages fix the architecture).
+        Output: none (constructor). Side effects: none. Exceptions: none."""
         super().__init__()
-        # Strategy + dependency injection: the caller hands in both
-        # collaborators, so swapping the text encoder (pretrained today,
-        # maybe one trained from scratch later) or the head architecture
-        # (linear, residual MLP, ...) never requires changing this class.
-        self.text_encoder: TextEncoder = text_encoder
-        self.embedding_head: EmbeddingHead = embedding_head
+        # Dependency injection: swapping any stage (text encoder,
+        # enrichment, pooling, head) happens inside the CardEmbeddingPipeline, never
+        # here
+        self.card_pipeline: CardEmbeddingPipeline = card_pipeline
 
     @property
     def embedding_dim(self) -> int:
-        """The injected head's output_dim. Inputs: none. Output: int.
+        """The card pipeline's output_dim. Inputs: none. Output: int.
         Side effects: none. Exceptions: none."""
-        return self.embedding_head.output_dim
+        return self.card_pipeline.output_dim
 
     def embed_together(self, cards: List[GenericCard]) -> List[torch.Tensor]:
         """Same as embed_apart: this model has no cross-card context.
@@ -44,17 +42,12 @@ class SingleCardModel(CardEncoderModel):
         return self.embed_apart(cards)
 
     def embed_apart(self, cards: List[GenericCard]) -> List[torch.Tensor]:
-        """One embedding per card, same order. Every card is serialized to
-        text, the texts are encoded in one batch, and the injected head
-        pools and projects them.
+        """One embedding per card, same order: CardEmbeddingPipeline.embed, split
+        into one tensor per card.
 
         Inputs: cards (List[GenericCard]), from any onboarded game.
         Output: List[Tensor], same length and order as cards.
-        Side effects: none directly (the injected TextEncoder may
-            accumulate gradients if it isn't frozen).
-        Exceptions: whatever the injected TextEncoder/EmbeddingHead raise.
+        Side effects: none directly (see CardEmbeddingPipeline.embed).
+        Exceptions: whatever CardEmbeddingPipeline.embed raises.
         """
-        texts = [serialize_card_to_json(card) for card in cards]
-        encoding = self.text_encoder.encode(texts)
-        embeddings = self.embedding_head(encoding)
-        return list(embeddings.unbind(0))
+        return list(self.card_pipeline.embed(cards).unbind(0))

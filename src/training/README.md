@@ -58,16 +58,26 @@ Top level:
   quoted `"!pattern"` entry in `dojos:` drops the names matched so far,
   and a pattern or exclusion that matches nothing raises. Held-out dojos
   join the run's dojos without being listed in `dojos:`. The `model:` section
-  describes the encoder `scripts/run_training.py` assembles: a frozen
-  pretrained text encoder (`checkpoint`), an `embedding_head`
-  (`linear_projection`, `residual_mlp` with optional `mlp_hidden_dim` /
-  `mlp_num_blocks`, or `attention_pooling`) producing
-  `card_embedding_size`-wide embeddings, and for a multi-card model a
+  describes the encoder `scripts/run_training.py` assembles (a
+  `CardEmbeddingPipeline`, see `../encoder_model/README.md`): a frozen
+  pretrained text encoder (`checkpoint`); an optional `enrichment:
+  {kind: whitening, stats_path: ...}` (token whitening, fitted by
+  `scripts/fit_whitening.py`); a `pooling:` (`{kind: mean}`, the default;
+  `{kind: attention, num_queries}`; or `{kind: transformer, num_layers,
+  num_heads, ffn_dim, dropout, inner: {kind: mean | attention}}`); an
+  `embedding_head` (`linear_projection`, or `residual_mlp` with optional
+  `mlp_hidden_dim` / `mlp_num_blocks`) producing
+  `card_embedding_size`-wide embeddings; and for a multi-card model a
   `group_attention:` block (`num_layers`, `num_heads`, `ffn_dim`,
   `dropout`, `norm_first`; defaults 2, 4, 1024, 0.1, true) of
   self-attention over each group. Without `group_attention` it is a
   single-card model. The driver prints the trainable parameter count, so
-  arms meant to be the same size can be checked under `--check`.
+  arms meant to be the same size can be checked under `--check`. With
+  token whitening, the driver refuses stats fitted on another
+  `checkpoint` or under another `holdout` than the run's (before any dojo
+  is built), and copies the stats file into the run directory as
+  `whitening_stats.pt`; the recorded `run_config.yaml` points at that
+  copy.
 - [dojo_catalog.py](dojo_catalog.py): `DOJO_CATALOG`, every dojo a config
   can name, keyed `"<metric source>.<metric stem>"` (e.g.
   `gwent_one.color_mask`). The key becomes the dojo's `name`, so same-stem
