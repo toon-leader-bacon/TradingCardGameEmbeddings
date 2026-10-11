@@ -44,6 +44,11 @@ from pathlib import Path
 import pandas as pd
 
 from src.data_refinement.metrics.version_metadata import read_version_metadata
+from src.run_logging import (
+    add_logging_arguments,
+    configure_logging,
+    logging_settings_from,
+)
 
 _DEFAULT_TOLERANCE = 1e-9
 
@@ -253,6 +258,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reference", type=Path, required=True)
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--tolerance", type=float, default=_DEFAULT_TOLERANCE)
+    add_logging_arguments(parser)
     return parser.parse_args()
 
 
@@ -264,6 +270,7 @@ def main() -> None:
     Side effects: prints; exits. Exceptions: see compare_trees.
     """
     args = parse_args()
+    configure_logging(logging_settings_from(args, None))
     results = compare_trees(args.reference, args.candidate, args.tolerance)
 
     for parity in results:

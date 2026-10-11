@@ -1,0 +1,29 @@
+== round 2 done 02:35
+latest     head norm   88.06 | final norm  102.87 cos 0.973 | shared-mean norm  101.66 spread  16.29
+0                  0.998     1.482   2.022               26
+1                  0.995     1.817   2.096               30
+2                  0.995     1.662   2.340               23
+== round 3 done 03:13
+latest     head norm   67.76 | final norm   81.53 cos 0.951 | shared-mean norm   79.69 spread  15.75
+3                  0.991     1.486   2.309               30
+== round 4 done 03:49
+latest     head norm   71.94 | final norm   88.44 cos 0.914 | shared-mean norm   85.49 spread  23.44
+4                  0.990     1.542   1.876               25
+== round 5 done 04:26
+latest     head norm   91.82 | final norm  123.86 cos 0.975 | shared-mean norm  122.44 spread  17.70
+5                  0.990     1.328   2.523               28
+== round 6 done 05:03
+latest     head norm   61.37 | final norm   74.99 cos 0.911 | shared-mean norm   71.82 spread  20.64
+6                  0.988     1.462   1.892               28
+== round 7 done 05:41
+latest     head norm   71.56 | final norm   78.97 cos 0.873 | shared-mean norm   74.68 spread  25.33
+7                  0.988     1.343   1.679               27
+== round 8 done 06:18
+latest     head norm   86.74 | final norm  104.42 cos 0.953 | shared-mean norm  102.16 spread  21.52
+8                  0.987     1.736   2.175               28
+== round 9 done 06:54
+latest     head norm   49.09 | final norm   61.26 cos 0.875 | shared-mean norm   57.66 spread  20.94
+9                  0.969     1.302   1.452               29
+== round 10 done 07:31
+latest     head norm   72.47 | final norm   86.22 cos 0.864 | shared-mean norm   80.72 spread  29.90
+10                 0.965     1.632   1.964               30

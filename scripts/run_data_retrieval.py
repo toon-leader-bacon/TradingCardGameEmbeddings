@@ -48,7 +48,6 @@ import shlex
 import shutil
 import subprocess
 import sys
-import traceback
 from pathlib import Path
 from typing import Callable
 
@@ -70,6 +69,15 @@ from src.data_retrieval.seventeenlands.downloader import SeventeenLandsDownloade
 from src.data_retrieval.spire_codex.card_downloader import SpireCodexCardDownloader
 from src.data_retrieval.spire_codex.run_downloader import SpireCodexRunDownloader
 from src.data_retrieval.sts_gg.run_downloader import STSGGRunDownloader
+from src.run_logging import (
+    add_logging_arguments,
+    configure_logging,
+    logging_settings_from,
+    script_log_path,
+    script_logger,
+)
+
+_logger = script_logger(__file__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -115,7 +123,7 @@ def _run_standard(downloader: Downloader) -> None:
     where its output landed."""
     downloader.phase_1()
     result_path = downloader.phase_2()
-    print(f"\nDone: {result_path}")
+    _logger.info("Done: %s", result_path)
 
 
 def run_scryfall() -> None:
@@ -123,7 +131,7 @@ def run_scryfall() -> None:
     # which the card stage reads for each card's lowest rarity.
     for bulk_type in ("oracle_cards", "default_cards"):
         url = _current_scryfall_bulk_url(bulk_type)
-        print(f"Scryfall {bulk_type} dump: {url}")
+        _logger.info("Scryfall %s dump: %s", bulk_type, url)
         _run_standard(ScryfallOracleDownloader(url))
 
 
@@ -197,15 +205,19 @@ DOWNLOADERS: dict[str, Callable[[], None]] = {
 }
 
 
-def _spawn_worker(name: str) -> subprocess.Popen:
-    """Launch `--source name --pause-on-exit` in its own new terminal
-    window, platform-dependently (see module docstring)."""
+def _spawn_worker(name: str, log_level: str) -> subprocess.Popen:
+    """Launch `--source name --pause-on-exit --log-level log_level` in its
+    own new terminal window, platform-dependently (see module docstring).
+    Each worker keeps its own default log file (--log-file isn't passed on:
+    the workers would interleave in one file)."""
     args = [
         sys.executable,
         str(Path(__file__).resolve()),
         "--source",
         name,
         "--pause-on-exit",
+        "--log-level",
+        log_level,
     ]
     env = os.environ.copy()
     env["PYTHONPATH"] = str(PROJECT_ROOT)
@@ -239,33 +251,34 @@ def _spawn_worker(name: str) -> subprocess.Popen:
                 [terminal, *exec_args, *args], cwd=PROJECT_ROOT, env=env
             )
 
-    print(
-        f"No supported terminal emulator found — running {name!r} inline instead.",
-        file=sys.stderr,
+    _logger.warning(
+        "No supported terminal emulator found — running %r inline instead.", name
     )
     return subprocess.Popen(args, cwd=PROJECT_ROOT, env=env)
 
 
-def run_all_in_separate_terminals() -> None:
+def run_all_in_separate_terminals(log_level: str) -> None:
     names = sorted(DOWNLOADERS)
-    print(f"Launching {len(names)} downloaders, each in its own terminal window:")
+    _logger.info(
+        "Launching %s downloaders, each in its own terminal window:", len(names)
+    )
     for name in names:
-        process = _spawn_worker(name)
-        print(f"  {name}: pid {process.pid}")
-    print(
-        "\nThis script does not wait for them — each window runs "
+        process = _spawn_worker(name, log_level)
+        _logger.info("  %s: pid %s", name, process.pid)
+    _logger.info(
+        "This script does not wait for them — each window runs "
         "independently and can be closed or re-run on its own; every "
         "downloader resumes from whatever it already wrote to disk."
     )
 
 
 def run_one(name: str, *, pause_on_exit: bool) -> None:
-    print(f"=== {name} ===")
+    _logger.info("=== %s ===", name)
     exit_code = 0
     try:
         DOWNLOADERS[name]()
     except Exception:
-        traceback.print_exc()
+        _logger.exception("%s failed", name)
         exit_code = 1
 
     if pause_on_exit:
@@ -298,6 +311,7 @@ def parse_args() -> argparse.Namespace:
         "--all spawns, so a finished (or crashed) window stays visible; harmless to "
         "pass by hand too.",
     )
+    add_logging_arguments(parser)
     return parser.parse_args()
 
 
@@ -308,12 +322,20 @@ def main() -> None:
         for name in sorted(DOWNLOADERS):
             print(name)
         return
+    # Each --all worker is its own process started in the same second: name
+    # its log after its source so the workers don't share one file
+    default_log_file = script_log_path(__file__)
+    if args.source:
+        default_log_file = default_log_file.with_stem(
+            f"{default_log_file.stem}_{args.source}"
+        )
+    configure_logging(logging_settings_from(args, default_log_file))
 
     if args.source:
         run_one(args.source, pause_on_exit=args.pause_on_exit)
         return
 
-    run_all_in_separate_terminals()
+    run_all_in_separate_terminals(args.log_level)
 
 
 if __name__ == "__main__":

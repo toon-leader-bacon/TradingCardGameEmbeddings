@@ -43,7 +43,6 @@ failure is logged and does not stop the rest.
 import argparse
 from functools import partial
 import sys
-import traceback
 from pathlib import Path
 from dataclasses import dataclass
 from enum import Enum
@@ -70,6 +69,13 @@ from src.data_refinement.metrics.seventeenlands.partition import (
 )
 from src.data_retrieval.seventeenlands import refs
 from src.data_retrieval.seventeenlands.downloader import SeventeenLandsDownloader
+from src.run_logging import (
+    add_logging_arguments,
+    configure_logging,
+    logging_settings_from,
+    script_log_path,
+    script_logger,
+)
 from src.schema.game_id import GameId
 
 # --- sts_gg ---
@@ -417,6 +423,8 @@ from src.data_refinement.metrics.seventeenlands.replay_data.tutor_target_rate_me
     TutorTargetRateMetric as ReplayTutorTargetRateMetric,
 )
 
+_logger = script_logger(__file__)
+
 _MTG_BINDER_HINT = (
     "run 'python3 scripts/run_card_binder_ingestion.py --source scryfall' first."
 )
@@ -478,14 +486,14 @@ def run_sts_gg(raw_path: Path | None) -> None:
         cls(binder, deck_box) for cls in _STS_GG_METRIC_CLASSES
     ]
 
-    print(f"=== sts_gg: {effective_raw_path} ===")
+    _logger.info("=== sts_gg: %s ===", effective_raw_path)
     scan_runs_jsonl(effective_raw_path, metrics)
     deck_box.save(
         STS_GG_DECK_BOX_PATH,
         GameId.SLAY_THE_SPIRE_2,
         binder.version_for(GameId.SLAY_THE_SPIRE_2),
     )
-    print(f"wrote {len(metrics)} metric outputs")
+    _logger.info("wrote %s metric outputs", len(metrics))
 
 
 # --- sts2_runs ---
@@ -545,10 +553,10 @@ def run_sts2_runs(raw_path: Path | None) -> None:
     )
     metrics: list[Metric[Sts2Run]] = [cls(binder) for cls in _STS2_RUNS_METRIC_CLASSES]
 
-    print("=== sts2_runs: spire_codex run pages ===")
+    _logger.info("=== sts2_runs: spire_codex run pages ===")
     tally = scan_sts2_runs(default_run_sources(), binder, metrics)
-    print(tally.as_dict())
-    print(f"wrote {len(metrics)} metric outputs")
+    _logger.info("%s", tally.as_dict())
+    _logger.info("wrote %s metric outputs", len(metrics))
 
 
 # --- gwent_one ---
@@ -568,17 +576,19 @@ def _reject_raw_path(name: str, raw_path: Path | None) -> None:
 def _scan_corpus_metrics(name: str, metrics: Sequence[CorpusScanMetric]) -> None:
     """scan() each CorpusScanMetric in turn, logging (not raising) any
     one metric's failure so the rest still run."""
-    print(f"=== {name} ===")
+    _logger.info("=== %s ===", name)
     failed: list[str] = []
     for metric in metrics:
         try:
             metric.scan()
         except Exception:
-            traceback.print_exc()
+            _logger.exception("%s failed", type(metric).__name__)
             failed.append(type(metric).__name__)
-    print(f"wrote {len(metrics) - len(failed)}/{len(metrics)} metric outputs")
+    _logger.info(
+        "wrote %d/%d metric outputs", len(metrics) - len(failed), len(metrics)
+    )
     if failed:
-        print(f"failed: {', '.join(failed)}", file=sys.stderr)
+        _logger.error("failed: %s", ", ".join(failed))
 
 
 def run_gwent_one(raw_path: Path | None) -> None:
@@ -745,9 +755,9 @@ def run_play_gwent(raw_path: Path | None) -> None:
     deck_box = _require_published_deck_box(GameId.GWENT)
     metrics: list[Metric[dict]] = [LeaderMaskedFromDeckMetric(binder, deck_box)]
 
-    print(f"=== play_gwent: {effective_raw_path} ===")
+    _logger.info("=== play_gwent: %s ===", effective_raw_path)
     scan_guides_jsonl(effective_raw_path, metrics)
-    print(f"wrote {len(metrics)} metric outputs")
+    _logger.info("wrote %s metric outputs", len(metrics))
 
 
 # --- fabtcg_decklists ---
@@ -772,9 +782,9 @@ def run_fabtcg_decklists(raw_path: Path | None) -> None:
         HeroConditionedInclusionMetric(binder, deck_box),
     ]
 
-    print(f"=== fabtcg_decklists: {effective_raw_path} ===")
+    _logger.info("=== fabtcg_decklists: %s ===", effective_raw_path)
     scan_decklist_files(effective_raw_path, metrics)
-    print(f"wrote {len(metrics)} metric outputs")
+    _logger.info("wrote %s metric outputs", len(metrics))
 
 
 def run_play_gwent_guides(raw_path: Path | None) -> None:
@@ -796,9 +806,9 @@ def run_play_gwent_guides(raw_path: Path | None) -> None:
         GuideVotesMetric(binder, deck_box),
     ]
 
-    print(f"=== play_gwent_guides: {effective_raw_path} ===")
+    _logger.info("=== play_gwent_guides: %s ===", effective_raw_path)
     scan_guides_jsonl(effective_raw_path, metrics)
-    print(f"wrote {len(metrics)} metric outputs")
+    _logger.info("wrote %s metric outputs", len(metrics))
 
 
 # --- isotropic ---
@@ -863,12 +873,14 @@ def run_isotropic_summary(raw_path: Path | None) -> None:
         MultiplayerPlacementMetric(binder, deck_box),
     ]
 
-    print(f"=== isotropic_summary: {', '.join(p.name for p in archive_paths)} ===")
+    _logger.info(
+        "=== isotropic_summary: %s ===", ", ".join(p.name for p in archive_paths)
+    )
     scan_isotropic_summary_archives(archive_paths, metrics)
     deck_box.save(
         ISOTROPIC_DECK_BOX_PATH, GameId.DOMINION, binder.version_for(GameId.DOMINION)
     )
-    print(f"wrote {len(metrics)} metric outputs")
+    _logger.info("wrote %s metric outputs", len(metrics))
 
 
 def run_isotropic_games(raw_path: Path | None) -> None:
@@ -894,7 +906,9 @@ def run_isotropic_games(raw_path: Path | None) -> None:
         MidGameDeckPairWinnerMetric(binder, deck_box),
     ]
 
-    print(f"=== isotropic_games: {', '.join(p.name for p in archive_paths)} ===")
+    _logger.info(
+        "=== isotropic_games: %s ===", ", ".join(p.name for p in archive_paths)
+    )
     # Two read passes over the same archives, one per scanner: header
     # metrics and mid-game metrics take different parsed row types.
     scan_isotropic_game_log_archives(archive_paths, header_metrics)
@@ -902,7 +916,7 @@ def run_isotropic_games(raw_path: Path | None) -> None:
     deck_box.save(
         ISOTROPIC_DECK_BOX_PATH, GameId.DOMINION, binder.version_for(GameId.DOMINION)
     )
-    print(f"wrote {len(header_metrics) + len(game_log_metrics)} metric outputs")
+    _logger.info("wrote %s metric outputs", len(header_metrics) + len(game_log_metrics))
 
 
 # --- seventeenlands ---
@@ -1215,9 +1229,9 @@ def _print_outcome_summary(outcomes: dict[Path, "CsvScanOutcome"]) -> list[Path]
     skipped = [p for p, o in outcomes.items() if o is CsvScanOutcome.SKIPPED]
     failed = [p for p, o in outcomes.items() if o is CsvScanOutcome.FAILED]
     for csv_path in skipped:
-        print(f"CSV SKIPPED summary: {csv_path}")
+        _logger.warning("CSV SKIPPED summary: %s", csv_path)
     for csv_path in failed:
-        print(f"CSV FAILURE summary: {csv_path}")
+        _logger.error("CSV FAILURE summary: %s", csv_path)
     return failed
 
 
@@ -1274,17 +1288,21 @@ def _scan_one_csv(run: _FamilyRun, csv_path: Path) -> CsvScanOutcome:
         )
         metrics = _namespaced_metrics(run.family, context)
 
-        print(
-            f"=== {run.family.name}: {csv_path} ({expansion.value}.{format_code.value}) ==="
+        _logger.info(
+            "=== %s: %s (%s.%s) ===",
+            run.family.name,
+            csv_path,
+            expansion.value,
+            format_code.value,
         )
         scan(csv_path, metrics)
-        print(f"wrote {len(metrics)} metric outputs")
+        _logger.info("wrote %s metric outputs", len(metrics))
         return CsvScanOutcome.SCANNED
     except UnsupportedCsvLayout as layout:
-        print(f"CSV SKIPPED {csv_path}: {layout}")
+        _logger.warning("CSV SKIPPED %s: %s", csv_path, layout)
         return CsvScanOutcome.SKIPPED
     except Exception:  # one bad CSV must not end a multi-hour family run
-        print(f"CSV FAILURE {csv_path}:\n{traceback.format_exc()}")
+        _logger.exception("CSV FAILURE %s", csv_path)
         return CsvScanOutcome.FAILED
 
 
@@ -1514,9 +1532,9 @@ def run_final_decks(name: str, raw_path: Path | None) -> None:
         raise SystemExit(f"{box_path} does not exist; run deck box ingestion first.")
     deck_box = DeckBox.load([box_path])
 
-    print(f"=== {name}: {box_path} ===")
+    _logger.info("=== %s: %s ===", name, box_path)
     output_path = metric_class(binder, deck_box).scan()
-    print(f"wrote {output_path}")
+    _logger.info("wrote %s", output_path)
 
 
 _FAMILIES: dict[str, Callable[[Path | None], None]] = {
@@ -1541,18 +1559,17 @@ _FAMILIES: dict[str, Callable[[Path | None], None]] = {
 
 def run_all() -> None:
     """Run every family in this process, isolating one family's failure
-    (logged via traceback, not raised) from the rest."""
+    (logged with its traceback, not raised) from the rest."""
     failed: list[str] = []
     for name in sorted(_FAMILIES):
         try:
             _FAMILIES[name](None)
         except Exception:
-            traceback.print_exc()
+            _logger.exception("%s failed", name)
             failed.append(name)
-        print()
 
     if failed:
-        print(f"Failed: {', '.join(failed)}", file=sys.stderr)
+        _logger.error("Failed: %s", ", ".join(failed))
         sys.exit(1)
 
 
@@ -1590,18 +1607,21 @@ def parse_args() -> argparse.Namespace:
         help="Run every metric family, one after another, in this process (the "
         "default when no other flag is given).",
     )
+    add_logging_arguments(parser)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
 
+    # --list is this script's output, not a log: print it and stop
     if args.list:
         for name in sorted(_FAMILIES):
             print(name)
         for name in _FINAL_DECKS_METRICS:
             print(f"{name} (--source only)")
         return
+    configure_logging(logging_settings_from(args, script_log_path(__file__)))
 
     if args.source in _FINAL_DECKS_METRICS:
         run_final_decks(args.source, args.raw_path)

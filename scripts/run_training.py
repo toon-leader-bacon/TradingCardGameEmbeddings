@@ -13,6 +13,10 @@ run_directory, which must not exist yet:
         diet_shares.csv     each phase's expected share of steps per dojo
         <phase>_roundNNNN/  the phase's best checkpoint (state.pt, encoder.pt, ...)
         latest/             the most recent round, rewritten every round
+        run.log             the full log, from the script's first line
+
+The log also goes to logs/run_training/<timestamp>.log (or --log-file),
+which is the only log for a --check.
 
 Usage (from the project root, in the ROCm venv for a GPU run):
 
@@ -26,7 +30,6 @@ Usage (from the project root, in the ROCm venv for a GPU run):
 """
 
 import argparse
-import logging
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,6 +57,16 @@ from src.encoder_model.enrichment.token_whitening import TokenWhitening
 from src.encoder_model.whitening.whitening_stats import WhiteningStats
 from src.encoder_model.single_card_model import SingleCardModel
 from src.encoder_model.text_encoder import PretrainedTextEncoder, TextEncoder
+from src.run_logging import (
+    RUN_LOG_NAME,
+    LoggingSettings,
+    add_logging_arguments,
+    configure_logging,
+    logging_settings_from,
+    mirror_log_into,
+    script_log_path,
+    script_logger,
+)
 from src.schema.card import GenericCard
 from src.schema.holdout import HoldoutSpec
 from src.training.diet.diet_shares import (
@@ -97,6 +110,8 @@ _ROUNDS_CSV_NAME = "rounds.csv"
 _CHECKPOINTS_CSV_NAME = "checkpoints.csv"
 _DIET_SHARES_CSV_NAME = "diet_shares.csv"
 
+_logger = script_logger(__file__)
+
 
 def card_cost(card: GenericCard) -> int:
     """One card's share of HardwareLimits.max_batch_cost: 1, so the budget
@@ -118,11 +133,13 @@ class CommandLine:
     config: the YAML run config. overrides: "dotted.key=value" strings, in
     order. check_only: build and preflight the dojos, build the model and
     validate the plan with a Trainer, then stop without training.
+    logging: where and how verbosely to log.
     """
 
     config: Path
     overrides: tuple[str, ...]
     check_only: bool
+    logging: LoggingSettings
 
 
 def parse_command_line() -> CommandLine:
@@ -154,9 +171,13 @@ def parse_command_line() -> CommandLine:
         help="build and preflight the dojos, build the model and validate "
         "the plan, then stop without training",
     )
+    add_logging_arguments(parser)
     args = parser.parse_args()
     return CommandLine(
-        config=args.config, overrides=tuple(args.overrides), check_only=args.check
+        config=args.config,
+        overrides=tuple(args.overrides),
+        check_only=args.check,
+        logging=logging_settings_from(args, script_log_path(__file__)),
     )
 
 
@@ -164,7 +185,7 @@ def main() -> int:
     """Run one training run end to end; return a process exit code.
 
     Output: 0 on a completed run (even one that stopped early: the reason
-        is printed) or a passed --check (preflight, model build and plan
+        is logged) or a passed --check (preflight, model build and plan
         validation), 1 if preflight failed.
     Side effects: loads card data, may write split files, creates the run
         directory and everything in it, trains on the configured device,
@@ -177,8 +198,8 @@ def main() -> int:
     Example:
         >>> raise SystemExit(main())
     """
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
     command_line = parse_command_line()
+    configure_logging(command_line.logging)
 
     # Read, override and parse the config; fail fast before loading anything
     document = apply_overrides(
@@ -206,23 +227,26 @@ def main() -> int:
     # Each phase's expected diet, checked by eye before any GPU time
     shares = plan_diet_shares(config.plan, dojos)
     for line in format_diet_shares(shares):
-        print(line)
+        _logger.info("%s", line)
     model = build_model(config.model).to(config.device)
-    print(f"Model: {trainable_parameter_count(model):,} trainable parameters")
+    _logger.info(
+        "Model: %s trainable parameters", f"{trainable_parameter_count(model):,}"
+    )
     if command_line.check_only:
         # Constructing a Trainer validates the plan against the model and
         # dojos (e.g. a phase with nothing trainable) without training
         Trainer(model, dojos, config.plan, config.limits, None, [], cost_of=card_cost)
-        print("Check passed; nothing trained.")
+        _logger.info("Check passed; nothing trained.")
         return 0
 
     # Train, recording into a fresh run directory
     recorded = _with_run_whitening_stats(_with_expanded_dojos(document, config), config)
     _create_run_directory(config.run_directory, recorded)
+    mirror_log_into(config.run_directory / RUN_LOG_NAME)
     _copy_whitening_stats(config)
     write_diet_shares_csv(shares, config.run_directory / _DIET_SHARES_CSV_NAME)
     result = train(model, dojos, config)
-    print_summary(result, config.run_directory)
+    log_summary(result, config.run_directory)
     return 0
 
 
@@ -428,11 +452,11 @@ def trainable_parameter_count(model: torch.nn.Module) -> int:
 
 
 def preflight_passes(dojos: list[Dojo], config: RunConfig) -> bool:
-    """Run preflight_dojo on every dojo and print one line each.
+    """Run preflight_dojo on every dojo and log one line each.
 
     Inputs: dojos (built dojos), config (for the batch budget and card_embedding_size).
     Output: True if every dojo passed.
-    Side effects: prints a report; reads one TRAIN batch per dojo.
+    Side effects: logs a report; reads one TRAIN batch per dojo.
     Exceptions: none (a failing dojo is reported, not raised).
 
     Example:
@@ -440,35 +464,39 @@ def preflight_passes(dojos: list[Dojo], config: RunConfig) -> bool:
         True
     """
     budget = BatchBudget(config.limits.max_batch_cost, card_cost)
-    print(f"Preflight: {len(dojos)} dojos")
+    _logger.info("Preflight: %d dojos", len(dojos))
     passed = 0
     for dojo in dojos:
         check = preflight_dojo(dojo, budget, config.model.card_embedding_size)
         if check.ok:
             passed += 1
-            print(
-                f"[ OK ] {check.dojo_name}: train={check.train_count} "
-                f"test={check.test_count} sample loss={check.sample_loss:.4g} "
-                f"baseline={check.sample_baseline_loss:.4g}"
+            _logger.info(
+                "[ OK ] %s: train=%d test=%d sample loss=%.4g baseline=%.4g",
+                check.dojo_name,
+                check.train_count,
+                check.test_count,
+                check.sample_loss,
+                check.sample_baseline_loss,
             )
         else:
-            print(f"[FAIL] {check.dojo_name}: {check.error}")
-        print_mod_tallies(check.mod_tallies)
-    print(f"{passed}/{len(dojos)} dojos passed preflight")
+            _logger.error("[FAIL] %s: %s", check.dojo_name, check.error)
+        log_mod_tallies(check.mod_tallies)
+    _logger.info("%d/%d dojos passed preflight", passed, len(dojos))
     return passed == len(dojos)
 
 
-def print_mod_tallies(tallies: Mapping[str, ModTally]) -> None:
+def log_mod_tallies(tallies: Mapping[str, ModTally]) -> None:
     """One indented line per augmentation mod: cards seen, changed and
     failed over the preflight batch, with a WARNING on a mod that changed
     nothing (e.g. its keys no longer match the data) or failed on any card
     (with its first error). Informational: never fails preflight.
 
     Inputs: tallies (a PreflightResult's snapshot). Output: none.
-    Side effects: prints. Exceptions: none.
+    Side effects: logs one line per mod, at WARNING for a suspect mod.
+        Exceptions: none.
 
     Example:
-        >>> print_mod_tallies(check.mod_tallies)
+        >>> log_mod_tallies(check.mod_tallies)
                0:ShuffleKeysMod: changed 30/32, failed 0
     """
     for label, tally in tallies.items():
@@ -477,10 +505,13 @@ def print_mod_tallies(tallies: Mapping[str, ModTally]) -> None:
             f"failed {tally.cards_failed}"
         )
         if tally.cards_failed:
-            line += f"  WARNING: first failure {tally.first_failure}"
+            _logger.warning("%s  first failure %s", line, tally.first_failure)
         elif tally.cards_seen and not tally.cards_changed:
-            line += "  WARNING: changed no card (do its fields still match the data?)"
-        print(line)
+            _logger.warning(
+                "%s  changed no card (do its fields still match the data?)", line
+            )
+        else:
+            _logger.info("%s", line)
 
 
 def train(
@@ -517,27 +548,30 @@ def train(
     return trainer.run()
 
 
-def print_summary(result: TrainingResult, run_directory: Path) -> None:
-    """Print why the run ended, its final per-dojo TEST loss and where the
+def log_summary(result: TrainingResult, run_directory: Path) -> None:
+    """Log why the run ended, its final per-dojo TEST loss and where the
     best checkpoint and logs are.
 
     Inputs: result (TrainingResult), run_directory (Path). Output: none.
-    Side effects: prints. Exceptions: none.
+    Side effects: logs. Exceptions: none.
 
     Example:
-        >>> print_summary(train(model, dojos, config), config.run_directory)
+        >>> log_summary(train(model, dojos, config), config.run_directory)
     """
-    print(f"stopped early: {result.stopped_early_reason or 'no'}")
+    _logger.info("stopped early: %s", result.stopped_early_reason or "no")
     if result.final_report is not None:
-        print(f"final round {result.final_report.round_index} TEST loss:")
+        _logger.info("final round %d TEST loss:", result.final_report.round_index)
         for name, split_loss in sorted(result.final_report.per_dojo_test_loss.items()):
-            print(
-                f"  {name}: {split_loss.loss:.4g} "
-                f"({split_loss.normalized:.3f}x baseline)"
+            _logger.info(
+                "  %s: %.4g (%.3fx baseline)",
+                name,
+                split_loss.loss,
+                split_loss.normalized,
             )
     if result.best_checkpoint is not None:
-        print(f"best checkpoint: {result.best_checkpoint.path}")
-    print(f"logs: {run_directory / _ROUNDS_CSV_NAME}")
+        _logger.info("best checkpoint: %s", result.best_checkpoint.path)
+    _logger.info("rounds: %s", run_directory / _ROUNDS_CSV_NAME)
+    _logger.info("log: %s", run_directory / RUN_LOG_NAME)
 
 
 def _require_device(device: torch.device) -> None:

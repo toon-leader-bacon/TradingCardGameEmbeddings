@@ -1,0 +1,7 @@
+multi_mixed_lr3e-4 start 2026-10-10T07:51:56-04:00
+multi_mixed_lr3e-4 end 2026-10-10T10:09:51-04:00 exit=0
+multi_mixed_lr1e-4 start 2026-10-10T10:10:17-04:00
+multi_mixed_lr1e-4 end 2026-10-10T12:24:01-04:00 exit=0
+multi_mixed_lr1e-3 start 2026-10-10T12:24:27-04:00
+multi_mixed_lr1e-3 end 2026-10-10T14:46:14-04:00 exit=0
+all done 2026-10-10T14:47:13-04:00

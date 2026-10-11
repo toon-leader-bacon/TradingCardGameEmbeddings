@@ -38,6 +38,14 @@ from src.data_refinement.metrics.seventeenlands.sliced_metric import (
     SlicedMetricClass,
 )
 from src.dojos.generic.generic_dojo import GenericDojo
+from src.run_logging import (
+    add_logging_arguments,
+    configure_logging,
+    logging_settings_from,
+    script_logger,
+)
+
+_logger = script_logger(__file__)
 
 _METRICS_ROOT = Path("src/data_refinement/metrics")
 _DOJOS_ROOT = Path("src/dojos")
@@ -220,16 +228,18 @@ def main() -> None:
         action="store_true",
         help="exit non-zero if the committed CSV is out of date, instead of writing it",
     )
+    add_logging_arguments(parser)
     args = parser.parse_args()
+    configure_logging(logging_settings_from(args, None))
     content = _as_csv(inventory_rows())
     if args.check:
         current = _OUTPUT_PATH.read_text() if _OUTPUT_PATH.exists() else ""
         if current != content:
             sys.exit(f"{_OUTPUT_PATH} is out of date; re-run without --check")
-        print(f"{_OUTPUT_PATH} is up to date")
+        _logger.info("%s is up to date", _OUTPUT_PATH)
         return
     _OUTPUT_PATH.write_text(content)
-    print(f"wrote {content.count(chr(10)) - 1} rows to {_OUTPUT_PATH}")
+    _logger.info("wrote %s rows to %s", content.count(chr(10)) - 1, _OUTPUT_PATH)
 
 
 if __name__ == "__main__":

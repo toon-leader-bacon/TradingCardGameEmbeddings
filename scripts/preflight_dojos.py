@@ -59,6 +59,15 @@ from src.dojos.sts_gg.deck_label_dojos import (
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
 from src.training.preflight import preflight_dojo
+from src.run_logging import (
+    add_logging_arguments,
+    configure_logging,
+    logging_settings_from,
+    script_log_path,
+    script_logger,
+)
+
+_logger = script_logger(__file__)
 
 
 def build_gwent_dojos(holdout: HoldoutSpec, card_embedding_size: int) -> list[Dojo]:
@@ -66,7 +75,7 @@ def build_gwent_dojos(holdout: HoldoutSpec, card_embedding_size: int) -> list[Do
     training/TODO.md section C, no regeneration needed."""
     binder_path = CardBinder.default_output_path(GameId.GWENT)
     if not binder_path.exists():
-        print(f"  skipping gwent_one: {binder_path} does not exist")
+        _logger.warning("  skipping gwent_one: %s does not exist", binder_path)
         return []
     binder = CardBinder.load([binder_path])
     dojo_classes = [
@@ -91,7 +100,7 @@ def build_sts_dojos(holdout: HoldoutSpec, card_embedding_size: int) -> list[Dojo
     training/TODO.md section C."""
     binder_path = CardBinder.default_output_path(GameId.SLAY_THE_SPIRE_2)
     if not binder_path.exists():
-        print(f"  skipping sts_gg: {binder_path} does not exist")
+        _logger.warning("  skipping sts_gg: %s does not exist", binder_path)
         return []
     binder = CardBinder.load([binder_path])
     card_dojo_classes = [
@@ -110,8 +119,9 @@ def build_sts_dojos(holdout: HoldoutSpec, card_embedding_size: int) -> list[Dojo
         for dojo_class in card_dojo_classes
     ]
     if not STS_GG_DECK_BOX_PATH.exists():
-        print(
-            f"  skipping sts_gg deck-level dojos: {STS_GG_DECK_BOX_PATH} does not exist"
+        _logger.warning(
+            "  skipping sts_gg deck-level dojos: %s does not exist",
+            STS_GG_DECK_BOX_PATH,
         )
         return dojos
     deck_box = DeckBox.load([STS_GG_DECK_BOX_PATH])
@@ -151,37 +161,45 @@ def parse_args() -> argparse.Namespace:
         default=8,
         help="BatchBudget.max_cost for the one TRAIN batch pulled per dojo",
     )
+    add_logging_arguments(parser)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    configure_logging(logging_settings_from(args, script_log_path(__file__)))
     holdout = HoldoutSpec.no_holdout()
     budget = BatchBudget(max_cost=args.max_batch_cost, cost_of=lambda card: 1)
 
-    print("Building dojos...")
+    _logger.info("Building dojos...")
     dojos = build_gwent_dojos(holdout, args.card_embedding_size)
     dojos += build_sts_dojos(holdout, args.card_embedding_size)
     if not dojos:
-        print("No dojos could be built (no card binder found) - nothing to check.")
+        _logger.error(
+            "No dojos could be built (no card binder found) - nothing to check."
+        )
         return 1
 
-    print(
-        f"\nChecking {len(dojos)} dojos (card_embedding_size={args.card_embedding_size}):"
+    _logger.info(
+        "Checking %d dojos (card_embedding_size=%d):",
+        len(dojos),
+        args.card_embedding_size,
     )
     results = [preflight_dojo(dojo, budget, args.card_embedding_size) for dojo in dojos]
     for result in results:
-        status = "[ OK ]" if result.ok else "[FAIL]"
-        print(
-            f"{status} {result.dojo_name}: train={result.train_count} test={result.test_count}"
-        )
         if result.ok:
-            print(f"       sample loss: {result.sample_loss:.4g}")
+            _logger.info(
+                "[ OK ] %s: train=%d test=%d sample loss=%.4g",
+                result.dojo_name,
+                result.train_count,
+                result.test_count,
+                result.sample_loss,
+            )
         else:
-            print(f"       {result.error}")
+            _logger.error("[FAIL] %s: %s", result.dojo_name, result.error)
 
     passed = sum(result.ok for result in results)
-    print(f"\n{passed}/{len(results)} dojos passed preflight")
+    _logger.info("%d/%d dojos passed preflight", passed, len(results))
     return 0 if passed == len(results) else 1
 
 

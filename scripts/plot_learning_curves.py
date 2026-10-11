@@ -20,6 +20,11 @@ from typing import get_args
 
 from src.evaluation.extrinsic.curve_renderer import XAxis
 from src.evaluation.extrinsic.learning_curves import plot_learning_curves
+from src.run_logging import (
+    add_logging_arguments,
+    configure_logging,
+    logging_settings_from,
+)
 
 
 def parse_curve(text: str) -> tuple[str, Path]:
@@ -76,6 +81,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--x-axis", choices=get_args(XAxis), default="step")
+    add_logging_arguments(parser)
     return parser.parse_args(argv)
 
 
@@ -84,6 +90,7 @@ def main() -> None:
     Side effects: writes one PNG per dojo. Exceptions: as
     plot_learning_curves (e.g. a missing or malformed CSV)."""
     args = parse_args()
+    configure_logging(logging_settings_from(args, None))
     plots = plot_learning_curves(
         curves_by_label(args.curve), args.output_dir, args.x_axis
     )

@@ -14,7 +14,6 @@ Usage (from the project root):
 """
 
 import argparse
-import logging
 import statistics
 import time
 from dataclasses import dataclass
@@ -36,6 +35,12 @@ from src.training.dojo_catalog import (
     build_dojos,
 )
 from src.training.preflight import random_embeddings_like
+from src.run_logging import (
+    LogLevel,
+    add_logging_arguments,
+    configure_logging,
+    logging_settings_from,
+)
 from scripts.run_training import card_cost
 
 _CSV_HEADER = (
@@ -135,8 +140,11 @@ def main() -> int:
         default=RegressionLossKind.MSE,
         help="loss the regression dojos are built with (their baselines differ)",
     )
+    add_logging_arguments(parser)
+    # The CSV on stdout is the output; keep stderr to warnings by default
+    parser.set_defaults(log_level=LogLevel.WARNING.name)
     args = parser.parse_args()
-    logging.basicConfig(level=logging.WARNING)
+    configure_logging(logging_settings_from(args, None))
     torch.manual_seed(0)
 
     context = DojoBuildContext(

@@ -7,7 +7,7 @@ turn on (a 7 vs an 8, which keyword attaches to which clause, negation),
 and no depth after the pool can recover them. The trainable poolings in
 `pooling/` (multi-query attention, transformer layers over the tokens)
 exist but are not yet compared; see `README.md` and
-`EXPERIMENTS_TODO.md`.
+`experiments/TODO.md`.
 
 - [ ] **Consider alternative text encoders.** ModernBERT-base was chosen
   in `src/training/TODO.md` section B (license, 8k context, code-heavy
@@ -27,7 +27,7 @@ exist but are not yet compared; see `README.md` and
   mods that change card text (masking, key shuffles) bypass it.
 - [ ] **Whitening after pooling.** `TokenWhitening` whitens
   tokens before pooling only. Offline, whitening the mean-pooled card
-  vector instead scored best (`logs/pooling_probe/findings.md`). After a
+  vector instead scored best (`experiments/2026-10-10_pooling_probe/NOTEBOOK.md`). After a
   fixed pooling it is fit once (`CovarianceAccumulator` on pooled
   vectors); after a trainable pooling its statistics drift as the
   pooling trains, so it needs a recalibration policy: every N steps or

@@ -1,0 +1,14 @@
+mean start 2026-10-10T16:47:17-04:00
+mean end 2026-10-10T17:58:17-04:00 exit=0
+tokwhite_mean start 2026-10-10T18:00:40-04:00
+tokwhite_mean end 2026-10-10T19:11:41-04:00 exit=0
+attn1 start 2026-10-10T19:13:38-04:00
+attn1 end 2026-10-10T20:25:39-04:00 exit=0
+tokwhite_attn1 start 2026-10-10T20:28:04-04:00
+tokwhite_attn1 end 2026-10-10T21:40:41-04:00 exit=0
+attn4 start 2026-10-10T21:42:39-04:00
+attn4 end 2026-10-10T22:54:10-04:00 exit=0
+tokwhite_attn4 start 2026-10-10T22:56:11-04:00
+tokwhite_attn4 end 2026-10-11T00:08:54-04:00 exit=0
+tfm_attn1 start 2026-10-11T00:10:50-04:00
+tfm_attn1 end 2026-10-11T01:34:21-04:00 exit=0
