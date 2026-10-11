@@ -30,7 +30,6 @@ the rest.
 
 import argparse
 import sys
-import traceback
 from pathlib import Path
 from typing import Callable
 
@@ -59,6 +58,15 @@ from src.data_refinement.deck_box.seventeenlands_game_data.extraction_stage impo
 from src.data_refinement.deck_box.sts_gg.extraction_stage import (
     StsGgDeckExtractionStage,
 )
+from src.run_logging import (
+    add_logging_arguments,
+    configure_logging,
+    logging_settings_from,
+    script_log_path,
+    script_logger,
+)
+
+_logger = script_logger(__file__)
 
 # One (extraction_stage, default raw_path) pair per source — the
 # default raw_path is each concrete stage's own DEFAULT_RAW_PATH.
@@ -122,31 +130,30 @@ def run_one(name: str, raw_path: Path | None) -> None:
     binder.save(binder_path, stage.SOURCE_GAME)
 
     box_path = DeckBox.default_output_path(stage.SOURCE_GAME)
-    print(f"=== {name}: {effective_raw_path} -> {box_path} ===")
+    _logger.info("=== %s: %s -> %s ===", name, effective_raw_path, box_path)
     changed_uuids = build_or_update_deck_box(
         raw_path=effective_raw_path,
         extraction_stage=stage,
         box_path=box_path,
         card_lookup=binder,
     )
-    print(f"created or content-changed {len(changed_uuids)} decks")
+    _logger.info("created or content-changed %s decks", len(changed_uuids))
 
 
 def run_all() -> None:
     """Run every source in this process, isolating one source's
-    failure (logged via traceback, not raised) from the rest — same
+    failure (logged with its traceback, not raised) from the rest — same
     convention as run_card_binder_ingestion.py's own run_all()."""
     failed: list[str] = []
     for name in sorted(_STAGES):
         try:
             run_one(name, raw_path=None)
         except Exception:
-            traceback.print_exc()
+            _logger.exception("%s failed", name)
             failed.append(name)
-        print()
 
     if failed:
-        print(f"Failed: {', '.join(failed)}", file=sys.stderr)
+        _logger.error("Failed: %s", ", ".join(failed))
         sys.exit(1)
 
 
@@ -173,6 +180,7 @@ def parse_args() -> argparse.Namespace:
         help="Extract every source, one after another, in this process (the default "
         "when no other flag is given).",
     )
+    add_logging_arguments(parser)
     return parser.parse_args()
 
 
@@ -183,6 +191,7 @@ def main() -> None:
         for name in sorted(_STAGES):
             print(name)
         return
+    configure_logging(logging_settings_from(args, script_log_path(__file__)))
 
     if args.source:
         run_one(args.source, raw_path=args.raw_path)

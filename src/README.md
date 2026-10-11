@@ -52,6 +52,43 @@ Two flows hand data between containers as files on disk:
 | [`training/`](training/README.md) | in progress | `Trainer`: phases, rounds and steps over a diet of dojos, with saturation-based stopping, fault isolation and checkpointing. Runs from a YAML config via `scripts/run_training.py`, on CPU or GPU. |
 | [`evaluation/`](evaluation/README.md) | in progress ([`plans/archive/evaluation.md`](../plans/archive/evaluation.md)) | Post-training evaluation of encoder checkpoints (intrinsic: embedding-table analyses against card labels; extrinsic: fresh-dojo-head curves on a frozen encoder via `Trainer`). Distinct from a training run's own TEST signal on a trainable encoder. |
 
+## Logging
+
+[`run_logging.py`](run_logging.py) is the one logging setup every script
+in `scripts/` calls at the start of `main()`. `src/` modules log through
+`logging.getLogger(__name__)` and never configure logging themselves.
+
+- **Console:** `HH:MM:SS LEVEL logger: message`, at `--log-level`
+  (default INFO). Lines are written through tqdm, so they don't break
+  progress bars.
+- **Log file:** full ISO timestamps plus `file.py:line`. It gets DEBUG
+  and above from `src.*` and `scripts.*`, INFO and above from other
+  libraries, plus Python warnings, uncaught tracebacks and a header line
+  naming the command, commit, host and versions.
+- **Where the file goes:**
+  - training: `logs/run_training/<YYYY-MM-DD_HHMMSS>.log` from the first
+    line. Once the run directory exists, the log is copied into
+    `<run_directory>/run.log` and both files are written from then on. A
+    `--check` run, or one that fails before its run directory exists, only
+    gets the `logs/` file;
+  - evaluation: `data/evaluations/<name>/run.log`;
+  - other pipeline scripts: `logs/<script>/<YYYY-MM-DD_HHMMSS>.log`;
+  - report scripts, whose printed output is the product: no file.
+
+  `--log-file` overrides the default file, and `--log-level` sets the
+  console level.
+
+```python
+_logger = script_logger(__file__)
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    add_logging_arguments(parser)
+    args = parser.parse_args()
+    configure_logging(logging_settings_from(args, script_log_path(__file__)))
+    _logger.info("starting")
+```
+
 ## A naming note: `Dojo` vs. `Gym`
 
 A **`Dojo`** is a non-episodic task: example in, label, loss out, the

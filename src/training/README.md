@@ -71,7 +71,7 @@ Top level:
   `group_attention:` block (`num_layers`, `num_heads`, `ffn_dim`,
   `dropout`, `norm_first`; defaults 2, 4, 1024, 0.1, true) of
   self-attention over each group. Without `group_attention` it is a
-  single-card model. The driver prints the trainable parameter count, so
+  single-card model. The driver logs the trainable parameter count, so
   arms meant to be the same size can be checked under `--check`. With
   token whitening, the driver refuses stats fitted on another
   `checkpoint` or under another `holdout` than the run's (before any dojo
@@ -277,7 +277,7 @@ PYTHONPATH=. python scripts/run_training.py configs/training/gpu_smoke.yaml --ch
 
 The script builds the model and the config's dojos, preflights every dojo
 (any failure stops the run before training), then trains. Preflight also
-prints each augmentation mod's tally over its one batch (cards changed,
+logs each augmentation mod's tally over its one batch (cards changed,
 failed) and warns on a mod that changed nothing or failed; that never
 stops the run. A config's optional `mods:` section replaces a dojo's
 default augmentations (see `configs/training/gwent_contrastive.yaml`);
@@ -285,7 +285,9 @@ dojo names contain ".", so `--set` cannot reach them (nor `loss_weights:`). The 
 directory must not already exist; it receives `run_config.yaml` (the
 config with overrides applied and dojo patterns expanded to names;
 defaults it left out are not written),
-`rounds.csv`, `checkpoints.csv` and the checkpoint directories. Batch cost
+`rounds.csv`, `checkpoints.csv`, the checkpoint directories and `run.log`,
+the script's full log from its first line (see `src/run_logging.py`;
+`--log-file` and `--log-level` adjust it). Batch cost
 is one per card, for preflight and training alike (`card_cost`).
 
 Directly from code, assuming `model` is a `SingleCardModel`/`MultiCardModel`

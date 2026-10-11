@@ -12,7 +12,7 @@ multi-card checkpoint, and an untrained single-card baseline):
    identical heads; then overlay every encoder's learning curves.
 
 Everything lands under data/evaluations/<name>/ (see src/evaluation/README.md
-for the layout). The script is re-runnable: a table that exists is opened
+for the layout), including run.log, which every invocation appends to. The script is re-runnable: a table that exists is opened
 and extended (embed_corpus skips stored cards), and an analysis or
 extrinsic run whose output directory already exists is skipped, not redone.
 
@@ -33,7 +33,6 @@ Usage (from the project root):
 
 import argparse
 import itertools
-import logging
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -65,6 +64,13 @@ from src.evaluation.extrinsic.run_extrinsic import ExtrinsicSpec, run_extrinsic
 from src.evaluation.labels.card_labels import CardLabels, HoldoutTierLabels
 from src.evaluation.labels.metric_parquet_labels import MetricParquetLabels
 from src.evaluation.select_corpus import CorpusSpec, select_corpus
+from src.run_logging import (
+    RUN_LOG_NAME,
+    add_logging_arguments,
+    configure_logging,
+    logging_settings_from,
+    script_logger,
+)
 from src.schema.card import GenericCard
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
@@ -74,7 +80,7 @@ from src.training.recording.checkpointer import (
     load_encoder_weights,
 )
 
-logger = logging.getLogger(__name__)
+_logger = script_logger(__file__)
 
 _BINDER_PATH = Path("data/final/cards/gwent.jsonl")
 _OUTPUT_ROOT = Path("data/evaluations")
@@ -233,7 +239,7 @@ def embed_encoder(
         added = embed_corpus(
             encoder.model, corpus, table, budget.embed_batch_size, precision
         )
-    print(f"      {encoder.label}: {added} cards embedded -> {path}")
+    _logger.info("      %s: %d cards embedded -> %s", encoder.label, added, path)
     return path
 
 
@@ -271,18 +277,18 @@ def _run_analysis(
 ) -> None:
     """One analysis, logged and skipped on failure - a label source that
     doesn't fit this corpus (e.g. one label) must not stop the others."""
-    # Print paths from intrinsic/ down: <encoder>/<labels>/<analysis>
+    # Log paths from intrinsic/ down: <encoder>/<labels>/<analysis>
     shown = out.relative_to(out.parents[3])
     if out.exists() and any(out.iterdir()):
-        print(f"      skip {shown} (already done)")
+        _logger.info("      skip %s (already done)", shown)
         return
     try:
         result = analysis.run(table, out)
     except ValueError as error:
-        logger.warning("%s skipped: %s", out, error)
+        _logger.warning("%s skipped: %s", out, error)
         return
     scalars = ", ".join(f"{key}={value:.3f}" for key, value in result.scalars.items())
-    print(f"      {shown}: {scalars}")
+    _logger.info("      %s: %s", shown, scalars)
 
 
 def run_extrinsic_all(
@@ -305,12 +311,14 @@ def run_extrinsic_all(
                 name: round(split_loss.normalized, 4)
                 for name, split_loss in (outcome.validation_losses or {}).items()
             }
-            print(
-                f"      {encoder.label}: validation (x baseline)={normalized}"
-                f" stopped_early={outcome.stopped_early_reason}"
+            _logger.info(
+                "      %s: validation (x baseline)=%s stopped_early=%s",
+                encoder.label,
+                normalized,
+                outcome.stopped_early_reason,
             )
         else:
-            print(f"      skip extrinsic/{encoder.label} (already done)")
+            _logger.info("      skip extrinsic/%s (already done)", encoder.label)
         if rounds_csv.exists():
             result[encoder.label] = rounds_csv
     return result
@@ -333,45 +341,50 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--smoke", action="store_true", help="tiny corpus and budgets: wiring check"
     )
+    add_logging_arguments(parser)
     return parser.parse_args()
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = parse_args()
     run_dir = args.output_root / args.name
+    configure_logging(logging_settings_from(args, run_dir / RUN_LOG_NAME))
     budget = budget_for(args.smoke)
     hardware = HardwareLimits(args.max_batch_cost, args.precision)
 
-    print(f"[1/5] Loading the card binder from {args.binder_path}")
+    _logger.info("[1/5] Loading the card binder from %s", args.binder_path)
     binder = CardBinder.load([args.binder_path])
 
-    print("[2/5] Building encoders, label sources and dojos")
+    _logger.info("[2/5] Building encoders, label sources and dojos")
     holdout = training_holdout(args)
     encoders = build_encoders(args)
     label_sources = build_label_sources(holdout)
     dojos = build_dojos(binder, holdout)
-    print(f"      encoders: {[encoder.label for encoder in encoders]}")
+    _logger.info("      encoders: %s", [encoder.label for encoder in encoders])
 
-    print("[3/5] Intrinsic: embedding each encoder's corpus")
+    _logger.info("[3/5] Intrinsic: embedding each encoder's corpus")
     tables = {
         encoder.label: embed_encoder(encoder, binder, run_dir, budget, args.precision)
         for encoder in encoders
     }
 
-    print("[4/5] Intrinsic: analyses")
+    _logger.info("[4/5] Intrinsic: analyses")
     for encoder in encoders:
         analyze_encoder(encoder, tables[encoder.label], label_sources, run_dir, budget)
 
-    print("[5/5] Extrinsic: fresh heads on each frozen encoder, then learning curves")
+    _logger.info(
+        "[5/5] Extrinsic: fresh heads on each frozen encoder, then learning curves"
+    )
     curves = run_extrinsic_all(encoders, dojos, run_dir, budget, hardware)
     if curves:
         plots = plot_learning_curves(curves, run_dir / "extrinsic" / "plots")
-        print(
-            f"      {len(plots)} learning-curve plots -> {run_dir / 'extrinsic' / 'plots'}"
+        _logger.info(
+            "      %d learning-curve plots -> %s",
+            len(plots),
+            run_dir / "extrinsic" / "plots",
         )
 
-    print(f"Done: {run_dir}")
+    _logger.info("Done: %s", run_dir)
 
 
 if __name__ == "__main__":

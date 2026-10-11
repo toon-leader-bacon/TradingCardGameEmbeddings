@@ -28,6 +28,11 @@ from scripts.run_card_binder_ingestion import STAGES
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.encoder_model.card_serialization import serialize_card_to_json
 from src.schema.card import GenericCard
+from src.run_logging import (
+    add_logging_arguments,
+    configure_logging,
+    logging_settings_from,
+)
 
 _DEFAULT_TOKENIZER = "answerdotai/ModernBERT-base"
 _KEY_COST_SAMPLE = 2000
@@ -129,11 +134,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source", choices=sorted(STAGES), help="Source to report.")
     parser.add_argument("--raw-path", type=Path, help="Override the raw data path.")
     parser.add_argument("--tokenizer", default=_DEFAULT_TOKENIZER)
+    add_logging_arguments(parser)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    configure_logging(logging_settings_from(args, None))
     if args.list or not args.source:
         print("\n".join(sorted(STAGES)))
         return

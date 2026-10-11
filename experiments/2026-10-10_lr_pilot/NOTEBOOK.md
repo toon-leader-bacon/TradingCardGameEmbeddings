@@ -9,7 +9,7 @@
 > isn't needed.
 
 **Migration note (2026-10-11).** This was reconstructed from
-`logs/lr_pilot/findings.md`, written while the runs went, and moved here
+`data/runs/Oct_10_2026_lr_pilot/legacy_logs/findings.md`, written while the runs went, and moved here
 with its scripts and outputs. The hypothesis was stated as a question
 ("the norm or the LR?") before launch, but no bar was written. One seed.
 
@@ -61,7 +61,7 @@ with its scripts and outputs. The hypothesis was stated as a question
   at the original run directories.
 - Raw data:
   - runs: `data/runs/Oct_10_2026_lr_pilot/<pilot>/`;
-  - console logs: `logs/lr_pilot/<pilot>.log`.
+  - console logs: `data/runs/Oct_10_2026_lr_pilot/legacy_logs/<pilot>.log`.
 - Analysis:
   - [`analysis/compare.py`](analysis/compare.py) on the console logs
     produces [`results/compare_test_loss.txt`](results/compare_test_loss.txt);

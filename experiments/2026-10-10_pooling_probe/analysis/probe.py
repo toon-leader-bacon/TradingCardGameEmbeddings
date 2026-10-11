@@ -16,8 +16,8 @@ three ways and post-processes it four ways, then scores each variant on:
   This is the contrastive dojos' task with no training.
 
 Run (CPU; pass --threads to share cores with a training run):
-    PYTHONPATH=. python logs/pooling_probe/probe.py [--threads 6]
-Writes logs/pooling_probe/cache/*.pt (pooled vectors), results.csv and
+    PYTHONPATH=. python experiments/2026-10-10_pooling_probe/analysis/probe.py [--threads 6]
+Writes data/runs/2026-10-10_pooling_probe/legacy_logs/cache/*.pt (pooled vectors), results.csv and
 prints a ranked table.
 """
 
@@ -45,7 +45,7 @@ from src.schema.game_id import GameId
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
 
-OUT = Path("logs/pooling_probe")
+OUT = Path("data/runs/2026-10-10_pooling_probe/legacy_logs")
 CACHE = OUT / "cache"
 SEED = 0
 DECKS_PER_GAME = 25

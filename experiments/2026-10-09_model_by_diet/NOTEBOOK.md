@@ -12,7 +12,7 @@
 entry in `experiments/TODO.md` (then `EXPERIMENTS_TODO.md`), the
 pre-launch design in [`configs/README.md`](configs/README.md), and the
 run's findings file, now archived at
-`logs/archive/2026-10-10_multi_mixed_before_layernorm/multi_mixed_findings.md`.
+`data/runs/2026-10-09_model_by_diet/legacy_logs/2026-10-10_multi_mixed_before_layernorm/multi_mixed_findings.md`.
 No predictions or bar were written before launch. Only one of the six
 cells ran, and it was stopped at round 10 of 20.
 
@@ -69,7 +69,7 @@ The full pre-launch design (2026-10-09) is
     at the original run directories.
 - Raw data:
   - the console log, the run records and the diagnostics are in
-    `logs/archive/2026-10-10_multi_mixed_before_layernorm/`;
+    `data/runs/2026-10-09_model_by_diet/legacy_logs/2026-10-10_multi_mixed_before_layernorm/`;
   - the checkpoints were deleted.
 - Analysis:
   - [`analysis/round_summary.py`](analysis/round_summary.py) takes
@@ -86,7 +86,7 @@ The full pre-launch design (2026-10-09) is
 
 The re-split of the metric data failed with `pyarrow ArrowInvalid:
 offset overflow while concatenating arrays`
-(`logs/series1_check/single_mixed_resplit_failed1.log`).
+(`data/runs/2026-10-09_model_by_diet/legacy_logs/series1_check/single_mixed_resplit_failed1.log`).
 
 Cause: bucket-shuffle sizing. Parquet's dictionary-encoded byte count
 underestimated the 17lands draft file about 30×. The fix sizes buckets
@@ -95,7 +95,7 @@ from a sample of decoded rows.
 ### 2026-10-10 00:15 · `--check` passed; `multi_mixed` launched
 
 162 of 162 dojos passed preflight
-(`logs/series1_check/single_mixed_resplit.log`). The re-split took about
+(`data/runs/2026-10-09_model_by_diet/legacy_logs/series1_check/single_mixed_resplit.log`). The re-split took about
 1 h 50 min; calibration took 27 min (61 before the fix).
 
 The full `multi_mixed` run started at 00:15. Startup took about 28 min.

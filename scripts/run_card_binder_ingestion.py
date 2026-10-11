@@ -28,7 +28,6 @@ run_all()'s own docstring.
 import argparse
 import glob
 import sys
-import traceback
 from pathlib import Path
 from typing import Callable
 
@@ -65,6 +64,15 @@ from src.data_retrieval.hearthstonejson.downloader import HearthstoneJsonDownloa
 from src.data_retrieval.pokemon_tcg.downloader import PokemonTcgDataDownloader
 from src.data_retrieval.scryfall.downloader import ScryfallOracleDownloader
 from src.data_retrieval.spire_codex.card_downloader import SpireCodexCardDownloader
+from src.run_logging import (
+    add_logging_arguments,
+    configure_logging,
+    logging_settings_from,
+    script_log_path,
+    script_logger,
+)
+
+_logger = script_logger(__file__)
 
 
 def _latest_scryfall_dump() -> Path:
@@ -171,18 +179,18 @@ def run_one(name: str, raw_path: Path | None) -> None:
     effective_raw_path = raw_path if raw_path is not None else default_raw_path()
     binder_path = CardBinder.default_output_path(stage.SOURCE_GAME)
 
-    print(f"=== {name}: {effective_raw_path} -> {binder_path} ===")
+    _logger.info("=== %s: %s -> %s ===", name, effective_raw_path, binder_path)
     changed_uuids = build_or_update_card_binder(
         raw_path=effective_raw_path,
         ingestion_stage=stage,
         binder_path=binder_path,
     )
-    print(f"created or content-changed {len(changed_uuids)} cards")
+    _logger.info("created or content-changed %s cards", len(changed_uuids))
 
 
 def run_all() -> None:
     """Run every source in this process, isolating one source's
-    failure (logged via traceback, not raised) from the rest — matches
+    failure (logged with its traceback, not raised) from the rest — matches
     this project's existing scanner-isolation convention (e.g.
     src/data_refinement/metrics/sts_gg/scanner.py) rather than letting
     one bad/missing raw dump abort every other source's run."""
@@ -191,12 +199,11 @@ def run_all() -> None:
         try:
             run_one(name, raw_path=None)
         except Exception:
-            traceback.print_exc()
+            _logger.exception("%s failed", name)
             failed.append(name)
-        print()
 
     if failed:
-        print(f"Failed: {', '.join(failed)}", file=sys.stderr)
+        _logger.error("Failed: %s", ", ".join(failed))
         sys.exit(1)
 
 
@@ -223,6 +230,7 @@ def parse_args() -> argparse.Namespace:
         help="Ingest every source, one after another, in this process (the default "
         "when no other flag is given).",
     )
+    add_logging_arguments(parser)
     return parser.parse_args()
 
 
@@ -233,6 +241,7 @@ def main() -> None:
         for name in sorted(STAGES):
             print(name)
         return
+    configure_logging(logging_settings_from(args, script_log_path(__file__)))
 
     if args.source:
         run_one(args.source, raw_path=args.raw_path)

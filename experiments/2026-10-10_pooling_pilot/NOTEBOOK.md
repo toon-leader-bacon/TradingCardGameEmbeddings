@@ -10,7 +10,7 @@
 > text encoder and the head will fix it.
 
 **Migration note (2026-10-11).** This was reconstructed from
-`logs/pooling_pilot/findings.md`, written while the runs went, and the
+`data/runs/Oct_10_2026_pooling_pilot/legacy_logs/findings.md`, written while the runs went, and the
 "Pooling and whitening" entry in [`../TODO.md`](../TODO.md), where the
 variants were designed. The bar came from the offline probe and was
 written before launch. Predictions per variant were not written down.
@@ -94,14 +94,14 @@ One seed.
     at the original run directories.
 - **Probe:**
   `PYTHONPATH=. python experiments/2026-10-10_pooling_probe/analysis/probe_checkpoint.py data/runs/Oct_10_2026_pooling_pilot/<variant>`.
-  It appends to `logs/pooling_probe/results_checkpoints.csv`, which was
+  It appends to `data/runs/2026-10-10_pooling_probe/legacy_logs/results_checkpoints.csv`, which was
   copied to [`results/probe_checkpoints.csv`](results/probe_checkpoints.csv).
 - **TEST table:** [`../2026-10-10_lr_pilot/analysis/compare.py`](../2026-10-10_lr_pilot/analysis/compare.py)
-  on `logs/pooling_pilot/<variant>.log` produces
+  on `data/runs/Oct_10_2026_pooling_pilot/legacy_logs/<variant>.log` produces
   [`results/compare_test_loss.txt`](results/compare_test_loss.txt).
 - **Raw data:**
   - runs, 2.4-2.5 GB each: `data/runs/Oct_10_2026_pooling_pilot/<variant>/`;
-  - console logs: `logs/pooling_pilot/`.
+  - console logs: `data/runs/Oct_10_2026_pooling_pilot/legacy_logs/`.
 - **Cost:** about 71 min per variant (84 for tfm_attn1). The probe takes
   minutes per variant.
 
@@ -169,7 +169,7 @@ experiment was halted pending a machine check.
 
 ### 2026-10-11 · Correction to the findings file
 
-`logs/pooling_pilot/findings.md` says "the only difference from the mean
+`data/runs/Oct_10_2026_pooling_pilot/legacy_logs/findings.md` says "the only difference from the mean
 arm is the fixed whitening, so the shared offset was what held
 contrastive at chance". That overclaims, for two reasons:
 - whitening removes the offset *and* rescales every direction;

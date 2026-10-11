@@ -5,8 +5,8 @@ with mu, P fitted on token states. This needs one pass per
 (encoder, serialization) to collect token mean and covariance; the
 mean-pooled vectors come from probe.py's cache (run probe.py first).
 
-Run: PYTHONPATH=. python logs/pooling_probe/probe_token_whitening.py
-Writes logs/pooling_probe/results_token_whitening.csv.
+Run: PYTHONPATH=. python experiments/2026-10-10_pooling_probe/analysis/probe_token_whitening.py
+Writes data/runs/2026-10-10_pooling_probe/legacy_logs/results_token_whitening.csv.
 """
 
 import csv

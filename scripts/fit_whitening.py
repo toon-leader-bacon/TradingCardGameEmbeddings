@@ -27,10 +27,20 @@ from src.encoder_model.whitening.calibration import (
     fit_token_whitening,
     sample_calibration_cards,
 )
+from src.run_logging import (
+    LoggingSettings,
+    add_logging_arguments,
+    configure_logging,
+    logging_settings_from,
+    script_log_path,
+    script_logger,
+)
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
 from src.training.dojo_catalog import DOJO_CATALOG, CardShelf
 from src.training.run_config import RunConfig, parse_run_config, read_config_document
+
+_logger = script_logger(__file__)
 
 
 @dataclass(frozen=True)
@@ -44,6 +54,7 @@ class CommandLine:
     components: int | None
     device: str
     out: Path
+    logging: LoggingSettings
 
 
 def parse_command_line() -> CommandLine:
@@ -78,6 +89,7 @@ def parse_command_line() -> CommandLine:
     )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--out", type=Path, required=True)
+    add_logging_arguments(parser)
     args = parser.parse_args()
     return CommandLine(
         checkpoint=args.checkpoint,
@@ -87,6 +99,7 @@ def parse_command_line() -> CommandLine:
         components=args.components,
         device=args.device,
         out=args.out,
+        logging=logging_settings_from(args, script_log_path(__file__)),
     )
 
 
@@ -95,7 +108,7 @@ def main() -> int:
 
     Output: 0.
     Side effects: loads card binders, may download the checkpoint, runs
-        the text encoder on the device, writes the stats file, prints a
+        the text encoder on the device, writes the stats file, logs a
         summary.
     Exceptions: ValueError for a bad config or an empty sample;
         FileNotFoundError for a missing binder.
@@ -104,6 +117,7 @@ def main() -> int:
         >>> raise SystemExit(main())
     """
     command_line = parse_command_line()
+    configure_logging(command_line.logging)
 
     # The run's holdout and text encoder, or no holdout and the default
     config = _run_config_of(command_line.holdout_from)
@@ -125,10 +139,13 @@ def main() -> int:
         encoder, sample, WhiteningFitOptions(components=command_line.components)
     )
     stats.save(command_line.out)
-    print(
-        f"Fitted {stats.input_dim} -> {stats.output_dim} token whitening on "
-        f"{stats.card_count} cards ({', '.join(g.value for g in games)}); "
-        f"saved {command_line.out}"
+    _logger.info(
+        "Fitted %d -> %d token whitening on %d cards (%s); saved %s",
+        stats.input_dim,
+        stats.output_dim,
+        stats.card_count,
+        ", ".join(g.value for g in games),
+        command_line.out,
     )
     return 0
 

@@ -46,10 +46,13 @@ The five experiments above predate this layout. Each notebook opens
 with a migration note saying what was reconstructed and what is
 missing under today's rules.
 
-Their raw data stays where it was written, and the notebooks give the
+Their raw data is in the ignored `data/runs/`, and the notebooks give the
 paths:
-- console logs and diagnostics in the ignored `logs/`;
-- runs under `data/runs/Oct_*`.
+- runs under `data/runs/Oct_*`;
+- console logs and diagnostics, which first lived in `logs/`, in a
+  `legacy_logs/` folder: inside the experiment's `data/runs/Oct_*`
+  folder, or under `data/runs/<experiment>/` for an experiment without
+  one.
 
 Their configs are the ones each run recorded. Configs that never ran
 are still launch configs, whose comments give the old

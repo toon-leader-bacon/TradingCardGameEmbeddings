@@ -9,7 +9,7 @@ and score two views of every card:
   model (what evaluation stores).
 Rows are appended to results_checkpoints.csv (one per run and view).
 
-Run: PYTHONPATH=. python logs/pooling_probe/probe_checkpoint.py data/runs/<pilot>/<arm> [...]
+Run: PYTHONPATH=. python experiments/2026-10-10_pooling_probe/analysis/probe_checkpoint.py data/runs/<pilot>/<arm> [...]
 """
 
 import csv

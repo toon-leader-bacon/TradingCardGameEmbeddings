@@ -22,7 +22,6 @@ Usage (from the project root):
 """
 
 import argparse
-import logging
 from pathlib import Path
 
 from src.data_refinement.card_binder.card_binder import CardBinder
@@ -41,6 +40,15 @@ from src.training.plan import (
 from src.training.recording.checkpointer import DirectoryCheckpointer
 from src.training.recording.run_listener import LoggingRunListener
 from src.training.trainer import Trainer
+from src.run_logging import (
+    add_logging_arguments,
+    configure_logging,
+    logging_settings_from,
+    script_log_path,
+    script_logger,
+)
+
+_logger = script_logger(__file__)
 
 _DEFAULT_BINDER_PATH = Path("data/final/cards/gwent.jsonl")
 _DEFAULT_RUN_DIRECTORY = Path("data/tmp/smoke_test/runs/training_loop")
@@ -91,18 +99,21 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--binder-path", type=Path, default=_DEFAULT_BINDER_PATH)
     parser.add_argument("--run-directory", type=Path, default=_DEFAULT_RUN_DIRECTORY)
+    add_logging_arguments(parser)
     return parser.parse_args()
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = parse_args()
+    configure_logging(logging_settings_from(args, script_log_path(__file__)))
 
-    print(f"[1/3] Loading gwent CardBinder from {args.binder_path}")
+    _logger.info("[1/3] Loading gwent CardBinder from %s", args.binder_path)
     card_binder = CardBinder.load([args.binder_path])
-    print(f"      {len(list(card_binder.all_cards(GameId.GWENT)))} cards loaded")
+    _logger.info(
+        "      %s cards loaded", len(list(card_binder.all_cards(GameId.GWENT)))
+    )
 
-    print("[2/3] Building dojos (color_mask, faction_mask) and the model")
+    _logger.info("[2/3] Building dojos (color_mask, faction_mask) and the model")
     holdout = HoldoutSpec.no_holdout()
     dojos = [
         ColorMaskDojo(card_binder, holdout, _EMBED_DIM, rng_seed=0),
@@ -111,7 +122,7 @@ def main() -> None:
     model = LinearProjectionCardModel(card_embedding_size=_EMBED_DIM)
     plan = build_plan(tuple(dojo.name for dojo in dojos), holdout)
 
-    print("[3/3] Running Trainer.run()")
+    _logger.info("[3/3] Running Trainer.run()")
     result = Trainer(
         model=model,
         dojos=dojos,
@@ -121,14 +132,15 @@ def main() -> None:
         listeners=[LoggingRunListener()],
     ).run()
 
-    print(f"stopped_early_reason: {result.stopped_early_reason}")
+    _logger.info("stopped_early_reason: %s", result.stopped_early_reason)
     if result.final_report is not None:
-        print(
-            f"final round per-dojo test loss: {result.final_report.per_dojo_test_loss}"
+        _logger.info(
+            "final round per-dojo test loss: %s",
+            result.final_report.per_dojo_test_loss,
         )
     if result.best_checkpoint is not None:
-        print(f"best checkpoint: {result.best_checkpoint.path}")
-    print("Smoke test complete.")
+        _logger.info("best checkpoint: %s", result.best_checkpoint.path)
+    _logger.info("Smoke test complete.")
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@
 > pooling and post-processing expose the most of it?
 
 **Migration note (2026-10-11).** This was reconstructed from
-`logs/pooling_probe/findings.md`, written as the probe ran, and moved
+`data/runs/2026-10-10_pooling_probe/legacy_logs/findings.md`, written as the probe ran, and moved
 here with its scripts and result CSVs. No bar or predictions were
 written beforehand. The working idea, from the LR pilot, was that
 anisotropy hides card differences from cosine.
@@ -70,7 +70,7 @@ anisotropy hides card differences from cosine.
   - then [`analysis/probe_token_whitening.py`](analysis/probe_token_whitening.py),
     which reads `probe.py`'s cache.
 - **Paths:** the scripts are kept as run. They still write to
-  `logs/pooling_probe/`: `cache/` (pooled vectors, 181 MB, ignored),
+  `data/runs/2026-10-10_pooling_probe/legacy_logs/`: `cache/` (pooled vectors, 181 MB, ignored),
   `results.csv`, `results_token_whitening.csv` and the console logs. The
   CSVs were copied into [`results/`](results/).
 - [`analysis/probe_checkpoint.py`](analysis/probe_checkpoint.py) lives
@@ -83,7 +83,7 @@ anisotropy hides card differences from cosine.
 ### 2026-10-10 15:33 · `probe.py` done: 72 rows
 
 [`results/results.csv`](results/results.csv); the console log is
-`logs/pooling_probe/probe.log`. The headline result is in Results.
+`data/runs/2026-10-10_pooling_probe/legacy_logs/probe.log`. The headline result is in Results.
 
 ### 2026-10-10 16:07 · Token whitening before mean pooling
 
