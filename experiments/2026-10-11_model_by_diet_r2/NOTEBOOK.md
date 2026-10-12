@@ -283,6 +283,11 @@ Why: the human reviewed batch 1 and read it as "the training is
 working". Running the other multi-card diets next completes the
 multi-card row of the grid.
 
+### 2026-10-12 · Batch 2, run 1 (lab_technician)
+
+- [Incident: launcher re-ran training](bench_notes/2026-10-12_1500_incident_launcher_rerun.md): small issue 1 of 5. An edit to the launcher mid-run lost `multi_contrastive`'s console capture and resource samples. Training data intact; no confound.
+- [multi_contrastive done](bench_notes/2026-10-12_1505_multi_contrastive_done.md): 399 min; TEST medians after round 3: contrastive 0.532 (1.00 = chance), held out 1.134 (1.0 = mean predictor).
+
 ## Results
 
 ## Conclusions

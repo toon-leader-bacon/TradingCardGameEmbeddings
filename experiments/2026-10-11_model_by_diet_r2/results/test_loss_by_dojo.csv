@@ -1,4 +1,42 @@
 cell,dojo,kind,round0,round1,round2,round3
+multi_contrastive,cardvault_fabtcg.pitch_mask,held out,1.0171,1.0116,1.0218,1.0326
+multi_contrastive,contrastive.dominion,contrastive,0.9901,0.9632,1.0071,0.9964
+multi_contrastive,contrastive.flesh_and_blood,contrastive,0.813,0.7547,0.635,0.6235
+multi_contrastive,contrastive.mtg,contrastive,1.0373,0.992,0.9186,0.8721
+multi_contrastive,contrastive.pokemon,contrastive,0.9336,0.7223,0.7796,0.8517
+multi_contrastive,contrastive.slay_the_spire_2,contrastive,0.6294,0.648,0.6606,0.663
+multi_contrastive,contrastive_cross_slice.dominion,contrastive,0.9482,0.9165,0.8918,0.9062
+multi_contrastive,contrastive_cross_slice.flesh_and_blood,contrastive,0.4242,0.4317,0.4017,0.4181
+multi_contrastive,contrastive_cross_slice.mtg,contrastive,0.7251,0.6782,0.5782,0.5159
+multi_contrastive,contrastive_cross_slice.pokemon,contrastive,0.6032,0.5008,0.3512,0.3314
+multi_contrastive,contrastive_cross_slice.slay_the_spire_2,contrastive,0.6488,0.6404,0.6327,0.6321
+multi_contrastive,contrastive_missing_card.dominion,contrastive,1.0493,1.0249,1.0255,0.9885
+multi_contrastive,contrastive_missing_card.flesh_and_blood,contrastive,0.4998,0.4845,0.5187,0.4713
+multi_contrastive,contrastive_missing_card.mtg,contrastive,0.8627,0.7775,0.6929,0.625
+multi_contrastive,contrastive_missing_card.pokemon,contrastive,0.9291,0.4849,0.5745,0.4228
+multi_contrastive,contrastive_missing_card.slay_the_spire_2,contrastive,0.5418,0.5235,0.5622,0.5455
+multi_contrastive,contrastive_odd_one_out.dominion,contrastive,0.8498,0.7796,0.7529,0.7953
+multi_contrastive,contrastive_odd_one_out.flesh_and_blood,contrastive,0.3248,0.3151,0.2245,0.2164
+multi_contrastive,contrastive_odd_one_out.mtg,contrastive,0.7305,0.7007,0.579,0.5324
+multi_contrastive,contrastive_odd_one_out.pokemon,contrastive,0.5081,0.4322,0.1653,0.4252
+multi_contrastive,contrastive_odd_one_out.slay_the_spire_2,contrastive,0.3393,0.2788,0.2357,0.3514
+multi_contrastive,contrastive_slice_match.dominion,contrastive,0.9167,0.8848,0.8888,0.8883
+multi_contrastive,contrastive_slice_match.flesh_and_blood,contrastive,0.3153,0.268,0.2689,0.2458
+multi_contrastive,contrastive_slice_match.mtg,contrastive,0.6351,0.5074,0.487,0.4454
+multi_contrastive,contrastive_slice_match.pokemon,contrastive,0.275,0.386,0.173,0.3299
+multi_contrastive,contrastive_slice_match.slay_the_spire_2,contrastive,0.5494,0.5188,0.5361,0.5158
+multi_contrastive,cross_game.rarity_tier,held out,1.2914,1.2477,1.2515,1.2319
+multi_contrastive,fabtcg_decklists.hero_masked_from_deck,held out,1.0738,1.0788,1.0823,1.0772
+multi_contrastive,hearthstonejson.class_mask,held out,1.1365,1.1315,1.1363,1.1341
+multi_contrastive,isotropic.kingdom_veto_prediction,held out,1.0392,1.0185,1.0135,1.0321
+multi_contrastive,pokemon_tcg.hp_regression,held out,1.257,1.2073,1.2492,1.2157
+multi_contrastive,scryfall.cmc_regression,held out,0.9703,0.9479,0.9703,0.9758
+multi_contrastive,seventeenlands_game_data.deck_win_prediction,held out,1.039,1.0352,1.0274,1.0226
+multi_contrastive,seventeenlands_replay_data.average_turn_cast,held out,1.1737,1.1749,1.191,1.1563
+multi_contrastive,spire_codex.card_type_mask,held out,1.0585,1.0404,1.0526,1.0493
+multi_contrastive,sts2_runs.card_reward_pick,held out,3.0111,3.1683,2.6712,2.5246
+multi_contrastive,sts2_runs.card_win_rate,held out,1.759,1.7913,1.7573,1.7699
+multi_contrastive,sts2_runs.card_win_rate_at_act2,held out,1.3861,1.3798,1.3805,1.3759
 multi_mixed,cardvault_fabtcg.card_type_mask,metric,1.0701,1.029,0.9434,0.8606
 multi_mixed,cardvault_fabtcg.class_mask,metric,0.9053,0.7561,0.7444,0.709
 multi_mixed,cardvault_fabtcg.cost_regression,metric,0.7206,0.9125,0.8603,0.8086

@@ -1,4 +1,12 @@
 cell,round,step,elapsed_min,kind,n_dojos,median,q25,q75,n_below_1,n_above_5,max
+multi_contrastive,0,5000,98.7,contrastive,25,0.6488,0.5081,0.9167,23,0,1.0493
+multi_contrastive,0,5000,98.7,held out,13,1.1365,1.0392,1.2914,1,0,3.0111
+multi_contrastive,1,9998,197.7,contrastive,25,0.6404,0.4845,0.7775,24,0,1.0249
+multi_contrastive,1,9998,197.7,held out,13,1.1315,1.0352,1.2477,1,0,3.1683
+multi_contrastive,2,14996,297.2,contrastive,25,0.5782,0.4017,0.7529,23,0,1.0255
+multi_contrastive,2,14996,297.2,held out,13,1.1363,1.0274,1.2515,1,0,2.6712
+multi_contrastive,3,19994,395.5,contrastive,25,0.5324,0.4228,0.7953,25,0,0.9964
+multi_contrastive,3,19994,395.5,held out,13,1.1341,1.0326,1.2319,1,0,2.5246
 multi_mixed,0,4996,125.0,contrastive,25,0.8238,0.6281,0.9713,22,0,1.0407
 multi_mixed,0,4996,125.0,held out,13,1.1204,1.0489,1.2545,0,0,4.2022
 multi_mixed,0,4996,125.0,metric,124,1.0221,0.9238,1.2067,54,0,2.856
