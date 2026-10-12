@@ -1,6 +1,6 @@
 # Series 1, round 2: model × diet on a stable embedding
 
-**Status:** running
+**Status:** awaiting review
 **Dates:** 2026-10-11 -
 **Parent:** [2026-10-09_model_by_diet](../2026-10-09_model_by_diet/NOTEBOOK.md) · **Branch:** `experiment/2026-10-11_model_by_diet_r2`
 
@@ -267,6 +267,11 @@ and the response to each:
 
 Why: every change is to how the results will be read, so it is fixed
 now, before any result is seen. No config changed.
+
+### 2026-10-12 · Batch 1 (lab_technician)
+
+- [multi_mixed done](bench_notes/2026-10-12_0635_multi_mixed_done.md): exit 0, 518 min; TEST medians after round 3: contrastive 0.662 (1.00 = chance), trained metric 0.942, held out 1.083 (1.0 = mean predictor).
+- [Batch 1 wrap-up](bench_notes/2026-10-12_0640_batch1_wrap_up.md): no incidents; results in `results/test_loss_by_round.*`.
 
 ## Results
 
