@@ -1,6 +1,6 @@
 # Series 1, round 2: model × diet on a stable embedding
 
-**Status:** proposed
+**Status:** running
 **Dates:** 2026-10-11 -
 **Parent:** [2026-10-09_model_by_diet](../2026-10-09_model_by_diet/NOTEBOOK.md) · **Branch:** `experiment/2026-10-11_model_by_diet_r2`
 
