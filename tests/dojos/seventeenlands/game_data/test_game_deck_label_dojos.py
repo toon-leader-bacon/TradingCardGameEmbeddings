@@ -134,8 +134,8 @@ class TestNameAvoidsSplitFileCollision:
     def test_two_expansions_same_metric_filename_get_distinct_split_prefixes(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Regression test for src/training/TODO.md section C's split-file
-        # collision: KTK/TradSealed/deck_win_prediction.parquet and
+        # Regression test for a split-file collision:
+        # KTK/TradSealed/deck_win_prediction.parquet and
         # MSH/PremierDraft/deck_win_prediction.parquet share a bare
         # filename, so without an explicit name they'd resolve to the
         # same Trainer name and the same split-file prefix. Chdir into

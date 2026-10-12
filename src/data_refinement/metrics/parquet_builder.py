@@ -5,7 +5,7 @@ module docstrings for why one row group per row breaks down on a large
 CSV (tens of millions of rows): ParquetWriter accumulates per-row-group
 metadata in memory for its whole lifetime, so RAM grows and throughput
 collapses well before the file is written (observed killing an actual
-run on MSH.PremierDraft.csv, ~40M rows - src/training/TODO.md section C).
+run on MSH.PremierDraft.csv, ~40M rows).
 """
 
 from pathlib import Path

@@ -24,7 +24,7 @@ this list is about runs and comparisons.
   only, and 50/50 (per-dojo diet weights, so the contrastive keys
   together are drawn half the time in expectation). ModernBERT frozen,
   `residual_mlp` head, both models about 2.9M trainable parameters (sizes
-  in `src/training/TODO.md`, section D). Both models get the same
+  in the series notebook). Both models get the same
   contrastive dojos: all five training styles, each style equally often
   (series 2 then separates them). Configs and notebook: [2026-10-09_model_by_diet](2026-10-09_model_by_diet/NOTEBOOK.md). 6 runs
   plus 2 controls, evaluated together (8 encoders fit the learning-curve
@@ -35,7 +35,7 @@ this list is about runs and comparisons.
   arm: it is an evaluation probe (`src/evaluation/TODO.md`).
 - [ ] **3. Unfrozen ModernBERT.** Repeat the useful arms of series 1 with
   the language model trainable; needs VRAM measurement and likely
-  gradient checkpointing (`src/training/TODO.md`, section E).
+  gradient checkpointing (`src/encoder_model/TODO.md`).
 
 - [ ] **Pooling and whitening** (code built: `model.pooling` / `model.enrichment`
   in `src/training/README.md`; stats from `scripts/fit_whitening.py`).
@@ -77,10 +77,10 @@ this list is about runs and comparisons.
 
 - [ ] Contrastive share of the mixed diet (e.g. 25 / 50 / 75%).
 - [ ] Game balance: today's per-dojo diet vs. a per-game two-level diet
-  (`src/training/TODO.md`, section C).
-- [ ] MSE vs. Huber regression loss (`src/training/TODO.md`, section C).
+  (`src/training/TODO.md`).
+- [ ] MSE vs. Huber regression loss (`src/training/TODO.md`).
 - [ ] Staple subsampling in contrastive pairs, arms t = inf / 0.1 / 0.01
-  (`src/training/TODO.md`, section C).
+  (`src/training/TODO.md`).
 - [ ] Curriculum: a contrastive phase, then a metric-dojo phase, against
   the mixed diet.
 
