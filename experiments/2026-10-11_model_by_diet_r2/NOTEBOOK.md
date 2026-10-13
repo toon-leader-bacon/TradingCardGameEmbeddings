@@ -291,10 +291,10 @@ multi-card row of the grid.
 ### 2026-10-12 · Batch 2 extended (human decision)
 
 What: `single_contrastive` and `single_metric` were added to batch 2,
-after `multi_metric`. Projected end: about 15:10 on 2026-10-13, so about
-24 h from the decision (15:05) and about 31 h for batch 2 as a whole,
-past the ~24 h gate. The human asked for this explicitly, and that is
-the approval.
+after `multi_metric`. Projected end: about 15:00 on 2026-10-13, so about
+17 h from the decision (21:47) and about 31 h for batch 2 as a whole
+(from 08:18 on 2026-10-12), past the ~24 h gate. The human asked for this
+explicitly, and that is the approval.
 
 The estimates reuse the multi-card figures: single-card step time has
 not been measured. No separate `--check` is run for these two, so that
