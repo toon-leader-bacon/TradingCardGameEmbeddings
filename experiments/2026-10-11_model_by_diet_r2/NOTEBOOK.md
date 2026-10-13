@@ -288,6 +288,20 @@ multi-card row of the grid.
 - [Incident: launcher re-ran training](bench_notes/2026-10-12_1500_incident_launcher_rerun.md): small issue 1 of 5. An edit to the launcher mid-run lost `multi_contrastive`'s console capture and resource samples. Training data intact; no confound.
 - [multi_contrastive done](bench_notes/2026-10-12_1505_multi_contrastive_done.md): 399 min; TEST medians after round 3: contrastive 0.532 (1.00 = chance), held out 1.134 (1.0 = mean predictor).
 
+### 2026-10-12 · Batch 2 extended (human decision)
+
+What: `single_contrastive` and `single_metric` were added to batch 2,
+after `multi_metric`. Projected end: about 15:10 on 2026-10-13, so about
+24 h from the decision (15:05) and about 31 h for batch 2 as a whole,
+past the ~24 h gate. The human asked for this explicitly, and that is
+the approval.
+
+The estimates reuse the multi-card figures: single-card step time has
+not been measured. No separate `--check` is run for these two, so that
+check jobs don't overlap `multi_metric`'s resource samples. Each run's
+own startup preflight serves as the check, and a failure there is
+handled as a small issue.
+
 ## Results
 
 ## Conclusions
