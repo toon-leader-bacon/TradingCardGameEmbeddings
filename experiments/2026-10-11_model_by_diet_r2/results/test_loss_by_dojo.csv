@@ -374,3 +374,140 @@ single_contrastive,spire_codex.card_type_mask,held out,1.076,1.1036,1.0998,1.097
 single_contrastive,sts2_runs.card_reward_pick,held out,3.1921,3.6026,2.7302,3.676
 single_contrastive,sts2_runs.card_win_rate,held out,1.689,1.6267,1.6713,1.7088
 single_contrastive,sts2_runs.card_win_rate_at_act2,held out,1.4454,1.4025,1.3955,1.4108
+single_metric,cardvault_fabtcg.card_type_mask,metric,1.0687,1.0385,1.0403,0.9707
+single_metric,cardvault_fabtcg.class_mask,metric,1.0239,1.0155,1.0169,1.01
+single_metric,cardvault_fabtcg.cost_regression,metric,0.9123,0.7999,0.7924,0.8209
+single_metric,cardvault_fabtcg.defense_regression,metric,0.942,0.9406,0.9932,0.8122
+single_metric,cardvault_fabtcg.pitch_mask,held out,1.0171,1.0154,1.01,1.0105
+single_metric,cardvault_fabtcg.power_regression,metric,1.1464,1.1437,1.0914,1.2
+single_metric,cross_game.rarity_tier,held out,1.149,1.1407,1.1337,1.1318
+single_metric,dominiontabs.cost_regression,metric,1.085,1.1117,1.0954,1.005
+single_metric,dominiontabs.set_mask,metric,1.026,1.0257,1.032,1.0326
+single_metric,dominiontabs.type_mask,metric,1.0887,1.1151,1.0737,1.0676
+single_metric,fabtcg_decklists.card_inclusion_rate,metric,0.818,0.8205,0.8086,0.7965
+single_metric,fabtcg_decklists.hero_conditioned_inclusion,metric,0.9621,1.0072,0.9867,0.9785
+single_metric,fabtcg_decklists.hero_masked_from_deck,held out,1.0834,1.0819,1.0831,1.081
+single_metric,final_decks.held_out_card_dominion,metric,1.1488,1.1423,1.0979,1.0897
+single_metric,final_decks.held_out_card_flesh_and_blood,metric,1.1112,1.3035,1.1676,1.2073
+single_metric,final_decks.held_out_card_mtg,metric,1.0884,1.1077,1.1362,1.0752
+single_metric,final_decks.held_out_card_pokemon,metric,1.2998,1.1526,1.1478,1.1541
+single_metric,final_decks.held_out_card_slay_the_spire_2,metric,1.0903,1.0728,1.0697,1.09
+single_metric,hearthstonejson.attack_regression,metric,0.9615,0.9565,0.9713,1.5303
+single_metric,hearthstonejson.card_type_mask,metric,0.9467,0.9442,0.9756,0.9337
+single_metric,hearthstonejson.class_mask,held out,1.1354,1.1427,1.1478,1.154
+single_metric,hearthstonejson.cost_regression,metric,0.9025,0.9007,0.8538,1.0256
+single_metric,hearthstonejson.health_regression,metric,0.9235,0.9436,0.9128,1.2876
+single_metric,hearthstonejson.races_mask,metric,1.2548,0.9374,0.9198,0.9127
+single_metric,hearthstonejson.rarity_mask,metric,0.9658,0.9737,0.9563,0.9864
+single_metric,hearthstonejson.spell_school_mask,metric,0.8813,0.8898,0.8943,0.9053
+single_metric,isotropic.average_copies_bought,metric,1.6205,0.7522,0.8674,0.666
+single_metric,isotropic.copies_bought_distribution,metric,0.9361,0.9279,0.8897,0.8734
+single_metric,isotropic.deck_card_set_copy_count,metric,0.7766,0.6747,0.6738,0.6916
+single_metric,isotropic.deck_pair_winner,metric,1.0556,1.0015,0.9983,0.9542
+single_metric,isotropic.full_deck_win_prediction,metric,0.9888,1.027,1.0093,0.982
+single_metric,isotropic.kingdom_ending_pile_prediction,metric,0.6325,0.6362,0.5759,0.6781
+single_metric,isotropic.kingdom_ending_type,metric,1.1066,1.0957,1.1053,1.0689
+single_metric,isotropic.kingdom_game_length,metric,1.0653,1.0497,1.0932,1.054
+single_metric,isotropic.kingdom_opening_buy_prediction,metric,1.0002,0.9855,0.9542,0.8983
+single_metric,isotropic.kingdom_veto_prediction,held out,1.0373,1.0404,1.0332,1.0458
+single_metric,isotropic.mid_game_deck_pair_winner,metric,1.0279,1.0093,0.9925,1.0074
+single_metric,isotropic.mid_game_next_buy,metric,1.456,1.1118,1.0648,1.0145
+single_metric,isotropic.mid_game_next_trashed_card,metric,1.7457,0.8708,0.8531,0.8667
+single_metric,isotropic.mid_game_next_turn_action_count,metric,0.4923,0.5315,0.4784,0.4648
+single_metric,isotropic.mid_game_win_probability,metric,1.1374,0.9939,0.9978,1.0322
+single_metric,isotropic.opening_buy_outcome,metric,1.0013,1.0057,1.0088,1.0065
+single_metric,isotropic.opening_buy_rate,metric,2.1018,1.8276,2.049,1.7691
+single_metric,isotropic.pile_exhaustion_rate,metric,0.7975,0.5327,0.4065,0.2537
+single_metric,isotropic.turn_count_association,metric,1.4902,1.0406,1.2374,1.1654
+single_metric,isotropic.veto_rate,metric,1.1019,0.7655,0.8007,0.8229
+single_metric,isotropic.winning_deck_count,metric,0.8985,0.6321,0.6185,0.6144
+single_metric,isotropic.winning_deck_masked_card,metric,1.1217,1.0892,1.0442,1.0478
+single_metric,isotropic.winning_deck_membership,metric,1.0247,0.9835,1.0182,1.0943
+single_metric,pokemon_tcg.hp_regression,held out,1.1526,1.1572,1.1493,1.1661
+single_metric,pokemon_tcg.retreat_cost_regression,metric,1.1969,1.0879,1.0836,0.9704
+single_metric,pokemon_tcg.stage_mask,metric,0.9355,0.9182,0.9312,0.9297
+single_metric,pokemon_tcg.types_mask,metric,1.0157,1.0076,1.0075,1.0103
+single_metric,pokemon_tcg.weakness_mask,metric,1.0287,1.029,1.0218,1.0267
+single_metric,scryfall.card_type_mask,metric,1.0363,1.0385,1.0414,1.01
+single_metric,scryfall.cmc_regression,held out,1.1833,1.2181,1.218,1.2272
+single_metric,scryfall.colors_mask,metric,0.9988,1.003,0.9976,1.0062
+single_metric,scryfall.power_regression,metric,0.9645,0.9062,0.9952,0.742
+single_metric,scryfall.rarity_mask,metric,0.9827,0.9704,0.9486,0.897
+single_metric,scryfall.toughness_regression,metric,0.8942,0.9161,0.8264,0.8376
+single_metric,seventeenlands_draft_data.card_take_rate,metric,1.072,1.0688,1.038,1.0302
+single_metric,seventeenlands_draft_data.first_pick_rate,metric,0.8735,0.7461,0.8627,0.7668
+single_metric,seventeenlands_draft_data.pack_to_pick_choice_set,metric,1.1442,1.13,1.1204,1.1358
+single_metric,seventeenlands_draft_data.pick_number_decay_curve,metric,1.0294,0.9701,0.8966,0.7429
+single_metric,seventeenlands_draft_data.pool_conditioned_pick,metric,1.1497,1.079,1.2192,1.1037
+single_metric,seventeenlands_draft_data.rank_stratified_take_rate,metric,1.0656,1.0449,1.118,1.0775
+single_metric,seventeenlands_game_data.deck_game_length_prediction,metric,1.1188,1.0592,0.9662,0.967
+single_metric,seventeenlands_game_data.deck_rank_tier_prediction,metric,0.9983,0.976,1.0083,0.9925
+single_metric,seventeenlands_game_data.deck_win_prediction,held out,1.0195,1.0148,1.0144,1.0158
+single_metric,seventeenlands_game_data.drawn_win_rate,metric,0.9685,0.9774,0.9881,0.9211
+single_metric,seventeenlands_game_data.game_length_association,metric,0.84,0.8051,0.8417,0.8102
+single_metric,seventeenlands_game_data.on_play_win_rate_delta,metric,0.7792,0.7778,0.7611,0.7877
+single_metric,seventeenlands_game_data.on_play_win_rate_sensitivity_by_deck,metric,0.9837,0.9856,0.9952,0.976
+single_metric,seventeenlands_game_data.opening_hand_win_rate,metric,1.3249,1.3605,1.3148,1.3135
+single_metric,seventeenlands_game_data.tutor_choice_rate,metric,1.0471,0.9597,1.0993,0.9542
+single_metric,seventeenlands_game_data.tutor_target_rate,metric,1.0101,0.9537,0.9111,0.9134
+single_metric,seventeenlands_game_data.win_rate_when_in_deck,metric,1.0811,1.0711,1.0737,1.0725
+single_metric,seventeenlands_replay_data.attacker_blocker_combat_outcome,metric,0.9261,0.9079,0.9132,0.9015
+single_metric,seventeenlands_replay_data.average_turn_cast,held out,1.0285,1.0161,1.0332,1.0169
+single_metric,seventeenlands_replay_data.cast_rate,metric,1.0896,0.9569,0.9168,0.936
+single_metric,seventeenlands_replay_data.combat_aggression_profile,metric,1.0571,1.0515,1.0993,1.0357
+single_metric,seventeenlands_replay_data.combat_damage_push_through_rate,metric,0.9195,0.921,0.9293,0.9086
+single_metric,seventeenlands_replay_data.combat_kill_involvement_rate,metric,0.8585,0.8265,0.8348,0.8303
+single_metric,seventeenlands_replay_data.discard_rate,metric,1.2167,1.2082,1.2561,1.211
+single_metric,seventeenlands_replay_data.turns_to_game_end_after_cast,metric,1.1156,1.0029,1.0277,0.8971
+single_metric,seventeenlands_replay_data.tutor_target_rate,metric,0.9403,0.8847,0.8963,0.8549
+single_metric,spire_codex.card_type_mask,held out,1.0432,1.0396,1.0418,1.0385
+single_metric,spire_codex.color_mask,metric,1.0499,1.0275,1.0406,1.0429
+single_metric,spire_codex.cost_mask,metric,0.9364,0.9019,0.8814,0.9016
+single_metric,spire_codex.rarity_mask,metric,1.0967,1.0836,1.0269,0.9784
+single_metric,sts2_runs.ascension_prediction,metric,1.2075,1.1733,1.0899,1.0836
+single_metric,sts2_runs.card_deck_size,metric,0.5298,0.5522,0.6039,0.5931
+single_metric,sts2_runs.card_elites_killed,metric,2.3591,1.9234,1.7306,1.7297
+single_metric,sts2_runs.card_floors_cleared,metric,2.333,1.9971,1.8733,1.8933
+single_metric,sts2_runs.card_relic_count,metric,2.2824,1.991,1.7805,1.8227
+single_metric,sts2_runs.card_removal_pick,metric,0.5834,0.5957,0.7452,0.5869
+single_metric,sts2_runs.card_reward_pick,held out,1.5976,1.5412,1.2445,2.4264
+single_metric,sts2_runs.card_total_cards_picked,metric,2.0727,1.8988,1.7867,1.7437
+single_metric,sts2_runs.card_total_combats,metric,2.2825,1.9246,1.7713,1.7681
+single_metric,sts2_runs.card_total_damage_taken,metric,1.299,1.3159,1.2835,1.2977
+single_metric,sts2_runs.card_total_turns,metric,2.1936,2.0403,1.8861,1.8915
+single_metric,sts2_runs.card_upgrade_pick,metric,0.8262,0.8402,0.8272,0.8467
+single_metric,sts2_runs.card_upgrade_rate,metric,1.0228,1.1092,0.9242,0.8672
+single_metric,sts2_runs.card_win_rate,held out,1.6995,1.6899,1.7098,1.7328
+single_metric,sts2_runs.card_win_rate_at_act2,held out,1.4959,1.5414,1.5209,1.498
+single_metric,sts2_runs.character_prediction,metric,0.9813,1.0169,0.9952,0.9978
+single_metric,sts2_runs.elites_killed,metric,0.7143,0.6944,0.803,0.7307
+single_metric,sts2_runs.floors_cleared,metric,0.5041,0.2752,0.3143,0.3469
+single_metric,sts2_runs.killed_by,metric,0.9971,0.9044,0.8951,0.8852
+single_metric,sts2_runs.relic_count,metric,0.5223,0.3802,0.3655,0.3635
+single_metric,sts2_runs.shop_purchase_pick,metric,1.0776,1.1172,1.024,1.0711
+single_metric,sts2_runs.total_cards_picked,metric,0.7148,0.3607,0.3811,0.3531
+single_metric,sts2_runs.total_cards_skipped,metric,0.6498,0.4201,0.4225,0.3985
+single_metric,sts2_runs.total_combats,metric,0.4737,0.3922,0.2928,0.4357
+single_metric,sts2_runs.total_damage_taken,metric,1.0097,0.8623,0.9563,0.8263
+single_metric,sts2_runs.total_turns,metric,0.5446,0.491,0.4822,0.4456
+single_metric,sts2_runs.win,metric,0.7131,0.6529,0.8297,0.6397
+single_metric,sts_gg.ascension_prediction,metric,1.1585,1.026,1.0192,1.0154
+single_metric,sts_gg.card_character_prediction,metric,1.0041,0.998,1.0048,0.9956
+single_metric,sts_gg.card_deck_size,metric,2.1849,2.1571,2.157,2.3292
+single_metric,sts_gg.card_elites_killed,metric,1.4786,1.4386,1.4299,1.4511
+single_metric,sts_gg.card_floors_cleared,metric,1.7258,1.7292,1.725,1.721
+single_metric,sts_gg.card_relic_count,metric,1.358,1.3022,1.338,1.3295
+single_metric,sts_gg.card_total_cards_picked,metric,1.6898,1.7297,1.7467,1.7023
+single_metric,sts_gg.card_total_combats,metric,1.4273,1.4629,1.4974,1.435
+single_metric,sts_gg.card_total_damage_taken,metric,1.3957,1.4326,1.502,1.3946
+single_metric,sts_gg.card_total_turns,metric,2.0411,1.5536,1.7496,1.7238
+single_metric,sts_gg.card_upgrade_rate,metric,1.4964,1.5461,1.3264,1.2724
+single_metric,sts_gg.character_prediction,metric,1.0495,1.0786,1.0532,1.0165
+single_metric,sts_gg.elites_killed,metric,0.8873,0.9074,0.8901,0.9845
+single_metric,sts_gg.floors_cleared,metric,1.0038,0.9806,0.9897,1.3331
+single_metric,sts_gg.relic_count,metric,0.8078,0.9741,0.9259,0.8318
+single_metric,sts_gg.total_cards_picked,metric,0.7883,0.8657,0.7537,0.7654
+single_metric,sts_gg.total_cards_skipped,metric,1.1666,1.4225,1.3451,1.2125
+single_metric,sts_gg.total_combats,metric,1.1434,1.1146,1.0929,1.1436
+single_metric,sts_gg.total_damage_taken,metric,1.1252,1.1519,1.1181,1.1562
+single_metric,sts_gg.total_turns,metric,1.0486,1.0506,1.0599,1.043

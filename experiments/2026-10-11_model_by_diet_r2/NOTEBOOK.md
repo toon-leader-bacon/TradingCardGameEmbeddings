@@ -1,6 +1,6 @@
 # Series 1, round 2: model × diet on a stable embedding
 
-**Status:** running
+**Status:** awaiting review
 **Dates:** 2026-10-11 -
 **Parent:** [2026-10-09_model_by_diet](../2026-10-09_model_by_diet/NOTEBOOK.md) · **Branch:** `experiment/2026-10-11_model_by_diet_r2`
 
@@ -309,6 +309,11 @@ handled as a small issue.
 ### 2026-10-13 · Batch 2, run 3 (lab_technician)
 
 - [single_contrastive done](bench_notes/2026-10-13_0555_single_contrastive_done.md): exit 0, 380 min; TEST medians after round 3: contrastive 0.670 (best in round 2, 0.647; 1.00 = chance), held out 1.153 (1.0 = mean predictor). GPU compute busy 57% (median).
+
+### 2026-10-13 · Batch 2, run 4 and wrap-up (lab_technician)
+
+- [single_metric done](bench_notes/2026-10-13_1410_single_metric_done.md): exit 0, 499 min; TEST medians after round 3: trained metric 0.997, held out 1.132 (1.0 = mean predictor).
+- [Batch 2 wrap-up](bench_notes/2026-10-13_1415_batch2_wrap_up.md): 5 of 6 cells done; `single_mixed` held by the human. On TEST, multi-card beats single-card on the same diet, and no diet moves the held-out dojos. Resource and timing table in `results/resources_by_cell.csv`.
 
 ## Results
 

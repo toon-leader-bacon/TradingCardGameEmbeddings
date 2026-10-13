@@ -1,0 +1,6 @@
+cell,duration_min,startup_min,round_min,peak_py_ram_gb,min_free_ram_gb,peak_py_vram_gb,peak_card_vram_gb,gpu_compute_p10,gpu_compute_median,gpu_compute_p90,py_cpu_p10,py_cpu_median,py_cpu_p90,n_util_samples
+multi_mixed,518,26,125 124 121 122,4.18,17.09,4.97,5.63,,,,,,,
+multi_contrastive,399,3,99 99 100 98,,,,,,,,,,,
+multi_metric,511,26,128 120 118 119,3.91,15.96,3.56,4.68,56.5,75.8,88.9,262.9,280.1,292.0,905
+single_contrastive,380,4,94 94 94 93,2.01,19.24,2.91,3.83,45.1,57.3,73.6,242.8,261.5,293.6,701
+single_metric,499,26,121 117 117 118,4.03,17.43,3.55,4.49,58.2,75.7,88.9,248.1,267.5,285.4,882
