@@ -302,6 +302,10 @@ check jobs don't overlap `multi_metric`'s resource samples. Each run's
 own startup preflight serves as the check, and a failure there is
 handled as a small issue.
 
+### 2026-10-12 · Batch 2, run 2 (lab_technician)
+
+- [multi_metric done](bench_notes/2026-10-12_2335_multi_metric_done.md): exit 0, 511 min; TEST medians after round 3: trained metric 0.936, held out 1.111 (1.0 = mean predictor). The first fully sampled run: VRAM 3.6 GB of 16, GPU compute busy 76% (median), Python CPU about 2.8 of 16 threads.
+
 ## Results
 
 ## Conclusions
