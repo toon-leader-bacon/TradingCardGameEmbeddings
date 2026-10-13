@@ -27,3 +27,11 @@ multi_mixed,2,14992,370.3,metric,124,0.9833,0.8592,1.1368,69,0,2.6914
 multi_mixed,3,19990,492.1,contrastive,25,0.6616,0.5228,0.9097,24,0,1.0418
 multi_mixed,3,19990,492.1,held out,13,1.0825,1.0532,1.2884,0,0,4.7316
 multi_mixed,3,19990,492.1,metric,124,0.9419,0.7584,1.1032,76,0,2.6995
+single_contrastive,0,5000,94.1,contrastive,25,0.7675,0.5417,0.956,23,0,1.0446
+single_contrastive,0,5000,94.1,held out,13,1.1544,1.0543,1.4353,0,0,3.1921
+single_contrastive,1,9997,188.0,contrastive,25,0.7322,0.4452,0.8824,24,0,1.0218
+single_contrastive,1,9997,188.0,held out,13,1.1689,1.0596,1.4025,0,0,3.6026
+single_contrastive,2,14996,282.5,contrastive,25,0.647,0.4356,0.8318,24,0,1.0458
+single_contrastive,2,14996,282.5,held out,13,1.1643,1.0695,1.3955,0,0,2.7302
+single_contrastive,3,19993,375.9,contrastive,25,0.6697,0.4953,0.8256,24,0,1.0571
+single_contrastive,3,19993,375.9,held out,13,1.1526,1.0588,1.4108,0,0,3.676

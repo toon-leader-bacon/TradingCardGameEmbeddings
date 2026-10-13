@@ -306,6 +306,10 @@ handled as a small issue.
 
 - [multi_metric done](bench_notes/2026-10-12_2335_multi_metric_done.md): exit 0, 511 min; TEST medians after round 3: trained metric 0.936, held out 1.111 (1.0 = mean predictor). The first fully sampled run: VRAM 3.6 GB of 16, GPU compute busy 76% (median), Python CPU about 2.8 of 16 threads.
 
+### 2026-10-13 · Batch 2, run 3 (lab_technician)
+
+- [single_contrastive done](bench_notes/2026-10-13_0555_single_contrastive_done.md): exit 0, 380 min; TEST medians after round 3: contrastive 0.670 (best in round 2, 0.647; 1.00 = chance), held out 1.153 (1.0 = mean predictor). GPU compute busy 57% (median).
+
 ## Results
 
 ## Conclusions
