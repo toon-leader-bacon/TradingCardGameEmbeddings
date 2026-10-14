@@ -937,6 +937,50 @@ lower is better).
     (1.14-2.37). The metric cells are lowest (1.14), but still worse than
     the baseline.
 
+### Zero-shot contrastive scores, trained games against Gwent
+
+From [`results/zero_shot_contrastive.csv`](results/zero_shot_contrastive.csv)
+and [`zero_shot_contrastive_summary.csv`](results/zero_shot_contrastive_summary.csv).
+The setup:
+- every contrastive dojo's VALIDATION loss on each frozen encoder, no
+  training;
+- at most 1,024 examples per dojo;
+- the median over the 5 styles per game.
+
+Values are normalized (1.0 = chance; lower is better). The catalog has no
+Hearthstone contrastive dojos.
+
+![zero-shot contrastive by game](results/zero_shot_contrastive_by_game.png)
+
+| game | untrained single | single contr. / metric / mixed | untrained multi | multi contr. / metric / mixed |
+|---|---|---|---|---|
+| Flesh and Blood | 0.95-0.96 | 0.41 / 1.00 / 0.47 | 0.90-0.91 | 0.38 / 0.99 / 0.43 |
+| STS2 | 1.00-1.01 | 0.56 / 1.06 / 0.57 | 1.03-1.08 | 0.58 / 3.70 / 0.56 |
+| Pokémon | 0.99-1.00 | 0.61 / 1.00 / 0.54 | 1.00-1.07 | 0.41 / 1.00 / 0.50 |
+| MTG | 1.01-1.02 | 0.80 / 1.02 / 0.94 | 1.04-1.06 | 0.60 / 3.81 / 0.77 |
+| Dominion | 0.97-0.98 | 0.98 / 1.02 / 0.98 | 1.01-1.04 | 0.90 / 1.06 / 0.96 |
+| **Gwent (unseen)** | 0.97 | 0.99 / 1.00 / 1.02 | 0.92-0.95 | 1.01 / 1.00 / 0.99 |
+
+- **On the trained games** the contrastive and mixed cells are well below
+  chance on held-out decks (0.38-0.94), except Dominion (0.90-0.98). The
+  controls sit at about chance.
+- **On Gwent, zero-shot, every trained cell is at chance (0.99-1.02)** and
+  slightly worse than the controls (0.92-0.97). Together with the leader
+  result above:
+  - the deck structure in the embedding geometry does not carry to an unseen
+    game;
+  - but the encoder carries something a trained head can use.
+- **Multi-card leads on the trained games' contrastive tasks** (MTG 0.60
+  against 0.80; Pokémon 0.41 against 0.61), unlike the per-card probe and
+  the intrinsic suite. These tasks score groups of cards, where its
+  attention applies.
+- **Multi-card metric-only is far worse than chance on MTG and STS2** (3.70
+  and 3.81). This fits the collapsed geometry.
+- **Dominion learns little even in training.** One possible reason, not
+  checked: its "decks" are kingdoms, 10 cards drawn from a large pool.
+- **Run time:** about 8-10 min per encoder, mostly building deck examples
+  on the CPU (not profiled; a TODO is in `src/dojos/TODO.md`).
+
 ## Conclusions
 
 ## Open questions
