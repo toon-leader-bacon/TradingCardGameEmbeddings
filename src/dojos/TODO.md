@@ -16,3 +16,26 @@
 - **A harder rarity task.** With `rarity` masked, a Pokemon card's `name` and
   `subtypes` still show the ex / V / GX mechanic (about 13% of Pokemon rows,
   nearly all TIER_4). Add noise mods if the task proves too easy.
+- **Contrastive batch building is slow on the CPU; find ways to speed it
+  up.** Seen in experiment 2026-10-11_model_by_diet_r2
+  (`analysis/zero_shot_contrastive.py`): scoring the 30 contrastive dojos
+  on VALIDATION (at most 1,024 examples each) took about 8-10 min per
+  frozen encoder, 12 encoders, about 1.5-2 h in all. The GPU only ran the
+  embedding head there (frozen text-encoder output was cached per card), so
+  most of the time is probably building deck examples on the CPU. **Not
+  yet profiled.**
+  - **Profile first.** Where does a `ContrastiveDojo.batches()` pass spend
+    its time: dealing decks, pair construction
+    (`contrastive/pair_constructor.py`), staple subsampling, mods,
+    serialization or collation?
+  - **Build evaluation batches once and reuse them.** A capped
+    VALIDATION/TEST pass is deterministic, so every encoder (and every
+    training round's TEST pass) rebuilds identical batches. Cache the built
+    examples per dojo and split.
+  - **Drop undealable decks once, not on every pass.** The same decks are
+    skipped and logged on every pass ("Skipping deck ...: N known card(s),
+    need M"; 255 lines in that run's log). Filter them when splits are
+    assigned, or cache the result.
+  - **Parallelize building:** worker processes or a prefetch thread, so
+    the CPU builds the next batches while the GPU runs the current ones.
+    This applies to training too, where throughput is a stated priority.
