@@ -1,6 +1,6 @@
 # Series 1, round 2: model × diet on a stable embedding
 
-**Status:** awaiting review
+**Status:** running
 **Dates:** 2026-10-11 -
 **Parent:** [2026-10-09_model_by_diet](../2026-10-09_model_by_diet/NOTEBOOK.md) · **Branch:** `experiment/2026-10-11_model_by_diet_r2`
 
@@ -314,6 +314,18 @@ handled as a small issue.
 
 - [single_metric done](bench_notes/2026-10-13_1410_single_metric_done.md): exit 0, 499 min; TEST medians after round 3: trained metric 0.997, held out 1.132 (1.0 = mean predictor).
 - [Batch 2 wrap-up](bench_notes/2026-10-13_1415_batch2_wrap_up.md): 5 of 6 cells done; `single_mixed` held by the human. On TEST, multi-card beats single-card on the same diet, and no diet moves the held-out dojos. Resource and timing table in `results/resources_by_cell.csv`.
+
+### 2026-10-13 · Batch 3 queued (human decision)
+
+What: batch 3 is the last cell, `single_mixed`, estimated at about
+500 min (26 min startup plus 4 rounds of about 118 min, from
+`single_metric`), so well under the ~24 h gate. The human held it on
+2026-10-13 after batch 2 and released it the same evening.
+
+Pre-flight: free RAM 23.9 GB, VRAM 17.0 of 17.2 GB free with no other
+Python process, 1.1 TB free on G:. No separate `--check`; as for the
+other single-card cells, the run's startup preflight covers it. Its
+launch config differs from `multi_mixed` only in the model block.
 
 ## Results
 
