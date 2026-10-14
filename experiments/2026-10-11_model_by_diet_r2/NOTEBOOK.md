@@ -974,7 +974,7 @@ Hearthstone contrastive dojos.
   against 0.80; Pokémon 0.41 against 0.61), unlike the per-card probe and
   the intrinsic suite. These tasks score groups of cards, where its
   attention applies.
-- **Multi-card metric-only is far worse than chance on MTG and STS2** (3.70
+- **Multi-card metric-only is far worse than chance on STS2 and MTG** (3.70
   and 3.81). This fits the collapsed geometry.
 - **Dominion learns little even in training.** One possible reason, not
   checked: its "decks" are kingdoms, 10 cards drawn from a large pool.
