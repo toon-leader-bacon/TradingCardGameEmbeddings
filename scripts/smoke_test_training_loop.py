@@ -10,10 +10,9 @@ does, just tiny (few steps, few rounds, frozen encoder, CPU-sized
 batches) and pointed at a throwaway run directory.
 
 Uses two already-ingested, already-scanned gwent_one dojos
-(ColorMaskDojo, FactionMaskDojo - see src/training/TODO.md section C
-for why these were picked: ready today, no regeneration needed) against
-a frozen LinearProjectionCardModel (src/training/TODO.md section B:
-ModernBERT-base + a linear head). No holdout, since this only checks
+(ColorMaskDojo, FactionMaskDojo, picked because they needed no
+regeneration) against a frozen LinearProjectionCardModel
+(ModernBERT-base + a linear head). No holdout, since this only checks
 that the loop runs, not that the model learns anything.
 
 Usage (from the project root):

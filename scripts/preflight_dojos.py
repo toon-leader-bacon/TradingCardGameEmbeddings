@@ -1,4 +1,4 @@
-"""Exercise the training/TODO.md section-C "first-run dojo set" once each,
+"""Exercise the first-run dojo set (gwent_one masks, sts_gg metrics) once each,
 before pointing an unattended Trainer.run() at them.
 
 Constructs the gwent_one mask dojos and the sts_gg per-metric dojos
@@ -71,8 +71,8 @@ _logger = script_logger(__file__)
 
 
 def build_gwent_dojos(holdout: HoldoutSpec, card_embedding_size: int) -> list[Dojo]:
-    """The 8 gwent_one masked-field dojos - "ready today" per
-    training/TODO.md section C, no regeneration needed."""
+    """The 8 gwent_one masked-field dojos - ready without
+    regeneration."""
     binder_path = CardBinder.default_output_path(GameId.GWENT)
     if not binder_path.exists():
         _logger.warning("  skipping gwent_one: %s does not exist", binder_path)
@@ -96,8 +96,7 @@ def build_gwent_dojos(holdout: HoldoutSpec, card_embedding_size: int) -> list[Do
 def build_sts_dojos(holdout: HoldoutSpec, card_embedding_size: int) -> list[Dojo]:
     """The 9 card-average dojos (need only a CardBinder) plus the
     deck-level dojos (need the metrics-private sts_gg deck box too, per
-    scripts/run_metrics.py's run_sts_gg) - "ready today" per
-    training/TODO.md section C."""
+    scripts/run_metrics.py's run_sts_gg)."""
     binder_path = CardBinder.default_output_path(GameId.SLAY_THE_SPIRE_2)
     if not binder_path.exists():
         _logger.warning("  skipping sts_gg: %s does not exist", binder_path)

@@ -265,7 +265,7 @@ Points worth knowing:
 ## How to run
 
 From a config file (configs live in `configs/training/`; use the ROCm
-venv for a GPU run, see `TODO.md` section A):
+venv for a GPU run, see `Notes.md`):
 
 ```sh
 PYTHONPATH=. python scripts/run_training.py configs/training/gpu_smoke.yaml

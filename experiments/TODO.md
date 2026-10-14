@@ -24,7 +24,7 @@ this list is about runs and comparisons.
   only, and 50/50 (per-dojo diet weights, so the contrastive keys
   together are drawn half the time in expectation). ModernBERT frozen,
   `residual_mlp` head, both models about 2.9M trainable parameters (sizes
-  in `src/training/TODO.md`, section D). Both models get the same
+  in the series notebook). Both models get the same
   contrastive dojos: all five training styles, each style equally often
   (series 2 then separates them). Configs and notebook: [2026-10-09_model_by_diet](2026-10-09_model_by_diet/NOTEBOOK.md). 6 runs
   plus 2 controls, evaluated together (8 encoders fit the learning-curve
@@ -35,7 +35,7 @@ this list is about runs and comparisons.
   arm: it is an evaluation probe (`src/evaluation/TODO.md`).
 - [ ] **3. Unfrozen ModernBERT.** Repeat the useful arms of series 1 with
   the language model trainable; needs VRAM measurement and likely
-  gradient checkpointing (`src/training/TODO.md`, section E).
+  gradient checkpointing (`src/encoder_model/TODO.md`).
 
 - [ ] **Pooling and whitening** (code built: `model.pooling` / `model.enrichment`
   in `src/training/README.md`; stats from `scripts/fit_whitening.py`).
@@ -73,14 +73,72 @@ this list is about runs and comparisons.
   numeric fields (R^2 0.57). Next: arms 5 and 8, then raw + whitened
   tokens (root `TODO.md`).
 
+## From model_by_diet_r2 (concluded 2026-10-14)
+
+[Notebook](2026-10-11_model_by_diet_r2/NOTEBOOK.md), Conclusions.
+Premises for the next suite (one seed, so pilot strength):
+- metric-only training on a trainable encoder collapses the embedding;
+- contrastive is the pre-training direction, but it trades card-text
+  fields for deck structure;
+- no trained cell met the bar.
+
+The reference encoder is the head-free frozen whitened mean. The trained
+pilot default is `single_mixed`.
+
+The goal (human, 2026-10-14): useful embeddings, judged by the
+evaluation module, with transfer to unseen cards and games as a major
+goal. Field recovery is a nice-to-have. **First decide which evaluation
+metrics count as "useful"**: fields that bear on card use, not every
+recoverable field.
+
+Evaluation gaps to close first (minutes each, on existing checkpoints and
+the feature cache):
+- [ ] The frozen whitened mean as an encoder in the held-out and Gwent
+  fresh heads and in the intrinsic suite. It was never measured there.
+- [ ] Held-out fresh heads on control seeds 1-2 and 2+ head seeds, with
+  paired differences against the control mean.
+- [ ] A longer head budget for the deck dojos and the four dojos no
+  encoder learned. About half the held-out heads peaked in the last of 6 rounds at 3,000 steps.
+
+Proposed experiments:
+- [ ] **A. A head that keeps the frozen features.**
+  - First, an offline probe of untrained variants: a linear projection, a
+    residual skip or a concatenation of the frozen feature, 512/768 wide,
+    no output LayerNorm.
+  - Then a contrastive pilot, with an anti-collapse term (VICReg, or
+    uniformity) as an option.
+  - The idea: the contrastive part learns deck structure, and the frozen
+    part keeps the text.
+  - A learned variant (human, 2026-10-14): an attention head over both
+    the whitened text embedding and a contrastive-trained refinement of
+    it, instead of a fixed skip or concatenation.
+- [ ] **B. Curriculum (multi-stage diet).** Contrastive pre-training, then (i) metric heads on
+  the frozen encoder, (ii) a full metric fine-tune, (iii) mixed from the
+  start, at equal steps.
+- [ ] **C. Why metric training collapses.** Smaller heads; per-card
+  against run- and deck-level metric dojos, trained separately.
+- [ ] **D. Train from cached frozen features**, for throughput. Check the
+  results match an uncached run.
+- [ ] **E. Seeds** of `single_contrastive`, `multi_contrastive` and
+  `single_mixed`, before any model or diet ranking is trusted.
+- [ ] Contrastive-only at 10k steps, to separate "metric hurts" from
+  "mixed gets half the contrastive steps".
+- [ ] Probe the per-round checkpoints: is the trade between deck AUC and
+  linear-cls monotone over training?
+- [ ] Centered-cosine deck AUC and nearest-centroid, to separate offset
+  from collapse.
+- [ ] How deck splits interact across dojos built from the same source
+  (contrastive decks against FaB hero-from-deck VALIDATION decks), before
+  deck-level results are read as transfer.
+
 ## Ablations, when a series raises the question
 
 - [ ] Contrastive share of the mixed diet (e.g. 25 / 50 / 75%).
 - [ ] Game balance: today's per-dojo diet vs. a per-game two-level diet
-  (`src/training/TODO.md`, section C).
-- [ ] MSE vs. Huber regression loss (`src/training/TODO.md`, section C).
+  (`src/training/TODO.md`).
+- [ ] MSE vs. Huber regression loss (`src/training/TODO.md`).
 - [ ] Staple subsampling in contrastive pairs, arms t = inf / 0.1 / 0.01
-  (`src/training/TODO.md`, section C).
+  (`src/training/TODO.md`).
 - [ ] Curriculum: a contrastive phase, then a metric-dojo phase, against
   the mixed diet.
 

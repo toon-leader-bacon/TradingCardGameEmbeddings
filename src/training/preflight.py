@@ -1,8 +1,8 @@
 """Exercise one dojo before it ever reaches Trainer.run().
 
-A dojo built against a stale split file (see training/TODO.md section C:
-gwent_one's own metrics were once built against a pre-re-ingest
-CardBinder, so every uuid failed to resolve) raises nothing on its own -
+A dojo built against a stale split file (e.g. gwent_one's own metrics
+were once built against a pre-re-ingest CardBinder, so every uuid
+failed to resolve) raises nothing on its own -
 Trainer just yields zero-example batches and quarantines it a few rounds
 in. This runs the same forward/loss path Trainer's _take_step does,
 against random embeddings shaped like the dojo's own batch (no encoder,

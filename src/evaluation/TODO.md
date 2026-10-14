@@ -39,3 +39,76 @@ Ideas:
 
 Card in contexts stays out of every training diet; see the dojo's
 docstring.
+
+## Deck AUC as an intrinsic analysis
+
+Add same-deck retrieval AUC to `analyses/` as an `EmbeddingAnalysis`.
+For a card in a sampled deck: P(cos to a random deck-mate > cos to a
+random same-game card outside the deck), 0.5 = chance. It is the
+contrastive dojos' task with no training, and the main signal they add,
+but today it exists only in experiment scripts
+(`experiments/2026-10-10_pooling_probe/analysis/probe.py`, wrapped by
+`experiments/2026-10-11_model_by_diet_r2/analysis/probe_cells.py`).
+
+Needs, beyond what the other analyses take:
+
+- a deck source (decks from the deck boxes, sampled with a seed), since
+  `EmbeddingTable` holds cards only; a card missing from the table is
+  skipped and counted;
+- scalars: overall AUC, AUC per game, and AUC split by the anchor card's
+  holdout tier (TRAIN vs VALIDATION/TEST), so in-sample and out-of-sample
+  readings are separate;
+- a 95% bootstrap interval over decks, as `probe_cells.py` reports.
+
+## run_evaluation.py: held-out dojos, cards and games
+
+`scripts/run_evaluation.py` is a Gwent-only prototype with hard-coded
+encoders, labels and dojos. Make it drive an experiment's own setup, so
+evaluating a finished experiment is one command instead of new
+`analysis/` scripts (the 2026-10-11_model_by_diet_r2 step 2 needed
+`probe_cells.py`, `extrinsic_held_out.py` and `intrinsic_suite.py`):
+
+- **Encoders:** build from a run's recorded `run_config.yaml`
+  (`build_model`), any architecture, plus untrained controls under
+  chosen seeds; not the fixed linear-projection reference models.
+- **Held-out dojos:** run extrinsic fresh heads on a config's
+  `held_out_dojos` (or a named list) via `build_dojos`, with the run's
+  own holdout.
+- **Held-out cards:** a corpus `TierFilter` option (e.g. only
+  VALIDATION/TEST cards under the run's holdout), and per-tier splits of
+  every analysis's scalars.
+- **Held-out games:** choose the corpus games, and report games no dojo
+  trained (e.g. Gwent) separately.
+- **Label sources:** chosen per run (game, holdout tier, metric parquets
+  for trained and held-out fields), not hard-coded.
+- **Shared frozen features:** while the text encoder is frozen, compute
+  its pooled output once per card and reuse it for every encoder (the
+  experiment scripts' cache; exact against the real model).
+- **Standard output:** one scalars CSV across encoders, so experiments
+  compare without per-experiment report scripts.
+
+## Controls and noise in extrinsic and intrinsic runs
+
+Gaps found in 2026-10-11_model_by_diet_r2 (Conclusions, and referee
+report 1 in its `reviews/`):
+
+- **A head-free frozen-feature reference encoder.** It is the frozen
+  pooled (and whitened) feature with no trainable head. In that
+  experiment it was the strongest encoder on the probe, but it was
+  never run through fresh heads or the intrinsic suite. So "trained
+  against frozen" downstream is unmeasured. Every evaluation run should
+  include it.
+- **Several control seeds and head seeds, with paired differences.**
+  Untrained controls under different seeds differ by about 0.08 in median
+  fresh-head loss (Gwent), and by up to 0.22 on one dojo. Report each
+  encoder's per-dojo difference against the control mean, not against
+  one control seed.
+- **A convergence check on the fresh-head budget.** At 3,000 steps about
+  half the held-out heads (51 of 104) and a fifth of the Gwent heads (32
+  of 156) hit their best TEST in the last round. Either stop on plateau, or
+  flag dojos whose best round is the last, so a learning-speed difference
+  isn't read as a ceiling.
+- **Centered-cosine variants** of the cosine-based analyses
+  (nearest-centroid, cluster agreement, deck AUC). Encoders differ in
+  mean cosine from 0.53 to 0.99, which confounds the cross-encoder
+  comparisons.

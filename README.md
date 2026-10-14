@@ -66,3 +66,32 @@ PYTHONPATH=. python3 scripts/smoke_test_training_loop.py
 Each `run_*` script takes `--source <name>` or `--all`. The pipeline
 runs in that order: retrieval, card binder, deck box, metrics, training.
 `TODO.md` holds cross-cutting open work; each container keeps its own.
+
+## Important Folders
+
+Tracked by git:
+
+```
+.
+├── configs/       Example training run configs (YAML) for scripts/run_training.py
+├── experiments/   One folder per experiment: notebook, configs, results, bench notes
+├── scripts/       Command-line entry points: run_*.py pipeline stages, check.sh, reports
+├── src/           Pipeline source, one container per stage (map in src/README.md)
+└── tests/         pytest suite, mirroring src/
+```
+
+Untracked folders: everything in these folders is temporary and
+disposable. They are deleted or archived from time to time. None is
+precious, but `data/` is the most valuable, since re-downloading and
+rebuilding it takes many hours.
+
+```
+.
+├── archive/   Soft-deleted code from past refactors
+├── data/      Landing place for downloads and metric processing
+├── logs/      Log files written by src/ and scripts/
+├── models/    Model checkpoints
+├── plans/     Plans written by the architect skill
+├── scratch/   Agent workspace for one-off scripts and outputs
+└── Nocab/     The human's private workspace
+```

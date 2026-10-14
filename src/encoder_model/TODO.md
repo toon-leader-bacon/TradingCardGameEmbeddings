@@ -10,7 +10,7 @@ exist but are not yet compared; see `README.md` and
 `experiments/TODO.md`.
 
 - [ ] **Consider alternative text encoders.** ModernBERT-base was chosen
-  in `src/training/TODO.md` section B (license, 8k context, code-heavy
+  in `src/training/Notes.md` (license, 8k context, code-heavy
   pretraining). Worth comparing, on the same dojos and the evaluation
   suite (`plans/archive/evaluation.md`): embedding-tuned models
   (`nomic-ai/modernbert-embed-base`, which needs its prefixes;
@@ -22,8 +22,7 @@ exist but are not yet compared; see `README.md` and
   `AttentionPooling` and `TransformerPooling` read every card's token
   states each step. With the LM frozen those never change, so caching
   them makes pooling training far faster (fp16 token states: gwent
-  ~175 MB, MTG ~9 GB; `src/training/TODO.md` notes the cache is not
-  built). Caching only covers cards the dojo passes through unmodified;
+  ~175 MB, MTG ~9 GB; not built yet). Caching only covers cards the dojo passes through unmodified;
   mods that change card text (masking, key shuffles) bypass it.
 - [ ] **Whitening after pooling.** `TokenWhitening` whitens
   tokens before pooling only. Offline, whitening the mean-pooled card
@@ -47,7 +46,7 @@ exist but are not yet compared; see `README.md` and
   exist, but no reference model or run config sets them. Build one (likely
   a frozen head-only phase first, then a thawed phase at a small
   `encoder_lr`) and practice: VRAM at 256/384 tokens (measurements in
-  `src/training/TODO.md` section A: bs 16 at 256 tokens ~5.6 GiB, bs 32
+  `src/training/Notes.md`: bs 16 at 256 tokens ~5.6 GiB, bs 32
   ~9.2 GiB; 512 tokens needs gradient checkpointing past bs 16), gradient
   checkpointing, the fp16 GradScaler on the real LM, and watching for
   Windows silently spilling VRAM into system RAM.

@@ -6,10 +6,6 @@ Flat decks only (a `card_nocab_uuids` multiset), per `GenericDeck`'s
 no-metadata design. Built today: `sts_gg/`, `spire_codex_runs/`,
 `fabtcg_decklists/`, `play_gwent/`, `seventeenlands_game_data/`.
 
-- **`spire_codex` runs** - `src/data_retrieval/spire_codex/run_downloader.py`
-  pulls spire-codex's paginated run export. Once downloaded, it would be
-  a Slay the Spire 2 run source alongside `sts_gg`; built as
-  `spire_codex_runs/`.
 - **`pitchstack`** - `decks.jsonl` holds deck metadata only, no card
   list. The downloader needs the per-version `/cards` endpoint first
   (see `src/data_retrieval/pitchstack/pitchstack.md`).
@@ -20,14 +16,9 @@ not decks).
 
 ## Data bugs seen during extraction
 
-- **SQLite re-ingestion (2026-09-27).** `fabtcg_decklists`,
-  `play_gwent`, `sts2runs` and `sts_gg` were re-ingested into fresh
-  `.db` boxes; all four stamp `card_binder_version`, and deck counts
-  match the pre-SQLite JSONL exactly (FaB 4,161; Gwent 60,197; STS2
-  6,796 sts2runs + 1,004 sts_gg). The old `.jsonl` files were moved to
-  `data/final/decks/_stale_jsonl_backup/`; delete that folder once the
-  `.db` boxes have been used for a while. `seventeenlands_game_data`
-  (`mtg.db`) was still running; see below.
+- **Delete `data/final/decks/_stale_jsonl_backup/`** once the SQLite
+  `.db` boxes have been in use for a while. It holds the pre-SQLite
+  `.jsonl` boxes, moved there at the 2026-09-27 re-ingestion.
 
 - STS2 cards missing from the spire-codex binder. Across the 7,800 STS2
   decks there are 251 Unknown slots out of 195,027 (0.13%), in 229
@@ -55,18 +46,6 @@ not decks).
   cards (in `card_binder/scryfall` or in name matching,
   `card_lookup.uuid_for_name_or_front_face()`), or accept the sentinel
   for true same-name collisions and document it.
-- **Full `seventeenlands_game_data` run: done (2026-09-28).** Batched
-  commits and one deck per `draft_id` took it from ~75 decks/s (~4
-  days) to ~1,000 rows/s. Claude Code's background shell was killed by
-  low memory twice; a foreground run in a separate terminal then got
-  through VOW, and most of WOE judging by the box, before an accidental
-  Ctrl+C (log: `logs/deck_box_17_lands_sep28.log`, which ends at VOW;
-  no tracebacks). The four WOE files were then re-run on their own via
-  `--raw-path` (45,310 more decks, 17 min). Final `mtg.db`: 27.9 GB,
-  `card_binder_version` stamped, 4,812,218 decks, exactly the number of
-  distinct `draft_id`s across all 133 CSVs. Unknown sentinel: 1,375,781
-  of 193,020,442 card slots (0.71%), in 140,425 decks (2.9%), about 10
-  per affected deck, which fits the OM1 gap below.
 - **17lands card names the MTG binder can't match** (from the full-run
   log; 162 distinct names, each logged once per file). All become the
   Unknown sentinel. The OM1 names (Arena printed names), KHM back faces
@@ -100,15 +79,7 @@ not decks).
   first build and reuses it afterwards, so decks added by a later
   re-ingest are never assigned a split. After re-ingesting a game's deck
   box, delete that game's index (or pass `force_resplit`).
-- **A game's first deck ingestion invalidates its metrics.**
-  `run_deck_box_ingestion.py` seeds the game's Unknown sentinel card
-  (`ensure_unknown_card`) and saves the binder. The first time that happens
-  for a game, the binder version changes, and every metric built from the
-  old version then fails the dojos' strict version check. This hit Dominion
-  on 2026-09-30, and the metrics had to be re-run.
-
-  Fixed 2026-10-02: `build_or_update_card_binder()` now seeds the sentinel,
-  so the binder version is final before any metric or deck box is built.
-  The binders on disk already carry it for every deck-box game;
-  Hearthstone gets it on its next ingestion (a one-time version change,
-  which invalidates its 8 mask metrics once).
+- **Hearthstone's next card ingestion invalidates its 8 mask metrics
+  once.** `build_or_update_card_binder()` seeds each game's Unknown
+  sentinel (since 2026-10-02), and Hearthstone's binder does not carry it
+  yet, so its version changes one more time. Re-run its metrics after.
