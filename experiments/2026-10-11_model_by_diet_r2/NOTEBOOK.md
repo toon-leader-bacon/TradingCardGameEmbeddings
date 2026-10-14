@@ -567,6 +567,24 @@ The human also asked for two TODOs, added to `src/evaluation/TODO.md`:
 - `run_evaluation.py` driving an experiment's held-out dojos, cards and
   games.
 
+### 2026-10-14 · Intrinsic suite: STS2 character and more Gwent labels (principal investigator)
+
+The human saw 5-6 Slay the Spire 2 clusters in the contrastive cells' game
+t-SNE, and asked whether they are the characters. I added label sources to
+`intrinsic_suite.py`:
+- `trained_sts2_character`, from `spire_codex/color_mask`. "Color" is the
+  character. Its dojo is trained in the metric and mixed cells only.
+- Gwent type, color and rarity.
+
+The rerun skipped finished work: 10:52 to 10:57. Numbers are in Results
+(Intrinsic suite).
+
+Two facts noted while checking:
+- **No Hearthstone contrastive dojo exists.** Contrastive covers Flesh and
+  Blood, STS2, MTG, Pokémon and Dominion.
+- **Every probed field appears verbatim in the serialized card JSON** (e.g.
+  `"color":"silent"`, `"cardClass":"WARRIOR"`, `"faction":"nilfgaard"`).
+
 ## Results
 
 All numbers are from one training seed (pilot strength). "No clear
@@ -734,6 +752,27 @@ seeds.
 | holdout tier | 0.36-0.37 | 0.37 / 0.34 / 0.38 | 0.34-0.36 | 0.34 / 0.37 / 0.37 | 0.33 |
 
 ![per label source](results/intrinsic_by_label.png)
+
+**Added label sources** (same setup; NMI in brackets):
+
+| label source | untrained single | single contr. / metric / mixed | untrained multi | multi contr. / metric / mixed | majority baseline |
+|---|---|---|---|---|---|
+| STS2 character | 0.54-0.61 (0.02-0.05) | **0.94** (0.87) / 0.25 (0.03) / **0.91** (0.81) | 0.47-0.60 (0.02-0.04) | **0.94** (0.86) / 0.60 (0.28) / **0.91** (0.82) | 0.18 |
+| unseen: Gwent type | 0.75-0.79 | 0.54 / 0.21 / 0.47 | 0.71-0.78 | 0.58 / 0.51 / 0.40 | 0.61 |
+| unseen: Gwent color | 0.85-0.89 | 0.74 / 0.63 / 0.61 | 0.85-0.88 | 0.70 / 0.63 / 0.59 | 0.48 |
+| unseen: Gwent rarity | 0.68-0.71 | 0.54 / 0.46 / 0.47 | 0.67-0.68 | 0.54 / 0.42 / 0.43 | 0.32 |
+
+- **STS2 character is the clearest structure training added.** Nearest-centroid
+  accuracy goes from 0.47-0.61 to 0.94, NMI from 0.02-0.05 to 0.86-0.87, and
+  silhouette from about 0 to 0.42-0.45
+  ([projection](results/intrinsic_projection_trained_sts2_character.png)).
+  - Contrastive-only does it with no character dojo.
+  - Metric-only, which trains the character dojo, does not (NMI 0.03 and
+    0.28).
+  - This matches Flesh and Blood class. Both are categories a deck is built
+    around, in games with contrastive dojos.
+- **Gwent, every field, every trained cell is below the controls.** Gwent
+  type falls to or below its majority baseline (0.61) in every trained cell.
 
 **Effective rank** (`EffectiveRank`, all cards):
 

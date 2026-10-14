@@ -49,7 +49,10 @@ SUMMARY_SCALARS = (
     "effective_rank", "effective_rank_fraction", "top1_variance_share", "top5_variance_share",
     "n_cards", "n_labels",
 )
-PROJECTION_SOURCES = ("game", "heldout_hs_class", "trained_mtg_card_type", "holdout_tier")
+PROJECTION_SOURCES = (
+    "game", "heldout_hs_class", "trained_mtg_card_type", "holdout_tier",
+    "trained_sts2_character", "unseen_gwent_faction",
+)
 
 
 def read_scalars() -> list[dict]:

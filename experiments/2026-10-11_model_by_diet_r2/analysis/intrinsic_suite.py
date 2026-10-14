@@ -18,8 +18,8 @@ Label sources (LABEL_SOURCES below):
 - fields whose dojos are held out in every cell (rarity tier across games,
   Hearthstone class, Flesh and Blood pitch, Slay the Spire 2 card type);
 - fields trained in the metric and mixed cells (MTG card type, Flesh and
-  Blood class, Pokemon stage);
-- Gwent faction (the game no dojo trains).
+  Blood class, Pokemon stage, Slay the Spire 2 character, i.e. its "color");
+- Gwent faction, type, color and rarity (the game no dojo trains).
 
 Encoders: the six cells' latest/encoder.pt, and the untrained controls
 (build_model under torch.manual_seed(s), s = 0, 1, 2, per model shape), as
@@ -105,7 +105,11 @@ METRIC_LABELS = (
     ("trained_mtg_card_type", "scryfall/card_type_mask"),
     ("trained_fab_class", "cardvault_fabtcg/class_mask"),
     ("trained_pokemon_stage", "pokemon_tcg/stage_mask"),
+    ("trained_sts2_character", "spire_codex/color_mask"),
     ("unseen_gwent_faction", "gwent_one/faction_mask"),
+    ("unseen_gwent_type", "gwent_one/type_mask"),
+    ("unseen_gwent_color", "gwent_one/color_mask"),
+    ("unseen_gwent_rarity", "gwent_one/rarity_mask"),
 )
 PER_LABEL_CAP = 500
 SEED = 0
