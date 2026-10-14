@@ -144,6 +144,17 @@ install) is in `Notes.md`.
   trains stably without a learning-rate warmup, which the trainer does
   not have. torch's own default is post-norm. Read up on it, or ask for an
   explanation, and decide whether it deserves an ablation.
+- [ ] **Seed the model's initial weights.** `scripts/run_training.py`
+  calls no `torch.manual_seed`. Only the dojos and diet are seeded, so an
+  untrained control can't reproduce a run's starting weights
+  (2026-10-11_model_by_diet_r2, step 2 Log entry).
+- [ ] **Log training loss per round, per dojo.** Without it, a dojo whose
+  TEST is worse than the mean predictor can't be told apart as
+  overfitting or as a TRAIN/TEST label shift (same experiment,
+  Corrections).
+- [ ] **Held-out dojos in the training-time TEST.** Their heads are never
+  trained, so their loss is a random head's. Either drop them from TEST,
+  or label them "untrained head" in the console and logs.
 
 ## Housekeeping
 

@@ -1,7 +1,7 @@
 # Series 1, round 2: model × diet on a stable embedding
 
-**Status:** awaiting review
-**Dates:** 2026-10-11 -
+**Status:** concluded
+**Dates:** 2026-10-11 - 2026-10-14
 **Parent:** [2026-10-09_model_by_diet](../2026-10-09_model_by_diet/NOTEBOOK.md) · **Branch:** `experiment/2026-10-11_model_by_diet_r2`
 
 > Now that the embedding is stable (output LayerNorm, token whitening,
@@ -212,16 +212,40 @@ and longer rounds. In series 1, TEST took 38% of each 1,000-step round.
   batch:
   `PYTHONPATH=. python scripts/run_training.py experiments/2026-10-11_model_by_diet_r2/configs/<cell>.yaml`.
   Outputs land in `data/runs/2026-10-11_model_by_diet_r2/<cell>/`.
-- **Probe:** an `analysis/` script, written after training, that wraps
+- **Probe:** `analysis/probe_cells.py` wraps
   `experiments/2026-10-10_pooling_probe/analysis/probe_checkpoint.py`
-  with the tier and field split (see Probe split). It writes to this
-  experiment's `results/`.
+  with the tier and field split (see Probe split). Step 2 below.
+- **Evaluation, as run** (added 2026-10-14). Run each from the repo root
+  with `PYTHONPATH=.`, in the ROCm venv. Paths below are under
+  `experiments/2026-10-11_model_by_diet_r2/`. Each one writes to `results/`, or
+  to the ignored `data/evaluations/2026-10-11_model_by_diet_r2/`.
+  1. `analysis/test_loss.py` and `analysis/resources.py`: TEST tables and
+     the resources table, from the runs' console logs and samples.
+  2. `analysis/probe_cells.py`, then `analysis/probe_report.py`: the
+     probe, the bar table and its figures. Minutes.
+  3. `analysis/extrinsic_held_out.py`, then `analysis/extrinsic_report.py`:
+     fresh heads on the 13 held-out dojos. About 4-9 min per encoder.
+  4. `analysis/intrinsic_suite.py`, then `analysis/intrinsic_report.py`:
+     the `src/evaluation` intrinsic suite. About 30 min.
+  5. `analysis/extrinsic_gwent.py`, then `analysis/gwent_report.py`: fresh
+     heads on the Gwent dojos.
+  6. `analysis/zero_shot_contrastive.py`: about 8-10 min per encoder.
+- **Environment:** AMD RX 6800 (16 GB), torch 2.10.0+rocm7.13 (bench
+  notes). Each run's whitening stats are a per-run `whitening_stats.pt`
+  copy of the Method's file. All six are byte-identical (step 2 Log
+  entry).
+- **Trainable parameters** (from the runs' logs and config checks, in
+  the bench notes): single-card 2,898,176; multi-card 2,895,616.
 - **TEST table:**
   [`../2026-10-10_lr_pilot/analysis/compare.py`](../2026-10-10_lr_pilot/analysis/compare.py)
   on each cell's console log.
-- **Configs:** the six files in `configs/` are launch configs, generated
-  from series 1's launch configs (patterns kept). Each is replaced by its
-  run's recorded `run_config.yaml` once it runs.
+- **Configs:** the six files in `configs/` were launch configs, generated
+  from series 1's launch configs (patterns kept). Each was replaced by its
+  run's recorded `run_config.yaml` once it ran, so they now point to the
+  per-run `whitening_stats.pt` copies.
+- **Data sizes are not recorded here** (decks per contrastive game, TRAIN
+  examples per dojo, cards per game). This is a known gap; see the
+  Corrections entry on `diet_shares.csv`.
 
 ## Log
 
@@ -656,6 +680,142 @@ The catalog has 19 Gwent dojos.
   The card-in-contexts evaluation (`src/evaluation/TODO.md`) is the test
   built for this question.
 
+### 2026-10-14 · Referee report 1 and responses (principal investigator, with the human)
+
+The human ran the `referee` agent on the folder at commit 567d8d5. Its
+report is [`reviews/referee_2026-10-14_1.md`](reviews/referee_2026-10-14_1.md).
+It recommends major revisions: "the central problem verdict ('bar not
+met') holds on the slice", but several secondary claims and the H2
+verdict go further than one seed allows. The human agreed with the main
+concerns and chose to conclude this experiment with narrowed claims.
+The new runs the referee asked for move to the next experiments.
+
+| # | concern | response |
+|---|---|---|
+| 1 | no Conclusions, and the deciding criterion is drifting | **Reword.** Conclusions judge the bar and H1/H2 as written at :26-65. The human's goal statement (evaluation-module scores; field recovery a nice-to-have) is recorded as a dated decision for the next experiments, not as a new reading of the bar. |
+| 2 | the fallback depends on the control reading; tie-break not applied | **Reinterpret.** Both readings and the tie-break are in Conclusions. Both give `single_mixed`. The default artifact is defined there. |
+| 3 | H2 read in one direction only; confounds | **Reword.** H2 is unresolved: by the 0.02 rule it is refuted in opposite directions on two diets. The parameter counts are now in the Recipe; the depth and group-of-one confounds are named in Conclusions. |
+| 4 | "mixed transfers best" is inside initialization noise | **Reword** now ("no difference distinguishable from initialization noise"). **New runs** (control seeds 1-2, more head seeds) go to the next experiment's evaluation. |
+| 5 | the fresh-head budget measures learning speed | **Reword** ("within a 3,000-step head budget"). **New runs** (a longer head budget) go to the next experiment's evaluation. |
+| 6 | "small per-card dojos overfit" is not supported | **Reword:** withdrawn; see the correction below. |
+| 7 | deck-level "transfer" may be in-sample at the deck level | **Reword.** FaB hero from deck and non-TRAIN-anchor deck AUC are not claimed as transfer. How deck splits interact across dojos is an open question. |
+| 8 | Gwent deck AUC has no interval | **Reword.** The bar still fails on slice linear-cls (-0.09 to -0.20). The Gwent half is within noise for `single_contrastive` (-0.014). No interval was added. |
+
+Minor concerns:
+- **Corrections** (contradictions, unsupported explanations, untraceable
+  numbers): in the next entry.
+- **Recipe, hardware and parameter counts:** added to the Recipe. Data
+  sizes are not; the Recipe lists them as a known gap.
+- **`single_mixed` provenance:** its commit, ced7ba7, differs from 467d0e1
+  in `src/` and `scripts/` only by docstrings and comments
+  (`git diff 467d0e1 ced7ba7`). The training code matches.
+- **Post-hoc analysis choices:**
+  - The slice change (all cards of three games) and the three control
+    seeds were decided while the probe script was being built, in the
+    same session. The record does not show whether that was before the
+    first probe numbers were seen.
+  - The bar fails under every reading, so neither choice changes the
+    verdict.
+- **Unbalanced slice, pool vs slice gap, linear-cls scope, anisotropy
+  (centered cosine), Pokémon memorization, mixed diet's half contrastive
+  steps, fixed budget:** carried into Conclusions as scope limits.
+  Centered cosine, per-round checkpoint probes and contrastive-only at
+  10k steps are follow-ups in `experiments/TODO.md`.
+- **Nitpicks:** accepted, not applied. The notebook is history.
+
+Not raised by the referee:
+- **The head-free frozen whitened mean was never run through any
+  extrinsic evaluation, nor through the intrinsic suite.** Every
+  "control" in the fresh-head, Gwent, zero-shot and projection results is
+  the untrained 256-d model: frozen features through a random head. So
+  "trained cells regress against frozen BERT downstream" is untested. It
+  is inferred only from the probe, where the frozen mean wins every
+  measure.
+
+### 2026-10-14 · Corrections (principal investigator)
+
+These correct earlier entries in this notebook. The earlier text stays as
+written.
+- **"Gwent deck AUC is below the controls … does not carry to Gwent"**
+  (PI review finding 3) and the human's preliminary finding "does not
+  transfer". These hold zero-shot: the Gwent probe AUC and the zero-shot
+  contrastive score (0.99-1.02). With a trained head, the contrastive
+  cells reach 0.63-0.69 on Gwent leader from deck, against 0.82-0.99 for
+  the controls. The better statement: the deck structure does not appear
+  in the geometry for an unseen game, but a fresh head can use something
+  the encoder carries, within a 3,000-step head budget. One competing
+  reading is untested: leaders follow faction, and faction is written in
+  the card text.
+- **PI review finding 6, "the mixed diet transfers best".** Withdrawn as
+  a claim. On Gwent, control seeds alone differ by 0.08 in median, so
+  -0.047 and -0.027 are not distinguishable from initialization noise.
+- **PI review finding 7, "small per-card statistic dojos overfit".**
+  Withdrawn. Those dojos are already at about 2× the mean predictor in
+  round 0 (`test_loss_by_dojo.csv`), and training loss was not logged.
+  The cause is not determined.
+- **"Metric heads total about 17M parameters"** (finding 2), **"2.1M
+  TRAIN examples" and "440-450 TRAIN cards"** (Results, from
+  `diet_shares.csv`). These are not in `results/`, so they are
+  withdrawn as numbers. The collapse itself (effective rank 2.7 and 5.6)
+  stands.
+- **"About 5% more time per step"** for multi-card. The figure from
+  `resources_by_cell.csv`, TEST included, is about 3-10% depending on
+  diet.
+- **"Multi-card metric-only is far worse than chance (3.70, 3.81). This
+  fits the collapsed geometry."** Withdrawn. A collapsed embedding
+  should score about chance, as `single_metric` does. Confidently wrong
+  scores point elsewhere, possibly to the attention over groups. Not
+  investigated.
+- **Intrinsic summary: "with one exception (holdout tier)".** There are
+  three exceptions to "every trained cell is below every control":
+  - holdout tier (at chance for every encoder);
+  - Flesh and Blood class, in the contrastive and mixed cells;
+  - STS2 character, in the contrastive and mixed cells.
+- **H2, "refuted, in single-card's favour"** (PI review draft). Replaced
+  by the verdict in Conclusions.
+
+### 2026-10-14 · Discussion with the human: conclusion (principal investigator)
+
+**The human's reading**, recorded as stated:
+- Training does add useful structure: the STS2 character clusters.
+- But on downstream card-field tasks the trained cells look worse than
+  the untrained ones, which is disappointing.
+- Metric-only as pre-training is a bust (surprising).
+- Contrastive as pre-training is the better direction, but needs more
+  work on architecture and diet.
+- H2 is unclear.
+
+On the finding that training gains on deck structure and loses card-text
+fields, the human's interpretation: knowing whether two cards are
+deck-mates does not need every fact on the card. A field that predicts
+co-occurrence (MTG colour, STS2 character, FaB class) is kept. A field
+that doesn't (rarity, the legendary rule) is dropped. So the field probes
+need to be chosen by whether a field matters for card use, not by
+whether it is recoverable.
+
+**PI note.** This matches what is known about contrastive learning: it
+keeps the information shared by the paired views and discards the rest.
+Here the views are deck-mates, so what is kept is "what decks share".
+See:
+- Tian et al. 2020, *What Makes for Good Views for Contrastive
+  Learning?* ([arXiv:2005.10243](https://arxiv.org/abs/2005.10243));
+- Xiao et al. 2021, *What Should Not Be Contrastive in Contrastive
+  Learning* ([arXiv:2008.05659](https://arxiv.org/abs/2008.05659)).
+
+It also suggests a design. If one embedding should serve both deck
+similarity and card text, keep the frozen text features alongside the
+trained ones (a residual skip or a concatenation, proposed experiment A).
+Then the contrastive part does not have to hold the text facts.
+
+**Decisions** (human, 2026-10-14):
+- Conclude this experiment now, with the claims narrowed as above.
+- **The goal for the next experiments** is the human's statement from
+  the intrinsic discussion: useful embeddings, judged by the evaluation
+  module, with transfer to unseen cards and games as a major goal.
+  Field recovery is a nice-to-have. Which metrics count as "useful" has
+  to be decided in that planning.
+- Plan the next suite of experiments next.
+
 ## Results
 
 All numbers are from one training seed (pilot strength). "No clear
@@ -687,12 +847,13 @@ medians at round 3 (step about 20,000).
 - **TEST by metric dojo size** (`multi_metric`, round 3, from
   `test_loss_by_dojo.csv` and the TRAIN counts in `diet_shares.csv`):
   - The dojos that learn best are large run-level and deck-level ones.
-    For example `sts2_runs.character_prediction` (2.1M TRAIN examples)
+    For example `sts2_runs.character_prediction` (2.1M TRAIN examples; corrected: see Log, Corrections 2026-10-14)
     reaches 0.06, and `sts2_runs.floors_cleared` reaches 0.33.
   - The worst are per-card statistics with about 440-450 TRAIN cards,
     such as `sts_gg.card_deck_size` (2.43) and
     `sts2_runs.card_relic_count` (1.93). Their heads end worse than the
-    mean predictor.
+    mean predictor. (Corrected: the TRAIN counts and the "overfit"
+    reading are withdrawn; see Log, Corrections 2026-10-14.)
 
 ### Per-card probe (the Aim's metric)
 
@@ -858,6 +1019,7 @@ seeds.
   classifier is involved, and the corpus is every card rather than the
   probe pool. Every trained cell is below every control on nearest-centroid
   accuracy for every card field, with one exception (holdout tier sits at chance for all of them).
+  (Corrected: there are three exceptions; see Log, Corrections 2026-10-14.)
 - **The exception is Flesh and Blood class**, under the contrastive and
   mixed diets:
   - nearest-centroid accuracy 0.68-0.72 against 0.53-0.60 for the controls;
@@ -916,7 +1078,9 @@ lower is better).
 | `gwent_one.faction_mask` | 0.77-1.00 | 0.91 / 1.01 / 0.92 | 0.80-0.90 | 0.85 / 1.00 / 0.88 |
 | median over 13 dojos | 0.78-0.86 | 0.89 / 0.95 / 0.92 | 0.82-0.86 | 0.84 / 0.95 / 0.91 |
 
-- **The deck skill transfers to Gwent once a head is trained.** On leader
+- **The deck skill transfers to Gwent once a head is trained.** (Corrected:
+  within a 3,000-step head budget, and the faction route is not ruled out;
+  see Log, Corrections 2026-10-14.) On leader
   from deck (Gwent's version of FaB hero from deck), the contrastive cells
   reach 0.63-0.69 and the mixed cells 0.76-0.77, against 0.82-0.99 for the
   controls and 0.96-1.00 for metric-only. This is the only Gwent dojo where
@@ -975,13 +1139,130 @@ Hearthstone contrastive dojos.
   the intrinsic suite. These tasks score groups of cards, where its
   attention applies.
 - **Multi-card metric-only is far worse than chance on STS2 and MTG** (3.70
-  and 3.81). This fits the collapsed geometry.
+  and 3.81). This fits the collapsed geometry. (Corrected: withdrawn; see
+  Log, Corrections 2026-10-14.)
 - **Dominion learns little even in training.** One possible reason, not
   checked: its "decks" are kingdoms, 10 cards drawn from a large pool.
 - **Run time:** about 8-10 min per encoder, mostly building deck examples
   on the CPU (not profiled; a TODO is in `src/dojos/TODO.md`).
 
 ## Conclusions
+
+Everything here comes from one training seed, so it is pilot strength
+(`EXPERIMENT_PRINCIPLES.md` §1). A gap under 0.02 is "no clear
+difference", as set in the Method. Referee report 1 and the responses are
+in the Log (2026-10-14).
+
+### Verdicts
+
+| part of the aim | verdict | evidence |
+|---|---|---|
+| **Problem:** a cell beats its untrained control by +0.03 deck AUC and loses at most 0.03 linear-cls, on the full probe and on the slice | **Not met.** Deck AUC passes easily for the four cells with contrastive dojos (+0.14 to +0.20). Every cell fails the linear-cls limit: -0.036 to -0.123 against control seed 0, -0.046 to -0.120 against the control mean. On the slice, held-out-field linear-cls falls 0.09 to 0.20. This holds under both control readings. | `probe_vs_control.csv` |
+| **H1, diet:** mixed gives the best balance | **Model-dependent** (the Aim's term for a split verdict): **refuted for single-card; not refuted for multi-card, by a narrow margin.** Single-card contrastive-only beats mixed on deck AUC (0.767 against 0.711) with no clear linear-cls difference (0.615 against 0.617). Multi-card contrastive-only leads on deck AUC by +0.027 but loses linear-cls by 0.023. Both gaps are just over the 0.02 threshold, at one seed. **The predicted mechanism is wrong in both models:** metric-only does not keep the field probes. It collapses the embedding (effective rank 2.7 and 5.6; deck AUC 0.500 and 0.522). | `probe_summary.csv` |
+| **H2, model:** no clear single- vs multi-card difference on per-card probes | **Unresolved.** By the 0.02 rule it is refuted in both directions: single-card leads on contrastive (+0.030), multi-card on metric (+0.022), and mixed is tied (0.711 against 0.710). The deck bootstrap does not cover training-seed noise. The models also differ in depth (9 MLP blocks, against 3 blocks plus 2 attention layers), and the isolated view runs attention over a group of one. | `probe_summary.csv`; parameter counts in the Recipe |
+
+**The fallback rule** (Aim: no cell met the bar):
+- Cells within 0.02 of the smallest linear-cls loss are tied:
+  - against control seed 0: `single_mixed` -0.036, `single_contrastive`
+    -0.038, `multi_mixed` -0.049;
+  - against the control mean: `multi_mixed` -0.046, `single_mixed`
+    -0.053, `single_contrastive` -0.055.
+- The tie-break is mixed over single-objective, then single-card over
+  multi-card. It picks **`single_mixed` under both readings**.
+- **This is an interpretation fixed at conclusion, not before launch.**
+  The Aim's 0.02 tie and tie-break were written for ranking cells that
+  pass, by deck AUC. The fallback says only "whichever cell loses the
+  least linear-cls". Read strictly, that is `single_mixed` against seed 0
+  and `multi_mixed` against the control mean. Every gap here is within
+  the control-seed spread on linear-cls (0.035), `single_mixed`'s -0.036
+  included.
+- "The untrained whitened encoder" is taken to be the **head-free frozen
+  whitened mean** (768-d). It beats every trained cell and every control
+  on linear-cls (0.863), the slice (0.956) and Gwent deck AUC (0.639).
+  This reading was fixed at conclusion, not before launch.
+- **Default for series 2:** the frozen whitened mean as the reference
+  encoder, with `single_mixed` as the trained pilot default. The human's
+  decision (Log, 2026-10-14) is to plan the next experiments around
+  contrastive pre-training, so this default is a reference point, not a
+  commitment.
+
+### Further findings (secondary; one seed)
+
+1. **Metric-only training with a trainable encoder collapses the
+   embedding**, while its TEST loss improves (`single_metric` 0.997,
+   `multi_metric` 0.936).
+   - Mean cosine is 0.99 and 0.94; kNN game accuracy 0.54 and 0.47
+     against about 0.89 untrained.
+   - It does not cluster the fields it trains (MTG type, Pokémon stage,
+     FaB class, STS2 character). The partial exception is `multi_metric`
+     on STS2 character: NMI 0.28, against 0.02-0.05 for the controls.
+   - Falling metric TEST is not evidence of a better embedding.
+   - The effects are far larger than the control-seed spread.
+2. **Contrastive training trades card-text structure for deck
+   structure.**
+   - **Gains:** same-deck AUC; STS2 character (NMI 0.02-0.05 to
+     0.86-0.87, with no character dojo); FaB class (NMI about 0.14 to
+     0.55-0.58).
+   - **Losses:** every other field, held-out or trained (intrinsic
+     suite; fresh heads on STS2 card type 0.33-0.35 to 0.48-0.98).
+   - A reading consistent with this, untested: contrastive keeps what
+     deck-mates share, and drops fields that don't predict co-occurrence
+     (Log, conclusion discussion).
+   - **Scope:** every probed field is written verbatim in the card
+     JSON. So linear-cls measures how much input text is preserved, not
+     card understanding in general.
+   - Cosine-based measures are not corrected for anisotropy (mean cosine
+     0.53-0.99 across encoders).
+3. **Unseen game (Gwent).**
+   - Zero-shot, the deck structure is absent: contrastive score
+     0.99-1.02, where 1.0 = chance.
+   - With a fresh head, within a 3,000-step budget, the contrastive cells
+     reach 0.63-0.69 on leader from deck, against 0.82-0.99 for the
+     controls.
+   - Every other Gwent field is worse after training, or within the
+     control spread (5 of 13 Gwent dojos are tabulated in Results).
+   - The faction route described in the Corrections is not ruled out.
+4. **Fresh heads on the 13 held-out dojos.** No trained cell differs
+   from its control by more than initialization noise on the median.
+   - Per dojo, deck-level tasks gain: FaB hero from deck 0.92-1.01 to
+     0.24-0.29. That may be in-sample at the deck level (referee 7).
+   - Card-field tasks lose.
+   - Four dojos are learned by no encoder in this budget.
+   - About half the held-out heads (51 of 104) and a fifth of the Gwent
+     heads (32 of 156) had their best TEST in the last round, so this
+     measures learning within the budget, not a ceiling.
+5. **The untrained 256-d head loses information before any training.**
+   Linear-cls goes from 0.863 (frozen mean) to about 0.67, and effective
+   rank from 233 to about 100. This is the largest single gap in the
+   probe.
+6. **Not measured: the frozen whitened mean on any extrinsic or intrinsic
+   suite evaluation.** Whether training "regresses against frozen BERT
+   downstream" is an inference from the probe, not a result.
+
+### Where each conclusion went
+
+- **The fallback default and the evaluation gaps → `experiments/TODO.md`**,
+  "From model_by_diet_r2" section. That covers:
+  - the frozen-mean reference in every evaluation;
+  - control seeds;
+  - the head budget;
+  - experiments A-E;
+  - centered cosine;
+  - contrastive-only at 10k steps;
+  - per-round checkpoint probes.
+- **Metric-only collapses; contrastive is the pre-training direction →
+  `experiments/TODO.md`** (same section), as the premise of the next
+  suite. Not adopted into a config default, because nothing is trained by
+  default yet.
+- **Code fixes → `src/training/TODO.md`:**
+  - seed the model's initial weights;
+  - log training loss per round;
+  - label untrained held-out dojos in the training-time TEST.
+- **Evaluation gaps → `src/evaluation/TODO.md`:**
+  - a head-free frozen-feature reference encoder;
+  - several control and head seeds with paired differences;
+  - a convergence check on the fresh-head budget.
+- **The index row → `experiments/README.md`.**
 
 ## Open questions
 
@@ -1010,3 +1291,17 @@ Hearthstone contrastive dojos.
 - **More seeds** of the leading cells (proposed experiment E).
 - **What data to collect next**: no ranking of data types is possible
   from this grid; see the PI review's answer and experiment C.
+
+**Addendum 2026-10-14, after conclusion** (human):
+- **Attention over text and refined embeddings.** New architectures
+  where an attention head combines two inputs:
+  - the whitened frozen text embedding;
+  - a contrastive-trained refinement of it.
+
+  This is a learned extension of experiment A's skip and concatenation
+  variants. Contrastive keeps what deck-mates share and drops other text
+  fields (Conclusions, finding 2), so the text path would keep those
+  fields while the contrastive path learns deck structure.
+- **Multi-stage diet: contrastive first, then metric.** Already listed
+  above as experiment B. The addendum re-affirms it as a priority
+  direction.

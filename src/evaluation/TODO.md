@@ -86,3 +86,29 @@ evaluating a finished experiment is one command instead of new
   experiment scripts' cache; exact against the real model).
 - **Standard output:** one scalars CSV across encoders, so experiments
   compare without per-experiment report scripts.
+
+## Controls and noise in extrinsic and intrinsic runs
+
+Gaps found in 2026-10-11_model_by_diet_r2 (Conclusions, and referee
+report 1 in its `reviews/`):
+
+- **A head-free frozen-feature reference encoder.** It is the frozen
+  pooled (and whitened) feature with no trainable head. In that
+  experiment it was the strongest encoder on the probe, but it was
+  never run through fresh heads or the intrinsic suite. So "trained
+  against frozen" downstream is unmeasured. Every evaluation run should
+  include it.
+- **Several control seeds and head seeds, with paired differences.**
+  Untrained controls under different seeds differ by about 0.08 in median
+  fresh-head loss (Gwent), and by up to 0.22 on one dojo. Report each
+  encoder's per-dojo difference against the control mean, not against
+  one control seed.
+- **A convergence check on the fresh-head budget.** At 3,000 steps about
+  half the held-out heads (51 of 104) and a fifth of the Gwent heads (32
+  of 156) hit their best TEST in the last round. Either stop on plateau, or
+  flag dojos whose best round is the last, so a learning-speed difference
+  isn't read as a ceiling.
+- **Centered-cosine variants** of the cosine-based analyses
+  (nearest-centroid, cluster agreement, deck AUC). Encoders differ in
+  mean cosine from 0.53 to 0.99, which confounds the cross-encoder
+  comparisons.
