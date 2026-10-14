@@ -585,6 +585,77 @@ Two facts noted while checking:
 - **Every probed field appears verbatim in the serialized card JSON** (e.g.
   `"color":"silent"`, `"cardClass":"WARRIOR"`, `"faction":"nilfgaard"`).
 
+### 2026-10-14 · Discussion with the human: intrinsic results (principal investigator)
+
+**The human's positions** (recorded as stated):
+- **The goal.** Useful, high-quality embeddings, judged by how they score
+  in the evaluation module. Recovering fields already written in the card
+  text is a nice-to-have, not a need.
+- **Transfer.** Transfer to games, sets and cards not in training,
+  effective though not perfect, is a major research goal. So evaluating
+  held-out cards and games is a priority.
+- **Preliminary finding:** the deck signal is learned per game and does not
+  transfer. The human called this disappointing given the transfer goal.
+- **Preliminary finding:** single- and multi-card tie on the structure
+  measures. The human expected each model to win on its own kind of task. A
+  possible reading: multi-card may be better overall, since it matches
+  single-card on single-card evaluations and is likely better on multi-card
+  ones.
+- **Observations from the figures:**
+  - metric-only training collapses the embedding;
+  - the 5-6 STS2 clusters in the contrastive cells look like characters
+    (confirmed; see the previous entry);
+  - the frozen encoder's strength may come from reading each game's JSON
+    rather than from anything useful, and the 256-d output may be too small.
+
+**Correction to my earlier wording.** I told the human that "none of the 13
+held-out dojos is a Gwent dojo", which read as if Gwent dojos did not exist.
+That was misleading. This experiment has two separate holdouts:
+- `holdout.held_out_games: [gwent]` makes every Gwent card VALIDATION-tier;
+- `held_out_dojos` lists 13 dojos left out of training whose untrained heads
+  were scored each round.
+
+I checked the recorded config: "gwent" appears once, under
+`held_out_games`. No Gwent dojo is in any diet or in `held_out_dojos`, so
+Gwent was never trained and never scored during training. **This is not a
+holdout bug.** It is a gap in the design:
+- the only planned Gwent measure was the probe's Gwent deck AUC;
+- the step-2 fresh-head runs used only `held_out_dojos`.
+
+The catalog has 19 Gwent dojos.
+
+**New runs** (human-approved):
+- **`analysis/extrinsic_gwent.py`:** fresh heads on the 13 Gwent dojos that
+  have a trainable head, on the 6 cells and 6 controls.
+  - Built with a holdout of the same seed and ratios but no held-out game:
+    under the runs' holdout every Gwent card is VALIDATION, so a fresh head
+    would have no TRAIN examples.
+  - The encoders still never saw a Gwent card.
+  - Settings as `extrinsic_held_out.py`.
+- **`analysis/zero_shot_contrastive.py`:** the 5 Gwent contrastive dojos have
+  no head, so they cannot take a fresh head. Instead, every contrastive dojo
+  (trained games and Gwent) is scored on VALIDATION with each frozen encoder
+  and no training, using the trainer's own `evaluate_split_losses`.
+  - This puts seen and unseen games on one scale: 1.0 = chance.
+
+**PI notes on the human's points:**
+- **Embedding width.** Width is probably not what limits the trained cells:
+  they use 13-30 effective dimensions of 256, against about 110 for the
+  controls. It may matter for the untrained head (frozen 768-d to 256-d
+  loses linear-cls 0.86 to 0.67). Proposed experiment A (an offline probe of
+  head widths and linear or skip variants) tests this in minutes.
+- **Single- against multi-card.** The "likely better on multi-card tasks"
+  half is not yet tested by any evaluation:
+  - so far it rests on training TEST, which scores cards in context;
+  - on the fresh-head runs multi-card was not better (median 0.964 against
+    0.876 contrastive; 0.814 against 0.856 mixed);
+  - on FaB hero from deck the two tie (0.238 against 0.243);
+  - on the per-card probe single-card leads on deck AUC (0.767 against
+    0.737, intervals not overlapping).
+
+  The card-in-contexts evaluation (`src/evaluation/TODO.md`) is the test
+  built for this question.
+
 ## Results
 
 All numbers are from one training seed (pilot strength). "No clear
@@ -821,6 +892,50 @@ seeds.
   [`results/learning_curves/`](results/learning_curves/), one per held-out
   dojo. They show, for example, the contrastive-trained encoders' early
   lead on `fabtcg_decklists.hero_masked_from_deck`.
+
+### Gwent, the held-out game: fresh heads
+
+From [`results/extrinsic_gwent_validation.csv`](results/extrinsic_gwent_validation.csv)
+and [`extrinsic_gwent_summary.csv`](results/extrinsic_gwent_summary.csv).
+The setup:
+- 13 Gwent dojos, 6 cells, 6 controls (3 seeds per shape);
+- settings as the held-out fresh-head runs;
+- Gwent cards split 8/1/1 for the heads (see the discussion Log entry).
+
+Values are normalized VALIDATION loss (1.0 = mean predictor or prior;
+lower is better).
+
+![Gwent fresh heads](results/extrinsic_gwent_by_dojo.png)
+
+| dojo | untrained single | single contr. / metric / mixed | untrained multi | multi contr. / metric / mixed |
+|---|---|---|---|---|
+| `play_gwent.leader_masked_from_deck` | 0.98-0.99 | **0.69** / 1.00 / **0.76** | 0.82-0.90 | **0.63** / 0.96 / **0.77** |
+| `gwent_one.type_mask` | 0.45-0.51 | 0.84 / 0.89 / 0.72 | 0.52-0.68 | 0.69 / 0.75 / 0.91 |
+| `gwent_one.color_mask` | 0.45-0.67 | 0.71 / 0.82 / 0.54 | 0.38-0.49 | 0.65 / 0.75 / 0.86 |
+| `gwent_one.rarity_mask` | 0.68-0.80 | 0.82 / 0.79 / 0.90 | 0.70-0.73 | 0.84 / 0.83 / 0.95 |
+| `gwent_one.faction_mask` | 0.77-1.00 | 0.91 / 1.01 / 0.92 | 0.80-0.90 | 0.85 / 1.00 / 0.88 |
+| median over 13 dojos | 0.78-0.86 | 0.89 / 0.95 / 0.92 | 0.82-0.86 | 0.84 / 0.95 / 0.91 |
+
+- **The deck skill transfers to Gwent once a head is trained.** On leader
+  from deck (Gwent's version of FaB hero from deck), the contrastive cells
+  reach 0.63-0.69 and the mixed cells 0.76-0.77, against 0.82-0.99 for the
+  controls and 0.96-1.00 for metric-only. This is the only Gwent dojo where
+  trained cells clearly beat the controls.
+  - The gain is smaller than on the trained game (FaB hero: 0.24-0.29), but
+    clear.
+  - The untrained multi-card controls already score 0.82-0.90 against
+    0.98-0.99 for single-card. Group attention over a deck helps a deck task
+    even untrained.
+- **Card fields on Gwent get worse after training**, as the intrinsic suite
+  showed. Type, color and rarity heads do best on the controls.
+- **Medians hide both effects.** Every trained cell's median is above
+  the control range except `multi_contrastive` (inside it). Per-dojo results are needed.
+- **Dojos nobody learns:**
+  - `play_gwent.guide_votes` (about 1.03-1.04) and `gwent_one.power_mask`
+    (about 1.01-1.07) stay at or above 1.0 for every encoder;
+  - `final_decks.held_out_card_gwent` ends above 1.0 for every encoder
+    (1.14-2.37). The metric cells are lowest (1.14), but still worse than
+    the baseline.
 
 ## Conclusions
 
