@@ -1,6 +1,6 @@
 # Series 1, round 2: model × diet on a stable embedding
 
-**Status:** running
+**Status:** awaiting review
 **Dates:** 2026-10-11 -
 **Parent:** [2026-10-09_model_by_diet](../2026-10-09_model_by_diet/NOTEBOOK.md) · **Branch:** `experiment/2026-10-11_model_by_diet_r2`
 
@@ -326,6 +326,11 @@ Pre-flight: free RAM 23.9 GB, VRAM 17.0 of 17.2 GB free with no other
 Python process, 1.1 TB free on G:. No separate `--check`; as for the
 other single-card cells, the run's startup preflight covers it. Its
 launch config differs from `multi_mixed` only in the model block.
+
+### 2026-10-14 · Batch 3, run 1 and wrap-up (lab_technician)
+
+- [single_mixed done](bench_notes/2026-10-14_0730_single_mixed_done.md): exit 0, 478 min; TEST medians after round 3: contrastive 0.745 (1.00 = chance), trained metric 0.947, held out 1.093 (1.0 = mean predictor).
+- [Batch 3 wrap-up](bench_notes/2026-10-14_0735_batch3_wrap_up.md): all 6 training cells done. On TEST, multi-card is lower than single-card on every diet (the mixed trained-metric gap is under 0.02); mixed matches or beats metric-only on trained metric; no cell moves the held-out dojos below 1.08. The probe and controls are next (principal investigator).
 
 ## Results
 
