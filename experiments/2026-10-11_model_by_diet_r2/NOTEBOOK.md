@@ -529,6 +529,44 @@ Small code fixes these runs exposed (for the owning TODOs):
 - either drop held-out dojos from the training-time TEST, or label them
   "untrained head" in the logs.
 
+### 2026-10-14 · Intrinsic suite with src/evaluation (principal investigator, human request)
+
+The human asked to run the evaluation module's own intrinsic analyses, so
+the numbers compare across experiments. The per-card probe above is
+experiment code from the pooling probe, not `src/evaluation`. The Method had
+listed the module's tools as "later, outside this aim".
+
+- **Script:** `analysis/intrinsic_suite.py`, summarized by
+  `analysis/intrinsic_report.py`. It uses the module as built:
+  - **Embedding:** one `EmbeddingTable` per encoder, isolated view, over
+    every card of all 7 games (65,634 cards).
+  - **Label-free:** `EffectiveRank` on the whole table.
+  - **Per label source:** `ClusterAgreement`, `LabelCompactness` and
+    `ProjectionPlot`, with `PerLabelCap(500)` and seed 0.
+  - **Learning curves:** `plot_learning_curves` over the fresh-head runs'
+    rounds CSVs.
+- **Encoders:** the 6 cells and the 6 untrained controls (seeds 0-2 per
+  shape). The head-free whitened mean is not included, since it is not a
+  model the module can embed with.
+- **Label sources:**
+  - every card: `game` and `holdout_tier` (the runs' holdout);
+  - held out in every cell (`MetricParquetLabels`): rarity tier across
+    games, Hearthstone class, Flesh and Blood pitch, STS2 card type;
+  - trained in the metric and mixed cells: MTG card type, Flesh and Blood
+    class, Pokémon stage;
+  - the unseen game: Gwent faction.
+- **Frozen features:** computed once for all 65,634 cards, about 4 min. Each
+  trained cell was checked against the real model on 64 cards: minimum
+  cosine 0.99975 to 0.99999.
+- **Time:** 10:03 to 10:34. No analysis was skipped.
+- **Output:** `data/evaluations/2026-10-11_model_by_diet_r2/`, summarized in
+  `results/intrinsic_*` and `results/learning_curves/`.
+
+The human also asked for two TODOs, added to `src/evaluation/TODO.md`:
+- deck AUC as an intrinsic analysis;
+- `run_evaluation.py` driving an experiment's held-out dojos, cards and
+  games.
+
 ## Results
 
 All numbers are from one training seed (pilot strength). "No clear
@@ -668,6 +706,82 @@ better). The setup:
 - **Speed.** With the cached frozen features, each encoder's 3,000 steps
   plus TEST and VALIDATION took about 4-9 min. The cache grew to 51,523
   cards. The log covers 07:32 to 08:09 for all eight encoders.
+
+### Intrinsic suite from src/evaluation (standard comparison)
+
+From [`results/intrinsic_summary.csv`](results/intrinsic_summary.csv)
+(every scalar: [`intrinsic_scalars.csv`](results/intrinsic_scalars.csv)).
+The setup:
+- isolated view;
+- 65,634 cards;
+- `PerLabelCap(500)`, seed 0.
+
+Nearest-centroid accuracy is leave-one-out; its majority baseline is in
+the CSV. The "untrained" columns give the range over the three control
+seeds.
+
+| label source | untrained single | single contr. / metric / mixed | untrained multi | multi contr. / metric / mixed | majority baseline |
+|---|---|---|---|---|---|
+| game | 0.83-0.86 | 0.69 / 0.34 / 0.49 | 0.82-0.84 | 0.59 / 0.35 / 0.55 | 0.14 |
+| held out: rarity tier | 0.47-0.51 | 0.34 / 0.33 / 0.35 | 0.45-0.51 | 0.32 / 0.37 / 0.31 | 0.19 |
+| held out: HS class | 0.49-0.52 | 0.29 / 0.15 / 0.24 | 0.46-0.50 | 0.28 / 0.17 / 0.24 | 0.10 |
+| held out: FaB pitch | 0.53-0.56 | 0.42 / 0.39 / 0.40 | 0.53-0.56 | 0.41 / 0.38 / 0.38 | 0.33 |
+| held out: STS2 type | 0.85-0.87 | 0.46 / 0.52 / 0.42 | 0.83-0.86 | 0.47 / 0.62 / 0.46 | 0.43 |
+| trained: MTG type | 0.72-0.74 | 0.43 / 0.30 / 0.33 | 0.69-0.73 | 0.41 / 0.39 / 0.36 | 0.15 |
+| trained: FaB class | 0.57-0.60 | **0.72** / 0.15 / **0.68** | 0.53-0.58 | **0.71** / 0.19 / **0.69** | 0.11 |
+| trained: Pokémon stage | 0.69-0.70 | 0.41 / 0.46 / 0.42 | 0.69-0.71 | 0.39 / 0.47 / 0.38 | 0.26 |
+| unseen: Gwent faction | 0.61-0.66 | 0.40 / 0.22 / 0.31 | 0.60-0.64 | 0.38 / 0.27 / 0.33 | 0.19 |
+| holdout tier | 0.36-0.37 | 0.37 / 0.34 / 0.38 | 0.34-0.36 | 0.34 / 0.37 / 0.37 | 0.33 |
+
+![per label source](results/intrinsic_by_label.png)
+
+**Effective rank** (`EffectiveRank`, all cards):
+
+| model | effective rank | top-1 variance share |
+|---|---|---|
+| untrained single (3 seeds) | 110-111 | 0.04 |
+| untrained multi (3 seeds) | 93-96 | 0.04-0.05 |
+| single contrastive / metric / mixed | 28.7 / 2.7 / 13.1 | 0.12 / 0.76 / 0.20 |
+| multi contrastive / metric / mixed | 24.4 / 6.3 / 12.6 | 0.12 / 0.33 / 0.20 |
+
+- **These agree with the probe, by different methods.** No fitted
+  classifier is involved, and the corpus is every card rather than the
+  probe pool. Every trained cell is below every control on nearest-centroid
+  accuracy for every card field, with one exception (holdout tier sits at chance for all of them).
+- **The exception is Flesh and Blood class**, under the contrastive and
+  mixed diets:
+  - nearest-centroid accuracy 0.68-0.72 against 0.53-0.60 for the controls;
+  - NMI 0.55-0.58 against about 0.14;
+  - silhouette 0.11-0.15 against about 0.
+  - The metric-only cells, which train a FaB class dojo, are far below
+    the controls (0.15-0.19). So the class structure comes from the deck
+    signal, not from the class dojo. A likely reason, not tested: Flesh
+    and Blood decks are built around one hero class, so deck-mates share a
+    class.
+- **The fields metric training targets are not more clustered after
+  metric training.**
+  - MTG type and Pokémon stage are lower in the metric cells than in the
+    controls (0.30-0.47 against 0.69-0.74).
+  - The heads decode these fields from directions that cosine geometry
+    does not show. This fits the collapse reading (top-1 variance share
+    0.76 for `single_metric`).
+- **Holdout tier stays at chance in every encoder** (0.34-0.38 against
+  0.33). Nothing in the geometry separates training cards from held-out
+  cards.
+- **Projections**
+  ([game](results/intrinsic_projection_game.png),
+  [HS class](results/intrinsic_projection_heldout_hs_class.png),
+  [MTG type](results/intrinsic_projection_trained_mtg_card_type.png),
+  [holdout tier](results/intrinsic_projection_holdout_tier.png)), for
+  illustration only:
+  - the controls separate games into large clouds;
+  - the contrastive cells break them into many small, tight clusters, which
+    look like deck neighbourhoods;
+  - the metric cells mix all games together.
+- **Learning curves** of the fresh-head runs are in
+  [`results/learning_curves/`](results/learning_curves/), one per held-out
+  dojo. They show, for example, the contrastive-trained encoders' early
+  lead on `fabtcg_decklists.hero_masked_from_deck`.
 
 ## Conclusions
 
