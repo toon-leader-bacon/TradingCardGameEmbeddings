@@ -332,7 +332,342 @@ launch config differs from `multi_mixed` only in the model block.
 - [single_mixed done](bench_notes/2026-10-14_0730_single_mixed_done.md): exit 0, 478 min; TEST medians after round 3: contrastive 0.745 (1.00 = chance), trained metric 0.947, held out 1.093 (1.0 = mean predictor).
 - [Batch 3 wrap-up](bench_notes/2026-10-14_0735_batch3_wrap_up.md): all 6 training cells done. On TEST, multi-card is lower than single-card on every diet (the mixed trained-metric gap is under 0.02); mixed matches or beats metric-only on trained metric; no cell moves the held-out dojos below 1.08. The probe and controls are next (principal investigator).
 
+### 2026-10-14 · Step 2: probe, controls and fresh-head runs (principal investigator)
+
+What: the human asked for step 2 (evaluate every trained model) and then
+a review of all findings. Three pieces, all from `analysis/`:
+1. **Per-card probe** (`analysis/probe_cells.py`): the pooling probe's
+   card pool and metrics, plus the Method's probe split. Results in
+   `results/probe_summary.csv`, `probe_by_field.csv` and
+   `probe_deck_by_game.csv`.
+2. **Probe tables and figures** (`analysis/probe_report.py`):
+   `results/probe_vs_control.csv` (the bar, per cell) and four figures.
+3. **Fresh-head runs on the 13 held-out dojos**
+   (`analysis/extrinsic_held_out.py`, `src/evaluation/extrinsic`): each
+   encoder frozen, the held-out dojos' heads trained from identical
+   starting weights (6 rounds × 500 steps, uniform diet, head lr 1e-3,
+   seed 0), then scored on VALIDATION at each head's best TEST round.
+   Encoders: the six cells and one untrained control per model shape.
+   Output: `results/extrinsic_validation.csv`.
+
+Deviations from the Method, decided before the fresh-head results:
+- **Controls cannot match the cells' starting weights.** Training never
+  seeds the model's initial weights (`scripts/run_training.py` calls no
+  `torch.manual_seed`; only the dojos and diet are seeded), so the
+  Method's check "the RNG order reproduces the round-0 initial weights"
+  cannot pass. Instead each model shape has three untrained controls
+  (`torch.manual_seed` 0, 1, 2), which also shows how much a random
+  initialization moves the probe. The bar is reported against control
+  seed 0 and against the mean of the three.
+- **The held-out TEST numbers in the bench notes do not measure transfer.**
+  The trainer evaluates held-out dojos every round but never trains
+  their heads (`src/training/README.md`: "evaluated every round but
+  never trained on"), so their loss is that of a randomly initialized
+  head. Flat values of 1.08-1.15 are expected whatever the encoder
+  learned. The wrap-up observation "no diet moved the held-out dojos" is
+  correct as a number but says nothing about the embedding
+  ([batch 3 wrap-up](bench_notes/2026-10-14_0735_batch3_wrap_up.md),
+  [batch 2 wrap-up](bench_notes/2026-10-13_1415_batch2_wrap_up.md)). The
+  fresh-head runs replace it as the transfer measure. The Method listed
+  them as "later, outside this aim"; they are run now at the human's
+  request and reported as secondary evidence, not as part of the bar.
+- **Speed: the frozen features are computed once per card.** ModernBERT,
+  token whitening and mean pooling have no trainable weights, and all six
+  runs used byte-identical whitening stats, so both scripts compute the
+  pooled 768-d vector once per card and run only each model's head and
+  attention. `probe_cells.py` checks this against the real model on 64
+  cards per cell: minimum cosine 1.00000 in all six.
+- **The out-of-sample linear-cls slice uses every card of the three
+  games** (Hearthstone, Flesh and Blood, Slay the Spire 2), not just the
+  probe pool, so that the non-TRAIN-tier subset is large enough: 1,272
+  Hearthstone class, 860 pitch and 101 STS2 type cards, 5-fold CV.
+
+Why: the probe is the Aim's decision metric; the fresh-head runs are the
+only measure of transfer to dojos the encoder never trained on.
+
+### 2026-10-14 · PI review, draft for discussion (principal investigator)
+
+This is a draft. Nothing here is a Conclusion yet: the verdicts below are
+proposed, for discussion with the human. Every number is in Results.
+
+**Proposed verdicts** (judged against the predictions written before
+launch):
+
+| part of the aim | proposed verdict | evidence |
+|---|---|---|
+| Problem: the bar | **not met.** Every cell fails the linear-cls limit, and all cells are below their controls on the slice. Under the fallback rule, the default stays the untrained whitened encoder, plus the cell that loses the least linear-cls: `single_mixed` (-0.036 vs seed 0) and `single_contrastive` (-0.038) are tied (under 0.02). | `probe_vs_control.csv` |
+| H1, diet | **model-dependent.** Single-card: refuted. Contrastive-only beats mixed on deck AUC (0.767 against 0.711), with no clear linear-cls difference (0.615 against 0.617). Multi-card: not refuted. Contrastive-only leads on deck AUC (+0.027) but loses linear-cls (-0.023), and metric-only is worse on both. The predicted mechanism was wrong: metric-only does not keep the field probes, it collapses the embedding. | `probe_summary.csv` |
+| H2, model | **refuted**, in single-card's favour. On the contrastive diet single-card leads by 0.030 deck AUC, and the bootstrap intervals don't overlap. Mixed shows no clear difference (0.711 against 0.710). The metric-only gap (+0.022 to multi) is between two collapsed embeddings near chance, so it carries little weight. | `probe_summary.csv` |
+
+**Key findings**
+
+1. **TEST and the per-card probe disagree about the model.** Multi-card
+   wins TEST on every diet, but single-card matches or beats it on the
+   isolated per-card probe. Two observations point the same way:
+   multi-card's TEST advantage lives in context, and running group
+   attention over a group of one costs card information. The second
+   shows in multi-card's pre-attention view, which keeps 0.05-0.08 more
+   linear-cls than its isolated view.
+2. **Metric training with a trainable encoder collapses the card
+   embedding while its TEST loss improves.** Effective rank falls to 2.7
+   and 5.6. A likely cause (a hypothesis, not tested):
+   - the metric heads total about 17M parameters, against the encoder's
+     2.9M, so they can decode tiny differences, and nothing pushes the
+     encoder to keep its geometry spread out;
+   - the metrics that learn best are run-level ones (e.g. STS2 character
+     at 0.06), which a few directions solve.
+
+   Falling metric TEST is therefore not evidence of a better embedding.
+3. **Contrastive training is the only source of the deck signal.** The
+   signal holds for non-TRAIN-tier cards in the seen games (0.725
+   against about 0.57), but not for the unseen game: Gwent deck AUC is
+   below the controls in every cell. It also helps a deck-level held-out
+   task strongly (FaB hero from deck: 0.24-0.29 against 0.92-1.01).
+4. **Every trained cell loses card-field information**, and most on the
+   fields no dojo trains (slice: -0.09 to -0.20).
+5. **The untrained head loses the most information of all.** The frozen
+   whitened mean beats every trained cell and every control on
+   linear-cls (0.863), the slice (0.956) and Gwent (0.639). The 256-d
+   residual MLP head loses much of that before any training. This is
+   the largest effect in the experiment, and the cheapest to study: an
+   offline probe of untrained head variants needs no training.
+6. **The mixed diet transfers best to held-out dojos with fresh heads**
+   (median 0.856 single and 0.814 multi, against 0.938 and 0.915 for the
+   controls; 7 of 13 dojos better than control). Contrastive-only and
+   metric-only show no clear median difference from their controls.
+   This is secondary, one head seed and a short head budget, and 4 of 13
+   dojos don't learn at all.
+7. **Small per-card statistic dojos overfit.** About 450 TRAIN cards
+   each, sampled throughout 20,000 steps, leaves their TEST worse than
+   the mean predictor (up to 2.4×).
+
+**The human's questions**
+- **Is multi-card the better model?** Not for per-card embeddings, on
+  this evidence. It wins when cards are scored together, which is
+  exactly where its attention helps. On the isolated view it is tied or
+  worse, and it costs about 5% more time per step. If downstream use is
+  per-card retrieval or storage (what evaluation stores), single-card is
+  the pick for now. If downstream use is in-context (scoring a deck), it
+  is multi-card. One seed; a second seed would firm this up.
+- **Contrastive pre-training, then metrics as post-training?** Partly
+  supported:
+  - contrastive is clearly the right pre-training signal;
+  - metric training on a trainable encoder is destructive, so metric
+    "post-training" should leave the encoder frozen (heads only), or use
+    a guarded fine-tune. Related work: Kumar et al. 2022, *Fine-Tuning
+    can Distort Pretrained Features*
+    ([arXiv:2202.10054](https://arxiv.org/abs/2202.10054)), whose
+    linear-probe-then-fine-tune recipe fits this case.
+
+  Against a pure curriculum: mixed transferred best to fresh heads. So
+  some metric signal during pre-training may help, as long as the
+  contrastive loss keeps the geometry from collapsing. That is a
+  testable question (proposed experiment B).
+- **More contrastive or more metric data?** The data says the bottleneck
+  right now is the model, not the data:
+  - the frozen features already hold most of the card-field information
+    that training loses (finding 5);
+  - metric TEST improvements did not make better embeddings (finding 2).
+
+  Within that, what the data does suggest:
+  - **Contrastive:** more decks for the small games (Pokémon has 150
+    TRAIN decks, and its probe deck AUC of 0.93 is probably partly
+    memorized). The Gwent result also says that deck signal does not yet
+    cross games, so more game variety may matter more than more MTG
+    decks.
+  - **Metric:** prefer metrics with many examples per target (run-level,
+    pick-level, draft-level). Per-card statistic dojos with a few
+    hundred cards overfit as currently weighted, and need either
+    pooling across games or far fewer steps.
+  - Which metrics best preserve card fields can't be answered from this
+    grid. It needs an ablation by metric family (proposed experiment C).
+- **Faster training.** The frozen-feature cache works exactly (minimum
+  cosine 1.00000 against the real model). With it, a fresh-head run
+  covered 3,000 steps in about 4 min per encoder, once 51.5k cards were
+  cached. While ModernBERT stays frozen, training could read cached
+  features instead of running the language model every step. That is
+  likely the biggest throughput gain available, ahead of batch-size
+  tuning. Not measured for training yet.
+
+**Weaknesses to discuss**
+- One training seed, and one head seed for the fresh-head runs.
+- The controls can't reproduce the cells' starting weights.
+- The probe pool's decks are partly TRAIN decks: deck AUC is partly in
+  sample, as the Method expected.
+- The fresh-head budget is short.
+
+**Proposed next experiments** (for discussion; not yet in
+`experiments/TODO.md`):
+- **A. Head that preserves the frozen features.** First, an offline
+  probe of untrained variants (minutes, no training):
+  - a linear projection;
+  - a residual skip from the frozen feature;
+  - 512 or 768 wide;
+  - no output LayerNorm.
+
+  Then a short training pilot with contrastive and an anti-collapse
+  term. Candidates are VICReg's variance and covariance terms (Bardes
+  et al. 2022, [arXiv:2105.04906](https://arxiv.org/abs/2105.04906)) or
+  the uniformity loss (Wang & Isola 2020,
+  [arXiv:2005.10242](https://arxiv.org/abs/2005.10242)). See also Jing
+  et al. 2022 on dimensional collapse
+  ([arXiv:2110.09348](https://arxiv.org/abs/2110.09348)).
+- **B. Curriculum.** Contrastive pre-training, then (i) metric heads on
+  the frozen encoder, against (ii) a full metric fine-tune, against
+  (iii) mixed from the start, at equal total steps. This tests the
+  human's idea directly.
+- **C. Why metric training collapses.** Smaller dojo heads, and per-card
+  metric dojos against run- and deck-level ones, trained separately.
+- **D. Throughput.** Train from cached frozen features. Measure steps/s
+  and check that the results match an uncached run.
+- **E. Seeds.** Two more seeds of `single_contrastive`, `single_mixed`
+  and `multi_mixed`, cheaper once D lands.
+
+Small code fixes these runs exposed (for the owning TODOs):
+- seed the model's initial weights in `run_training.py`;
+- log training loss per round;
+- either drop held-out dojos from the training-time TEST, or label them
+  "untrained head" in the logs.
+
 ## Results
+
+All numbers are from one training seed (pilot strength). "No clear
+difference" means a gap under 0.02, as set in the Method.
+
+### Training (TEST loss)
+
+From [`results/test_loss_by_round.csv`](results/test_loss_by_round.csv)
+and [`test_loss_by_round.png`](results/test_loss_by_round.png). These are
+medians at round 3 (step about 20,000).
+
+| cell | contrastive (25; 1.00 = chance) | trained metric (124; 1.0 = mean predictor) |
+|---|---|---|
+| single_contrastive | 0.670 | - |
+| single_metric | - | 0.997 |
+| single_mixed | 0.745 | 0.947 |
+| multi_contrastive | 0.532 | - |
+| multi_metric | - | 0.936 |
+| multi_mixed | 0.662 | 0.942 |
+
+- Contrastive TEST left chance in every cell that trained it, as
+  predicted.
+- No trained metric dojo went above 5× in any round, as predicted.
+- Multi-card has the lower TEST on every diet. The one exception is mixed
+  trained-metric (0.942 against 0.947), which is no clear difference.
+- **Correction:** the held-out TEST numbers in the bench notes come from
+  heads that were never trained (see the 2026-10-14 step 2 Log entry).
+  They don't measure transfer; the fresh-head runs below do.
+- **TEST by metric dojo size** (`multi_metric`, round 3, from
+  `test_loss_by_dojo.csv` and the TRAIN counts in `diet_shares.csv`):
+  - The dojos that learn best are large run-level and deck-level ones.
+    For example `sts2_runs.character_prediction` (2.1M TRAIN examples)
+    reaches 0.06, and `sts2_runs.floors_cleared` reaches 0.33.
+  - The worst are per-card statistics with about 440-450 TRAIN cards,
+    such as `sts_gg.card_deck_size` (2.43) and
+    `sts2_runs.card_relic_count` (1.93). Their heads end worse than the
+    mean predictor.
+
+### Per-card probe (the Aim's metric)
+
+From [`results/probe_summary.csv`](results/probe_summary.csv) and
+[`results/probe_vs_control.csv`](results/probe_vs_control.csv):
+- isolated view;
+- 3,415 cards and 150 decks (25 for each of 6 games);
+- 95% bootstrap intervals over decks.
+
+The "untrained" columns give the range over the three control seeds. Deck
+AUC: 0.5 = chance.
+
+| model | deck AUC [95%] | Gwent deck AUC (unseen game) | linear-cls bacc | slice linear-cls (held-out fields, non-TRAIN cards) | effective rank |
+|---|---|---|---|---|---|
+| frozen whitened mean (768-d, no head) | 0.618 [0.607-0.628] | 0.639 | 0.863 | 0.956 | 232.6 |
+| untrained single-card (3 seeds) | 0.567-0.578 | 0.581-0.608 | 0.653-0.688 | 0.683-0.697 | 106-108 |
+| untrained multi-card (3 seeds) | 0.570-0.572 | 0.588-0.612 | 0.652-0.675 | 0.672-0.692 | 90-93 |
+| single_contrastive | **0.767** [0.757-0.776] | 0.568 | 0.615 | 0.596 | 30.1 |
+| single_metric | 0.500 [0.492-0.508] | 0.504 | 0.582 | 0.581 | 2.7 |
+| single_mixed | 0.711 [0.700-0.721] | 0.552 | 0.617 | 0.538 | 13.2 |
+| multi_contrastive | 0.737 [0.728-0.745] | 0.551 | 0.596 | 0.566 | 25.6 |
+| multi_metric | 0.522 [0.512-0.531] | 0.530 | 0.545 | 0.497 | 5.6 |
+| multi_mixed | 0.710 [0.700-0.720] | 0.537 | 0.619 | 0.557 | 13.2 |
+
+![deck AUC against linear-cls](results/probe_tradeoff.png)
+
+**Against the bar** (`probe_vs_control.csv`):
+- No cell meets it, against either control seed 0 or the mean of the
+  three seeds, on the full probe or on the slice.
+- **Deck AUC passes easily for the four cells with contrastive dojos:**
+  +0.14 to +0.20 over the controls. The metric-only cells fall below
+  them, by 0.05 to 0.07.
+- **Every cell fails the linear-cls limit:**
+  - against control seed 0, losses range from 0.036 (`single_mixed`) to
+    0.123 (`multi_metric`);
+  - against the control mean, from 0.046 to 0.120.
+  - The control seeds alone spread 0.035 on linear-cls, which is as wide
+    as the limit itself.
+- **On the slice, every cell is below its controls on both measures:**
+  - Gwent deck AUC is lower by 0.01 to 0.09;
+  - held-out-field linear-cls is lower by 0.09 to 0.20.
+
+**Other probe readings:**
+- **Deck AUC by anchor tier.** The contrastive gain holds for non-TRAIN
+  cards in the seen games. `single_contrastive` scores 0.725 on
+  non-TRAIN anchors and 0.818 on TRAIN anchors, against about 0.57 for
+  the controls. It does not carry to Gwent
+  ([`probe_deck_by_game.png`](results/probe_deck_by_game.png)).
+- **Metric-only training collapses the isolated embedding.** Mean cosine
+  between cards is 0.99 (single) and 0.94 (multi), effective rank is 2.7
+  and 5.6, and kNN game accuracy is 0.54 and 0.47, against about 0.89
+  untrained ([`probe_effective_rank.png`](results/probe_effective_rank.png)).
+- **Multi-card's pre-attention ("pipeline") view keeps more field
+  information than its isolated view.** Linear-cls is 0.656 against
+  0.596 (contrastive), 0.623 against 0.545 (metric) and 0.666 against
+  0.619 (mixed). The untrained multi-card controls show the same gap,
+  about 0.025.
+- **The untrained 256-d head already loses information.** Going from the
+  frozen whitened mean to the untrained controls, linear-cls falls 0.863
+  to about 0.67, slice linear-cls 0.956 to about 0.69, and effective
+  rank 233 to about 100. On the slice, Flesh and Blood pitch falls from
+  0.926 to 0.55-0.62
+  ([`probe_held_out_fields.png`](results/probe_held_out_fields.png)).
+
+### Fresh heads on the 13 held-out dojos (secondary)
+
+From [`results/extrinsic_summary.csv`](results/extrinsic_summary.csv) and
+[`extrinsic_validation.csv`](results/extrinsic_validation.csv). Values
+are normalized VALIDATION loss (1.0 = mean predictor or prior; lower is
+better). The setup:
+- one control per model shape, seed 0;
+- 3,000 head steps in total (about 230 per dojo);
+- one head seed.
+
+| encoder | median over 13 dojos | dojos below 1.0 | median paired difference vs its control | dojos better / worse than control by > 0.02 |
+|---|---|---|---|---|
+| control_single_s0 | 0.938 | 7 | - | - |
+| single_contrastive | 0.876 | 10 | +0.004 | 3 / 5 |
+| single_metric | 0.964 | 7 | +0.001 | 4 / 4 |
+| single_mixed | 0.856 | 10 | -0.047 | 7 / 4 |
+| control_multi_s0 | 0.915 | 8 | - | - |
+| multi_contrastive | 0.964 | 10 | +0.011 | 4 / 6 |
+| multi_metric | 0.965 | 8 | +0.003 | 5 / 6 |
+| multi_mixed | 0.814 | 10 | -0.027 | 7 / 4 |
+
+![held-out dojos](results/extrinsic_by_dojo.png)
+
+- **Deck-level gain.** `fabtcg_decklists.hero_masked_from_deck` drops
+  from 0.92-1.01 (controls and metric-only) to 0.24-0.29 with any
+  contrastive-trained encoder.
+- **Card-field losses.**
+  - `spire_codex.card_type_mask`: controls 0.33-0.35, trained cells
+    0.48-0.98.
+  - `pokemon_tcg.hp_regression`: controls 0.36-0.43, trained cells
+    0.46-0.78.
+- **Dojos no encoder learns in this budget.** Two stay at about 1.0:
+  `seventeenlands_game_data.deck_win_prediction` and
+  `cardvault_fabtcg.pitch_mask`. Two end above 1.0 for every encoder:
+  `sts2_runs.card_reward_pick` and `sts2_runs.card_win_rate_at_act2`.
+- **Speed.** With the cached frozen features, each encoder's 3,000 steps
+  plus TEST and VALIDATION took about 4-9 min. The cache grew to 51,523
+  cards. The log covers 07:32 to 08:09 for all eight encoders.
 
 ## Conclusions
 
@@ -349,3 +684,17 @@ launch config differs from `multi_mixed` only in the model block.
   Open points: whether the held-out dojos, flat at about 1.08 so far,
   also improve with more steps; and the ~24 h gate, which a longer run
   needs explicit approval to pass.
+
+- **Head that preserves the frozen features** (PI review 2026-10-14,
+  proposed experiment A): the untrained 256-d head loses most of the
+  frozen feature's card information before any training.
+- **Contrastive pre-training, then metrics** (human, 2026-10-14;
+  proposed experiment B): frozen-encoder metric heads against a full
+  fine-tune against mixed from the start.
+- **Why metric training collapses the embedding** (proposed experiment
+  C).
+- **Training from cached frozen features** (proposed experiment D), for
+  throughput.
+- **More seeds** of the leading cells (proposed experiment E).
+- **What data to collect next**: no ranking of data types is possible
+  from this grid; see the PI review's answer and experiment C.
