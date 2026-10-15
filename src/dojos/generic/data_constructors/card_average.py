@@ -57,7 +57,7 @@ class CardAverageDataConstructor:
         self, chunk: pd.DataFrame, lookup: CardLookup
     ) -> List[TrainingDatum[float]]:
         """Convert a chunk of (uuid_column, <label_column>) rows into
-        (SingleCardInput, Label) TrainingDatum pairs.
+        (SingleCardInput, float) TrainingDatum pairs.
 
         Inputs:
             chunk: one chunk of rows from a CardAverageMetric subclass's

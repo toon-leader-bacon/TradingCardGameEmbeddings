@@ -18,8 +18,8 @@ own row shape is (draft_id, match_number, game_number, deck_uuid,
 <label>) - the extra draft_id/match_number/game_number columns are
 simply ignored by a constructor that only reads deck_uuid and
 LABEL_COLUMN, so sts_gg's DeckLabelDataConstructor (built as
-DeckLabelDataConstructor(deck_box, LABEL_COLUMN)) is reused unchanged:
-shape-compatible, not class-compatible.
+DeckLabelDataConstructor(deck_box, LABEL_COLUMN, label_caster=...))
+is reused unchanged: shape-compatible, not class-compatible.
 
 CELL MAPPING: DeckWinPredictionMetric (bool) ->
 SeventeenLandsDeckBinaryLabelDojo (label_caster=cast_to_float handles

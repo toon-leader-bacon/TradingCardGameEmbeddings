@@ -72,7 +72,7 @@ class GroupSwapMod(Mod):
 
         # A new outer list; the group lists themselves are shared, not copied
         swapped: MultiGroupInput = [groups[1], groups[0]]
-        # _split_pair_datum checked the label is a float, so LabelT is float
+        # label is a float, so 1.0 - label is too; LabelT is float for this cell
         return (swapped, cast(LabelT, 1.0 - label))
 
 

@@ -15,7 +15,8 @@ from src.schema.type_hints import LabelT, MultiCardInput, TrainingDatum
 class DeckLabelDataConstructor(Generic[LabelT]):
     """DataConstructor for the DeckLabelMetric family (see
     src/data_refinement/metrics/sts_gg/deck_label_metric.py) - whole
-    deck in, single int/bool/str label out. Every concrete
+    deck in, one label out (a raw int/bool/str column, cast by
+    label_caster). Every concrete
     DeckLabelMetric subclass (deck_label_metrics.py) shares this same
     row shape (run_id, deck_uuid, LABEL_COLUMN), differing only in
     which column holds the label and that column's type - so, like
@@ -73,12 +74,12 @@ class DeckLabelDataConstructor(Generic[LabelT]):
         self, chunk: pd.DataFrame, lookup: CardLookup
     ) -> List[TrainingDatum[LabelT]]:
         """Convert a chunk of (run_id, <deck_uuid_column>, <label_column>) rows
-        into (MultiCardInput, Label) TrainingDatum pairs.
+        into (MultiCardInput, LabelT) TrainingDatum pairs.
 
         Inputs:
             chunk: one chunk of rows from a DeckLabelMetric subclass's
                 output parquet file.
-        Output: one (List[GenericCard], Label) TrainingDatum per row
+        Output: one (List[GenericCard], LabelT) TrainingDatum per row
             whose label is not null (None or NaN) and whose deck_uuid
             resolves to a deck with at least one resolvable card. The label is passed through
             self._label_caster - see __init__'s label_caster docstring
@@ -95,7 +96,9 @@ class DeckLabelDataConstructor(Generic[LabelT]):
             skipped, not raised - mirrors CardAverageDataConstructor.build()).
 
         Example:
-            >>> constructor = DeckLabelDataConstructor(deck_box, "relic_count")
+            >>> constructor = DeckLabelDataConstructor(
+            ...     deck_box, "relic_count", label_caster=cast_to_float
+            ... )
             >>> constructor.build(chunk, lookup)
             [([<GenericCard>, <GenericCard>], 3.0), ...]
         """

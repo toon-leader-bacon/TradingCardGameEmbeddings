@@ -23,7 +23,7 @@ so one cell serves every metric family with the same shape.
   `strict_version_check`. `GenericDojo.__init__` is the only place a
   `None` field falls back to its default.
 - `data_constructor.py` - the `DataConstructor` Protocol:
-  `build(chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]`.
+  `build(chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum[LabelT]]`, on a `DataConstructor[LabelT]`.
 - `data_constructors/` - the concrete constructors, one module each
   (see the table below). `row_values.py` holds the shared helpers that
   turn one raw row value into a typed label or card(s).
@@ -96,7 +96,7 @@ head.
 
 ## Label types
 
-Labels are typed end to end. `TrainingDatum[LabelT]`
+Labels are typed wherever a cell is built. `TrainingDatum[LabelT]`
 (`src/schema/type_hints.py`) carries a label of the dojo's own type, and
 `GenericDojo[LabelT]` ties together its `DataConstructor[LabelT]`, its
 loss (`NocabLoss[..., List[LabelT]]`) and its `LossCalibration[LabelT]`,
@@ -107,9 +107,12 @@ takes it from its `LossSpec` (str, or `Dict[str, float]` /
 `Dict[int, float]`), so its wrappers name it
 (`SingleCardFixedClassificationDojo[str]`). `DeckLabelDataConstructor`
 takes it from its required `label_caster` (`cast_to_float` or `str`).
-Mods and batching only carry labels, so they are generic in LabelT;
-`GroupSwapMod`, the one mod that reads its label, checks it is a float
-at runtime.
+Mods and batching only carry labels, so their methods are generic in
+LabelT. Because `Mod` itself is not generic, mypy will not stop a
+`GroupSwapMod` (the one mod that reads its label) on a non-float dojo,
+so it checks the label is a float at runtime. The type is erased past
+the cell: the `Trainer` sees a plain `Dojo` / `DojoBatch`, and the
+training catalog holds `GenericDojo[Any]`, since it mixes label types.
 
 ## Loss calibration
 
