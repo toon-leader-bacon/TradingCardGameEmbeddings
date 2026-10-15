@@ -17,6 +17,7 @@ PokemonTcgDataDownloader) — no separate checkpoint file needed, since
 unlike a paginated crawl, build ids don't depend on each other.
 """
 
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,8 @@ from tqdm import tqdm
 from src.data_retrieval.download_utils import download_to_file
 from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.rate_limiter import RateLimiter
+
+_logger = logging.getLogger(__name__)
 
 _REQUEST_TIMEOUT_SECONDS = 60
 # The live listing page serves relative hrefs (href="/v1/190920/enUS/"),
@@ -201,8 +204,7 @@ class HearthstoneJsonDownloader(Downloader):
         id, rather than aborting the whole run. This is a deliberate
         broad `except Exception` — matches the "best effort, one bad
         build shouldn't lose the rest" intent, not an accidental catch-
-        all. Every failure is written via tqdm.write() (not print())
-        so it doesn't corrupt the progress bar, and is also present in
+        all. Every failure is logged as a warning, and is also present in
         the structured return value so callers/tests don't have to
         scrape log output to know what failed.
 
@@ -215,8 +217,8 @@ class HearthstoneJsonDownloader(Downloader):
         Side effects: creates raw_data_dir if missing; one paced
             network request and (on success) one file write per build
             id not already present; prints a tqdm progress bar to
-            stderr covering all of build_ids; prints one tqdm.write()
-            line per failed build.
+            stderr covering all of build_ids; logs one warning
+            per failed build.
         Exceptions: none — download_build() failures are caught here,
             not propagated. (A failure in list_build_ids(), which this
             method doesn't call, is unaffected by this and still
@@ -236,7 +238,7 @@ class HearthstoneJsonDownloader(Downloader):
             try:
                 path = self.download_build(build_id)
             except Exception as error:
-                tqdm.write(f"HearthstoneJSON build {build_id} failed: {error}")
+                _logger.warning("HearthstoneJSON build %s failed: %s", build_id, error)
                 outcomes.append(
                     BuildDownloadFailure(build_id=build_id, error=str(error))
                 )

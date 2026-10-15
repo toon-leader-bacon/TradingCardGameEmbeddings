@@ -53,6 +53,7 @@ other existing caller keeps passing nothing and gets identical
 behavior to today.
 """
 
+import logging
 import re
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
@@ -64,6 +65,8 @@ from tqdm import tqdm
 from src.data_retrieval.download_utils import download_to_string
 from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.rate_limiter import RateLimiter
+
+_logger = logging.getLogger(__name__)
 
 # See https://www.sitemaps.org/schemas/sitemap/0.9 — ElementTree
 # requires this spelled out on every tag lookup, it isn't inferred from
@@ -212,7 +215,7 @@ class FabtcgDecklistDownloader(Downloader):
 
         A deck page that still fails after download_to_string()'s
         retries, or whose decklist fragment can't be found, is logged
-        via tqdm.write() and skipped, not raised — best-effort, same
+        as a warning and skipped, not raised — best-effort, same
         convention as every other two-phase downloader in this
         container: a run over many thousands of decks shouldn't be
         lost to one bad page.
@@ -225,8 +228,8 @@ class FabtcgDecklistDownloader(Downloader):
             download_to_string()) per deck URL not already saved;
             creates raw_data_dir/decklists/ if missing; writes one file
             per successfully-fetched deck; prints a tqdm progress bar
-            to stderr covering all deck URLs; prints one tqdm.write()
-            line per deck that fails and gets skipped.
+            to stderr covering all deck URLs; logs one warning
+            per deck that fails and gets skipped.
         Exceptions: raises only if raw_data_dir/deck_urls.txt doesn't
             exist (phase_1() hasn't been run) — per-deck failures are
             caught internally (see above), never propagated.
@@ -263,7 +266,7 @@ class FabtcgDecklistDownloader(Downloader):
                 page_html = download_to_string(deck_url, headers=_REQUEST_HEADERS)
                 fragment_html = self._extract_decklist_fragment(page_html)
             except Exception as error:
-                tqdm.write(f"fabtcg.com decklist {deck_url} failed: {error}")
+                _logger.warning("fabtcg.com decklist %s failed: %s", deck_url, error)
                 continue
 
             destination_path.write_text(fragment_html, encoding="utf-8")

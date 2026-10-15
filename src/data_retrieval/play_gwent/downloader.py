@@ -30,6 +30,7 @@ import json
 from pathlib import Path
 from typing import ClassVar
 
+import logging
 import requests
 from bs4 import BeautifulSoup
 from tqdm import tqdm
@@ -41,6 +42,8 @@ from src.data_retrieval.download_utils import (
 )
 from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.rate_limiter import RateLimiter
+
+_logger = logging.getLogger(__name__)
 
 _REQUEST_TIMEOUT_SECONDS = 60
 _MAX_FETCH_ATTEMPTS = 3  # 1 initial try + up to 2 retries
@@ -209,7 +212,7 @@ class PlayGwentDownloader(Downloader):
 
         A guide that still fails after _get_with_retries's retries (or
         whose page has a malformed/missing data-state payload — see
-        _extract_guide_payload) is logged via tqdm.write() and skipped,
+        _extract_guide_payload) is logged as a warning and skipped,
         not raised — best-effort, same convention and rationale as
         HearthstoneJsonDownloader.download_missing_builds: a run over
         tens of thousands of guides shouldn't be lost to one bad id. A
@@ -229,8 +232,8 @@ class PlayGwentDownloader(Downloader):
             progress bar to stderr covering all of guide_ids (skipped/
             already-downloaded ids still advance the bar, so its
             position reflects "how far through deck_ids.txt," not just
-            "how many new fetches happened"); prints one tqdm.write()
-            line per guide that fails and gets skipped.
+            "how many new fetches happened"); logs one warning
+            per guide that fails and gets skipped.
         Exceptions: raises only if raw_data_dir/deck_ids.txt doesn't
             exist (phase_1() hasn't been run) — per-guide failures are
             caught internally (see above), never propagated.
@@ -272,7 +275,7 @@ class PlayGwentDownloader(Downloader):
                 # guides_manifest.txt, so a later phase_2() run will
                 # attempt it again like any other not-yet-downloaded id
                 # — the manifest's "done" meaning stays intact.
-                tqdm.write(f"Play Gwent guide {guide_id} failed: {error}")
+                _logger.warning("Play Gwent guide %s failed: %s", guide_id, error)
                 continue
 
             append_with_manifest(

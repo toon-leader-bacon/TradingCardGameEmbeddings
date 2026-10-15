@@ -346,7 +346,7 @@ class TestPhase2:
         ) == "already here"
 
     def test_skips_and_logs_a_deck_that_fails_after_retries(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         downloader = _make_downloader(tmp_path)
         (tmp_path / "deck_urls.txt").write_text(
@@ -364,10 +364,10 @@ class TestPhase2:
 
         assert not (decklists_dir / "tom-penny-go-wide-warrior-deck.html").exists()
         assert (decklists_dir / "john-jaurigue-warrior-deck.html").exists()
-        assert _DECK_URL_A in capsys.readouterr().out
+        assert _DECK_URL_A in caplog.text
 
     def test_skips_and_logs_a_deck_with_no_decklist_fragment(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         downloader = _make_downloader(tmp_path)
         (tmp_path / "deck_urls.txt").write_text(f"{_DECK_URL_A}\n", encoding="utf-8")
@@ -377,7 +377,7 @@ class TestPhase2:
             decklists_dir = downloader.phase_2()
 
         assert not (decklists_dir / "tom-penny-go-wide-warrior-deck.html").exists()
-        assert _DECK_URL_A in capsys.readouterr().out
+        assert _DECK_URL_A in caplog.text
 
     def test_all_urls_already_saved_makes_no_requests(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)

@@ -13,13 +13,33 @@
 # picture rather than stopping at the first problem. Exits non-zero if
 # any step failed.
 #
-# Requires the dev tools in requirements-dev.txt:
-#   pip install -r requirements-dev.txt
+# Every tool runs as `$PYTHON -m <tool>`, so all four steps share one
+# interpreter and its packages. $PYTHON defaults to the project venv
+# (venv/bin/python, or venv/Scripts/python.exe on Windows), then
+# python3 on PATH. Override it to use another environment, e.g. a ROCm
+# venv:
+#   PYTHON=/path/to/rocm-venv/bin/python ./scripts/check.sh
+#
+# That interpreter needs requirements.txt and the dev tools in
+# requirements-dev.txt:
+#   $PYTHON -m pip install -r requirements.txt -r requirements-dev.txt
 
 set -uo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
+
+if [ -z "${PYTHON:-}" ]; then
+    if [ -x venv/bin/python ]; then
+        PYTHON="venv/bin/python"
+    elif [ -x venv/Scripts/python.exe ]; then
+        PYTHON="venv/Scripts/python.exe"
+    else
+        PYTHON="python3"
+    fi
+fi
+echo "Using $PYTHON ($("$PYTHON" --version 2>&1))"
+echo
 
 SRC_DIR="src"
 TEST_DIR="tests"
@@ -40,16 +60,16 @@ run_step() {
 }
 
 run_step "black (auto-format)" \
-    black "$SRC_DIR" "$TEST_DIR"
+    "$PYTHON" -m black "$SRC_DIR" "$TEST_DIR"
 
 run_step "flake8 (lint)" \
-    flake8 "$SRC_DIR" "$TEST_DIR"
+    "$PYTHON" -m flake8 "$SRC_DIR" "$TEST_DIR"
 
 run_step "mypy (type-check)" \
-    mypy --ignore-missing-imports "$SRC_DIR"
+    "$PYTHON" -m mypy --ignore-missing-imports "$SRC_DIR"
 
 run_step "pytest (tests)" \
-    python3 -m pytest "$TEST_DIR" -q
+    "$PYTHON" -m pytest "$TEST_DIR" -q
 
 echo "-- cleanup --"
 rm -rf .pytest_cache

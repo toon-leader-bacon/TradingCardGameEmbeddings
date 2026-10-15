@@ -1,6 +1,5 @@
 # TODO
 - Formalize the git-ignored directories (logs, plans, scratch)
-- Update all source code to use the python logging library so it's easier to log to a file, with time stamps, file names, etc. 
 
 - [ ] **`Label = Any` in `src/schema/type_hints.py` crosses every
   dojo's label boundary untyped** (`TrainingDatum = Tuple[TrainingInput,

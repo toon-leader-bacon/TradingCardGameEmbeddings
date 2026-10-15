@@ -51,6 +51,7 @@ meant for browsing archived HTML pages.
 """
 
 import json
+import logging
 from pathlib import Path
 from typing import ClassVar, NamedTuple
 
@@ -63,6 +64,8 @@ from src.data_retrieval.download_utils import (
 )
 from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.rate_limiter import RateLimiter
+
+_logger = logging.getLogger(__name__)
 
 
 class _ArchivedFile(NamedTuple):
@@ -205,7 +208,7 @@ class IsotropicGameLogDownloader(Downloader):
             _destination_filename()); appends one line to
             downloads_manifest.txt per successful download, flushing
             immediately; prints a tqdm progress bar to stderr; prints
-            one tqdm.write() line per file that fails and gets skipped.
+            logs one warning per file that fails and gets skipped.
         Exceptions: raises only if raw_data_dir/archived_files.jsonl
             doesn't exist (phase_1() hasn't been run) — per-file
             download failures are caught internally and skipped, never
@@ -247,8 +250,10 @@ class IsotropicGameLogDownloader(Downloader):
                 download_to_file(download_url, destination_path)
             except Exception as error:
                 # Best-effort — see this method's docstring.
-                tqdm.write(
-                    f"isotropic download failed ({archived_file.original_url}): {error}"
+                _logger.warning(
+                    "isotropic download failed (%s): %s",
+                    archived_file.original_url,
+                    error,
                 )
                 continue
 

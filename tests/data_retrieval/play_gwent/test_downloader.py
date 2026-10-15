@@ -322,7 +322,9 @@ class TestPhase2:
         mock_get.assert_not_called()
         assert guides_path == tmp_path / "guides.jsonl"
 
-    def test_skips_guide_that_fails_all_retries_and_logs(self, tmp_path: Path) -> None:
+    def test_skips_guide_that_fails_all_retries_and_logs(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         downloader = _make_downloader(tmp_path)
         (tmp_path / "deck_ids.txt").write_text("407608\n999\n", encoding="utf-8")
         failing_response = _mock_text_response("")
@@ -341,15 +343,12 @@ class TestPhase2:
             ],
         ) as mock_get:
             with patch("src.data_retrieval.download_utils.time.sleep"):
-                with patch(
-                    "src.data_retrieval.play_gwent.downloader.tqdm.write"
-                ) as mock_write:
-                    guides_path = downloader.phase_2()
+                guides_path = downloader.phase_2()
 
         # 3 failed attempts for 407608, then 1 successful attempt for 999.
         assert mock_get.call_count == 4
-        mock_write.assert_called_once()
-        assert "407608" in mock_write.call_args.args[0]
+        [written_message] = [record.getMessage() for record in caplog.records]
+        assert "407608" in written_message
 
         manifest_ids = (
             (tmp_path / "guides_manifest.txt").read_text(encoding="utf-8").splitlines()

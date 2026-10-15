@@ -18,6 +18,11 @@ Warnings (warnings.warn) and uncaught exceptions are logged too, and the
 file opens with a header line recording what produced it (argv, git
 commit, host, Python and torch versions).
 
+Library code logs through a module logger (logging.getLogger(__name__)),
+never print() or tqdm.write(). A script may still print() what it
+produces (a --list listing, a CSV or report on stdout), so stdout stays
+pipeable; what the program says about itself goes through the logger.
+
 Typical script:
 
     _logger = script_logger(__file__)

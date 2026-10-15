@@ -166,7 +166,7 @@ class TestPhase2:
         assert mock_get.call_args.args[0] == "https://example.test/run/run2"
 
     def test_skips_and_logs_a_run_that_fails_after_retries(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         downloader = _make_downloader(tmp_path)
         (tmp_path / "run_ids.txt").write_text("run1\nrun2\n", encoding="utf-8")
@@ -189,4 +189,4 @@ class TestPhase2:
             (tmp_path / "runs_manifest.txt").read_text(encoding="utf-8").splitlines()
         )
         assert manifest_ids == ["run2"]
-        assert "run1" in capsys.readouterr().out
+        assert "run1" in caplog.text

@@ -172,9 +172,9 @@ install) is in `Notes.md`.
   line per dojo), so this is lower-priority than the line count alone
   suggests. Flagged during a 2026-10-05 project-wide cleanup scan, not
   yet fixed. (`src/training/run_config.py`, `src/training/dojo_catalog.py`)
-- [ ] **Update `requirements.txt` and `scripts/check.sh`.** Document the
-  ROCm torch install (command in `Notes.md`). `check.sh` runs `python3`,
-  which on this Windows setup needs a shim pointing at the ROCm venv
-  (the only one with the full test dependencies) while black, flake8 and
-  mypy come from the project `venv/`. Decide whether the project `venv/`
-  should become the ROCm one.
+- [ ] **Document the ROCm torch install in `requirements.txt`** (command in
+  `Notes.md`). `scripts/check.sh` now runs every tool as
+  `$PYTHON -m <tool>`, defaulting to the project `venv/`. On the Windows
+  box, either install `requirements-dev.txt` into the ROCm venv and run
+  `PYTHON=G:/Projects/venvs/tcg-rocm/Scripts/python.exe ./scripts/check.sh`,
+  or make the project `venv/` the ROCm one. Decide which.

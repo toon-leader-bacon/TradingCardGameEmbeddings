@@ -227,7 +227,9 @@ class TestDownloadMissingBuilds:
         mock_get.assert_not_called()
         assert outcomes == []
 
-    def test_failed_build_is_reported_and_loop_continues(self, tmp_path: Path) -> None:
+    def test_failed_build_is_reported_and_loop_continues(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         downloader = _make_downloader(tmp_path)
         failing_response = _mock_streaming_response([])
         failing_response.raise_for_status.side_effect = requests.HTTPError(
@@ -244,10 +246,7 @@ class TestDownloadMissingBuilds:
             return failing_response if "111111" in url else succeeding_response
 
         with patch("requests.get", side_effect=_get_side_effect) as mock_get:
-            with patch(
-                "src.data_retrieval.hearthstonejson.downloader.tqdm.write"
-            ) as mock_write:
-                outcomes = downloader.download_missing_builds(["111111", "222222"])
+            outcomes = downloader.download_missing_builds(["111111", "222222"])
 
         assert mock_get.call_count > 1
         assert outcomes == [
@@ -255,12 +254,10 @@ class TestDownloadMissingBuilds:
             BuildDownloadSuccess(build_id="222222", path=tmp_path / "222222.json"),
         ]
         # The failing build didn't stop 222222 from being attempted and
-        # succeeding, and the failure was reported via tqdm.write (not
-        # print), so it doesn't corrupt the progress bar.
+        # succeeding, and the failure was logged as a warning.
         assert not (tmp_path / "111111.json").exists()
         assert (tmp_path / "222222.json").read_bytes() == b"data"
-        mock_write.assert_called_once()
-        written_message = mock_write.call_args.args[0]
+        [written_message] = [record.getMessage() for record in caplog.records]
         assert "111111" in written_message
         assert "404 Not Found" in written_message
 

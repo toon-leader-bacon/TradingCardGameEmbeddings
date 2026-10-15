@@ -70,6 +70,7 @@ the live site). data/tmp/run.json is a saved sample response.
 """
 
 import json
+import logging
 from pathlib import Path
 from typing import ClassVar
 
@@ -82,6 +83,8 @@ from src.data_retrieval.download_utils import (
 )
 from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.rate_limiter import RateLimiter
+
+_logger = logging.getLogger(__name__)
 
 
 class STSGGRunDownloader(Downloader):
@@ -217,7 +220,7 @@ class STSGGRunDownloader(Downloader):
         Same contract as PlayGwentDownloader.phase_2.
 
         A run that still fails after download_to_string()'s retries is
-        logged via tqdm.write() and skipped, not raised — best-effort,
+        logged as a warning and skipped, not raised — best-effort,
         same convention as PlayGwentDownloader.phase_2: a run over many
         thousands of run ids shouldn't be lost to one bad id. A skipped
         run is simply absent from runs_manifest.txt, so it's
@@ -236,7 +239,7 @@ class STSGGRunDownloader(Downloader):
             to stderr covering all of run_ids (skipped/already-
             downloaded ids still advance the bar, so its position
             reflects "how far through run_ids.txt," not just "how many
-            new fetches happened"); prints one tqdm.write() line per run
+            new fetches happened"); logs one warning per run
             that fails and gets skipped.
         Exceptions: raises only if raw_data_dir/run_ids.txt doesn't exist
             (phase_1() hasn't been run) — per-run failures are caught
@@ -277,7 +280,7 @@ class STSGGRunDownloader(Downloader):
                 # runs_manifest.txt, so it's indistinguishable from "not
                 # yet attempted" and a later phase_2() call retries it
                 # like any other.
-                tqdm.write(f"sts.gg run {run_id} failed: {error}")
+                _logger.warning("sts.gg run %s failed: %s", run_id, error)
                 continue
 
             append_with_manifest(

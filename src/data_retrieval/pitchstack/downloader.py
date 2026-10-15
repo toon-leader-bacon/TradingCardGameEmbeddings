@@ -77,6 +77,7 @@ implemented by this class yet (see pitchstack.md):
 """
 
 import json
+import logging
 import re
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
@@ -91,6 +92,8 @@ from src.data_retrieval.download_utils import (
 )
 from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.rate_limiter import RateLimiter
+
+_logger = logging.getLogger(__name__)
 
 # Sitemaps use this namespace on every element, including <loc> — see
 # https://www.sitemaps.org/schemas/sitemap/0.9 — ElementTree requires
@@ -209,7 +212,7 @@ class PitchstackDeckDownloader(Downloader):
         STSGGRunDownloader.phase_2 — see this module's docstring.
 
         A deck that still fails after download_to_string()'s retries is
-        logged via tqdm.write() and skipped, not raised — best-effort,
+        logged as a warning and skipped, not raised — best-effort,
         same convention as the sibling downloaders: a run over many
         thousands of decks shouldn't be lost to one bad id.
 
@@ -226,8 +229,8 @@ class PitchstackDeckDownloader(Downloader):
             decks_manifest.txt; appends one line to decks.jsonl and one
             line to decks_manifest.txt per successfully-fetched deck,
             flushing each write immediately; prints a tqdm progress bar
-            to stderr covering all of deck_ids; prints one
-            tqdm.write() line per deck that fails and gets skipped.
+            to stderr covering all of deck_ids; logs one
+            warning per deck that fails and gets skipped.
         Exceptions: raises only if raw_data_dir/deck_ids.txt doesn't
             exist (phase_1() hasn't been run) — per-deck failures are
             caught internally (see above), never propagated.
@@ -265,7 +268,7 @@ class PitchstackDeckDownloader(Downloader):
                 url = self.deck_url.format(deck_id=deck_id)
                 deck_payload = json.loads(download_to_string(url))
             except Exception as error:
-                tqdm.write(f"pitchstack.gg deck {deck_id} failed: {error}")
+                _logger.warning("pitchstack.gg deck %s failed: %s", deck_id, error)
                 continue
 
             append_with_manifest(

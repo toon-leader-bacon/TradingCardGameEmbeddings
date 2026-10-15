@@ -33,6 +33,7 @@ no-op default.
 """
 
 import gzip
+import logging
 import shutil
 import tarfile
 from dataclasses import dataclass
@@ -45,6 +46,8 @@ from src.data_retrieval.download_utils import download_to_file
 from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.seventeenlands.known_files import list_known_refs
 from src.data_retrieval.seventeenlands.refs import DataType, SeventeenLandsFileRef
+
+_logger = logging.getLogger(__name__)
 
 # POSIX ustar header layout: the "ustar" magic sits at byte offset 257
 # of every 512-byte tar header. See SeventeenLandsDownloader.download_one()'s
@@ -199,7 +202,7 @@ class SeventeenLandsDownloader(Downloader):
             already present at its destination path, one paced network
             request and (on success) two file writes (compressed
             download, then extracted CSV); prints a tqdm progress bar to
-            stderr covering the filtered refs, and one tqdm.write() line
+            stderr covering the filtered refs, and logs one warning
             per failed ref — same convention as
             HearthstoneJsonDownloader.download_missing_builds(),
             including the resumability: a ref whose destination file
@@ -234,7 +237,7 @@ class SeventeenLandsDownloader(Downloader):
             try:
                 path = self.download_one(ref)
             except Exception as error:
-                tqdm.write(f"17Lands file {ref.url} failed: {error}")
+                _logger.warning("17Lands file %s failed: %s", ref.url, error)
                 outcomes.append(FileDownloadFailure(ref=ref, error=error))
             else:
                 outcomes.append(FileDownloadSuccess(ref=ref, path=path))

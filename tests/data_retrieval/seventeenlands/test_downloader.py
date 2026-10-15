@@ -342,7 +342,9 @@ class TestDownload:
         mock_get.assert_called_once()
         assert [outcome.ref for outcome in result.outcomes] == [_GAME_MSH_PREMIER]
 
-    def test_failed_ref_is_reported_and_loop_continues(self, tmp_path: Path) -> None:
+    def test_failed_ref_is_reported_and_loop_continues(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         downloader = _make_downloader(tmp_path)
         failing_response = _mock_streaming_response([])
         failing_response.raise_for_status.side_effect = requests.HTTPError(
@@ -363,10 +365,7 @@ class TestDownload:
             )
 
         with patch("requests.get", side_effect=_get_side_effect) as mock_get:
-            with patch(
-                "src.data_retrieval.seventeenlands.downloader.tqdm.write"
-            ) as mock_write:
-                result = downloader.download([_GAME_MSH_PREMIER, _GAME_WOE_TRAD])
+            result = downloader.download([_GAME_MSH_PREMIER, _GAME_WOE_TRAD])
 
         assert mock_get.call_count > 1
         assert len(result.outcomes) == 2
@@ -381,10 +380,8 @@ class TestDownload:
         assert second.error is None
 
         # The failing ref didn't stop the second one from being
-        # attempted and succeeding, and the failure was reported via
-        # tqdm.write (not print), so it doesn't corrupt the progress bar.
-        mock_write.assert_called_once()
-        written_message = mock_write.call_args.args[0]
+        # attempted and succeeding, and the failure was logged as a warning.
+        [written_message] = [record.getMessage() for record in caplog.records]
         assert _GAME_MSH_PREMIER.url in written_message
 
     def test_all_refs_failing_returns_all_failures(self, tmp_path: Path) -> None:

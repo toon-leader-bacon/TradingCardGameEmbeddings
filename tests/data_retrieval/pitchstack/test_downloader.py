@@ -234,7 +234,7 @@ class TestPhase2:
         assert mock_get.call_args.args[0] == f"https://example.test/decks/{_DECK_ID_B}"
 
     def test_skips_and_logs_a_deck_that_fails_after_retries(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         downloader = _make_downloader(tmp_path)
         (tmp_path / "deck_ids.txt").write_text(
@@ -259,7 +259,7 @@ class TestPhase2:
             (tmp_path / "decks_manifest.txt").read_text(encoding="utf-8").splitlines()
         )
         assert manifest_ids == [_DECK_ID_B]
-        assert _DECK_ID_A in capsys.readouterr().out
+        assert _DECK_ID_A in caplog.text
 
     def test_all_ids_already_downloaded_makes_no_requests(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)
