@@ -14,7 +14,7 @@ from src.encoder_model.pooling.mean_pooling import MeanPooling
 from src.encoder_model.pooling.transformer_pooling import TransformerPooling
 from src.encoder_model.whitening.whitening_stats import WhiteningStats
 from src.schema.holdout import HoldoutSpec
-from src.training.run_config import (
+from src.training.model_spec import (
     AttentionPoolingSpec,
     EmbeddingHeadKind,
     MeanPoolingSpec,

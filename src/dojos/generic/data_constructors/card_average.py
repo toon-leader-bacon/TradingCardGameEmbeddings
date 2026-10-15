@@ -53,7 +53,9 @@ class CardAverageDataConstructor:
         self._label_column = label_column
         self._uuid_column = uuid_column
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[float]]:
         """Convert a chunk of (uuid_column, <label_column>) rows into
         (SingleCardInput, Label) TrainingDatum pairs.
 
@@ -67,7 +69,7 @@ class CardAverageDataConstructor:
         Exceptions: none expected (per-row failures are skipped, not
             raised - mirrors AveragePickNumberDataConstructor.build()).
         """
-        results: List[TrainingDatum] = []
+        results: List[TrainingDatum[float]] = []
 
         # Resolve each row's card and label independently; skip rows that
         # fail either resolution rather than raising, since a metric's

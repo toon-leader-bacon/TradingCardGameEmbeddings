@@ -45,7 +45,9 @@ class PoolConditionedPickDataConstructor:
         Exceptions: none.
         """
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[int]]:
         """Convert a chunk of (pool_uuids, pack_option_uuids, pick_uuid)
         rows into (MultiGroupInput, int) TrainingDatum pairs.
 
@@ -71,7 +73,7 @@ class PoolConditionedPickDataConstructor:
             >>> constructor.build(chunk, lookup)
             [([[<GenericCard>, <GenericCard>], [<GenericCard>]], 0), ...]
         """
-        results: List[TrainingDatum] = []
+        results: List[TrainingDatum[int]] = []
 
         # Handle the option side exactly like
         # PackToPickChoiceSetDataConstructor.build(); skip rows that

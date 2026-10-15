@@ -35,7 +35,9 @@ class MaskedFieldMultiLabelDataConstructor:
             )
         self._positions = {value: index for index, value in enumerate(label_values)}
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[Dict[int, float]]]:
         """Convert (nocab_uuid, masked_field, label: list[str]) rows into
         (GenericCard, Dict[int, float]) TrainingDatum pairs.
 
@@ -54,7 +56,7 @@ class MaskedFieldMultiLabelDataConstructor:
             >>> MaskedFieldMultiLabelDataConstructor(["W", "U"]).build(chunk, lookup)
             [(<GenericCard>, {0: 1.0, 1: 0.0}), ...]
         """
-        results: List[TrainingDatum] = []
+        results: List[TrainingDatum[Dict[int, float]]] = []
 
         # One dense indicator dict per row whose card is found
         for _, row in chunk.iterrows():

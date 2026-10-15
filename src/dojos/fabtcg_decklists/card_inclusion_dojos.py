@@ -11,6 +11,7 @@ column-renaming Decorator rather than copied.
 """
 
 from pathlib import Path
+from typing import Dict
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.fabtcg_decklists.card_inclusion_metrics import (
@@ -45,7 +46,7 @@ class CardInclusionRateDojo(CardAverageMetricDojo):
     METRIC = CardInclusionRateMetric
 
 
-class HeroConditionedInclusionDojo(SingleCardFixedClassificationDojo):
+class HeroConditionedInclusionDojo(SingleCardFixedClassificationDojo[Dict[int, float]]):
     """Card -> P(card in deck | hero) per HERO_NAMES hero; positions where
     the card is illegal (count 0) or the hero has fewer than
     MIN_HERO_DECKS decks are masked out of the loss."""

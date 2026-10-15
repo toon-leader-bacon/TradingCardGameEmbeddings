@@ -1,18 +1,21 @@
-from typing import List, cast
+from typing import Generic, List, cast
 
 from src.schema.type_hints import (
     BatchedTrainingInput,
     InputShape,
-    Label,
+    LabelT,
     TrainingDatum,
     input_shape_of,
 )
 
 
-class Batch:
-    def __init__(self, inputs: BatchedTrainingInput, labels: List[Label]):
+class Batch(Generic[LabelT]):
+    """Examples of one input shape, with labels of the dojo's label type
+    (LabelT, see src/schema/type_hints.py)."""
+
+    def __init__(self, inputs: BatchedTrainingInput, labels: List[LabelT]):
         self.inputs: BatchedTrainingInput = inputs
-        self.labels: List[Label] = labels
+        self.labels: List[LabelT] = labels
         self._validate_structure()
         self.structure_type = self._determine_structure_type()
 
@@ -21,7 +24,9 @@ class Batch:
         return len(self.inputs)
 
     @staticmethod
-    def from_training_datum(training_datum: TrainingDatum) -> "Batch":
+    def from_training_datum(
+        training_datum: TrainingDatum[LabelT],
+    ) -> "Batch[LabelT]":
         # A one-element batch; see from_training_data's cast for why mypy
         # needs the nudge.
         return Batch(
@@ -29,7 +34,9 @@ class Batch:
         )
 
     @staticmethod
-    def from_training_data(training_data: List[TrainingDatum]) -> "Batch":
+    def from_training_data(
+        training_data: List[TrainingDatum[LabelT]],
+    ) -> "Batch[LabelT]":
         inputs = [datum[0] for datum in training_data]
         labels = [datum[1] for datum in training_data]
         # _validate_structure() (run inside Batch.__init__) is what actually
@@ -66,7 +73,6 @@ class Batch:
         )
 
     def _validate_label_structure(self):
-        # Labels can be any type, so we don't need to validate the first type
-        # Just ensure that all labels are of the same type
+        # LabelT is erased at runtime, so check the labels share one type
         first_label_type = type(self.labels[0])
         return all(type(label) is first_label_type for label in self.labels)

@@ -18,7 +18,7 @@ from uuid import UUID
 import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.deck_box.deck_lookup import DeckLookup
 from src.dojos.generic.data_constructors.row_values import (
     card_for_uuid,
     parsed_uuid,
@@ -53,7 +53,7 @@ class DeckColumnGroup:
         which every kingdom offers but no kingdom group lists).
     """
 
-    deck_box: DeckBox
+    deck_box: DeckLookup
     column: str
     distinct: bool = False
     always_included: tuple[UUID, ...] = field(default_factory=tuple)

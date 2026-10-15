@@ -6,7 +6,7 @@ from typing import List
 import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.deck_box.deck_lookup import DeckLookup
 from src.dojos.generic.data_constructors.row_values import (
     deck_cards_excluding,
     parsed_uuid,
@@ -38,7 +38,7 @@ class DeckCardMaskDataConstructor:
     in the generic dojo, not the DataConstructor).
     """
 
-    def __init__(self, deck_box: DeckBox, label_column: str) -> None:
+    def __init__(self, deck_box: DeckLookup, label_column: str) -> None:
         """
         Inputs:
             deck_box: registry to look up each row's deck_uuid against.
@@ -54,7 +54,9 @@ class DeckCardMaskDataConstructor:
         self._deck_box = deck_box
         self._label_column = label_column
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[str]]:
         """Convert a chunk of (deck_uuid, target_card_uuid,
         <label_column>) rows into (MultiCardInput, str) TrainingDatum
         pairs, with each row's target card masked out of its deck's
@@ -84,7 +86,7 @@ class DeckCardMaskDataConstructor:
             >>> constructor.build(chunk, lookup)
             [([<GenericCard>, <GenericCard>], "Geralt"), ...]
         """
-        results: List[TrainingDatum] = []
+        results: List[TrainingDatum[str]] = []
 
         # Resolve each row's deck, minus its target card, independently;
         # skip rows that fail deck resolution or end up with no cards

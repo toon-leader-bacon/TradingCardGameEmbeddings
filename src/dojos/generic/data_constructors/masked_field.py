@@ -43,7 +43,9 @@ class MaskedFieldDataConstructor:
         """
         self._label_column = label_column
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[str]]:
         """Convert a chunk of (nocab_uuid, masked_field, <label_column>)
         rows into (SingleCardInput, str) TrainingDatum pairs.
 
@@ -59,7 +61,7 @@ class MaskedFieldDataConstructor:
         Exceptions: none expected (per-row lookup failures are skipped,
             not raised - mirrors CardAverageDataConstructor.build()).
         """
-        results: List[TrainingDatum] = []
+        results: List[TrainingDatum[str]] = []
 
         # Look up each row's card independently; skip rows whose
         # nocab_uuid doesn't look up a card, same as

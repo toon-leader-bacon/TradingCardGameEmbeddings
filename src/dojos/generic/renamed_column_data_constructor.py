@@ -4,42 +4,39 @@ DataConstructor read a metric whose uuid column has a different name.
 Lives in dojos/generic/ (not under any one game's dojo package) since
 it wraps any DataConstructor - it has no metric-family-specific logic
 of its own, unlike data_constructors/, where each class maps to one
-metric family. Originally written for isotropic's deck-level metrics,
-which key their rows by what the row's card group is (kingdom_uuid,
-partial_deck_uuid) while DeckLabelDataConstructor reads a fixed
-"deck_uuid" column; fabtcg_decklists and play_gwent's own
-card_inclusion_dojos.py now reuse it too. This wrapper renames the
-chunk's columns before delegating, so the generic constructor is
-reused unchanged. It is the only place the column names are mapped.
-
-If DeckLabelDataConstructor grows a deck_uuid_column argument (as
-CardAverageDataConstructor has uuid_column), this module can be deleted.
+metric family. fabtcg_decklists and play_gwent's
+card_inclusion_dojos.py use it to read their per-faction/per-hero
+inclusion columns as PickNumberDecayCurveDataConstructor's
+take_rate_by_pick_number / sample_count_by_pick_number. This wrapper
+renames the chunk's columns before delegating, so the generic
+constructor is reused unchanged.
 """
 
-from typing import List, Mapping
+from typing import Generic, List, Mapping
 
 import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.dojos.generic.data_constructor import DataConstructor
-from src.schema.type_hints import TrainingDatum
+from src.schema.type_hints import LabelT, TrainingDatum
 
 
-class RenamedColumnDataConstructor:
+class RenamedColumnDataConstructor(Generic[LabelT]):
     """A DataConstructor that renames chunk columns, then delegates.
 
     Satisfies the DataConstructor Protocol (../generic/data_constructor.py).
     """
 
     def __init__(
-        self, inner: DataConstructor, column_renames: Mapping[str, str]
+        self, inner: DataConstructor[LabelT], column_renames: Mapping[str, str]
     ) -> None:
         """
         Inputs:
             inner: the DataConstructor that builds TrainingDatum from the
                 renamed chunk.
             column_renames: {metric column name: name inner reads}, e.g.
-                {"kingdom_uuid": "deck_uuid"}. Copied, never mutated.
+                {"inclusion_rate_by_hero": "take_rate_by_pick_number"}.
+                Copied, never mutated.
         Output: none (constructor).
         Side effects: none.
         Exceptions: ValueError if column_renames is empty (the wrapper
@@ -47,8 +44,8 @@ class RenamedColumnDataConstructor:
 
         Example:
             >>> RenamedColumnDataConstructor(
-            ...     DeckLabelDataConstructor(box, "winner_turns"),
-            ...     {"kingdom_uuid": "deck_uuid"},
+            ...     PickNumberDecayCurveDataConstructor(min_sample_count=5),
+            ...     {"inclusion_rate_by_hero": "take_rate_by_pick_number"},
             ... )
         """
         if not column_renames:
@@ -60,7 +57,9 @@ class RenamedColumnDataConstructor:
         self._inner = inner
         self._column_renames = dict(column_renames)
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[LabelT]]:
         """Rename chunk's columns, then build with the inner constructor.
 
         Inputs:

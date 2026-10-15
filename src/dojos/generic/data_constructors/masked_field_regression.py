@@ -45,7 +45,9 @@ class MaskedFieldRegressionDataConstructor:
         """
         self._label_column = label_column
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[float]]:
         """Convert a chunk of (nocab_uuid, masked_field, <label_column>)
         rows into (SingleCardInput, float) TrainingDatum pairs.
 
@@ -59,7 +61,7 @@ class MaskedFieldRegressionDataConstructor:
         Exceptions: none expected (per-row failures are skipped, not
             raised - mirrors CardAverageDataConstructor.build()).
         """
-        results: List[TrainingDatum] = []
+        results: List[TrainingDatum[float]] = []
 
         # Resolve each row's card and label independently; skip rows
         # that fail either resolution rather than raising, matching

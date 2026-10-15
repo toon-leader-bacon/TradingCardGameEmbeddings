@@ -20,6 +20,9 @@ from src.data_refinement.metrics.isotropic.summary.copies_bought_distribution_me
 )
 from src.dojos.generic.data_constructors.row_values import card_for_uuid
 from src.dojos.generic.dojo_config import DojoConfig
+from src.dojos.generic.single_card_fixed_classification.loss_spec import (
+    FIXED_CLASSIFICATION_LOSS_SPEC,
+)
 from src.dojos.generic.single_card_fixed_classification.dojo import (
     SingleCardFixedClassificationDojo,
 )
@@ -57,7 +60,9 @@ class CopiesBoughtDataConstructor:
     class label out. Satisfies the DataConstructor Protocol
     (../generic/data_constructor.py)."""
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[str]]:
         """Convert a chunk of (nocab_uuid, copies) rows into (card, label).
 
         Inputs: chunk (rows of copies_bought_distribution.parquet), lookup.
@@ -69,7 +74,7 @@ class CopiesBoughtDataConstructor:
             >>> CopiesBoughtDataConstructor().build(chunk, binder)
             [(<GenericCard Village>, '2'), ...]
         """
-        result: List[TrainingDatum] = []
+        result: List[TrainingDatum[str]] = []
 
         # Pair each row's card with its bucketed copy count
         for raw_uuid, copies in zip(chunk["nocab_uuid"], chunk["copies"]):
@@ -81,7 +86,7 @@ class CopiesBoughtDataConstructor:
         return result
 
 
-class CopiesBoughtDistributionDojo(SingleCardFixedClassificationDojo):
+class CopiesBoughtDistributionDojo(SingleCardFixedClassificationDojo[str]):
     """Card -> P(copies in a finished deck | card is in the deck), as a
     class over COPIES_LABEL_VALUES ("1" ... "9", "10+")."""
 
@@ -113,6 +118,7 @@ class CopiesBoughtDistributionDojo(SingleCardFixedClassificationDojo):
             data_constructor=CopiesBoughtDataConstructor(),
             label_values=COPIES_LABEL_VALUES,
             card_embedding_size=card_embedding_size,
+            loss_spec=FIXED_CLASSIFICATION_LOSS_SPEC,
             config=DojoConfig(
                 name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),

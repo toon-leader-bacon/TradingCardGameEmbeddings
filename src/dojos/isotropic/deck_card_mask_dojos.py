@@ -16,7 +16,7 @@ appear as labels.
 from pathlib import Path
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.deck_box.deck_lookup import DeckLookup
 from src.data_refinement.metrics.isotropic.summary.deck_card_mask_metric import (
     WinningDeckMaskedCardMetric,
 )
@@ -36,7 +36,7 @@ class WinningDeckMaskedCardDojo(MultiCardFixedClassificationDojo):
         self,
         card_binder: CardBinder,
         holdout: HoldoutSpec,
-        deck_box: DeckBox,
+        deck_box: DeckLookup,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         name: str | None = None,

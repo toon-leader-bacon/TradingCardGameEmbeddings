@@ -14,15 +14,13 @@ _value_for_run(row) -> single value hook cannot express.
 import logging
 from pathlib import Path
 from typing import ClassVar
-from uuid import UUID
-
-import pandas as pd
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.isotropic.summary.row_utils import (
     card_uuid_for_name,
     eligible_player_entries,
 )
+from src.data_refinement.metrics.card_mean_tally import CardMeanTally
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     write_dataframe_with_version_metadata,
@@ -61,20 +59,19 @@ class AverageCopiesBoughtMetric:
         """
         self._card_binder = card_binder
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
-        self._copies_sum: dict[UUID, int] = {}
-        self._deck_count: dict[UUID, int] = {}
+        self._tally = CardMeanTally()
 
     def accumulate(self, row: dict) -> None:
         """Fold every eligible player's end.deck counts into this
-        metric's running per-card (copies_sum, deck_count) pairs.
+        metric's running per-card tally of copies bought.
 
         Inputs:
             row: one parsed Flavor A summary row, carrying "players"
                 (see row_utils.eligible_player_entries()).
         Output: none.
-        Side effects: updates self._copies_sum/_deck_count in place,
-            once per (eligible player, distinct card in that player's
-            end.deck) pair. Emits one logging.error() per card name
+        Side effects: adds the copy count to self._tally once per
+            (eligible player, distinct card in that player's end.deck)
+            pair. Emits one logging.error() per card name
             that fails to resolve.
         Exceptions: none expected beyond whatever row_utils' own
             functions raise for a malformed row.
@@ -94,8 +91,7 @@ class AverageCopiesBoughtMetric:
                         card_name,
                     )
                     continue
-                self._copies_sum[card_uuid] = self._copies_sum.get(card_uuid, 0) + count
-                self._deck_count[card_uuid] = self._deck_count.get(card_uuid, 0) + 1
+                self._tally.add(card_uuid, count)
 
     def finalize(self) -> Path:
         """Compute every seen card's average copy count and write one
@@ -113,17 +109,8 @@ class AverageCopiesBoughtMetric:
             >>> metric.finalize()
             PosixPath('data/metrics/isotropic/average_copies_bought.parquet')
         """
-        result = [
-            {
-                "nocab_uuid": str(card_uuid),
-                self.LABEL_COLUMN: self._copies_sum[card_uuid] / count,
-                "sample_count": count,
-            }
-            for card_uuid, count in self._deck_count.items()
-        ]
-
         write_dataframe_with_version_metadata(
-            pd.DataFrame(result),
+            self._tally.mean_frame(self.LABEL_COLUMN),
             self._output_path,
             MetricVersionMetadata(
                 game=GameId.DOMINION,

@@ -25,22 +25,25 @@ import numbers
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Sequence, Type
+from typing import Any, Callable, Dict, Generic, Iterable, List, Mapping, Sequence, Type
 
 from src.dojos.loss.loss_calibration import CalibratedLoss
 from src.dojos.loss.nocab_loss import NocabLoss
-from src.schema.type_hints import TrainingDatum, TrainingInput
+from src.schema.type_hints import LabelT, TrainingDatum, TrainingInput
 
 
-class PriorBaselineCalibration(ABC):
+class PriorBaselineCalibration(ABC, Generic[LabelT]):
     """Template Method base: the loss is kept, the baseline is measured.
 
-    Subclasses implement only baseline_of. Satisfies LossCalibration.
+    Subclasses fix LabelT and implement only baseline_of. Satisfies
+    LossCalibration[LabelT].
     """
 
     def calibrate(
-        self, loss: NocabLoss[Any, Any], train_sample: Sequence[TrainingDatum]
-    ) -> CalibratedLoss:
+        self,
+        loss: NocabLoss[Any, List[LabelT]],
+        train_sample: Sequence[TrainingDatum[LabelT]],
+    ) -> CalibratedLoss[LabelT]:
         """See LossCalibration.calibrate.
 
         Inputs: loss (kept unchanged), train_sample (non-empty).
@@ -56,7 +59,7 @@ class PriorBaselineCalibration(ABC):
             ... ).baseline_loss  # ln 2
             0.6931...
         """
-        result: CalibratedLoss
+        result: CalibratedLoss[LabelT]
 
         # Validate inputs
         if not train_sample:
@@ -67,7 +70,7 @@ class PriorBaselineCalibration(ABC):
         return result
 
     @abstractmethod
-    def baseline_of(self, train_sample: Sequence[TrainingDatum]) -> float:
+    def baseline_of(self, train_sample: Sequence[TrainingDatum[LabelT]]) -> float:
         """The best input-ignoring predictor's loss on train_sample.
 
         Inputs: train_sample (non-empty Sequence[TrainingDatum]).
@@ -80,14 +83,14 @@ class PriorBaselineCalibration(ABC):
 
 
 @dataclass(frozen=True)
-class ClassPriorCalibration(PriorBaselineCalibration):
+class ClassPriorCalibration(PriorBaselineCalibration[str]):
     """Fixed-class cross-entropy: baseline = H(TRAIN class frequencies).
 
     Labels are hashable class labels (str). The constant predictor that
     outputs the TRAIN class prior scores exactly this entropy on TRAIN.
     """
 
-    def baseline_of(self, train_sample: Sequence[TrainingDatum]) -> float:
+    def baseline_of(self, train_sample: Sequence[TrainingDatum[str]]) -> float:
         """-sum_k p_k ln p_k over the sample's class frequencies p_k.
 
         Inputs/Side effects: see PriorBaselineCalibration.baseline_of.
@@ -113,10 +116,10 @@ class ClassPriorCalibration(PriorBaselineCalibration):
 
 
 @dataclass(frozen=True)
-class BinaryPriorCalibration(PriorBaselineCalibration):
+class BinaryPriorCalibration(PriorBaselineCalibration[float]):
     """BCE: baseline = binary entropy of the TRAIN positive rate."""
 
-    def baseline_of(self, train_sample: Sequence[TrainingDatum]) -> float:
+    def baseline_of(self, train_sample: Sequence[TrainingDatum[float]]) -> float:
         """-(p ln p + (1-p) ln(1-p)), p the mean of the 0.0/1.0 labels.
 
         Inputs/Side effects: see PriorBaselineCalibration.baseline_of.
@@ -142,14 +145,16 @@ class BinaryPriorCalibration(PriorBaselineCalibration):
 
 
 @dataclass(frozen=True)
-class SoftTargetPriorCalibration(PriorBaselineCalibration):
+class SoftTargetPriorCalibration(PriorBaselineCalibration[Dict[str, float]]):
     """Soft cross-entropy: baseline = H(mean TRAIN target distribution).
 
     The constant predictor q minimizing E[-sum_k y_k ln q_k] is q = mean(y),
     so its loss is the cross-entropy of mean(y) with itself.
     """
 
-    def baseline_of(self, train_sample: Sequence[TrainingDatum]) -> float:
+    def baseline_of(
+        self, train_sample: Sequence[TrainingDatum[Dict[str, float]]]
+    ) -> float:
         """-sum_k m_k ln m_k, m = elementwise mean of the label dicts
         (a key absent from a dict counts as 0).
 
@@ -171,7 +176,7 @@ class SoftTargetPriorCalibration(PriorBaselineCalibration):
 
 
 @dataclass(frozen=True)
-class MaskedVectorMeanCalibration(PriorBaselineCalibration):
+class MaskedVectorMeanCalibration(PriorBaselineCalibration[Dict[int, float]]):
     """Masked, sigmoid-squashed vector MSE: baseline = that loss for a
     predictor outputting each position's TRAIN mean.
 
@@ -183,7 +188,9 @@ class MaskedVectorMeanCalibration(PriorBaselineCalibration):
     weighting; close enough for a baseline, and deterministic.)
     """
 
-    def baseline_of(self, train_sample: Sequence[TrainingDatum]) -> float:
+    def baseline_of(
+        self, train_sample: Sequence[TrainingDatum[Dict[int, float]]]
+    ) -> float:
         """mean over examples of mean over observed positions b of
         (y_b - mean_b)^2, mean_b the TRAIN mean of position b.
 
@@ -213,7 +220,7 @@ class MaskedVectorMeanCalibration(PriorBaselineCalibration):
 
 
 @dataclass(frozen=True)
-class UniformOptionCalibration(PriorBaselineCalibration):
+class UniformOptionCalibration(PriorBaselineCalibration[int]):
     """Pick prediction over a ragged option list: baseline = mean ln(n).
 
     A constant-logit head spreads probability uniformly over an example's
@@ -227,7 +234,7 @@ class UniformOptionCalibration(PriorBaselineCalibration):
 
     option_count: Callable[[TrainingInput], int]
 
-    def baseline_of(self, train_sample: Sequence[TrainingDatum]) -> float:
+    def baseline_of(self, train_sample: Sequence[TrainingDatum[int]]) -> float:
         """mean over examples of ln(option_count(input)).
 
         Inputs/Side effects: see PriorBaselineCalibration.baseline_of.

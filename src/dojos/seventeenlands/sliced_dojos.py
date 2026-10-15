@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import ClassVar, Protocol
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.deck_box.deck_lookup import DeckLookup
 from src.data_refinement.metrics.seventeenlands.data_slice import (
     SeventeenLandsSlice,
 )
@@ -43,6 +43,7 @@ from src.dojos.generic.data_constructors import (
     CardAverageDataConstructor,
     DeckLabelDataConstructor,
 )
+from src.dojos.generic.data_constructors.row_values import cast_to_float
 from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.multi_card_binary_classification.dojo import (
     MultiCardBinaryClassificationDojo,
@@ -163,7 +164,7 @@ class SeventeenLandsDeckRegressionDojo(MultiCardRegressionDojo):
         self,
         card_binder: CardBinder,
         holdout: HoldoutSpec,
-        deck_box: DeckBox,
+        deck_box: DeckLookup,
         card_embedding_size: int,
         data_slice: SeventeenLandsSlice = ALL_DATA,
         path_to_training_data: Path | None = None,
@@ -191,7 +192,7 @@ class SeventeenLandsDeckRegressionDojo(MultiCardRegressionDojo):
                 self.METRIC, data_slice, path_to_training_data
             ),
             data_constructor=DeckLabelDataConstructor(
-                deck_box, self.METRIC.LABEL_COLUMN
+                deck_box, self.METRIC.LABEL_COLUMN, label_caster=cast_to_float
             ),
             card_embedding_size=card_embedding_size,
             deck_box=deck_box,
@@ -203,8 +204,8 @@ class SeventeenLandsDeckRegressionDojo(MultiCardRegressionDojo):
 
 
 class SeventeenLandsDeckBinaryLabelDojo(MultiCardBinaryClassificationDojo):
-    """Whole deck in -> a boolean METRIC.LABEL_COLUMN out (the default
-    label_caster=float maps True/False to 1.0/0.0), each row's deck_uuid
+    """Whole deck in -> a boolean METRIC.LABEL_COLUMN out
+    (label_caster=cast_to_float maps True/False to 1.0/0.0), each row's deck_uuid
     looked up in deck_box. The slice-aware twin of
     ../generic/paired_metric_dojos.py's DeckBinaryLabelMetricDojo.
 
@@ -217,7 +218,7 @@ class SeventeenLandsDeckBinaryLabelDojo(MultiCardBinaryClassificationDojo):
         self,
         card_binder: CardBinder,
         holdout: HoldoutSpec,
-        deck_box: DeckBox,
+        deck_box: DeckLookup,
         card_embedding_size: int,
         data_slice: SeventeenLandsSlice = ALL_DATA,
         path_to_training_data: Path | None = None,
@@ -243,7 +244,7 @@ class SeventeenLandsDeckBinaryLabelDojo(MultiCardBinaryClassificationDojo):
                 self.METRIC, data_slice, path_to_training_data
             ),
             data_constructor=DeckLabelDataConstructor(
-                deck_box, self.METRIC.LABEL_COLUMN
+                deck_box, self.METRIC.LABEL_COLUMN, label_caster=cast_to_float
             ),
             card_embedding_size=card_embedding_size,
             deck_box=deck_box,
@@ -267,7 +268,7 @@ class SeventeenLandsDeckFixedLabelDojo(MultiCardFixedClassificationDojo):
         self,
         card_binder: CardBinder,
         holdout: HoldoutSpec,
-        deck_box: DeckBox,
+        deck_box: DeckLookup,
         card_embedding_size: int,
         data_slice: SeventeenLandsSlice = ALL_DATA,
         path_to_training_data: Path | None = None,

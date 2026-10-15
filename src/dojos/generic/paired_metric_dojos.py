@@ -19,10 +19,10 @@ METRIC's ClassVars, so they are never duplicated as literals.
 """
 
 from pathlib import Path
-from typing import ClassVar, Protocol, Sequence
+from typing import ClassVar, Dict, Protocol, Sequence
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.deck_box.deck_lookup import DeckLookup
 from src.data_refinement.metrics.generic.masked_field_metric import MaskedFieldMetric
 from src.data_refinement.metrics.generic.masked_field_multi_label_metric import (
     MaskedFieldMultiLabelMetric,
@@ -40,6 +40,7 @@ from src.dojos.generic.data_constructors import (
     MaskedFieldMultiLabelDataConstructor,
     MaskedFieldRegressionDataConstructor,
 )
+from src.dojos.generic.data_constructors.row_values import cast_to_float
 from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.multi_card_binary_classification.dojo import (
     MultiCardBinaryClassificationDojo,
@@ -55,6 +56,7 @@ from src.dojos.generic.single_card_fixed_classification.dojo import (
     SingleCardFixedClassificationDojo,
 )
 from src.dojos.generic.single_card_fixed_classification.loss_spec import (
+    FIXED_CLASSIFICATION_LOSS_SPEC,
     MASKED_VECTOR_REGRESSION_LOSS_SPEC,
 )
 from src.dojos.generic.single_card_regression.dojo import SingleCardRegressionDojo
@@ -204,7 +206,7 @@ class DeckLabelMetricDojo(MultiCardRegressionDojo):
         self,
         card_binder: CardBinder,
         holdout: HoldoutSpec,
-        deck_box: DeckBox,
+        deck_box: DeckLookup,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         name: str | None = None,
@@ -228,7 +230,7 @@ class DeckLabelMetricDojo(MultiCardRegressionDojo):
             path_to_training_data=path_to_training_data
             or self.METRIC.DEFAULT_OUTPUT_PATH,
             data_constructor=DeckLabelDataConstructor(
-                deck_box, self.METRIC.LABEL_COLUMN
+                deck_box, self.METRIC.LABEL_COLUMN, label_caster=cast_to_float
             ),
             card_embedding_size=card_embedding_size,
             deck_box=deck_box,
@@ -243,7 +245,7 @@ class DeckBinaryLabelMetricDojo(MultiCardBinaryClassificationDojo):
     """Whole deck in -> METRIC.LABEL_COLUMN (bool) out.
 
     Subclasses set METRIC to a DeckLabelMetric-shaped class whose label
-    is boolean (e.g. a win/loss outcome); the default label_caster=float
+    is boolean (e.g. a win/loss outcome); label_caster=cast_to_float
     handles True/False -> 1.0/0.0 fine.
     """
 
@@ -253,7 +255,7 @@ class DeckBinaryLabelMetricDojo(MultiCardBinaryClassificationDojo):
         self,
         card_binder: CardBinder,
         holdout: HoldoutSpec,
-        deck_box: DeckBox,
+        deck_box: DeckLookup,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         name: str | None = None,
@@ -276,7 +278,7 @@ class DeckBinaryLabelMetricDojo(MultiCardBinaryClassificationDojo):
             path_to_training_data=path_to_training_data
             or self.METRIC.DEFAULT_OUTPUT_PATH,
             data_constructor=DeckLabelDataConstructor(
-                deck_box, self.METRIC.LABEL_COLUMN
+                deck_box, self.METRIC.LABEL_COLUMN, label_caster=cast_to_float
             ),
             card_embedding_size=card_embedding_size,
             deck_box=deck_box,
@@ -304,7 +306,7 @@ class DeckFixedLabelMetricDojo(MultiCardFixedClassificationDojo):
         self,
         card_binder: CardBinder,
         holdout: HoldoutSpec,
-        deck_box: DeckBox,
+        deck_box: DeckLookup,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         name: str | None = None,
@@ -357,7 +359,7 @@ class DeckCardMaskMetricDojo(MultiCardFixedClassificationDojo):
         self,
         card_binder: CardBinder,
         holdout: HoldoutSpec,
-        deck_box: DeckBox,
+        deck_box: DeckLookup,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         name: str | None = None,
@@ -389,7 +391,7 @@ class DeckCardMaskMetricDojo(MultiCardFixedClassificationDojo):
         )
 
 
-class MaskedFieldMetricDojo(SingleCardFixedClassificationDojo):
+class MaskedFieldMetricDojo(SingleCardFixedClassificationDojo[str]):
     """Single card with METRIC's field masked in -> that field's value out.
 
     Subclasses set METRIC to a MaskedFieldMetric subclass. The mask is
@@ -440,6 +442,7 @@ class MaskedFieldMetricDojo(SingleCardFixedClassificationDojo):
             data_constructor=MaskedFieldDataConstructor("label"),
             label_values=self.METRIC.LABEL_VALUES,
             card_embedding_size=card_embedding_size,
+            loss_spec=FIXED_CLASSIFICATION_LOSS_SPEC,
             mod_pipeline=_field_masking_pipeline(
                 self.METRIC.MASKED_FIELD,
                 self.EXTRA_MASKED_KEYS,
@@ -502,7 +505,9 @@ class MaskedFieldRegressionMetricDojo(SingleCardRegressionDojo):
         )
 
 
-class MaskedFieldMultiLabelMetricDojo(SingleCardFixedClassificationDojo):
+class MaskedFieldMultiLabelMetricDojo(
+    SingleCardFixedClassificationDojo[Dict[int, float]]
+):
     """Single card with METRIC's field masked in -> one independent
     probability per METRIC.LABEL_VALUES member out (e.g. MTG colors).
 
@@ -577,7 +582,7 @@ class HeldOutDeckCardMetricDojo(MultiGroupOptionSelectionDojo):
         self,
         card_binder: CardBinder,
         holdout: HoldoutSpec,
-        deck_box: DeckBox,
+        deck_box: DeckLookup,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         name: str | None = None,

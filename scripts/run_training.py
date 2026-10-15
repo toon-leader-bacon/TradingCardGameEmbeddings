@@ -74,12 +74,9 @@ from src.training.diet.diet_shares import (
     plan_diet_shares,
     write_diet_shares_csv,
 )
-from src.training.dojo_catalog import (
-    DOJO_CATALOG,
-    CardShelf,
-    DojoBuildContext,
-    build_dojos,
-)
+from src.training.dojo_catalog import DOJO_CATALOG, build_dojos
+from src.training.dojo_recipes.card_shelf import CardShelf
+from src.training.dojo_recipes.dojo_build_context import DojoBuildContext
 from src.training.preflight import preflight_dojo
 from src.training.recording.checkpointer import DirectoryCheckpointer
 from src.training.recording.reports import TrainingResult
@@ -88,16 +85,18 @@ from src.training.recording.run_listener import (
     LoggingRunListener,
     RunListener,
 )
-from src.training.run_config import (
+from src.training.model_spec import (
     AttentionPoolingSpec,
-    ConfigDocument,
     EmbeddingHeadKind,
     MeanPoolingSpec,
     ModelSpec,
     PoolingSpec,
-    RunConfig,
     TokenWhiteningSpec,
     TransformerPoolingSpec,
+)
+from src.training.run_config import (
+    ConfigDocument,
+    RunConfig,
     apply_overrides,
     parse_run_config,
     read_config_document,

@@ -6,6 +6,7 @@ import pyarrow as pa
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.dojos.generic.data_constructors.row_values import cast_to_float
 from src.dojos.generic.data_constructors import DeckLabelDataConstructor
 from src.schema.card import GenericCard, GenericDeck, Provenance
 from src.schema.data_source import DataSource
@@ -45,7 +46,7 @@ class TestDeckLabelDataConstructorBuild:
         deck = _deck([card1, card2])
         deck_box.create(deck)
         chunk = pd.DataFrame({"deck_uuid": [str(deck.nocab_uuid)], "relic_count": [3]})
-        constructor = DeckLabelDataConstructor(deck_box, "relic_count")
+        constructor = DeckLabelDataConstructor(deck_box, "relic_count", cast_to_float)
 
         result = constructor.build(chunk, card_binder)
 
@@ -66,7 +67,7 @@ class TestDeckLabelDataConstructorBuild:
         deck = _deck([resolvable_card, unresolvable_card])
         deck_box.create(deck)
         chunk = pd.DataFrame({"deck_uuid": [str(deck.nocab_uuid)], "relic_count": [3]})
-        constructor = DeckLabelDataConstructor(deck_box, "relic_count")
+        constructor = DeckLabelDataConstructor(deck_box, "relic_count", cast_to_float)
 
         result = constructor.build(chunk, card_binder)
 
@@ -82,7 +83,7 @@ class TestDeckLabelDataConstructorBuild:
         deck = _deck([unresolvable_card])
         deck_box.create(deck)
         chunk = pd.DataFrame({"deck_uuid": [str(deck.nocab_uuid)], "relic_count": [3]})
-        constructor = DeckLabelDataConstructor(deck_box, "relic_count")
+        constructor = DeckLabelDataConstructor(deck_box, "relic_count", cast_to_float)
 
         result = constructor.build(chunk, card_binder)
 
@@ -92,7 +93,7 @@ class TestDeckLabelDataConstructorBuild:
         card_binder = CardBinder()
         deck_box = DeckBox()
         chunk = pd.DataFrame({"deck_uuid": [str(uuid4())], "relic_count": [3]})
-        constructor = DeckLabelDataConstructor(deck_box, "relic_count")
+        constructor = DeckLabelDataConstructor(deck_box, "relic_count", cast_to_float)
 
         result = constructor.build(chunk, card_binder)
 
@@ -102,7 +103,7 @@ class TestDeckLabelDataConstructorBuild:
         card_binder = CardBinder()
         deck_box = DeckBox()
         chunk = pd.DataFrame({"deck_uuid": ["not-a-uuid"], "relic_count": [3]})
-        constructor = DeckLabelDataConstructor(deck_box, "relic_count")
+        constructor = DeckLabelDataConstructor(deck_box, "relic_count", cast_to_float)
 
         result = constructor.build(chunk, card_binder)
 
@@ -112,13 +113,32 @@ class TestDeckLabelDataConstructorBuild:
         card_binder = CardBinder()
         deck_box = DeckBox()
         chunk = pd.DataFrame({"deck_uuid": [], "relic_count": []})
-        constructor = DeckLabelDataConstructor(deck_box, "relic_count")
+        constructor = DeckLabelDataConstructor(deck_box, "relic_count", cast_to_float)
 
         result = constructor.build(chunk, card_binder)
 
         assert result == []
 
-    def test_label_caster_defaults_to_float(self) -> None:
+    def test_reads_the_deck_uuid_from_a_named_column(self) -> None:
+        card_binder = CardBinder()
+        deck_box = DeckBox()
+        card = _card("Strike", "strike")
+        card_binder.create(card)
+        deck = _deck([card])
+        deck_box.create(deck)
+        chunk = pd.DataFrame(
+            {"kingdom_uuid": [str(deck.nocab_uuid)], "winner_turns": [19]}
+        )
+        constructor = DeckLabelDataConstructor(
+            deck_box, "winner_turns", cast_to_float, deck_uuid_column="kingdom_uuid"
+        )
+
+        [(deck_cards, label)] = constructor.build(chunk, card_binder)
+
+        assert [card.nocab_uuid for card in deck_cards] == [card.nocab_uuid]
+        assert label == 19.0
+
+    def test_cast_to_float_turns_a_bool_label_into_a_float(self) -> None:
         card_binder = CardBinder()
         deck_box = DeckBox()
         card = _card("Strike", "strike")
@@ -126,7 +146,7 @@ class TestDeckLabelDataConstructorBuild:
         deck = _deck([card])
         deck_box.create(deck)
         chunk = pd.DataFrame({"deck_uuid": [str(deck.nocab_uuid)], "win": [True]})
-        constructor = DeckLabelDataConstructor(deck_box, "win")
+        constructor = DeckLabelDataConstructor(deck_box, "win", cast_to_float)
 
         _, label = constructor.build(chunk, card_binder)[0]
 
@@ -187,7 +207,7 @@ class TestDeckLabelDataConstructorBuild:
                 "sample_count": [1, 2],
             }
         ).to_pandas(types_mapper=pd.ArrowDtype)
-        constructor = DeckLabelDataConstructor(deck_box, "sensitivity")
+        constructor = DeckLabelDataConstructor(deck_box, "sensitivity", cast_to_float)
 
         result = constructor.build(chunk, card_binder)
 

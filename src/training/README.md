@@ -78,6 +78,15 @@ Top level:
   is built), and copies the stats file into the run directory as
   `whitening_stats.pt`; the recorded `run_config.yaml` points at that
   copy.
+- [model_spec.py](model_spec.py): `ModelSpec` and the pooling, enrichment
+  and group-attention specs inside it, the frozen form of the `model:`
+  section above.
+- [config_parsing/](config_parsing/): the parsers `run_config.py` delegates
+  to. `config_section.py` holds `ConfigSection`, the typed, key-checked
+  reader of one mapping (every getter records its key, so unread keys
+  raise) and the shared scalar checks; `diet_parsing.py`,
+  `model_parsing.py` and `mod_parsing.py` parse the `diet:`, `model:` and
+  `mods:` sections.
 - [dojo_catalog.py](dojo_catalog.py): `DOJO_CATALOG`, every dojo a config
   can name, keyed `"<metric source>.<metric stem>"` (e.g.
   `gwent_one.color_mask`). The key becomes the dojo's `name`, so same-stem
@@ -94,6 +103,12 @@ Top level:
   Deck mods are opt-in, for the dojos and groups in `DECK_MOD_GROUPS`.
   Every mod gets its own seed from a stream separate from the dojo's own
   sampling.
+- [dojo_recipes/](dojo_recipes/): what the catalog is built from. One
+  recipe class per file (`CardDojoRecipe`, `DeckDojoRecipe`,
+  `MultiGameCardDojoRecipe`, `ContrastiveDojoRecipe`), the constructor
+  Protocols they accept (`dojo_constructors.py`, which also binds the
+  run's regression objective onto regression dojos), `CardShelf`,
+  `DojoBuildContext`, and the augmentation helpers (`augmentations.py`).
 - [preflight.py](preflight.py): `preflight_dojo()` exercises one already-
   built dojo (one TRAIN batch, `compute_loss` against random embeddings,
   and that batch's `baseline_loss`, which must be finite and > 0)

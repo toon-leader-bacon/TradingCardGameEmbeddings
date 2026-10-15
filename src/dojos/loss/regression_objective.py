@@ -8,7 +8,7 @@ RegressionObjective keeps the pair from being mismatched.
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Any, List
 
 from src.dojos.loss.huber_loss import DEFAULT_HUBER_DELTA, HuberLoss
 from src.dojos.loss.loss_calibration import (
@@ -39,8 +39,8 @@ class RegressionObjective:
         MseLoss with StandardizedRegressionCalibration).
     """
 
-    loss: NocabLoss[Any, Any]
-    calibration: LossCalibration
+    loss: NocabLoss[Any, List[float]]
+    calibration: LossCalibration[float]
 
     def __post_init__(self) -> None:
         # Each loss type must come with its own calibration

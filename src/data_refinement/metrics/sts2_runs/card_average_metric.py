@@ -24,9 +24,6 @@ DEFAULT_OUTPUT_PATH, and implements _value_for().
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import ClassVar
-from uuid import UUID
-
-import pandas as pd
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.sts2_runs.run_record import (
@@ -34,6 +31,7 @@ from src.data_refinement.metrics.sts2_runs.run_record import (
     PlayerRun,
     Sts2Run,
 )
+from src.data_refinement.metrics.card_mean_tally import CardMeanTally
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     write_dataframe_with_version_metadata,
@@ -67,15 +65,14 @@ class CardAverageMetric(ABC):
             game=GameId.SLAY_THE_SPIRE_2,
             card_binder_version=card_binder.version_for(GameId.SLAY_THE_SPIRE_2),
         )
-        self._value_sum: dict[UUID, float] = {}
-        self._sample_count: dict[UUID, int] = {}
+        self._tally = CardMeanTally()
 
     def accumulate(self, run: Sts2Run) -> None:
         """Tally every aliased card copy of every player of run.
 
         Inputs: run (Sts2Run), already filtered by the scanner.
         Output: none.
-        Side effects: updates the in-memory per-card sums and counts.
+        Side effects: adds to the in-memory per-card tally.
         Exceptions: whatever _value_for() raises.
 
         Example:
@@ -90,9 +87,7 @@ class CardAverageMetric(ABC):
                 value = self._value_for(run, player, slot)
                 if value is None:
                     continue
-                card_uuid = slot.card_uuid
-                self._value_sum[card_uuid] = self._value_sum.get(card_uuid, 0.0) + value
-                self._sample_count[card_uuid] = self._sample_count.get(card_uuid, 0) + 1
+                self._tally.add(slot.card_uuid, value)
 
     def finalize(self) -> Path:
         """Write one row per tallied card: nocab_uuid (str), LABEL_COLUMN
@@ -107,19 +102,10 @@ class CardAverageMetric(ABC):
             >>> metric.finalize()
             PosixPath('data/metrics/sts2_runs/card_win_rate.parquet')
         """
-        rows = [
-            {
-                "nocab_uuid": str(card_uuid),
-                self.LABEL_COLUMN: self._value_sum[card_uuid] / count,
-                "sample_count": count,
-            }
-            for card_uuid, count in self._sample_count.items()
-        ]
-        frame = pd.DataFrame(
-            rows, columns=["nocab_uuid", self.LABEL_COLUMN, "sample_count"]
-        )
         write_dataframe_with_version_metadata(
-            frame, self._output_path, self._version_metadata
+            self._tally.mean_frame(self.LABEL_COLUMN),
+            self._output_path,
+            self._version_metadata,
         )
         return self._output_path
 

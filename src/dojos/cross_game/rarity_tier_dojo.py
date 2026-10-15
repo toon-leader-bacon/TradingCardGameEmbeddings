@@ -39,6 +39,9 @@ from src.dojos.cross_game.rarity_tier_data_constructor import (
 from src.dojos.file_managers.game_balanced_chunk_reader import GameBalancedChunkReader
 from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.generic_dojo import ROWS_PER_CHUNK
+from src.dojos.generic.single_card_fixed_classification.loss_spec import (
+    FIXED_CLASSIFICATION_LOSS_SPEC,
+)
 from src.dojos.generic.single_card_fixed_classification.dojo import (
     SingleCardFixedClassificationDojo,
 )
@@ -54,7 +57,7 @@ from src.schema.splits import Split
 _BALANCE_COLUMN = "source_game"
 
 
-class RarityTierDojo(SingleCardFixedClassificationDojo):
+class RarityTierDojo(SingleCardFixedClassificationDojo[str]):
     """Card, its rarity masked -> its RarityTier (RarityTierMetric).
 
     label_values = TIER_1..TIER_4 then SPECIAL. OTHER rows are never
@@ -103,6 +106,7 @@ class RarityTierDojo(SingleCardFixedClassificationDojo):
             data_constructor=RarityTierDataConstructor(),
             label_values=[tier.value for tier in (*LADDER, RarityTier.SPECIAL)],
             card_embedding_size=card_embedding_size,
+            loss_spec=FIXED_CLASSIFICATION_LOSS_SPEC,
             mod_pipeline=ModPipeline(
                 [PerGameMod(_masking_pipelines(translators), train_only=False)]
             ),

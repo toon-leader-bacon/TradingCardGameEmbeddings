@@ -14,7 +14,7 @@ group 0 beat group 1") pass a ModPipeline holding a GroupSwapMod
 from pathlib import Path
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.deck_box.deck_lookup import DeckLookup
 from src.dojos.generic.data_constructor import DataConstructor
 from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.generic_dojo import GenericDojo
@@ -28,7 +28,7 @@ from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
 
 
-class MultiGroupBinaryClassificationDojo(GenericDojo):
+class MultiGroupBinaryClassificationDojo(GenericDojo[float]):
     """Dojo for the (two card groups in, single logit out) task shape.
 
     Callers never build the decoder head or loss themselves. See
@@ -38,13 +38,13 @@ class MultiGroupBinaryClassificationDojo(GenericDojo):
     def __init__(
         self,
         path_to_training_data: Path,
-        data_constructor: DataConstructor,
+        data_constructor: DataConstructor[float],
         card_lookup: CardLookup,
         holdout: HoldoutSpec,
         card_embedding_size: int,
         mod_pipeline: ModPipeline | None = None,
         pooler: EmbeddingPooler | None = None,
-        deck_box: DeckBox | None = None,
+        deck_box: DeckLookup | None = None,
         config: DojoConfig = DojoConfig(),
     ) -> None:
         self.card_embedding_size = card_embedding_size

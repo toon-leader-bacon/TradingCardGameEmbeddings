@@ -126,11 +126,9 @@ def _catalog_dojo_classes(metric_classes: list[type]) -> list[_DojoClass]:
     Side effects: imports the training catalog. Exceptions: ImportError.
     """
     # Imported here: only this pairing needs the training catalog
-    from src.training.dojo_catalog import (
-        DOJO_CATALOG,
-        CardDojoRecipe,
-        DeckDojoRecipe,
-    )
+    from src.training.dojo_catalog import DOJO_CATALOG
+    from src.training.dojo_recipes.card_dojo_recipe import CardDojoRecipe
+    from src.training.dojo_recipes.deck_dojo_recipe import DeckDojoRecipe
 
     dojos: list[_DojoClass] = []
     for recipe in DOJO_CATALOG.values():

@@ -7,6 +7,7 @@ import pandas as pd
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.dojos.generic.data_constructors.row_values import cast_to_float
 from src.dojos.generic.data_constructors import DeckLabelDataConstructor
 from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
 from src.dojos.seventeenlands.game_data.on_play_win_rate_sensitivity_by_deck_dojo import (
@@ -84,7 +85,7 @@ class TestOnPlayWinRateSensitivityByDeckDojo:
         )
 
         result = DeckLabelDataConstructor(
-            deck_box, "on_play_win_rate_sensitivity"
+            deck_box, "on_play_win_rate_sensitivity", cast_to_float
         ).build(chunk, card_binder)
 
         assert result == []

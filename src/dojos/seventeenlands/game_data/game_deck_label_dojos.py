@@ -22,7 +22,7 @@ DeckLabelDataConstructor(deck_box, LABEL_COLUMN)) is reused unchanged:
 shape-compatible, not class-compatible.
 
 CELL MAPPING: DeckWinPredictionMetric (bool) ->
-SeventeenLandsDeckBinaryLabelDojo (default label_caster=float handles
+SeventeenLandsDeckBinaryLabelDojo (label_caster=cast_to_float handles
 True/False -> 1.0/0.0 fine, same as sts_gg's WinDojo).
 DeckGameLengthPredictionMetric (int64) -> SeventeenLandsDeckRegressionDojo.
 DeckRankTierPredictionMetric (str, closed vocabulary + OTHER_LABEL) ->

@@ -6,7 +6,6 @@ import pytest
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.isotropic.games import kingdom_ending_type_metric
-from src.dojos.generic.data_constructors import DeckLabelDataConstructor
 from src.dojos.generic.multi_card_binary_classification.dojo import (
     MultiCardBinaryClassificationDojo,
 )
@@ -19,11 +18,7 @@ from src.dojos.isotropic.deck_label_dojos import (
     KingdomEndingTypeDojo,
     KingdomGameLengthDojo,
     NextTurnActionCountDojo,
-    build_deck_label_constructor,
     label_capped_at,
-)
-from src.dojos.generic.renamed_column_data_constructor import (
-    RenamedColumnDataConstructor,
 )
 from src.schema.holdout import HoldoutSpec
 from tests.dojos.isotropic._fixtures import binder_and_group
@@ -124,18 +119,6 @@ class TestIsotropicDeckLabelDojos:
         dojo = _build(KingdomEndingTypeDojo, source, DeckBox())
 
         assert dojo.label_values == list(kingdom_ending_type_metric.LABEL_VALUES)
-
-
-class TestBuildDeckLabelConstructor:
-    def test_deck_uuid_column_needs_no_rename(self) -> None:
-        result = build_deck_label_constructor(DeckBox(), "deck_uuid", "won")
-
-        assert isinstance(result, DeckLabelDataConstructor)
-
-    def test_other_group_column_is_renamed(self) -> None:
-        result = build_deck_label_constructor(DeckBox(), "kingdom_uuid", "winner_turns")
-
-        assert isinstance(result, RenamedColumnDataConstructor)
 
 
 class TestLabelCaps:

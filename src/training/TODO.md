@@ -158,20 +158,6 @@ install) is in `Notes.md`.
 
 ## Housekeeping
 
-- [ ] **Split `run_config.py` (913 lines) and `dojo_catalog.py` (895
-  lines) into smaller files.** Neither violates a specific size
-  heuristic badly today (no individual function is oversized, and the
-  `_MOD_PARSERS`/`DOJO_CATALOG` dispatch-table style already avoids a
-  long if/elif chain, which PRINCIPLES.md §5 wants), but per §3 (file
-  organization) each file mixes a large flat literal/table with
-  meaningful parsing/building logic, and is a candidate to move its
-  private helpers (`run_config.py`'s `ConfigSection`/`_parse_*` family;
-  `dojo_catalog.py`'s `_recipe_for_*` builders) into sibling
-  implementation files, leaving the catalog/public API in a slimmer
-  top-level file. Most of the bulk is irreducible data (one catalog
-  line per dojo), so this is lower-priority than the line count alone
-  suggests. Flagged during a 2026-10-05 project-wide cleanup scan, not
-  yet fixed. (`src/training/run_config.py`, `src/training/dojo_catalog.py`)
 - [ ] **Document the ROCm torch install in `requirements.txt`** (command in
   `Notes.md`). `scripts/check.sh` now runs every tool as
   `$PYTHON -m <tool>`, defaulting to the project `venv/`. On the Windows

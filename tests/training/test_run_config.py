@@ -26,14 +26,16 @@ from src.training.plan import (
     Temperature,
     Uniform,
 )
-from src.training.run_config import (
+from src.training.model_spec import (
     AttentionPoolingSpec,
-    ConfigDocument,
     EmbeddingHeadKind,
     GroupAttentionSpec,
     MeanPoolingSpec,
     TokenWhiteningSpec,
     TransformerPoolingSpec,
+)
+from src.training.run_config import (
+    ConfigDocument,
     apply_overrides,
     parse_run_config,
     read_config_document,

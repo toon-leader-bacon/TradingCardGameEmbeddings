@@ -15,15 +15,18 @@ from typing import List, Protocol, runtime_checkable
 import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.schema.type_hints import TrainingDatum
+from src.schema.type_hints import LabelT, TrainingDatum
 
 
 @runtime_checkable
-class DataConstructor(Protocol):
+class DataConstructor(Protocol[LabelT]):
     """Converts one chunk of a metric's raw output rows into TrainingDatum
-    (input, label) pairs, ready for Batch.from_training_data()."""
+    (input, label) pairs, ready for Batch.from_training_data(). A cell
+    takes a DataConstructor of its own label type (GenericDojo)."""
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[LabelT]]:
         """
         Inputs:
             chunk: one chunk of rows read from a metric's own output

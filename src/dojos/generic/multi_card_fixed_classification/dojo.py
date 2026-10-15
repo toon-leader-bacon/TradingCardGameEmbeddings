@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Sequence
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.deck_box.deck_lookup import DeckLookup
 from src.dojos.generic.data_constructor import DataConstructor
 from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.generic_dojo import GenericDojo
@@ -22,7 +22,7 @@ from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
 
 
-class MultiCardFixedClassificationDojo(GenericDojo):
+class MultiCardFixedClassificationDojo(GenericDojo[str]):
     """Dojo for the (whole deck in, closed-vocabulary class out) task shape.
 
     Callers never build the decoder head or loss themselves; both are this
@@ -32,14 +32,14 @@ class MultiCardFixedClassificationDojo(GenericDojo):
     def __init__(
         self,
         path_to_training_data: Path,
-        data_constructor: DataConstructor,
+        data_constructor: DataConstructor[str],
         card_lookup: CardLookup,
         holdout: HoldoutSpec,
         label_values: Sequence[str],
         card_embedding_size: int,
         mod_pipeline: ModPipeline | None = None,
         pooler: EmbeddingPooler | None = None,
-        deck_box: DeckBox | None = None,
+        deck_box: DeckLookup | None = None,
         config: DojoConfig = DojoConfig(),
     ) -> None:
         label_values = list(label_values)

@@ -41,7 +41,9 @@ class CardCharacterPredictionDataConstructor:
         Exceptions: none.
         """
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[Dict[str, float]]]:
         """Convert a chunk of (nocab_uuid, characters, probabilities,
         sample_count) rows into (SingleCardInput, Dict[str, float])
         TrainingDatum pairs.
@@ -66,7 +68,7 @@ class CardCharacterPredictionDataConstructor:
             >>> constructor.build(chunk, lookup)
             [(<GenericCard>, {"CHARACTER.SILENT": 0.6, "CHARACTER.REGENT": 0.4}), ...]
         """
-        results: List[TrainingDatum] = []
+        results: List[TrainingDatum[Dict[str, float]]] = []
 
         # Look up each row's card independently; skip rows whose
         # nocab_uuid doesn't look up a card, same as

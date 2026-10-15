@@ -29,6 +29,7 @@ own docstring).
 """
 
 from pathlib import Path
+from typing import Dict
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.seventeenlands.data_slice import (
@@ -54,7 +55,7 @@ from src.schema.holdout import HoldoutSpec
 MIN_SAMPLE_COUNT = 10
 
 
-class PickNumberDecayCurveDojo(SingleCardFixedClassificationDojo):
+class PickNumberDecayCurveDojo(SingleCardFixedClassificationDojo[Dict[int, float]]):
     """Card -> per-bucket P(picked | in pack, at pick_number bucket i)
     (PickNumberDecayCurveMetric). See module docstring for why this
     wrapper injects MaskedVectorRegressionLoss instead of this cell's

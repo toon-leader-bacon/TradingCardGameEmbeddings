@@ -1,7 +1,7 @@
 from typing import List
 
 from src.dojos.mods.mod import Mod, ModTally
-from src.schema.type_hints import TrainingDatum
+from src.schema.type_hints import LabelT, TrainingDatum
 
 
 class ModPipeline:
@@ -44,8 +44,8 @@ class ModPipeline:
         return result
 
     def apply_single(
-        self, data: TrainingDatum, is_training: bool = True
-    ) -> TrainingDatum:
+        self, data: TrainingDatum[LabelT], is_training: bool = True
+    ) -> TrainingDatum[LabelT]:
         for mod in self.mods:
             if not is_training and mod.train_only:
                 continue
@@ -53,8 +53,8 @@ class ModPipeline:
         return data
 
     def apply(
-        self, data: List[TrainingDatum], is_training: bool = True
-    ) -> List[TrainingDatum]:
+        self, data: List[TrainingDatum[LabelT]], is_training: bool = True
+    ) -> List[TrainingDatum[LabelT]]:
         for mod in self.mods:
             if not is_training and mod.train_only:
                 continue

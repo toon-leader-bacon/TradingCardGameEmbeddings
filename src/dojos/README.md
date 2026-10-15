@@ -174,11 +174,8 @@ rows never straddle TRAIN and TEST.
   `DeckOccurrenceCountMetric`. `CopiesBoughtDistributionDojo` classifies a
   card's copy count in a finished deck (1 to 9, 10+), so it learns the
   whole distribution where `AverageCopiesBoughtDojo` learns the mean. Its kingdom and partial-deck metrics key rows by
-  `kingdom_uuid`/`partial_deck_uuid`, so `isotropic/` wraps
-  `DeckLabelDataConstructor` in a column-renaming Decorator
-  (`generic/renamed_column_data_constructor.py` - reused by
-  `fabtcg_decklists/` and `play_gwent/` too, so it lives in `generic/`
-  rather than here). Its two-group and "which
+  `kingdom_uuid`/`partial_deck_uuid`, which `isotropic/` passes to
+  `DeckLabelDataConstructor` as its `deck_uuid_column`. Its two-group and "which
   card(s)" metrics use `isotropic/`'s own constructors: a `CardGroup`
   Strategy (`card_groups.py`) reads each group from a row column (a
   DeckBox group, optionally distinct or with extra cards such as the
@@ -375,7 +372,7 @@ each mainly masks the field that nearly identifies a card's deck (Gwent
 `faction`, STS2 `color`), so same-deck positives cannot be matched on that
 field alone. A `ModSpec` is a frozen recipe; each dojo builds its own mods
 from it, with its own seed and tally. Every catalog dojo takes its game's
-defaults (`src/training/dojo_catalog.py`): a contrastive dojo as its whole
+defaults (`src/training/dojo_recipes/augmentations.py`): a contrastive dojo as its whole
 pipeline, a metric dojo after its own task mods (`GenericDojo.append_mods`),
 so a task's mask (`train_only=False`) stays first and in order. Card-field
 mods only remove information and never move a card, so a mask stays masked

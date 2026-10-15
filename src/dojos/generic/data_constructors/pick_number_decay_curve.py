@@ -60,7 +60,9 @@ class PickNumberDecayCurveDataConstructor:
             raise ValueError(f"min_sample_count must be >= 1, got {min_sample_count}")
         self._min_sample_count = min_sample_count
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[Dict[int, float]]]:
         """Convert a chunk of (nocab_uuid, take_rate_by_pick_number,
         sample_count_by_pick_number) rows into (SingleCardInput,
         Dict[int, float]) TrainingDatum pairs.
@@ -93,7 +95,7 @@ class PickNumberDecayCurveDataConstructor:
             >>> constructor.build(chunk, lookup)
             [(<GenericCard>, {0: 0.05, 1: 0.12, 14: 0.83}), ...]
         """
-        results: List[TrainingDatum] = []
+        results: List[TrainingDatum[Dict[int, float]]] = []
 
         # Resolve each row's card and its per-bucket label dict
         # independently; skip rows that fail either.

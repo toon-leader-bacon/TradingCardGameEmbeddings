@@ -32,7 +32,7 @@ from uuid import UUID
 
 from src.dojos.mods.mod import Mod, ModTally
 from src.schema.card import GenericCard
-from src.schema.type_hints import TrainingDatum, TrainingInput
+from src.schema.type_hints import LabelT, TrainingDatum, TrainingInput
 
 _logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ class DeckThinningMod(Mod):
         """
         ...
 
-    def apply_single(self, data: TrainingDatum) -> TrainingDatum:
+    def apply_single(self, data: TrainingDatum[LabelT]) -> TrainingDatum[LabelT]:
         """A new datum with each thinnable group thinned; the label is
         unchanged, and data itself is returned when nothing was removed.
 

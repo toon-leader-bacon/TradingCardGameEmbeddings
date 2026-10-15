@@ -18,7 +18,7 @@ import random
 from typing import cast
 
 from src.dojos.mods.mod import Mod
-from src.schema.type_hints import MultiGroupInput, TrainingDatum
+from src.schema.type_hints import LabelT, MultiGroupInput, TrainingDatum
 
 
 class GroupSwapMod(Mod):
@@ -49,7 +49,7 @@ class GroupSwapMod(Mod):
         self.swap_probability = swap_probability
         self._rng = random.Random(rng_seed)
 
-    def apply_single(self, data: TrainingDatum) -> TrainingDatum:
+    def apply_single(self, data: TrainingDatum[LabelT]) -> TrainingDatum[LabelT]:
         """The datum swapped (new outer list, flipped label) or unchanged.
 
         Inputs: data, a ([group_0, group_1], label) datum, both groups
@@ -72,10 +72,11 @@ class GroupSwapMod(Mod):
 
         # A new outer list; the group lists themselves are shared, not copied
         swapped: MultiGroupInput = [groups[1], groups[0]]
-        return (swapped, 1.0 - label)
+        # _split_pair_datum checked the label is a float, so LabelT is float
+        return (swapped, cast(LabelT, 1.0 - label))
 
 
-def _split_pair_datum(data: TrainingDatum) -> tuple[MultiGroupInput, float]:
+def _split_pair_datum(data: TrainingDatum[object]) -> tuple[MultiGroupInput, float]:
     """data's two groups and float label, typed and checked.
 
     Inputs: data (TrainingDatum).

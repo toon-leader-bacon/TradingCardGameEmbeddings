@@ -36,7 +36,9 @@ class PackToPickChoiceSetDataConstructor:
         Exceptions: none.
         """
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[int]]:
         """Convert a chunk of (pack_option_uuids, pick_uuid) rows into
         (MultiCardInput, int) TrainingDatum pairs.
 
@@ -57,7 +59,7 @@ class PackToPickChoiceSetDataConstructor:
             >>> constructor.build(chunk, lookup)
             [([<GenericCard>, <GenericCard>, <GenericCard>], 1), ...]
         """
-        results: List[TrainingDatum] = []
+        results: List[TrainingDatum[int]] = []
 
         # Resolve each row's option list and picked index together (one
         # row's label is meaningless without the other) via the shared

@@ -6,6 +6,7 @@ behind isotropic's column-renaming Decorator).
 """
 
 from pathlib import Path
+from typing import Dict
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.play_gwent.card_inclusion_metrics import (
@@ -37,7 +38,9 @@ class CardInclusionRateDojo(CardAverageMetricDojo):
     METRIC = CardInclusionRateMetric
 
 
-class FactionConditionedInclusionDojo(SingleCardFixedClassificationDojo):
+class FactionConditionedInclusionDojo(
+    SingleCardFixedClassificationDojo[Dict[int, float]]
+):
     """Card -> P(card in deck | faction) per GWENT_FACTIONS faction;
     positions where the card is illegal (count 0) are masked out of the
     loss, so a faction card trains one position and a neutral card six."""

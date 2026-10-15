@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List
 
-from src.schema.type_hints import TrainingDatum
+from src.schema.type_hints import LabelT, TrainingDatum
 
 # What every masking mod writes in place of a hidden value
 MASK_TOKEN = "[MASK]"
@@ -75,7 +75,7 @@ class Mod(ABC):
         self.tally: ModTally | None = None
 
     @abstractmethod
-    def apply_single(self, data: TrainingDatum) -> TrainingDatum: ...
+    def apply_single(self, data: TrainingDatum[LabelT]) -> TrainingDatum[LabelT]: ...
 
     def child_tallies(self) -> dict[str, ModTally]:
         """Tallies of mods this mod holds inside itself (a PerGameMod's
@@ -87,7 +87,7 @@ class Mod(ABC):
         """
         return {}
 
-    def apply(self, data: List[TrainingDatum]) -> List[TrainingDatum]:
+    def apply(self, data: List[TrainingDatum[LabelT]]) -> List[TrainingDatum[LabelT]]:
         """apply_single on each datum, in order; data is unchanged.
         Override only for a mod that works across data (e.g. mixing two
         datums). Side effects: as apply_single. Exceptions: as apply_single."""

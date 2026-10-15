@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Iterator
 from uuid import UUID
 
-from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.deck_box.deck_lookup import DeckLookup
 from src.schema.card import GenericDeck
 from src.schema.game_id import GameId
 from src.schema.splits import Split
@@ -66,7 +66,7 @@ class DeckBoxDealer:
 
     def __init__(
         self,
-        deck_box: DeckBox,
+        deck_box: DeckLookup,
         source_game: GameId,
         index_path: Path,
         split_ratios: list[float] = [8, 1, 1],

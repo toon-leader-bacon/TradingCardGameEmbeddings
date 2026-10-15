@@ -8,7 +8,7 @@ one level down: several per-card metrics
 (card_average_metrics.py) are otherwise identical except for which
 field of the row feeds the average and what its output column is
 named - this class owns the shared sequence (per-copy iteration,
-card resolution, running sum/count, final division), and a subclass
+card resolution, then a CardMeanTally (../card_mean_tally.py)), and a subclass
 only fixes LABEL_COLUMN/DEFAULT_OUTPUT_PATH and implements
 _value_for_run().
 
@@ -20,8 +20,7 @@ variable, so it needs no separate accumulation shape.
 ACCUMULATION, NOT STREAMING: like CardUpgradeRateMetric/
 CardWinRateAtAct2Metric, a card's average is only knowable after
 scanning every run it appears in, so accumulate() only tallies
-in-memory per-card (value_sum, total_count) pairs and finalize() does
-the real division and write.
+in memory and finalize() does the real division and write.
 
 COPY COUNTING / CARD RESOLUTION: same rules as every other metric in
 this container - a card appearing twice in one run's final deck is
@@ -37,10 +36,9 @@ from pathlib import Path
 from typing import Any, ClassVar
 from uuid import UUID
 
-import pandas as pd
-
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.metrics.card_mean_tally import CardMeanTally
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     write_dataframe_with_version_metadata,
@@ -94,20 +92,18 @@ class CardAverageMetric(ABC):
             game=GameId.SLAY_THE_SPIRE_2,
             card_binder_version=card_binder.version_for(GameId.SLAY_THE_SPIRE_2),
         )
-        self._total_count: dict[UUID, int] = {}
-        self._value_sum: dict[UUID, float] = {}
+        self._tally = CardMeanTally()
 
     def accumulate(self, row: dict) -> None:
         """Tally every card copy in one run's final deck toward this
-        metric's running per-card (value_sum, total_count) pairs.
+        metric's running per-card tally.
 
         Inputs:
             row: one parsed sts_gg run, carrying at least "deck" (list
                 of {"id": str, ...} card entries - the run's final
                 deck) plus whatever field _value_for_run() reads.
         Output: none.
-        Side effects: updates self._value_sum/_total_count in place,
-            once per physical copy in row["deck"] (see module
+        Side effects: adds value to self._tally once per physical copy in row["deck"] (see module
             docstring's COPY COUNTING section). Emits one
             logging.error() per deck entry that fails to resolve.
         Exceptions: raises if row is missing "deck", or whatever
@@ -130,8 +126,7 @@ class CardAverageMetric(ABC):
                 )
                 continue
 
-            self._total_count[card_uuid] = self._total_count.get(card_uuid, 0) + 1
-            self._value_sum[card_uuid] = self._value_sum.get(card_uuid, 0.0) + value
+            self._tally.add(card_uuid, value)
 
     def finalize(self) -> Path:
         """Compute every seen card's average and write one row per
@@ -149,12 +144,10 @@ class CardAverageMetric(ABC):
             >>> metric.finalize()
             PosixPath('data/metrics/sts_gg/some_average.parquet')
         """
-        result: list[dict] = [
-            self._average_row(card_uuid) for card_uuid in self._total_count
-        ]
-
         write_dataframe_with_version_metadata(
-            pd.DataFrame(result), self._output_path, self._version_metadata
+            self._tally.mean_frame(self.LABEL_COLUMN),
+            self._output_path,
+            self._version_metadata,
         )
         return self._output_path
 
@@ -175,27 +168,6 @@ class CardAverageMetric(ABC):
             missing the field this subclass reads).
         """
         raise NotImplementedError
-
-    def _average_row(self, card_uuid: UUID) -> dict:
-        """Build one output row for a single already-tallied card.
-
-        Private helper - single consumer is finalize().
-
-        Inputs:
-            card_uuid: a key already present in self._total_count.
-        Output: a dict with keys "nocab_uuid" (str), self.LABEL_COLUMN
-            (float, self._value_sum[card_uuid] divided by
-            self._total_count[card_uuid]), and "sample_count" (int,
-            self._total_count[card_uuid]).
-        Side effects: none.
-        Exceptions: none.
-        """
-        total = self._total_count[card_uuid]
-        return {
-            "nocab_uuid": str(card_uuid),
-            self.LABEL_COLUMN: self._value_sum[card_uuid] / total,
-            "sample_count": total,
-        }
 
     def _card_uuid(self, raw_card_id: str) -> UUID | None:
         """Look up the nocab_uuid for one sts_gg deck entry's card id.

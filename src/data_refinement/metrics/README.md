@@ -66,6 +66,12 @@ larger amount of configuration surface - judged not worth it.
   bounded row groups so a metric over a tens-of-millions-row source
   keeps flat memory. `write_columns()` writes a whole batch of rows at
   once (e.g. one 17lands chunk), after any rows already buffered.
+- `card_mean_tally.py` - `CardMeanTally`, the per-card running (value
+  sum, sample count) that the dict-based per-card average and rate
+  metrics (sts_gg, sts2_runs, isotropic) add to, and the
+  `nocab_uuid`/label/`sample_count` table they write from it. A rate
+  adds 1.0 or 0.0 per sample. 17lands keeps the same shape as count
+  tables (`seventeenlands/count_table.py`).
 - `generic/` - source-agnostic metric bases, described above.
 
 Content-addressed deck-id hashing (`deck_uuid_from_cards()`) now lives

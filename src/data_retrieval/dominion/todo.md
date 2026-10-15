@@ -98,8 +98,8 @@ the real site directly. Mechanism:
    into that same table (`Automatch` → finds `driver1`'s account by
    name in the friend-activity list) and readies up, which completes
    the replay and ends the game.
-4. `get_log()` scrapes the `.game-log` DOM element's `innerHTML`,
-   parses turn breaks (`new-turn-line` class) and nesting (`padding-left`
+4. `read_log()` scrapes the `.game-log` DOM element's `innerHTML`;
+   `game_log_text.py` parses turn breaks (`new-turn-line` class) and nesting (`padding-left`
    style values) via regex, and reconstructs the full indented,
    turn-by-turn text log — the same shape as a manually-copy-pasted
    dominion.games log.

@@ -4,8 +4,9 @@ fresh Mod on demand.
 A Mod holds per-dojo state (its random.Random and its ModTally), so one
 Mod object must never be shared between dojos. A ModSpec is the shareable,
 immutable recipe: per-game defaults (src/dojos/augmentation_defaults.py)
-and run-config overrides (src/training/run_config.py) are both tuples of
-ModSpecs, and each dojo builds its own Mods from them with its own seed.
+and run-config overrides (src/training/config_parsing/mod_parsing.py) are
+both tuples of ModSpecs, and each dojo builds its own Mods from them with
+its own seed.
 
 One ModSpec subclass per mod (polymorphism, not a kind switch). The
 card-field specs suit any dojo; the deck specs (DeckModSpec) thin card

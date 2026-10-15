@@ -3,12 +3,12 @@
 from typing import Iterable, Iterator, List
 
 from src.dojos.dojo import BatchBudget
-from src.schema.type_hints import TrainingDatum, iter_cards
+from src.schema.type_hints import LabelT, TrainingDatum, iter_cards
 
 
 def group_by_budget(
-    data: Iterable[TrainingDatum], budget: BatchBudget
-) -> Iterator[List[TrainingDatum]]:
+    data: Iterable[TrainingDatum[LabelT]], budget: BatchBudget
+) -> Iterator[List[TrainingDatum[LabelT]]]:
     """Greedily pack consecutive examples into groups within a budget.
 
     Inputs:
@@ -24,7 +24,7 @@ def group_by_budget(
         >>> [len(g) for g in group_by_budget(data, BatchBudget(4, lambda c: 1))]
         [2, 2, 1]  # for 2-card examples... 4 cost holds two of them
     """
-    group: List[TrainingDatum] = []
+    group: List[TrainingDatum[LabelT]] = []
     group_cost = 0
     for datum in data:
         cost = sum(budget.cost_of(card) for card in iter_cards(datum[0]))

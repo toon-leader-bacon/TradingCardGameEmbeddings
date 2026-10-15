@@ -7,7 +7,7 @@ from uuid import UUID
 import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.deck_box.deck_lookup import DeckLookup
 from src.dojos.generic.data_constructors.row_values import (
     card_for_uuid,
     deck_cards_excluding,
@@ -35,7 +35,7 @@ class HeldOutDeckCardDataConstructor:
       context cards are dropped; empty context -> skipped.
     """
 
-    def __init__(self, deck_box: DeckBox) -> None:
+    def __init__(self, deck_box: DeckLookup) -> None:
         """
         Inputs: deck_box, the published box the rows' deck_uuids point
             into; only read.
@@ -44,7 +44,9 @@ class HeldOutDeckCardDataConstructor:
         """
         self._deck_box = deck_box
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[int]]:
         """Convert a chunk of metric rows into training data.
 
         Inputs:
@@ -61,7 +63,7 @@ class HeldOutDeckCardDataConstructor:
             >>> HeldOutDeckCardDataConstructor(box).build(chunk, lookup)
             [([[<GenericCard>, ...], [<GenericCard>, ...]], 3), ...]
         """
-        result: List[TrainingDatum] = []
+        result: List[TrainingDatum[int]] = []
 
         # Each row: candidates first (they carry the label), then context
         for _, row in chunk.iterrows():

@@ -38,7 +38,9 @@ import extrinsic_held_out as base  # noqa: E402
 from src.dojos.dojo import BatchBudget  # noqa: E402
 from src.dojos.loss.regression_objective import RegressionObjective  # noqa: E402
 from src.schema.splits import Split  # noqa: E402
-from src.training.dojo_catalog import DOJO_CATALOG, CardShelf, DojoBuildContext, build_dojos  # noqa: E402
+from src.training.dojo_catalog import DOJO_CATALOG, build_dojos  # noqa: E402
+from src.training.dojo_recipes.card_shelf import CardShelf  # noqa: E402
+from src.training.dojo_recipes.dojo_build_context import DojoBuildContext  # noqa: E402
 from src.training.round_evaluation import evaluate_split_losses  # noqa: E402
 
 MAX_EXAMPLES = 1024

@@ -26,15 +26,6 @@
   - how each game's values map, e.g. whether Gwent's `epic` becomes
     `rare`/`legendary` or `other`;
   - what games with no rarity get: `not-applicable` rows, or no metric.
-- **Deduplicate the running-tally Template Method shape.** `sts_gg`'s
-  `CardAverageMetric` (`card_average_metric.py`), `draft_data`'s
-  `PackCardTallyMetric` (`pack_card_tally_metric.py`) and `game_data`'s
-  `GameCardAverageMetric` (`game_card_average_metric.py`) each implement
-  the same per-key running (sum, count) accumulate-then-average shape,
-  and several replay_data metrics repeat it again. All three
-  seventeenlands families now exist, so the shared shape can be read
-  off real code; pull it into one base only where key shapes truly
-  match.
 
 - [ ] **FaB deck box keys cards by name.** A name printed in several pitches
   maps to one arbitrary printing, so FaB inclusion rates are per name.

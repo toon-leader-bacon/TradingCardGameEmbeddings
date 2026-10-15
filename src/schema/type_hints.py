@@ -8,7 +8,7 @@ to the same shapes instead of each re-deriving them.
 """
 
 from enum import Enum
-from typing import Any, Callable, Iterator, List, Tuple, TypeAlias, Union, cast
+from typing import Any, Callable, Iterator, List, Tuple, TypeAlias, TypeVar, Union, cast
 
 import torch
 
@@ -160,8 +160,12 @@ def map_cards(
     return cast(TrainingInput, [map_cards(element, transform) for element in x])
 
 
-Label = Any  # Typically a single scaler value, but could be a list of values
-TrainingDatum = Tuple[TrainingInput, Label]
+# A dojo's label type: float (regression, binary), str (a class name), int
+# (an option index), or a dict (a soft target or masked vector). Each cell
+# fixes it (e.g. GenericDojo[float]), so its data constructor, mods, Batch
+# and loss must agree on it; code that only carries labels stays generic.
+LabelT = TypeVar("LabelT")
+TrainingDatum = Tuple[TrainingInput, LabelT]
 
 
 # region Outputs

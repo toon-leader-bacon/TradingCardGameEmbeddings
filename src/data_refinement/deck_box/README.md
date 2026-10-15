@@ -107,6 +107,11 @@ metrics too.
     current. A crash loses at most the uncommitted batch. This relies
     on every stage deriving deterministic deck ids (see
     `extraction.py`). The module docstring has the details.
+- `deck_lookup.py` — `DeckLookup`, `DeckBox`'s read-only surface as a
+  Protocol (the `CardLookup` counterpart). Dojos, their data
+  constructors and `DeckBoxDealer` take a `DeckLookup`, so a reader
+  cannot write through a box that `load()` connected straight to its
+  file.
 - `_deck_tables.py` — `DeckTables`, private to `deck_box.py`: one method
   per SQL statement. Row writes never commit; `create_schema()` and
   `merge_from()` do, so they run only when a box is built.

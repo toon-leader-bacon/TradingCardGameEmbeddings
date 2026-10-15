@@ -45,7 +45,9 @@ class AttackerBlockerCombatOutcomeDataConstructor:
         Exceptions: none.
         """
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[float]]:
         """Convert a chunk of (attacker_uuids, blocker_uuids,
         net_kill_delta) rows into (MultiGroupInput, float) TrainingDatum
         pairs.
@@ -78,7 +80,7 @@ class AttackerBlockerCombatOutcomeDataConstructor:
             >>> constructor.build(chunk, lookup)
             [([[<GenericCard>], [<GenericCard>, <GenericCard>]], -1.0), ...]
         """
-        results: List[TrainingDatum] = []
+        results: List[TrainingDatum[float]] = []
 
         # Attacker side must resolve to at least one card; blocker side
         # tolerates being empty - see build()'s own docstring.

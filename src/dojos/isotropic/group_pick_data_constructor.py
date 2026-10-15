@@ -56,7 +56,9 @@ class GroupPickDataConstructor:
         self._picks_column = picks_column
         self._context = context
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[int]]:
         """Convert a chunk of metric rows into option-selection data.
 
         Inputs: chunk (metric rows), lookup (the split's holdout-filtered
@@ -72,7 +74,7 @@ class GroupPickDataConstructor:
             ... ).build(chunk, lookup)
             [([<GenericCard>, ...], 3), ...]
         """
-        result: List[TrainingDatum] = []
+        result: List[TrainingDatum[int]] = []
         for _, row in chunk.iterrows():
             options = _first_copies(self._options.cards(row, lookup))
             if len(options) < 2:

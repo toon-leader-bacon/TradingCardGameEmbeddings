@@ -47,13 +47,15 @@ class GroupLabelDataConstructor:
         self._label_column = label_column
         self._label_caster = label_caster
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[float]]:
         """Convert a chunk of metric rows into ([group_0, group_1], float)
         data, skipping rows as the class docstring says.
 
         Inputs: chunk (metric rows), lookup (the split's holdout-filtered
             lookup).
-        Output: List[TrainingDatum].
+        Output: List[TrainingDatum[float]].
         Side effects: reads the groups' DeckBox. Exceptions: whatever
             label_caster raises on a malformed label.
 
@@ -65,7 +67,7 @@ class GroupLabelDataConstructor:
             ... ).build(chunk, lookup)
             [([[<GenericCard>, ...], [<GenericCard>, ...]], 1.0), ...]
         """
-        result: List[TrainingDatum] = []
+        result: List[TrainingDatum[float]] = []
         for _, row in chunk.iterrows():
             raw_label = row[self._label_column]
             if pd.isna(raw_label):

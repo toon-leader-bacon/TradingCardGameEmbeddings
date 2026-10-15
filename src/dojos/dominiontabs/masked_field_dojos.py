@@ -14,6 +14,9 @@ from src.data_refinement.metrics.dominiontabs.type_mask_metric import TypeMaskMe
 from src.dojos.generic.paired_metric_dojos import MaskedFieldMetricDojo
 from src.dojos.generic.data_constructors import MaskedFieldDataConstructor
 from src.dojos.generic.dojo_config import DojoConfig
+from src.dojos.generic.single_card_fixed_classification.loss_spec import (
+    FIXED_CLASSIFICATION_LOSS_SPEC,
+)
 from src.dojos.generic.single_card_fixed_classification.dojo import (
     SingleCardFixedClassificationDojo,
 )
@@ -28,7 +31,7 @@ class TypeMaskDojo(MaskedFieldMetricDojo):
     METRIC = TypeMaskMetric
 
 
-class SetMaskDojo(SingleCardFixedClassificationDojo):
+class SetMaskDojo(SingleCardFixedClassificationDojo[str]):
     """Card -> predicted expansion (SetMaskMetric).
     label_values=SetMaskMetric.LABEL_VALUES unchanged - this metric
     never falls back to OTHER_LABEL.
@@ -61,6 +64,7 @@ class SetMaskDojo(SingleCardFixedClassificationDojo):
             data_constructor=MaskedFieldDataConstructor("label"),
             label_values=SetMaskMetric.LABEL_VALUES,
             card_embedding_size=card_embedding_size,
+            loss_spec=FIXED_CLASSIFICATION_LOSS_SPEC,
             config=DojoConfig(
                 name=name, rng_seed=rng_seed, strict_version_check=strict_version_check
             ),

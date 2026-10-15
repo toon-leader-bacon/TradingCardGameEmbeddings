@@ -21,6 +21,7 @@ FIXED_CLASSIFICATION_LOSS_SPEC.
 """
 
 from pathlib import Path
+from typing import Dict
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.sts_gg.card_character_prediction_metric import (
@@ -40,7 +41,7 @@ from src.dojos.generic.single_card_fixed_classification.loss_spec import (
 from src.schema.holdout import HoldoutSpec
 
 
-class CardCharacterPredictionDojo(SingleCardFixedClassificationDojo):
+class CardCharacterPredictionDojo(SingleCardFixedClassificationDojo[Dict[str, float]]):
     """Card -> character probability distribution (CardCharacterPredictionMetric).
 
     label_values=CharacterPredictionMetric.LABEL_VALUES unchanged - it

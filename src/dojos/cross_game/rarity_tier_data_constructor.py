@@ -39,7 +39,9 @@ class RarityTierDataConstructor:
     def __init__(self) -> None:
         self._inner = MaskedFieldDataConstructor("label")
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[str]]:
         """Convert a chunk of metric rows into TrainingDatum pairs.
 
         Inputs: chunk (rows with nocab_uuid and label columns), lookup

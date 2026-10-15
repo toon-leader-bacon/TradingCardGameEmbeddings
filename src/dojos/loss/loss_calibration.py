@@ -18,7 +18,7 @@ vectors, option picks) live in prior_baseline_calibrations.py.
 import math
 import statistics
 from dataclasses import dataclass
-from typing import Any, List, Protocol, Sequence
+from typing import Any, Generic, List, Protocol, Sequence
 
 import torch
 
@@ -27,7 +27,7 @@ from src.dojos.loss.huber_loss import HuberLoss, huber_values
 from src.dojos.loss.label_stats import LabelStats
 from src.dojos.loss.nocab_loss import NocabLoss
 from src.dojos.loss.standardized_label_loss import StandardizedLabelLoss
-from src.schema.type_hints import TrainingDatum
+from src.schema.type_hints import LabelT, TrainingDatum
 
 # The mean predictor's MSE on z-scored TRAIN labels (population std): exactly 1
 _STANDARDIZED_MEAN_PREDICTOR_MSE = 1.0
@@ -39,8 +39,9 @@ _MAX_LOCATION_STEPS = 100
 
 
 @dataclass(frozen=True)
-class CalibratedLoss:
-    """A generic dojo's loss after fitting it to the TRAIN split.
+class CalibratedLoss(Generic[LabelT]):
+    """A generic dojo's loss after fitting it to the TRAIN split, over the
+    dojo's label type LabelT.
 
     loss: what compute_loss scores with (possibly the cell's loss wrapped,
         e.g. in StandardizedLabelLoss).
@@ -51,7 +52,7 @@ class CalibratedLoss:
         loss itself, so stats can never disagree with what the loss uses.
     """
 
-    loss: NocabLoss[Any, Any]
+    loss: NocabLoss[Any, List[LabelT]]
     baseline_loss: float
 
     def __post_init__(self) -> None:
@@ -80,12 +81,15 @@ class CalibratedLoss:
         return None
 
 
-class LossCalibration(Protocol):
-    """Strategy: fit a cell's loss to a TRAIN sample (see module docstring)."""
+class LossCalibration(Protocol[LabelT]):
+    """Strategy: fit a cell's loss to a TRAIN sample (see module docstring).
+    LabelT is the label type the loss and the sample share."""
 
     def calibrate(
-        self, loss: NocabLoss[Any, Any], train_sample: Sequence[TrainingDatum]
-    ) -> CalibratedLoss:
+        self,
+        loss: NocabLoss[Any, List[LabelT]],
+        train_sample: Sequence[TrainingDatum[LabelT]],
+    ) -> CalibratedLoss[LabelT]:
         """Fit loss to the TRAIN sample.
 
         Inputs: loss (the cell's own NocabLoss), train_sample (unmodded
@@ -112,8 +116,10 @@ class StandardizedRegressionCalibration:
     """
 
     def calibrate(
-        self, loss: NocabLoss[Any, Any], train_sample: Sequence[TrainingDatum]
-    ) -> CalibratedLoss:
+        self,
+        loss: NocabLoss[Any, List[float]],
+        train_sample: Sequence[TrainingDatum[float]],
+    ) -> CalibratedLoss[float]:
         """See LossCalibration.calibrate.
 
         Inputs: loss (a regression NocabLoss over float labels, e.g.
@@ -128,7 +134,7 @@ class StandardizedRegressionCalibration:
             ...     MseLoss(), [(card_a, 1.0), (card_b, 3.0)]).label_stats
             LabelStats(mean=2.0, std=1.0)
         """
-        result: CalibratedLoss
+        result: CalibratedLoss[float]
 
         # Train on z-scored labels (raises on empty / constant); the mean
         # predictor then scores exactly 1.0
@@ -152,8 +158,10 @@ class HuberRegressionCalibration:
     """
 
     def calibrate(
-        self, loss: NocabLoss[Any, Any], train_sample: Sequence[TrainingDatum]
-    ) -> CalibratedLoss:
+        self,
+        loss: NocabLoss[Any, List[float]],
+        train_sample: Sequence[TrainingDatum[float]],
+    ) -> CalibratedLoss[float]:
         """See LossCalibration.calibrate.
 
         Inputs: loss (must be a HuberLoss), train_sample (float labels).
@@ -220,7 +228,7 @@ def best_constant_huber_loss(
 
 
 def _standardize(
-    loss: NocabLoss[Any, Any], train_sample: Sequence[TrainingDatum]
+    loss: NocabLoss[Any, List[float]], train_sample: Sequence[TrainingDatum[float]]
 ) -> tuple[StandardizedLabelLoss, List[float]]:
     """The z-score step both regression calibrations share.
 
@@ -237,14 +245,14 @@ def _standardize(
     return StandardizedLabelLoss(loss, stats), stats.standardize(labels)
 
 
-def _float_labels_of(train_sample: Sequence[TrainingDatum]) -> List[float]:
+def _float_labels_of(train_sample: Sequence[TrainingDatum[float]]) -> List[float]:
     """The sample's labels, checked to be floats.
 
     Inputs: train_sample (Sequence[TrainingDatum]).
     Output: List[float], same order.
     Side effects: none.
-    Exceptions: TypeError naming the first non-float label (a regression
-        cell wired to a non-regression constructor).
+    Exceptions: TypeError naming the first non-float label (typed float,
+        but an int that skipped its label caster is still caught here).
     """
     result: List[float] = []
     for _, label in train_sample:

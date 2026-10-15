@@ -10,6 +10,10 @@ class to construct.
 Loading is lazy and shared: a CardShelf loads each game's binder (and each
 deck box) once, only when a named dojo needs it.
 
+The recipe types, CardShelf and DojoBuildContext live in dojo_recipes/;
+this module is the catalog itself (the shorthand recipe builders, the
+DOJO_CATALOG table, DECK_MOD_GROUPS) and build_dojos().
+
 A recipe may point an existing dojo class at another metric's output
 (metric_output): the sts2_runs keys reuse the sts_gg wrappers over
 data/metrics/sts2_runs/, whose files share the sts_gg label columns.
@@ -25,15 +29,9 @@ and in order; its augmentations run after them. Deck mods
 DECK_MOD_GROUPS take them, and only when `mods:` lists them.
 """
 
-import functools
-import random
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Mapping, Protocol, Sequence, TypeVar, cast
+from typing import Mapping, Sequence
 
-from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.data_refinement.card_binder.multi_game_card_lookup import MultiGameCardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.cross_game.rarity.translator_tables import (
     RARITY_TRANSLATORS,
@@ -45,8 +43,6 @@ from src.data_refinement.metrics.seventeenlands.deck_box_path import (
 from src.data_refinement.metrics.sts2_runs import card_average_metrics as sts2_cards
 from src.data_refinement.metrics.sts2_runs import deck_label_metrics as sts2_decks
 from src.data_refinement.metrics.sts_gg.deck_box_path import STS_GG_DECK_BOX_PATH
-from src.dojos.augmentation_defaults import default_augmentations_for
-from src.dojos.contrastive.dojo import ContrastiveDojo
 from src.dojos.contrastive.contrastive_style import ContrastiveStyle
 from src.dojos.contrastive.styles.card_in_contexts import CardInContextsStyle
 from src.dojos.contrastive.styles.cross_slice_card import CrossSliceCardStyle
@@ -54,20 +50,7 @@ from src.dojos.contrastive.styles.missing_card import MissingCardStyle
 from src.dojos.contrastive.styles.odd_one_out import OddOneOutStyle
 from src.dojos.contrastive.styles.slice_match import SliceMatchStyle
 from src.dojos.contrastive.styles.single_card import SingleCardStyle
-from src.dojos.contrastive.staple_subsampling import (
-    StapleSubsampling,
-    cached_document_frequency,
-)
 from src.dojos.dojo import Dojo
-from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
-from src.dojos.generic.multi_group_regression.dojo import (
-    MultiGroupRegressionDojo,
-)
-from src.dojos.generic.single_card_regression.dojo import (
-    SingleCardRegressionDojo,
-)
-from src.dojos.loss.regression_objective import RegressionObjective
-from src.dojos.file_managers.deck_box_dealer import DeckBoxDealer
 from src.dojos.final_decks import held_out_card_dojos as final_decks
 from src.dojos.cross_game.rarity_tier_dojo import RarityTierDojo
 from src.dojos.dominiontabs.cost_regression_dojo import CostRegressionDojo
@@ -136,19 +119,23 @@ from src.dojos.sts_gg import card_average_dojos as sts_cards
 from src.dojos.sts_gg.card_character_prediction_dojo import (
     CardCharacterPredictionDojo,
 )
-from src.dojos.generic.generic_dojo import GenericDojo
-from src.dojos.mods.mod_pipeline import ModPipeline
-from src.dojos.mods.per_game_mod import PerGameMod
 from src.dojos.mods.mod_specs import DeckModSpec, ModSpec
 from src.dojos.play_gwent import card_inclusion_dojos as gwent_inclusion
 from src.dojos.play_gwent.deck_card_mask_dojos import LeaderMaskedFromDeckDojo
 from src.dojos.play_gwent.deck_label_dojos import GuideVotesDojo
 from src.dojos.sts_gg import deck_label_dojos as sts_decks
 from src.schema.game_id import GameId
-from src.schema.holdout import HoldoutSpec
-
-# Contrastive dojos keep their deck split index here (see DeckBoxDealer)
-_CONTRASTIVE_INDEX_DIRECTORY = Path("data/splits/contrastive")
+from src.training.dojo_recipes.card_dojo_recipe import CardDojoRecipe
+from src.training.dojo_recipes.contrastive_dojo_recipe import ContrastiveDojoRecipe
+from src.training.dojo_recipes.deck_dojo_recipe import DeckDojoRecipe
+from src.training.dojo_recipes.dojo_build_context import DojoBuildContext, DojoRecipe
+from src.training.dojo_recipes.dojo_constructors import (
+    CardDojoConstructor,
+    DeckDojoConstructor,
+)
+from src.training.dojo_recipes.multi_game_card_dojo_recipe import (
+    MultiGameCardDojoRecipe,
+)
 
 # Games with a final deck box, so each can have contrastive dojos
 _CONTRASTIVE_GAMES = (
@@ -169,389 +156,6 @@ _CONTRASTIVE_STYLES: Mapping[str, ContrastiveStyle] = {
     "contrastive_slice_match": SliceMatchStyle(),
     "contrastive_card_in_contexts": CardInContextsStyle(),
 }
-
-# TRAIN decks a staple-subsampling document frequency is counted over
-_DOCUMENT_FREQUENCY_SAMPLE_DECKS = 20_000
-
-
-class CardDojoConstructor(Protocol):
-    """A dojo class built from a CardBinder alone (every gwent_one and
-    dominiontabs dojo, every sts_gg and isotropic card-level dojo)."""
-
-    def __call__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        card_embedding_size: int,
-        *,
-        path_to_training_data: Path | None = None,
-        name: str | None = None,
-        rng_seed: int | None = None,
-    ) -> GenericDojo: ...
-
-
-class DeckDojoConstructor(Protocol):
-    """A dojo class that also needs the DeckBox its metric was built from
-    (every sts_gg and isotropic deck-level dojo, play_gwent's leader
-    mask)."""
-
-    def __call__(
-        self,
-        card_binder: CardBinder,
-        holdout: HoldoutSpec,
-        deck_box: DeckBox,
-        card_embedding_size: int,
-        *,
-        path_to_training_data: Path | None = None,
-        name: str | None = None,
-        rng_seed: int | None = None,
-    ) -> GenericDojo: ...
-
-
-class CardShelf:
-    """Loads each game's CardBinder and each DeckBox at most once."""
-
-    def __init__(self) -> None:
-        """Side effects: none (nothing loads until asked)."""
-        self._card_binders: dict[GameId, CardBinder] = {}
-        self._deck_boxes: dict[Path, DeckBox] = {}
-
-    def card_binder(self, game: GameId) -> CardBinder:
-        """game's binder from CardBinder.default_output_path, loaded on
-        first request.
-
-        Inputs: game (GameId). Output: CardBinder.
-        Side effects: reads the binder file on first call per game.
-        Exceptions: FileNotFoundError if the binder file does not exist.
-
-        Example:
-            >>> CardShelf().card_binder(GameId.GWENT)
-        """
-        if game not in self._card_binders:
-            path = CardBinder.default_output_path(game)
-            if not path.exists():
-                raise FileNotFoundError(
-                    f"no {game.value} card binder at {path}; run "
-                    "scripts/run_card_binder_ingestion.py first"
-                )
-            self._card_binders[game] = CardBinder.load([path])
-        return self._card_binders[game]
-
-    def card_lookup(self, games: Sequence[GameId]) -> MultiGameCardLookup:
-        """One CardLookup over games' binders, sharing the ones already
-        loaded (no merged copy of any game's cards).
-
-        Inputs: games (non-empty). Output: MultiGameCardLookup.
-        Side effects: loads any game's binder not yet loaded.
-        Exceptions: FileNotFoundError as card_binder; ValueError if games
-            is empty.
-
-        Example:
-            >>> CardShelf().card_lookup([GameId.GWENT, GameId.MTG])
-        """
-        return MultiGameCardLookup({game: self.card_binder(game) for game in games})
-
-    def deck_box(self, path: Path) -> DeckBox:
-        """The DeckBox at path, loaded on first request.
-
-        Inputs: path (Path). Output: DeckBox.
-        Side effects: reads the deck box on first call per path.
-        Exceptions: FileNotFoundError if path does not exist (DeckBox.load
-            would silently return an empty box).
-
-        Example:
-            >>> CardShelf().deck_box(STS_GG_DECK_BOX_PATH)
-        """
-        if path not in self._deck_boxes:
-            if not path.exists():
-                raise FileNotFoundError(
-                    f"no deck box at {path}; run scripts/run_metrics.py for "
-                    "the metric source that writes it"
-                )
-            self._deck_boxes[path] = DeckBox.load([path])
-        return self._deck_boxes[path]
-
-
-@dataclass(frozen=True)
-class DojoBuildContext:
-    """What every recipe needs besides its own entry: the shared shelf and
-    the run-wide settings every dojo must agree on.
-
-    shelf: loaded card data. holdout: the plan's HoldoutSpec (the trainer
-    requires every dojo to share it). card_embedding_size: the model's
-    output embedding width. rng_seed: seeds each dojo's split shuffling, so
-    a first split build is reproducible. mod_overrides: per dojo name,
-    augmentation specs replacing that dojo's game defaults (an empty tuple
-    means no augmentation); build_dojos rejects a name that is not built,
-    and a deck spec on a dojo or group DECK_MOD_GROUPS does not allow.
-    staple_thresholds: per contrastive dojo name, its staple-subsampling t
-    (src/dojos/contrastive/staple_subsampling.py); a dojo not named keeps
-    t = inf (no subsampling). build_dojos rejects a name that is not a
-    contrastive dojo being built. regression_objective: the loss and
-    baseline every regression dojo trains with (default: plain MSE); only
-    the three regression cells take it (see _constructor_for).
-    """
-
-    shelf: CardShelf
-    holdout: HoldoutSpec
-    card_embedding_size: int
-    rng_seed: int
-    mod_overrides: Mapping[str, tuple[ModSpec, ...]] = field(default_factory=dict)
-    staple_thresholds: Mapping[str, float] = field(default_factory=dict)
-    regression_objective: RegressionObjective = field(
-        default_factory=RegressionObjective.mse
-    )
-
-
-class DojoRecipe(Protocol):
-    """How to build one catalog dojo."""
-
-    def build(self, name: str, context: DojoBuildContext) -> Dojo:
-        """Construct the dojo, named name. Side effects: may load card
-        data through context.shelf; may write split files on first build.
-        Exceptions: FileNotFoundError for missing data; ValueError for a
-        stale metric (the dojo's own version check)."""
-        ...
-
-
-_REGRESSION_CELLS = (
-    SingleCardRegressionDojo,
-    MultiCardRegressionDojo,
-    MultiGroupRegressionDojo,
-)
-_ConstructorT = TypeVar("_ConstructorT")
-
-
-def _constructor_for(
-    dojo_class: _ConstructorT, context: DojoBuildContext
-) -> _ConstructorT:
-    """dojo_class, bound to the run's regression objective if it is a
-    regression dojo.
-
-    Inputs: dojo_class (a dojo class, typed as its constructor Protocol),
-        context (carries regression_objective).
-    Output: for a subclass of a regression cell, a functools.partial with
-        objective=context.regression_objective; any other class unchanged.
-        (Only regression constructors accept objective, so this is the one
-        place the catalog tells them apart.)
-    Side effects: none. Exceptions: none.
-    """
-    if isinstance(dojo_class, type) and issubclass(dojo_class, _REGRESSION_CELLS):
-        constructor = cast(Callable[..., GenericDojo], dojo_class)
-        return cast(
-            _ConstructorT,
-            functools.partial(constructor, objective=context.regression_objective),
-        )
-    return dojo_class
-
-
-@dataclass(frozen=True)
-class CardDojoRecipe:
-    """A dojo that needs only its game's CardBinder. metric_output, when
-    set, replaces the dojo class's own metric file."""
-
-    game: GameId
-    dojo_class: CardDojoConstructor
-    metric_output: Path | None = None
-
-    def build(self, name: str, context: DojoBuildContext) -> Dojo:
-        """See DojoRecipe.build; augmentations as _with_augmentations."""
-        dojo = _constructor_for(self.dojo_class, context)(
-            context.shelf.card_binder(self.game),
-            context.holdout,
-            context.card_embedding_size,
-            path_to_training_data=self.metric_output,
-            name=name,
-            rng_seed=context.rng_seed,
-        )
-        return _with_augmentations(dojo, name, self.game, context)
-
-
-class MultiGameCardDojoConstructor(Protocol):
-    """A dojo class built from one CardLookup spanning several games (the
-    cross-game rarity dojo)."""
-
-    def __call__(
-        self,
-        card_lookup: CardLookup,
-        holdout: HoldoutSpec,
-        card_embedding_size: int,
-        *,
-        path_to_training_data: Path | None = None,
-        name: str | None = None,
-        rng_seed: int | None = None,
-    ) -> GenericDojo: ...
-
-
-@dataclass(frozen=True)
-class MultiGameCardDojoRecipe:
-    """A dojo over the cards of several games, through one
-    MultiGameCardLookup. Augmentations are each game's own defaults, run
-    per card by a PerGameMod; a mod_overrides entry for the dojo replaces
-    them for every game."""
-
-    games: tuple[GameId, ...]
-    dojo_class: MultiGameCardDojoConstructor
-
-    def build(self, name: str, context: DojoBuildContext) -> Dojo:
-        """See DojoRecipe.build.
-
-        Inputs: name, context.
-        Output: the dojo, with a PerGameMod of every game's augmentations
-            appended after its own task mods.
-        Side effects: loads each game's binder through context.shelf; may
-            write split files.
-        Exceptions: as DojoRecipe.build.
-        """
-        dojo = self.dojo_class(
-            context.shelf.card_lookup(self.games),
-            context.holdout,
-            context.card_embedding_size,
-            name=name,
-            rng_seed=context.rng_seed,
-        )
-
-        # One augmentation pipeline per game, dispatched by each card's game
-        pipelines = {
-            game: _augmentation_pipeline(name, game, context) for game in self.games
-        }
-        if any(pipeline.mods for pipeline in pipelines.values()):
-            dojo.append_mods([PerGameMod(pipelines, train_only=True)])
-        return dojo
-
-
-@dataclass(frozen=True)
-class DeckDojoRecipe:
-    """A dojo that needs its game's CardBinder and a DeckBox. metric_output,
-    when set, replaces the dojo class's own metric file."""
-
-    game: GameId
-    dojo_class: DeckDojoConstructor
-    deck_box_path: Path
-    metric_output: Path | None = None
-
-    def build(self, name: str, context: DojoBuildContext) -> Dojo:
-        """See DojoRecipe.build; augmentations as _with_augmentations."""
-        dojo = _constructor_for(self.dojo_class, context)(
-            context.shelf.card_binder(self.game),
-            context.holdout,
-            context.shelf.deck_box(self.deck_box_path),
-            context.card_embedding_size,
-            path_to_training_data=self.metric_output,
-            name=name,
-            rng_seed=context.rng_seed,
-        )
-        return _with_augmentations(dojo, name, self.game, context)
-
-
-@dataclass(frozen=True)
-class ContrastiveDojoRecipe:
-    """A contrastive dojo over one game's final deck box, in one
-    contrastive style (contrastive_style.py).
-
-    game: whose binder and deck box. deck_box_path: the game's
-    data/final/decks/<game>.db. style: builds the matched pair
-    constructor and loss (default: single cards, every same-deck card a
-    positive). decks_per_sample: see ContrastiveDojo.
-    """
-
-    game: GameId
-    deck_box_path: Path
-    style: ContrastiveStyle = SingleCardStyle()
-    decks_per_sample: int = 16
-
-    def build(self, name: str, context: DojoBuildContext) -> Dojo:
-        """See DojoRecipe.build. The dealer keeps its split index at
-        data/splits/contrastive/<name>.db (seeded by context.rng_seed);
-        mods come from context.mod_overrides[name] if present, else the
-        game's defaults, each built with its own seed. A
-        context.staple_thresholds[name] turns on staple subsampling, its
-        document frequency cached beside the split index."""
-        binder = context.shelf.card_binder(self.game)
-        dealer = DeckBoxDealer(
-            context.shelf.deck_box(self.deck_box_path),
-            self.game,
-            _contrastive_index_path(name),
-            seed=context.rng_seed,
-        )
-        # The style builds the pair constructor and loss as a matched set
-        pair_constructor = self.style.pair_constructor(
-            context.rng_seed, _staple_subsampling(name, dealer, context)
-        )
-        return ContrastiveDojo(
-            dealer,
-            pair_constructor,
-            binder,
-            context.holdout,
-            decks_per_sample=self.decks_per_sample,
-            contrastive_loss=self.style.contrastive_loss(),
-            name=name,
-            mod_pipeline=_augmentation_pipeline(name, self.game, context),
-        )
-
-
-def _contrastive_index_path(name: str) -> Path:
-    """Where a contrastive dojo's deck split index lives.
-    Inputs: name. Output: Path. Side effects: none. Exceptions: none."""
-    return _CONTRASTIVE_INDEX_DIRECTORY / f"{name}.db"
-
-
-def _staple_subsampling(
-    name: str, dealer: DeckBoxDealer, context: DojoBuildContext
-) -> StapleSubsampling | None:
-    """name's staple subsampling, or None (t = inf) when the run config
-    names no threshold for it. Its document frequency comes from
-    cached_document_frequency, cached at
-    data/splits/contrastive/<name>.document_frequency.json.
-
-    Inputs: name, dealer (the dojo's), context.
-    Output: StapleSubsampling | None.
-    Side effects: may count and cache the document frequency (reads decks
-        through dealer; writes only the cache file).
-    Exceptions: as cached_document_frequency and StapleSubsampling.
-    """
-    threshold = context.staple_thresholds.get(name)
-    if threshold is None:
-        return None
-    cache_path = _CONTRASTIVE_INDEX_DIRECTORY / f"{name}.document_frequency.json"
-    frequency = cached_document_frequency(
-        dealer, cache_path, _DOCUMENT_FREQUENCY_SAMPLE_DECKS
-    )
-    return StapleSubsampling(threshold, frequency)
-
-
-def _augmentation_pipeline(
-    name: str, game: GameId, context: DojoBuildContext
-) -> ModPipeline:
-    """The dojo's augmentations: context.mod_overrides[name] if present,
-    else game's defaults. Each mod's seed is drawn from a stream seeded by
-    (rng_seed, name, "mods"), so mods neither share a random stream with
-    each other nor with the dojo's own sampling (seeded by rng_seed
-    itself), and each dojo's mods differ.
-
-    Inputs: name, game, context. Output: ModPipeline.
-    Side effects: none. Exceptions: as a ModSpec's build.
-    """
-    specs = context.mod_overrides.get(name, default_augmentations_for(game))
-    seeds = random.Random(f"{context.rng_seed}:{name}:mods")
-    return ModPipeline([spec.build(seeds.randrange(2**32)) for spec in specs])
-
-
-def _with_augmentations(
-    dojo: GenericDojo, name: str, game: GameId, context: DojoBuildContext
-) -> GenericDojo:
-    """dojo with its augmentations (_augmentation_pipeline) appended after
-    its own task mods, which stay first and in order.
-
-    Inputs: dojo (a just-built metric dojo, no batch yet), name, game,
-        context. Output: dojo itself.
-    Side effects: dojo.append_mods when there is anything to append.
-    Exceptions: as a ModSpec's build.
-    """
-    mods = _augmentation_pipeline(name, game, context).mods
-    if mods:
-        dojo.append_mods(mods)
-    return dojo
 
 
 def _recipe_for_contrastive(

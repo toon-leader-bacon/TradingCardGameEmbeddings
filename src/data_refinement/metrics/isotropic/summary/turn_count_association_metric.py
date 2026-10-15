@@ -2,7 +2,9 @@
 the average winner turns over games where a card is in board.supply,
 minus the corpus-wide average winner turns.
 
-Bespoke rather than built on a shared "per-kingdom-card average" base:
+The per-card averages come from a CardMeanTally (../../card_mean_tally.py);
+the rest is bespoke rather than built on a shared "per-kingdom-card
+average" base:
 the baseline subtraction (a SECOND, corpus-wide running average, kept
 alongside the per-card ones and only combined at finalize() time) is
 unique to this metric among BRAINSTORM.md's current shortlist - forcing
@@ -18,9 +20,6 @@ veto_rate_metric.py - see row_utils.is_natural_kingdom().
 import logging
 from pathlib import Path
 from typing import ClassVar
-from uuid import UUID
-
-import pandas as pd
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.isotropic.summary.row_utils import (
@@ -29,6 +28,7 @@ from src.data_refinement.metrics.isotropic.summary.row_utils import (
     kingdom_card_names,
     winner_entry,
 )
+from src.data_refinement.metrics.card_mean_tally import CardMeanTally
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     write_dataframe_with_version_metadata,
@@ -68,8 +68,7 @@ class TurnCountAssociationMetric:
         """
         self._card_binder = card_binder
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
-        self._turns_sum: dict[UUID, int] = {}
-        self._game_count: dict[UUID, int] = {}
+        self._tally = CardMeanTally()
         self._corpus_turns_sum = 0
         self._corpus_game_count = 0
 
@@ -82,7 +81,7 @@ class TurnCountAssociationMetric:
             row: one parsed Flavor A summary row, carrying "board"
                 (with "supply") and "players".
         Output: none.
-        Side effects: updates self._turns_sum/_game_count per kingdom
+        Side effects: adds the winner turns to self._tally per kingdom
             card, and self._corpus_turns_sum/_corpus_game_count once,
             for natural-kingdom games with a resolvable winner (see
             row_utils.winner_entry()) - a game with no winner
@@ -118,8 +117,7 @@ class TurnCountAssociationMetric:
                     card_name,
                 )
                 continue
-            self._turns_sum[card_uuid] = self._turns_sum.get(card_uuid, 0) + turns
-            self._game_count[card_uuid] = self._game_count.get(card_uuid, 0) + 1
+            self._tally.add(card_uuid, turns)
 
     def finalize(self) -> Path:
         """Compute every seen card's baseline-adjusted turn-count
@@ -143,18 +141,11 @@ class TurnCountAssociationMetric:
             PosixPath('data/metrics/isotropic/turn_count_association.parquet')
         """
         baseline = self._corpus_turns_sum / self._corpus_game_count
-
-        result = [
-            {
-                "nocab_uuid": str(card_uuid),
-                self.LABEL_COLUMN: self._turns_sum[card_uuid] / count - baseline,
-                "sample_count": count,
-            }
-            for card_uuid, count in self._game_count.items()
-        ]
+        frame = self._tally.mean_frame(self.LABEL_COLUMN)
+        frame[self.LABEL_COLUMN] -= baseline
 
         write_dataframe_with_version_metadata(
-            pd.DataFrame(result),
+            frame,
             self._output_path,
             MetricVersionMetadata(
                 game=GameId.DOMINION,

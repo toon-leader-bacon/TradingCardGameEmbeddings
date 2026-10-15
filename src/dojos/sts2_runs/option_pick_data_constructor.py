@@ -34,7 +34,9 @@ class OptionPickDataConstructor:
     built with can_skip=True.
     """
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[int]]:
         """Convert a chunk of metric rows into option-selection data.
 
         Inputs:
@@ -52,7 +54,7 @@ class OptionPickDataConstructor:
             >>> OptionPickDataConstructor().build(chunk, lookup)
             [([[<GenericCard>, <GenericCard>], [<GenericCard>]], 1), ...]
         """
-        result: List[TrainingDatum] = []
+        result: List[TrainingDatum[int]] = []
 
         # One datum per row that still has all of its offered cards
         for _, row in chunk.iterrows():

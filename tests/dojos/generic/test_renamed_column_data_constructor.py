@@ -1,6 +1,7 @@
 import pandas as pd
 import pytest
 
+from src.dojos.generic.data_constructors.row_values import cast_to_float
 from src.dojos.generic.data_constructors import DeckLabelDataConstructor
 from src.dojos.generic.renamed_column_data_constructor import (
     RenamedColumnDataConstructor,
@@ -12,7 +13,7 @@ class TestRenamedColumnDataConstructor:
     def test_builds_deck_label_data_from_a_renamed_uuid_column(self) -> None:
         binder, box, kingdom = binder_and_group(["Chapel", "Village", "Smithy"])
         constructor = RenamedColumnDataConstructor(
-            DeckLabelDataConstructor(box, "winner_turns"),
+            DeckLabelDataConstructor(box, "winner_turns", cast_to_float),
             {"kingdom_uuid": "deck_uuid"},
         )
         chunk = pd.DataFrame(
@@ -29,7 +30,7 @@ class TestRenamedColumnDataConstructor:
     def test_does_not_modify_the_given_chunk(self) -> None:
         binder, box, kingdom = binder_and_group(["Chapel"])
         constructor = RenamedColumnDataConstructor(
-            DeckLabelDataConstructor(box, "winner_turns"),
+            DeckLabelDataConstructor(box, "winner_turns", cast_to_float),
             {"kingdom_uuid": "deck_uuid"},
         )
         chunk = pd.DataFrame(
@@ -43,12 +44,14 @@ class TestRenamedColumnDataConstructor:
     def test_rejects_empty_renames(self) -> None:
         _, box, _ = binder_and_group(["Chapel"])
         with pytest.raises(ValueError):
-            RenamedColumnDataConstructor(DeckLabelDataConstructor(box, "x"), {})
+            RenamedColumnDataConstructor(
+                DeckLabelDataConstructor(box, "x", cast_to_float), {}
+            )
 
     def test_rejects_two_columns_renamed_onto_one(self) -> None:
         _, box, _ = binder_and_group(["Chapel"])
         with pytest.raises(ValueError):
             RenamedColumnDataConstructor(
-                DeckLabelDataConstructor(box, "x"),
+                DeckLabelDataConstructor(box, "x", cast_to_float),
                 {"kingdom_uuid": "deck_uuid", "partial_deck_uuid": "deck_uuid"},
             )

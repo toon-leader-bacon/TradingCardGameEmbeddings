@@ -8,14 +8,14 @@ from typing import List, cast
 from src.dojos.mods.mod import MASK_TOKEN, Mod
 from src.schema.card import GenericCard
 from src.schema.card_factory import FieldPath, GenericCardFactory, MissingPathPolicy
-from src.schema.type_hints import TrainingDatum
+from src.schema.type_hints import LabelT, TrainingDatum
 
 
 class NoOpMod(Mod):
-    def apply_single(self, data: TrainingDatum) -> TrainingDatum:
+    def apply_single(self, data: TrainingDatum[LabelT]) -> TrainingDatum[LabelT]:
         return data
 
-    def apply(self, data: List[TrainingDatum]) -> List[TrainingDatum]:
+    def apply(self, data: List[TrainingDatum[LabelT]]) -> List[TrainingDatum[LabelT]]:
         return data
 
 
@@ -51,7 +51,7 @@ class MaskTargetKeyMod(Mod):
         """self.key as a FieldPath (a bare str key is a one-step path)."""
         return (self.key,) if isinstance(self.key, str) else self.key
 
-    def apply_single(self, data: TrainingDatum) -> TrainingDatum:
+    def apply_single(self, data: TrainingDatum[LabelT]) -> TrainingDatum[LabelT]:
         """A new datum with the card's field masked; `data` is unchanged.
 
         Inputs: data, a single-card TrainingDatum (GenericCard, label).
@@ -85,7 +85,7 @@ class ShuffleDeckMod(Mod):
     Side effects: advances the global `random` state; `data` is unchanged.
     """
 
-    def apply_single(self, data: TrainingDatum) -> TrainingDatum:
+    def apply_single(self, data: TrainingDatum[LabelT]) -> TrainingDatum[LabelT]:
         """A new datum with the same cards in a random order.
 
         Inputs: data, a multi-card TrainingDatum (list[GenericCard], label).

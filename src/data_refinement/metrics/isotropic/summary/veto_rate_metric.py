@@ -12,26 +12,17 @@ always two cards (one per player), so a row without one most likely had
 vetoing switched off rather than two players who chose not to veto.
 Those rows are skipped rather than counted as "offered, not vetoed".
 
-Bespoke, not part of a shared Template Method family - unlike
-../../sts_gg/card_win_rate_at_act2_metric.py (which this mirrors in
-overall shape: per-card running (hit_count, total_count) pairs,
-divided in finalize()), this is currently the only isotropic metric
-whose per-card "hit" condition is itself card-specific membership in a
-second per-row list (vetoed) rather than a single row-wide scalar
-broadcast to every card (contrast ../../sts_gg/card_average_metric.py's
-CardAverageMetric, which IS shared because every consumer broadcasts
-one row-level value). A second isotropic metric with this same
-membership-rate shape (e.g. a future pile-exhaustion rate, see
-BRAINSTORM.md's "More Flavor B-only candidates" section) would be the
-trigger to extract a shared base then, not before.
+The per-card rate is a CardMeanTally (../../card_mean_tally.py) of a 0/1
+"vetoed" indicator, the same tally ../games/pile_exhaustion_rate_metric.py
+and ../games/opening_buy_rate_metric.py use for their membership rates.
+Each of the three still selects its own rows and hits, and keeps its own
+_card_uuid_or_log(), rather than sharing a Template Method base.
 """
 
 import logging
 from pathlib import Path
 from typing import ClassVar
 from uuid import UUID
-
-import pandas as pd
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.isotropic.summary.row_utils import (
@@ -40,6 +31,7 @@ from src.data_refinement.metrics.isotropic.summary.row_utils import (
     vetoed_card_names,
     card_uuid_for_name,
 )
+from src.data_refinement.metrics.card_mean_tally import CardMeanTally
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     write_dataframe_with_version_metadata,
@@ -83,21 +75,20 @@ class VetoRateMetric:
         """
         self._card_binder = card_binder
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
-        self._total_count: dict[UUID, int] = {}
-        self._veto_count: dict[UUID, int] = {}
+        self._tally = CardMeanTally()
 
     def accumulate(self, row: dict) -> None:
         """Tally every offered card (board.supply plus vetoed) of a
         natural-kingdom row with vetoes toward this metric's running
-        per-card (veto_count, total_count) pairs.
+        per-card veto rate.
 
         Inputs:
             row: one parsed Flavor A summary row (see BRAINSTORM.md),
                 carrying at least "board" (with "supply") and,
                 optionally, "vetoed" (a list of card names).
         Output: none.
-        Side effects: updates self._total_count/_veto_count in place,
-            once per distinct offered card, for natural kingdoms with a
+        Side effects: adds to self._tally once per distinct offered
+            card, for natural kingdoms with a
             non-empty "vetoed" list only (other rows are skipped
             entirely). Emits one logging.error() per offered card name
             that fails to resolve.
@@ -125,9 +116,7 @@ class VetoRateMetric:
             card_uuid = self._card_uuid_or_log(card_name)
             if card_uuid is None:
                 continue
-            self._total_count[card_uuid] = self._total_count.get(card_uuid, 0) + 1
-            if card_name in vetoed_names:
-                self._veto_count[card_uuid] = self._veto_count.get(card_uuid, 0) + 1
+            self._tally.add(card_uuid, 1.0 if card_name in vetoed_names else 0.0)
 
     def finalize(self) -> Path:
         """Compute every seen card's veto rate and write one row per
@@ -145,17 +134,8 @@ class VetoRateMetric:
             >>> metric.finalize()
             PosixPath('data/metrics/isotropic/veto_rate.parquet')
         """
-        result = [
-            {
-                "nocab_uuid": str(card_uuid),
-                self.LABEL_COLUMN: self._veto_count.get(card_uuid, 0) / total,
-                "sample_count": total,
-            }
-            for card_uuid, total in self._total_count.items()
-        ]
-
         write_dataframe_with_version_metadata(
-            pd.DataFrame(result),
+            self._tally.mean_frame(self.LABEL_COLUMN),
             self._output_path,
             MetricVersionMetadata(
                 game=GameId.DOMINION,

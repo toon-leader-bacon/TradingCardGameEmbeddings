@@ -19,10 +19,9 @@ from pathlib import Path
 from typing import ClassVar
 from uuid import UUID
 
-import pandas as pd
-
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.metrics.card_mean_tally import CardMeanTally
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     write_dataframe_with_version_metadata,
@@ -80,8 +79,7 @@ class CardUpgradeRateMetric:
             game=GameId.SLAY_THE_SPIRE_2,
             card_binder_version=card_binder.version_for(GameId.SLAY_THE_SPIRE_2),
         )
-        self._total_count: dict[UUID, int] = {}
-        self._upgraded_count: dict[UUID, int] = {}
+        self._tally = CardMeanTally()
 
     def accumulate(self, row: dict) -> None:
         """Tally every card copy in one run's final deck toward this
@@ -93,8 +91,7 @@ class CardUpgradeRateMetric:
                 other per-entry fields like "floor" aren't used by
                 this metric).
         Output: none.
-        Side effects: updates self._total_count/_upgraded_count in
-            place, once per physical copy in row["deck"] (see module
+        Side effects: adds to self._tally once per physical copy in row["deck"] (see module
             docstring's COPY COUNTING section). Emits one
             logging.error() per deck entry that fails to resolve.
         Exceptions: raises if row is missing "deck".
@@ -125,14 +122,10 @@ class CardUpgradeRateMetric:
             >>> metric.finalize()
             PosixPath('data/metrics/sts_gg/card_upgrade_rate.parquet')
         """
-        result: list[dict] = []
-
-        # Build one output row per card seen at least once.
-        for card_uuid in self._total_count:
-            result.append(self._upgrade_rate_row(card_uuid))
-
         write_dataframe_with_version_metadata(
-            pd.DataFrame(result), self._output_path, self._version_metadata
+            self._tally.mean_frame(self.LABEL_COLUMN),
+            self._output_path,
+            self._version_metadata,
         )
         return self._output_path
 
@@ -146,9 +139,8 @@ class CardUpgradeRateMetric:
             card_entry: one row["deck"] entry, carrying "id" (str) and
                 "upgraded" (bool).
         Output: none.
-        Side effects: increments self._total_count[card_uuid], and
-            self._upgraded_count[card_uuid] if card_entry["upgraded"]
-            is true, when the card resolves; otherwise emits one
+        Side effects: adds 1.0 (upgraded) or 0.0 to self._tally for
+            the card when it resolves; otherwise emits one
             logging.error() call and updates nothing.
         Exceptions: none.
         """
@@ -161,31 +153,7 @@ class CardUpgradeRateMetric:
             )
             return
 
-        self._total_count[card_uuid] = self._total_count.get(card_uuid, 0) + 1
-        if card_entry["upgraded"]:
-            self._upgraded_count[card_uuid] = self._upgraded_count.get(card_uuid, 0) + 1
-
-    def _upgrade_rate_row(self, card_uuid: UUID) -> dict:
-        """Build one output row for a single already-tallied card.
-
-        Private helper - single consumer is finalize().
-
-        Inputs:
-            card_uuid: a key already present in self._total_count.
-        Output: a dict with keys "nocab_uuid" (str), "upgrade_rate"
-            (float, self._upgraded_count.get(card_uuid, 0) divided by
-            self._total_count[card_uuid]), and "sample_count" (int,
-            self._total_count[card_uuid]).
-        Side effects: none.
-        Exceptions: none.
-        """
-        total = self._total_count[card_uuid]
-        upgraded = self._upgraded_count.get(card_uuid, 0)
-        return {
-            "nocab_uuid": str(card_uuid),
-            self.LABEL_COLUMN: upgraded / total,
-            "sample_count": total,
-        }
+        self._tally.add(card_uuid, 1.0 if card_entry["upgraded"] else 0.0)
 
     def _card_uuid(self, raw_card_id: str) -> UUID | None:
         """Look up the nocab_uuid for one sts_gg deck entry's card id.

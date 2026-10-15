@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from src.dojos.mods.mod import MASK_TOKEN, Mod, ModTally
 from src.schema.card import GenericCard
 from src.schema.card_factory import FieldPath, GenericCardFactory, MissingPathPolicy
-from src.schema.type_hints import TrainingDatum, map_cards
+from src.schema.type_hints import LabelT, TrainingDatum, map_cards
 from src.utils.drop_table import DropTable
 
 _logger = logging.getLogger(__name__)
@@ -136,7 +136,7 @@ class CardFieldMod(Mod):
         """
         ...
 
-    def apply_single(self, data: TrainingDatum) -> TrainingDatum:
+    def apply_single(self, data: TrainingDatum[LabelT]) -> TrainingDatum[LabelT]:
         """A new datum with modified_card applied to each card (any input
         shape, via map_cards); the label is unchanged and data itself is
         never mutated.

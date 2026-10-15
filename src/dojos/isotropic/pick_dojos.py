@@ -28,7 +28,7 @@ from typing import ClassVar
 from uuid import UUID
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.deck_box.deck_lookup import DeckLookup
 from src.data_refinement.metrics.isotropic.games.kingdom_opening_buy_prediction_metric import (  # noqa: E501
     KingdomOpeningBuyPredictionMetric,
 )
@@ -87,7 +87,7 @@ def base_supply_uuids(card_binder: CardBinder) -> tuple[UUID, ...]:
 
 
 def _kingdom_supply(
-    card_binder: CardBinder, deck_box: DeckBox, column: str
+    card_binder: CardBinder, deck_box: DeckLookup, column: str
 ) -> DeckColumnGroup:
     """The kingdom group named by column plus the base supply, distinct.
     Inputs: card_binder, deck_box, column. Output: DeckColumnGroup.
@@ -111,7 +111,7 @@ class IsotropicOptionPickDojo(MultiCardOptionSelectionDojo):
         self,
         card_binder: CardBinder,
         holdout: HoldoutSpec,
-        deck_box: DeckBox,
+        deck_box: DeckLookup,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         name: str | None = None,
@@ -155,7 +155,7 @@ class IsotropicOptionPickDojo(MultiCardOptionSelectionDojo):
     @classmethod
     @abstractmethod
     def option_group(
-        cls, card_binder: CardBinder, deck_box: DeckBox
+        cls, card_binder: CardBinder, deck_box: DeckLookup
     ) -> DeckColumnGroup:
         """How a row's options are read. Inputs: card_binder, deck_box.
         Output: DeckColumnGroup. Side effects: none. Exceptions: as
@@ -171,7 +171,7 @@ class KingdomOpeningBuyDojo(IsotropicOptionPickDojo):
 
     @classmethod
     def option_group(
-        cls, card_binder: CardBinder, deck_box: DeckBox
+        cls, card_binder: CardBinder, deck_box: DeckLookup
     ) -> DeckColumnGroup:
         """See IsotropicOptionPickDojo.option_group."""
         return _kingdom_supply(card_binder, deck_box, "kingdom_uuid")
@@ -186,7 +186,7 @@ class KingdomVetoDojo(IsotropicOptionPickDojo):
 
     @classmethod
     def option_group(
-        cls, card_binder: CardBinder, deck_box: DeckBox
+        cls, card_binder: CardBinder, deck_box: DeckLookup
     ) -> DeckColumnGroup:
         """See IsotropicOptionPickDojo.option_group."""
         return DeckColumnGroup(deck_box, "candidate_pool_uuid", distinct=True)
@@ -203,7 +203,7 @@ class IsotropicContextPickDojo(MultiGroupOptionSelectionDojo):
         self,
         card_binder: CardBinder,
         holdout: HoldoutSpec,
-        deck_box: DeckBox,
+        deck_box: DeckLookup,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         name: str | None = None,
@@ -239,7 +239,7 @@ class IsotropicContextPickDojo(MultiGroupOptionSelectionDojo):
     @classmethod
     @abstractmethod
     def option_group(
-        cls, card_binder: CardBinder, deck_box: DeckBox
+        cls, card_binder: CardBinder, deck_box: DeckLookup
     ) -> DeckColumnGroup:
         """How a row's options are read; the context is always the
         row's partial deck. Inputs: card_binder, deck_box.
@@ -257,7 +257,7 @@ class NextBuyDojo(IsotropicContextPickDojo):
 
     @classmethod
     def option_group(
-        cls, card_binder: CardBinder, deck_box: DeckBox
+        cls, card_binder: CardBinder, deck_box: DeckLookup
     ) -> DeckColumnGroup:
         """See IsotropicContextPickDojo.option_group."""
         return _kingdom_supply(card_binder, deck_box, "kingdom_uuid")
@@ -274,7 +274,7 @@ class NextTrashedCardDojo(IsotropicContextPickDojo):
 
     @classmethod
     def option_group(
-        cls, card_binder: CardBinder, deck_box: DeckBox
+        cls, card_binder: CardBinder, deck_box: DeckLookup
     ) -> DeckColumnGroup:
         """See IsotropicContextPickDojo.option_group."""
         return DeckColumnGroup(deck_box, "partial_deck_uuid", distinct=True)

@@ -11,7 +11,7 @@ import logging
 import random
 import time
 from pathlib import Path
-from typing import Any, Iterable, Iterator, List, Mapping, Sequence
+from typing import Any, Generic, Iterable, Iterator, List, Mapping, Sequence
 
 import pandas as pd
 import torch
@@ -19,7 +19,7 @@ from torch import nn
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.card_binder.visible_card_lookup import VisibleCardLookup
-from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.deck_box.deck_lookup import DeckLookup
 from src.data_refinement.metrics.version_metadata import (
     MultiGameVersionMetadata,
     metadata_from_schema,
@@ -38,7 +38,7 @@ from src.dojos.mods.mod import Mod, ModTally
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
-from src.schema.type_hints import BatchedModelOutput, TrainingDatum
+from src.schema.type_hints import BatchedModelOutput, LabelT, TrainingDatum
 
 _logger = logging.getLogger(__name__)
 
@@ -54,8 +54,12 @@ ROWS_PER_CHUNK = 256
 _CALIBRATION_SAMPLE_CAP = 20_000
 
 
-class GenericDojo:
-    """Implements `Dojo` for a parquet-backed (input, label) task.
+class GenericDojo(Generic[LabelT]):
+    """Implements `Dojo` for a parquet-backed (input, label) task, whose
+    labels are of type LabelT (src/schema/type_hints.py). Each cell fixes
+    LabelT (e.g. SingleCardRegressionDojo is a GenericDojo[float]), so a
+    data constructor, loss or calibration over another label type is a
+    type error at the cell's constructor.
 
     Inputs (constructor):
         path_to_training_data: a metric's output parquet file. Its stem is
@@ -121,14 +125,14 @@ class GenericDojo:
     def __init__(
         self,
         path_to_training_data: Path,
-        data_constructor: DataConstructor,
+        data_constructor: DataConstructor[LabelT],
         card_lookup: CardLookup,
         holdout: HoldoutSpec,
         decoder_head: nn.Module,
-        loss_calculator: NocabLoss[Any, Any],
-        calibration: LossCalibration,
+        loss_calculator: NocabLoss[Any, List[LabelT]],
+        calibration: LossCalibration[LabelT],
         mod_pipeline: ModPipeline | None = None,
-        deck_box: DeckBox | None = None,
+        deck_box: DeckLookup | None = None,
         config: DojoConfig = DojoConfig(),
     ) -> None:
         self.name = config.name or path_to_training_data.stem
@@ -160,13 +164,13 @@ class GenericDojo:
             split: VisibleCardLookup(card_lookup, holdout, split) for split in Split
         }
         # Fit the loss to TRAIN, now that the split files and TRAIN lookup exist
-        self._calibrated: CalibratedLoss = self._calibrated_loss(
+        self._calibrated: CalibratedLoss[LabelT] = self._calibrated_loss(
             loss_calculator, calibration
         )
 
     def batches(
         self, split: Split, budget: BatchBudget, max_examples: int | None = None
-    ) -> Iterator[Batch]:
+    ) -> Iterator[Batch[LabelT]]:
         """Yield one split's examples as Batches within `budget`.
 
         Inputs: split (Split), budget (BatchBudget), max_examples (int |
@@ -247,7 +251,7 @@ class GenericDojo:
         return self._calibrated.label_stats
 
     @property
-    def loss_calculator(self) -> NocabLoss[Any, Any]:
+    def loss_calculator(self) -> NocabLoss[Any, List[LabelT]]:
         """The loss compute_loss scores with: the cell's loss after
         calibration (a regression cell's is wrapped in StandardizedLabelLoss).
 
@@ -296,12 +300,14 @@ class GenericDojo:
 
     def _examples(
         self, split: Split, max_examples: int | None
-    ) -> Iterator[TrainingDatum]:
+    ) -> Iterator[TrainingDatum[LabelT]]:
         """Stream a split's examples in _chunks() order, modded and truncated."""
         lookup = self._lookups[split]
         emitted = 0
         for chunk in self._chunks(split):
-            data: List[TrainingDatum] = self.data_constructor.build(chunk, lookup)
+            data: List[TrainingDatum[LabelT]] = self.data_constructor.build(
+                chunk, lookup
+            )
             data = self.data_mod_pipeline.apply(data, is_training=split == Split.TRAIN)
             for datum in data:
                 if max_examples is not None and emitted >= max_examples:
@@ -323,7 +329,7 @@ class GenericDojo:
         """
         return self.file_manager.reader_for(split, ROWS_PER_CHUNK)
 
-    def _calibration_sample(self) -> List[TrainingDatum]:
+    def _calibration_sample(self) -> List[TrainingDatum[LabelT]]:
         """An unmodded sample of the TRAIN split's examples: its first
         _CALIBRATION_SAMPLE_CAP rows in _chunks() order.
 
@@ -343,7 +349,7 @@ class GenericDojo:
             fully held-out TRAIN split cannot be calibrated); whatever
             data_constructor.build raises.
         """
-        result: List[TrainingDatum] = []
+        result: List[TrainingDatum[LabelT]] = []
         lookup = self._lookups[Split.TRAIN]
 
         # Build chunks until the cap's rows are read, cutting the last one
@@ -363,8 +369,10 @@ class GenericDojo:
         return result
 
     def _calibrated_loss(
-        self, loss_calculator: NocabLoss[Any, Any], calibration: LossCalibration
-    ) -> CalibratedLoss:
+        self,
+        loss_calculator: NocabLoss[Any, List[LabelT]],
+        calibration: LossCalibration[LabelT],
+    ) -> CalibratedLoss[LabelT]:
         """calibration fit to a TRAIN sample, with one INFO line timing it.
 
         Private helper - single caller is __init__ (its last step).
@@ -422,7 +430,7 @@ class GenericDojo:
         self,
         path_to_training_data: Path,
         card_lookup: CardLookup,
-        deck_box: DeckBox | None,
+        deck_box: DeckLookup | None,
         strict_version_check: bool,
     ) -> None:
         """Raise if path_to_training_data's embedded version metadata

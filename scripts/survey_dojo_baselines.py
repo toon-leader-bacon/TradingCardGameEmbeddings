@@ -28,12 +28,9 @@ from src.dojos.loss.regression_objective import (
 )
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
-from src.training.dojo_catalog import (
-    DOJO_CATALOG,
-    CardShelf,
-    DojoBuildContext,
-    build_dojos,
-)
+from src.training.dojo_catalog import DOJO_CATALOG, build_dojos
+from src.training.dojo_recipes.card_shelf import CardShelf
+from src.training.dojo_recipes.dojo_build_context import DojoBuildContext
 from src.training.preflight import random_embeddings_like
 from src.run_logging import (
     LogLevel,

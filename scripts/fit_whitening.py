@@ -9,7 +9,7 @@ never), so the stats can be used by any run with that same holdout; a run
 with another holdout refuses them. Without --holdout-from every card may
 be sampled (HoldoutSpec.no_holdout()), for offline analysis only. A run
 uses the file through `model.enrichment: {kind: whitening, stats_path:
-...}` (src/training/run_config.py).
+...}` (src/training/config_parsing/model_parsing.py).
 """
 
 import argparse
@@ -37,7 +37,8 @@ from src.run_logging import (
 )
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
-from src.training.dojo_catalog import DOJO_CATALOG, CardShelf
+from src.training.dojo_catalog import DOJO_CATALOG
+from src.training.dojo_recipes.card_shelf import CardShelf
 from src.training.run_config import RunConfig, parse_run_config, read_config_document
 
 _logger = script_logger(__file__)

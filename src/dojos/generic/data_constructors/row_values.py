@@ -10,15 +10,15 @@ from typing import List, Tuple, cast
 from uuid import UUID
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.deck_box.deck_lookup import DeckLookup
 from src.schema.card import GenericCard
 from src.schema.type_hints import MultiCardInput
 
 
 def cast_to_float(raw_label: object) -> float:
-    """DeckLabelDataConstructor's default label_caster - float() typed
-    against object rather than its builtin overloads, so it satisfies
-    Callable[[object], Label]."""
+    """The float label_caster for DeckLabelDataConstructor and
+    GroupLabelDataConstructor - float() typed against object rather than
+    its builtin overloads, so it satisfies Callable[[object], float]."""
     return float(raw_label)  # type: ignore[arg-type]
 
 
@@ -67,7 +67,7 @@ def parsed_uuid(raw_uuid: object) -> UUID | None:
 
 
 def deck_cards_excluding(
-    deck_box: DeckBox,
+    deck_box: DeckLookup,
     lookup: CardLookup,
     raw_deck_uuid: object,
     target_uuid: UUID | None,

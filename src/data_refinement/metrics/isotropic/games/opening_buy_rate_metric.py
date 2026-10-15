@@ -25,11 +25,10 @@ from pathlib import Path
 from typing import ClassVar
 from uuid import UUID
 
-import pandas as pd
-
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.metrics.isotropic.games.header_parser import GameHeader
 from src.data_refinement.metrics.isotropic.games.row_utils import card_uuid_for_name
+from src.data_refinement.metrics.card_mean_tally import CardMeanTally
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     write_dataframe_with_version_metadata,
@@ -71,19 +70,18 @@ class OpeningBuyRateMetric:
         """
         self._card_binder = card_binder
         self._output_path = output_path or self.DEFAULT_OUTPUT_PATH
-        self._total_count: dict[UUID, int] = {}
-        self._opening_count: dict[UUID, int] = {}
+        self._tally = CardMeanTally()
 
     def accumulate(self, header: GameHeader) -> None:
         """Tally every kingdom card in a natural-kingdom game toward
-        this metric's running per-card (opening_count, total_count)
-        pairs, once per player in the game.
+        this metric's running per-card opening-buy rate, once per
+        player in the game.
 
         Inputs:
             header: one parsed GameHeader (header_parser.py).
         Output: none.
-        Side effects: updates self._total_count/_opening_count in
-            place, once per (player, kingdom card) pair, for natural-
+        Side effects: adds to self._tally once per (player, kingdom
+            card) pair, for natural-
             kingdom games only (header.is_natural_kingdom False skips
             the whole header). Emits one logging.error() per kingdom
             card name that fails to resolve.
@@ -105,11 +103,7 @@ class OpeningBuyRateMetric:
                 card_uuid = self._card_uuid_or_log(card_name)
                 if card_uuid is None:
                     continue
-                self._total_count[card_uuid] = self._total_count.get(card_uuid, 0) + 1
-                if card_name in opening_names:
-                    self._opening_count[card_uuid] = (
-                        self._opening_count.get(card_uuid, 0) + 1
-                    )
+                self._tally.add(card_uuid, 1.0 if card_name in opening_names else 0.0)
 
     def finalize(self) -> Path:
         """Compute every seen card's opening-buy rate and write one
@@ -127,17 +121,8 @@ class OpeningBuyRateMetric:
             >>> metric.finalize()
             PosixPath('data/metrics/isotropic/opening_buy_rate.parquet')
         """
-        result = [
-            {
-                "nocab_uuid": str(card_uuid),
-                self.LABEL_COLUMN: self._opening_count.get(card_uuid, 0) / total,
-                "sample_count": total,
-            }
-            for card_uuid, total in self._total_count.items()
-        ]
-
         write_dataframe_with_version_metadata(
-            pd.DataFrame(result),
+            self._tally.mean_frame(self.LABEL_COLUMN),
             self._output_path,
             MetricVersionMetadata(
                 game=GameId.DOMINION,

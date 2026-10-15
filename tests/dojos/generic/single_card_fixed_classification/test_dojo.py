@@ -14,7 +14,10 @@ from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.single_card_fixed_classification.dojo import (
     SingleCardFixedClassificationDojo,
 )
-from src.dojos.generic.single_card_fixed_classification.loss_spec import LossSpec
+from src.dojos.generic.single_card_fixed_classification.loss_spec import (
+    FIXED_CLASSIFICATION_LOSS_SPEC,
+    LossSpec,
+)
 from src.dojos.loss.fixed_classification_loss import FixedClassificationLoss
 from src.dojos.loss.loss_calibration import CalibratedLoss
 from src.dojos.mods.common_mods import MaskTargetKeyMod
@@ -83,6 +86,7 @@ class TestSingleCardFixedClassificationDojoSplits:
             holdout=HoldoutSpec.no_holdout(),
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
+            loss_spec=FIXED_CLASSIFICATION_LOSS_SPEC,
             config=DojoConfig(
                 rng_seed=0,
                 strict_version_check=False,
@@ -109,6 +113,7 @@ class TestSingleCardFixedClassificationDojoSplits:
             holdout=HoldoutSpec.no_holdout(),
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
+            loss_spec=FIXED_CLASSIFICATION_LOSS_SPEC,
             config=DojoConfig(
                 rng_seed=0,
                 strict_version_check=False,
@@ -148,6 +153,7 @@ class TestSingleCardFixedClassificationDojoModPipeline:
             holdout=HoldoutSpec.no_holdout(),
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
+            loss_spec=FIXED_CLASSIFICATION_LOSS_SPEC,
             mod_pipeline=ModPipeline(
                 [MaskTargetKeyMod(key="faction", train_only=False)]
             ),
@@ -180,6 +186,7 @@ class TestSingleCardFixedClassificationDojoComputeLoss:
             holdout=HoldoutSpec.no_holdout(),
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
+            loss_spec=FIXED_CLASSIFICATION_LOSS_SPEC,
             config=DojoConfig(
                 rng_seed=0,
                 strict_version_check=False,
@@ -204,6 +211,7 @@ class TestSingleCardFixedClassificationDojoComputeLoss:
             holdout=HoldoutSpec.no_holdout(),
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
+            loss_spec=FIXED_CLASSIFICATION_LOSS_SPEC,
             config=DojoConfig(
                 rng_seed=0,
                 strict_version_check=False,
@@ -244,7 +252,7 @@ class _UnitBaselineCalibration:
 
 
 class TestSingleCardFixedClassificationDojoLossSpec:
-    def test_defaults_to_fixed_classification_loss(self, tmp_path: Path) -> None:
+    def test_fixed_classification_spec_builds_its_loss(self, tmp_path: Path) -> None:
         source = tmp_path / "source.parquet"
         _write_source(source, num_rows=10)
         card = _card("Geralt of Rivia")
@@ -255,6 +263,7 @@ class TestSingleCardFixedClassificationDojoLossSpec:
             holdout=HoldoutSpec.no_holdout(),
             label_values=["monster", "northern_realms"],
             card_embedding_size=4,
+            loss_spec=FIXED_CLASSIFICATION_LOSS_SPEC,
             config=DojoConfig(
                 rng_seed=0,
                 strict_version_check=False,

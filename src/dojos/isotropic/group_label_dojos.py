@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import ClassVar
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.deck_box.deck_lookup import DeckLookup
 from src.data_refinement.metrics.isotropic.games.kingdom_ending_pile_prediction_metric import (  # noqa: E501
     KingdomEndingPilePredictionMetric,
 )
@@ -89,7 +89,7 @@ class IsotropicGroupBinaryDojo(MultiGroupBinaryClassificationDojo):
         self,
         card_binder: CardBinder,
         holdout: HoldoutSpec,
-        deck_box: DeckBox,
+        deck_box: DeckLookup,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         name: str | None = None,
@@ -141,7 +141,7 @@ class IsotropicGroupBinaryDojo(MultiGroupBinaryClassificationDojo):
 
     @classmethod
     @abstractmethod
-    def card_groups(cls, deck_box: DeckBox) -> tuple[CardGroup, CardGroup]:
+    def card_groups(cls, deck_box: DeckLookup) -> tuple[CardGroup, CardGroup]:
         """How a row's two groups are read, in input order.
         Inputs: deck_box. Output: (group_0, group_1).
         Side effects: none. Exceptions: none."""
@@ -160,7 +160,7 @@ class IsotropicGroupRegressionDojo(MultiGroupRegressionDojo):
         self,
         card_binder: CardBinder,
         holdout: HoldoutSpec,
-        deck_box: DeckBox,
+        deck_box: DeckLookup,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         name: str | None = None,
@@ -198,13 +198,13 @@ class IsotropicGroupRegressionDojo(MultiGroupRegressionDojo):
 
     @classmethod
     @abstractmethod
-    def card_groups(cls, deck_box: DeckBox) -> tuple[CardGroup, CardGroup]:
+    def card_groups(cls, deck_box: DeckLookup) -> tuple[CardGroup, CardGroup]:
         """How a row's two groups are read, in input order.
         Inputs: deck_box. Output: (group_0, group_1).
         Side effects: none. Exceptions: none."""
 
 
-def _deck_pair(deck_box: DeckBox) -> tuple[CardGroup, CardGroup]:
+def _deck_pair(deck_box: DeckLookup) -> tuple[CardGroup, CardGroup]:
     """(deck_uuid_lo's deck, deck_uuid_hi's deck). Inputs: deck_box.
     Output: the two groups. Side effects: none. Exceptions: none."""
     return (
@@ -213,7 +213,7 @@ def _deck_pair(deck_box: DeckBox) -> tuple[CardGroup, CardGroup]:
     )
 
 
-def _card_in_kingdom(deck_box: DeckBox) -> tuple[CardGroup, CardGroup]:
+def _card_in_kingdom(deck_box: DeckLookup) -> tuple[CardGroup, CardGroup]:
     """([card_uuid's card], kingdom_uuid's kingdom). Inputs: deck_box.
     Output: the two groups. Side effects: none. Exceptions: none."""
     return (
@@ -231,7 +231,7 @@ class DeckPairWinnerDojo(IsotropicGroupBinaryDojo):
     SYMMETRIC_PAIR = True
 
     @classmethod
-    def card_groups(cls, deck_box: DeckBox) -> tuple[CardGroup, CardGroup]:
+    def card_groups(cls, deck_box: DeckLookup) -> tuple[CardGroup, CardGroup]:
         """See IsotropicGroupBinaryDojo.card_groups."""
         return _deck_pair(deck_box)
 
@@ -245,7 +245,7 @@ class MidGameDeckPairWinnerDojo(IsotropicGroupBinaryDojo):
     SYMMETRIC_PAIR = True
 
     @classmethod
-    def card_groups(cls, deck_box: DeckBox) -> tuple[CardGroup, CardGroup]:
+    def card_groups(cls, deck_box: DeckLookup) -> tuple[CardGroup, CardGroup]:
         """See IsotropicGroupBinaryDojo.card_groups."""
         return _deck_pair(deck_box)
 
@@ -258,7 +258,7 @@ class EventualWinDojo(IsotropicGroupBinaryDojo):
     LABEL_COLUMN = "player_wins"
 
     @classmethod
-    def card_groups(cls, deck_box: DeckBox) -> tuple[CardGroup, CardGroup]:
+    def card_groups(cls, deck_box: DeckLookup) -> tuple[CardGroup, CardGroup]:
         """See IsotropicGroupBinaryDojo.card_groups."""
         return (
             DeckColumnGroup(deck_box, "partial_deck_uuid"),
@@ -274,7 +274,7 @@ class OpeningBuyOutcomeDojo(IsotropicGroupBinaryDojo):
     LABEL_COLUMN = "won"
 
     @classmethod
-    def card_groups(cls, deck_box: DeckBox) -> tuple[CardGroup, CardGroup]:
+    def card_groups(cls, deck_box: DeckLookup) -> tuple[CardGroup, CardGroup]:
         """See IsotropicGroupBinaryDojo.card_groups."""
         return (
             DeckColumnGroup(deck_box, "opening_group_uuid"),
@@ -291,7 +291,7 @@ class WinningDeckMembershipDojo(IsotropicGroupBinaryDojo):
     SPLIT_GROUP_COLUMN = _KINGDOM_UUID_COLUMN
 
     @classmethod
-    def card_groups(cls, deck_box: DeckBox) -> tuple[CardGroup, CardGroup]:
+    def card_groups(cls, deck_box: DeckLookup) -> tuple[CardGroup, CardGroup]:
         """See IsotropicGroupBinaryDojo.card_groups."""
         return _card_in_kingdom(deck_box)
 
@@ -305,7 +305,7 @@ class KingdomEndingPileDojo(IsotropicGroupBinaryDojo):
     SPLIT_GROUP_COLUMN = _KINGDOM_UUID_COLUMN
 
     @classmethod
-    def card_groups(cls, deck_box: DeckBox) -> tuple[CardGroup, CardGroup]:
+    def card_groups(cls, deck_box: DeckLookup) -> tuple[CardGroup, CardGroup]:
         """See IsotropicGroupBinaryDojo.card_groups."""
         return _card_in_kingdom(deck_box)
 
@@ -319,7 +319,7 @@ class WinningDeckCountDojo(IsotropicGroupRegressionDojo):
     SPLIT_GROUP_COLUMN = _KINGDOM_UUID_COLUMN
 
     @classmethod
-    def card_groups(cls, deck_box: DeckBox) -> tuple[CardGroup, CardGroup]:
+    def card_groups(cls, deck_box: DeckLookup) -> tuple[CardGroup, CardGroup]:
         """See IsotropicGroupRegressionDojo.card_groups."""
         return _card_in_kingdom(deck_box)
 
@@ -333,7 +333,7 @@ class DeckCardSetCopyCountDojo(IsotropicGroupRegressionDojo):
     SPLIT_GROUP_COLUMN = "deck_set_uuid"
 
     @classmethod
-    def card_groups(cls, deck_box: DeckBox) -> tuple[CardGroup, CardGroup]:
+    def card_groups(cls, deck_box: DeckLookup) -> tuple[CardGroup, CardGroup]:
         """See IsotropicGroupRegressionDojo.card_groups."""
         return (
             CardColumnGroup(_CARD_UUID_COLUMN),

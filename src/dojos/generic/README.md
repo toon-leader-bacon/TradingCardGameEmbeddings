@@ -29,9 +29,8 @@ so one cell serves every metric family with the same shape.
   turn one raw row value into a typed label or card(s).
 - `renamed_column_data_constructor.py` - `RenamedColumnDataConstructor`,
   a Decorator that renames a chunk's columns before delegating to any
-  other `DataConstructor` - for a metric whose group-uuid column isn't
-  named `deck_uuid` (isotropic's kingdom/partial-deck metrics) or whose
-  label columns need remapping (`fabtcg_decklists`/`play_gwent`'s
+  other `DataConstructor` - for a metric whose label columns need
+  remapping (`fabtcg_decklists`/`play_gwent`'s
   `card_inclusion_dojos.py`). Lives here rather than in
   `data_constructors/` since it wraps any constructor rather than
   mapping to one metric family.
@@ -56,7 +55,7 @@ so one cell serves every metric family with the same shape.
 | Cell | Input | Label | Loss | Calibration (baseline) |
 |---|---|---|---|---|
 | `single_card_regression/` | one card | float | `MseLoss` or `HuberLoss` (its `objective`) | z-scored labels (MSE: 1.0; Huber: the best constant's Huber loss) |
-| `single_card_fixed_classification/` | one card | one of `label_values` | from its `LossSpec` (default `FixedClassificationLoss`) | from its `LossSpec` (default class-prior entropy) |
+| `single_card_fixed_classification/` | one card | one of `label_values`, or a dict (its `LossSpec`) | from its `LossSpec` (`FixedClassificationLoss` for class names) | from its `LossSpec` (class-prior entropy for class names) |
 | `multi_card_regression/` | a deck | float | `MseLoss` or `HuberLoss` (its `objective`) | z-scored labels (MSE: 1.0; Huber: the best constant's Huber loss) |
 | `multi_card_binary_classification/` | a deck | 0/1 | `BceLoss` (one logit) | binary entropy of the positive rate |
 | `multi_card_fixed_classification/` | a deck | one of `label_values` | `FixedClassificationLoss` | class-prior entropy |
@@ -86,13 +85,31 @@ outputs a raw logit. For a symmetric pair task ("did group 0 beat group
 it raises on an empty group or a non-float label. Asymmetric inputs
 (`[partial deck, kingdom]`) must not use it.
 
-`single_card_fixed_classification`'s `loss_spec` (a `LossSpec`:
-a loss factory and its matching calibration, as one value) lets a metric
-use `SOFT_CLASSIFICATION_LOSS_SPEC` (a distribution over `label_values`,
+`single_card_fixed_classification`'s required `loss_spec` (a `LossSpec`:
+a loss factory and its matching calibration, as one value) is
+`FIXED_CLASSIFICATION_LOSS_SPEC` for class names, or lets a metric use
+`SOFT_CLASSIFICATION_LOSS_SPEC` (a distribution over `label_values`,
 `CardCharacterPredictionDojo`) or `MASKED_VECTOR_REGRESSION_LOSS_SPEC`
 (independent per-position rates in [0, 1], `PickNumberDecayCurveDojo`;
 not z-scored, since its loss sigmoids the head's output) with the same
 head.
+
+## Label types
+
+Labels are typed end to end. `TrainingDatum[LabelT]`
+(`src/schema/type_hints.py`) carries a label of the dojo's own type, and
+`GenericDojo[LabelT]` ties together its `DataConstructor[LabelT]`, its
+loss (`NocabLoss[..., List[LabelT]]`) and its `LossCalibration[LabelT]`,
+so a constructor, loss or calibration over another label type is a mypy
+error where the cell is built. Each cell in the table above fixes LabelT
+(float, str or int); `single_card_fixed_classification` stays generic and
+takes it from its `LossSpec` (str, or `Dict[str, float]` /
+`Dict[int, float]`), so its wrappers name it
+(`SingleCardFixedClassificationDojo[str]`). `DeckLabelDataConstructor`
+takes it from its required `label_caster` (`cast_to_float` or `str`).
+Mods and batching only carry labels, so they are generic in LabelT;
+`GroupSwapMod`, the one mod that reads its label, checks it is a float
+at runtime.
 
 ## Loss calibration
 

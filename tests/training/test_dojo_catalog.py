@@ -117,22 +117,26 @@ from src.dojos.seventeenlands.replay_data.attacker_blocker_combat_outcome_dojo i
 from src.dojos.sts_gg import deck_label_dojos
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
-from src.training import dojo_catalog
-from src.training.dojo_catalog import (
-    DECK_MOD_GROUPS,
-    DOJO_CATALOG,
-    CardDojoRecipe,
-    CardShelf,
+from src.training.dojo_recipes import contrastive_dojo_recipe
+from src.training.dojo_catalog import DECK_MOD_GROUPS, DOJO_CATALOG, build_dojos
+from src.training.dojo_recipes.augmentations import (
+    build_augmentation_pipeline,
+    append_augmentations,
+)
+from src.training.dojo_recipes.card_dojo_recipe import CardDojoRecipe
+from src.training.dojo_recipes.card_shelf import CardShelf
+from src.training.dojo_recipes.contrastive_dojo_recipe import (
     ContrastiveDojoRecipe,
-    DeckDojoRecipe,
-    DojoBuildContext,
-    MultiGameCardDojoRecipe,
-    _REGRESSION_CELLS,
-    _augmentation_pipeline,
-    _constructor_for,
     _staple_subsampling,
-    _with_augmentations,
-    build_dojos,
+)
+from src.training.dojo_recipes.deck_dojo_recipe import DeckDojoRecipe
+from src.training.dojo_recipes.dojo_build_context import DojoBuildContext
+from src.training.dojo_recipes.dojo_constructors import (
+    REGRESSION_CELLS,
+    bind_regression_objective,
+)
+from src.training.dojo_recipes.multi_game_card_dojo_recipe import (
+    MultiGameCardDojoRecipe,
 )
 
 
@@ -477,8 +481,10 @@ class TestContrastiveEntries:
             built["loss"] = kwargs["contrastive_loss"]
             return "dojo"
 
-        monkeypatch.setattr(dojo_catalog, "DeckBoxDealer", lambda *a, **k: "dealer")
-        monkeypatch.setattr(dojo_catalog, "ContrastiveDojo", fake_dojo)
+        monkeypatch.setattr(
+            contrastive_dojo_recipe, "DeckBoxDealer", lambda *a, **k: "dealer"
+        )
+        monkeypatch.setattr(contrastive_dojo_recipe, "ContrastiveDojo", fake_dojo)
         context = DojoBuildContext(
             shelf=_RecordingShelf(),
             holdout=HoldoutSpec.no_holdout(),
@@ -494,7 +500,7 @@ class TestContrastiveEntries:
         assert isinstance(built["loss"], MissingCardInfoNCELoss)
 
     def test_every_metric_dojo_is_a_generic_dojo(self) -> None:
-        # _with_augmentations appends to a GenericDojo's pipeline
+        # append_augmentations appends to a GenericDojo's pipeline
         for name, recipe in DOJO_CATALOG.items():
             if not isinstance(recipe, ContrastiveDojoRecipe):
                 dojo_class = getattr(recipe, "dojo_class")
@@ -543,7 +549,7 @@ class TestAugmentationPipeline:
         )
 
     def test_defaults_come_from_the_game(self) -> None:
-        pipeline = _augmentation_pipeline(
+        pipeline = build_augmentation_pipeline(
             "contrastive.gwent", GameId.GWENT, self._context()
         )
         names = [type(mod).__name__ for mod in pipeline.mods]
@@ -551,19 +557,21 @@ class TestAugmentationPipeline:
 
     def test_an_override_replaces_the_defaults(self) -> None:
         context = self._context({"contrastive.gwent": (ShuffleKeysSpec(),)})
-        pipeline = _augmentation_pipeline("contrastive.gwent", GameId.GWENT, context)
+        pipeline = build_augmentation_pipeline(
+            "contrastive.gwent", GameId.GWENT, context
+        )
         assert [type(mod).__name__ for mod in pipeline.mods] == ["ShuffleKeysMod"]
 
     def test_an_empty_override_turns_augmentation_off(self) -> None:
         context = self._context({"contrastive.gwent": ()})
         assert (
-            _augmentation_pipeline("contrastive.gwent", GameId.GWENT, context).mods
+            build_augmentation_pipeline("contrastive.gwent", GameId.GWENT, context).mods
             == []
         )
 
     def test_mod_streams_are_reproducible_and_distinct(self) -> None:
         def first_draws(name: str, seed: int) -> list[float]:
-            pipeline = _augmentation_pipeline(
+            pipeline = build_augmentation_pipeline(
                 name, GameId.GWENT, self._context(seed=seed)
             )
             return [mod.rng.random() for mod in pipeline.mods]  # type: ignore[attr-defined]
@@ -662,7 +670,7 @@ class TestMetricDojoAugmentations:
         task_mod = MaskTargetKeyMod("rarity", train_only=False)
         dojo = _stub_dojo("scryfall.rarity_mask", [task_mod])
 
-        _with_augmentations(dojo, "scryfall.rarity_mask", GameId.MTG, self._context())
+        append_augmentations(dojo, "scryfall.rarity_mask", GameId.MTG, self._context())
 
         mods = dojo.data_mod_pipeline.mods
         assert mods[0] is task_mod and not mods[0].train_only
@@ -679,7 +687,7 @@ class TestMetricDojoAugmentations:
         specs = (CardDropoutSpec(0.1), DuplicateCollapseSpec())
         context = self._context({"sts2_runs.win": specs})
 
-        _with_augmentations(dojo, "sts2_runs.win", GameId.SLAY_THE_SPIRE_2, context)
+        append_augmentations(dojo, "sts2_runs.win", GameId.SLAY_THE_SPIRE_2, context)
 
         mods = dojo.data_mod_pipeline.mods
         assert mods[0] is task_mod
@@ -693,13 +701,13 @@ class TestMetricDojoAugmentations:
         dojo = _stub_dojo("scryfall.rarity_mask", [task_mod])
         context = self._context({"scryfall.rarity_mask": ()})
 
-        _with_augmentations(dojo, "scryfall.rarity_mask", GameId.MTG, context)
+        append_augmentations(dojo, "scryfall.rarity_mask", GameId.MTG, context)
 
         assert dojo.data_mod_pipeline.mods == [task_mod]
 
     def test_a_game_without_defaults_adds_nothing(self) -> None:
         dojo = _stub_dojo("x.y")
-        _with_augmentations(dojo, "x.y", GameId.YUGIOH, self._context())
+        append_augmentations(dojo, "x.y", GameId.YUGIOH, self._context())
         assert dojo.data_mod_pipeline.mods == []
 
 
@@ -737,14 +745,14 @@ class TestStapleThresholds:
 
 class TestRegressionObjective:
     def test_exactly_the_regression_dojo_classes_accept_an_objective(self) -> None:
-        # A new regression cell outside _REGRESSION_CELLS would silently
+        # A new regression cell outside REGRESSION_CELLS would silently
         # train with MSE; a classifier must not be handed an objective
         for key, recipe in DOJO_CATALOG.items():
             dojo_class = getattr(recipe, "dojo_class", None)
             if dojo_class is None:
                 continue
             takes = "objective" in inspect.signature(dojo_class).parameters
-            assert takes == issubclass(dojo_class, _REGRESSION_CELLS), key
+            assert takes == issubclass(dojo_class, REGRESSION_CELLS), key
 
     def test_a_regression_class_is_bound_to_the_runs_objective(self) -> None:
         objective = RegressionObjective.huber()
@@ -756,7 +764,7 @@ class TestRegressionObjective:
             regression_objective=objective,
         )
 
-        bound: Any = _constructor_for(CostRegressionDojo, context)
+        bound: Any = bind_regression_objective(CostRegressionDojo, context)
 
         assert bound.keywords == {"objective": objective}
 
@@ -767,7 +775,7 @@ class TestRegressionObjective:
             card_embedding_size=32,
             rng_seed=0,
         )
-        assert _constructor_for(SetMaskDojo, context) is SetMaskDojo
+        assert bind_regression_objective(SetMaskDojo, context) is SetMaskDojo
 
     def test_the_default_objective_is_plain_mse(self) -> None:
         context = DojoBuildContext(

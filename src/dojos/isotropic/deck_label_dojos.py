@@ -13,12 +13,11 @@ and whose label is one value per row - the DeckLabelDataConstructor shape.
 - KingdomEndingTypeDojo: kingdom -> province / colony / multi_pile
   (fixed classification).
 
-DECK COLUMN: DeckLabelDataConstructor reads a fixed "deck_uuid" column;
-the kingdom and partial-deck metrics name theirs kingdom_uuid and
-partial_deck_uuid, so those wrappers wrap it in a
-RenamedColumnDataConstructor. Their label column names are literals in
-the metrics' parquet schemas (no LABEL_COLUMN ClassVar), so they are
-named once here as module constants.
+DECK COLUMN: the kingdom and partial-deck metrics name their group
+column kingdom_uuid and partial_deck_uuid, which those wrappers pass to
+DeckLabelDataConstructor as its deck_uuid_column. Their column names
+are literals in the metrics' parquet schemas (no LABEL_COLUMN ClassVar),
+so they are named once here as module constants.
 
 DECK BOX: every wrapper passes deck_box to its cell as well as to its
 constructor, so GenericDojo's version check can confirm the box and the
@@ -29,7 +28,7 @@ from pathlib import Path
 from typing import Callable, ClassVar
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.deck_box.deck_lookup import DeckLookup
 from src.data_refinement.metrics.isotropic.games import kingdom_ending_type_metric
 from src.data_refinement.metrics.isotropic.games.kingdom_ending_type_metric import (
     KingdomEndingTypeMetric,
@@ -44,7 +43,6 @@ from src.data_refinement.metrics.isotropic.summary.kingdom_game_length_metric im
     KingdomGameLengthMetric,
 )
 from src.dojos.loss.regression_objective import RegressionObjective
-from src.dojos.generic.data_constructor import DataConstructor
 from src.dojos.generic.data_constructors import DeckLabelDataConstructor
 from src.dojos.generic.dojo_config import DojoConfig
 from src.dojos.generic.multi_card_fixed_classification.dojo import (
@@ -52,54 +50,14 @@ from src.dojos.generic.multi_card_fixed_classification.dojo import (
 )
 from src.dojos.generic.multi_card_regression.dojo import MultiCardRegressionDojo
 from src.dojos.generic.paired_metric_dojos import DeckBinaryLabelMetricDojo
-from src.dojos.generic.renamed_column_data_constructor import (
-    RenamedColumnDataConstructor,
-)
 from src.schema.holdout import HoldoutSpec
-from src.schema.type_hints import Label
 
-_DECK_UUID_COLUMN = "deck_uuid"
 _KINGDOM_UUID_COLUMN = "kingdom_uuid"
 _PARTIAL_DECK_UUID_COLUMN = "partial_deck_uuid"
 
 _WINNER_TURNS_COLUMN = "winner_turns"
 _NEXT_TURN_ACTION_COUNT_COLUMN = "next_turn_action_count"
 _ENDING_TYPE_COLUMN = "ending_type"
-
-
-def build_deck_label_constructor(
-    deck_box: DeckBox,
-    deck_column: str,
-    label_column: str,
-    label_caster: Callable[[object], Label] | None = None,
-) -> DataConstructor:
-    """A DeckLabelDataConstructor for a metric whose group column is
-    deck_column, renamed to "deck_uuid" first when it differs.
-
-    Inputs:
-        deck_box: the DeckBox the metric's group uuids point into.
-        deck_column: the metric's group uuid column name.
-        label_column: the metric's label column name.
-        label_caster: converts a raw label cell; None keeps
-            DeckLabelDataConstructor's float default (regression and
-            binary cells), str suits a fixed-classification cell.
-    Output: DataConstructor - a plain DeckLabelDataConstructor when
-        deck_column is already "deck_uuid", else one wrapped in a
-        RenamedColumnDataConstructor.
-    Side effects: none.
-    Exceptions: none.
-
-    Example:
-        >>> build_deck_label_constructor(box, "kingdom_uuid", "winner_turns")
-    """
-    result: DataConstructor = (
-        DeckLabelDataConstructor(deck_box, label_column)
-        if label_caster is None
-        else DeckLabelDataConstructor(deck_box, label_column, label_caster)
-    )
-    if deck_column != _DECK_UUID_COLUMN:
-        result = RenamedColumnDataConstructor(result, {deck_column: _DECK_UUID_COLUMN})
-    return result
 
 
 def label_capped_at(cap: float) -> Callable[[object], float]:
@@ -139,7 +97,7 @@ class IsotropicDeckRegressionDojo(MultiCardRegressionDojo):
         self,
         card_binder: CardBinder,
         holdout: HoldoutSpec,
-        deck_box: DeckBox,
+        deck_box: DeckLookup,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         name: str | None = None,
@@ -172,11 +130,11 @@ class IsotropicDeckRegressionDojo(MultiCardRegressionDojo):
             card_lookup=card_binder,
             holdout=holdout,
             path_to_training_data=path_to_training_data or self.OUTPUT_PATH,
-            data_constructor=build_deck_label_constructor(
+            data_constructor=DeckLabelDataConstructor(
                 deck_box,
-                self.DECK_COLUMN,
                 self.LABEL_COLUMN,
                 label_caster=label_capped_at(self.LABEL_CAP),
+                deck_uuid_column=self.DECK_COLUMN,
             ),
             card_embedding_size=card_embedding_size,
             deck_box=deck_box,
@@ -229,7 +187,7 @@ class KingdomEndingTypeDojo(MultiCardFixedClassificationDojo):
         self,
         card_binder: CardBinder,
         holdout: HoldoutSpec,
-        deck_box: DeckBox,
+        deck_box: DeckLookup,
         card_embedding_size: int,
         path_to_training_data: Path | None = None,
         name: str | None = None,
@@ -251,8 +209,11 @@ class KingdomEndingTypeDojo(MultiCardFixedClassificationDojo):
             holdout=holdout,
             path_to_training_data=path_to_training_data
             or KingdomEndingTypeMetric.DEFAULT_OUTPUT_PATH,
-            data_constructor=build_deck_label_constructor(
-                deck_box, _KINGDOM_UUID_COLUMN, _ENDING_TYPE_COLUMN, label_caster=str
+            data_constructor=DeckLabelDataConstructor(
+                deck_box,
+                _ENDING_TYPE_COLUMN,
+                label_caster=str,
+                deck_uuid_column=_KINGDOM_UUID_COLUMN,
             ),
             label_values=kingdom_ending_type_metric.LABEL_VALUES,
             card_embedding_size=card_embedding_size,

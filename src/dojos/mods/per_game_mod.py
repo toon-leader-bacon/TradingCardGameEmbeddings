@@ -12,7 +12,7 @@ from src.dojos.mods.mod import Mod, ModTally
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.card import GenericCard
 from src.schema.game_id import GameId
-from src.schema.type_hints import TrainingDatum
+from src.schema.type_hints import LabelT, TrainingDatum
 
 
 class PerGameMod(Mod):
@@ -41,7 +41,7 @@ class PerGameMod(Mod):
         super().__init__(train_only=train_only)
         self._pipelines = dict(pipelines)
 
-    def apply_single(self, data: TrainingDatum) -> TrainingDatum:
+    def apply_single(self, data: TrainingDatum[LabelT]) -> TrainingDatum[LabelT]:
         """A new datum run through its card's game's pipeline.
 
         Inputs: data, a single-card TrainingDatum (GenericCard, label).

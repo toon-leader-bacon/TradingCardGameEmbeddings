@@ -2,18 +2,17 @@
 src/data_refinement/metrics/sts_gg/deck_label_metric.py."""
 
 import math
-from typing import Callable, List
+from typing import Callable, Generic, List
 from uuid import UUID
 
 import pandas as pd
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
-from src.data_refinement.deck_box.deck_box import DeckBox
-from src.dojos.generic.data_constructors.row_values import cast_to_float
-from src.schema.type_hints import Label, MultiCardInput, TrainingDatum
+from src.data_refinement.deck_box.deck_lookup import DeckLookup
+from src.schema.type_hints import LabelT, MultiCardInput, TrainingDatum
 
 
-class DeckLabelDataConstructor:
+class DeckLabelDataConstructor(Generic[LabelT]):
     """DataConstructor for the DeckLabelMetric family (see
     src/data_refinement/metrics/sts_gg/deck_label_metric.py) - whole
     deck in, single int/bool/str label out. Every concrete
@@ -22,18 +21,19 @@ class DeckLabelDataConstructor:
     which column holds the label and that column's type - so, like
     CardAverageDataConstructor, label_column is a constructor argument
     here, letting one class serve every subclass. Consumed by
-    MultiCardRegressionDojo (int64/bool-labeled subclasses, via the
-    default float caster) and MultiCardFixedClassificationDojo
+    MultiCardRegressionDojo (int64/bool-labeled subclasses, via
+    label_caster=cast_to_float) and MultiCardFixedClassificationDojo
     (str-labeled subclasses, via label_caster=str) - see label_caster
     below for why casting is configurable rather than a hardcoded
-    float() call.
+    float() call. The caster's return type is this constructor's LabelT.
     """
 
     def __init__(
         self,
-        deck_box: DeckBox,
+        deck_box: DeckLookup,
         label_column: str,
-        label_caster: Callable[[object], Label] = cast_to_float,
+        label_caster: Callable[[object], LabelT],
+        deck_uuid_column: str = "deck_uuid",
     ) -> None:
         """
         Inputs:
@@ -45,15 +45,21 @@ class DeckLabelDataConstructor:
                 ClassVar by the thin wrapper that constructs this,
                 never duplicated as a literal.
             label_caster: converts each row's raw label_column cell to
-                the Label type the consuming dojo's loss expects.
-                Defaults to float, matching every DeckLabelMetric
-                subclass consumed by MultiCardRegressionDojo (int64 and
-                WinMetric's bool column both cast fine). A thin wrapper
+                the label type (LabelT) the consuming dojo's loss
+                expects. row_values.cast_to_float suits every
+                DeckLabelMetric subclass consumed by
+                MultiCardRegressionDojo (int64 and WinMetric's bool
+                column both cast fine). A thin wrapper
                 for a str-labeled subclass (e.g. CharacterDojo, backed
                 by MultiCardFixedClassificationDojo/FixedClassificationLoss)
                 passes label_caster=str instead - the wrapper already
                 knows which generic dojo cell it targets, so the choice
                 belongs there, not as a branch inside this class.
+            deck_uuid_column: the column holding each row's deck uuid.
+                Defaults to "deck_uuid", the DeckLabelMetric family's
+                name; isotropic's kingdom and partial-deck metrics pass
+                "kingdom_uuid" / "partial_deck_uuid" (mirrors
+                CardAverageDataConstructor's uuid_column).
         Output: none (constructor).
         Side effects: none.
         Exceptions: none.
@@ -61,10 +67,13 @@ class DeckLabelDataConstructor:
         self._deck_box = deck_box
         self._label_column = label_column
         self._label_caster = label_caster
+        self._deck_uuid_column = deck_uuid_column
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
-        """Convert a chunk of (run_id, deck_uuid, <label_column>) rows
-        into (MultiCardInput, float) TrainingDatum pairs.
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[LabelT]]:
+        """Convert a chunk of (run_id, <deck_uuid_column>, <label_column>) rows
+        into (MultiCardInput, Label) TrainingDatum pairs.
 
         Inputs:
             chunk: one chunk of rows from a DeckLabelMetric subclass's
@@ -90,7 +99,7 @@ class DeckLabelDataConstructor:
             >>> constructor.build(chunk, lookup)
             [([<GenericCard>, <GenericCard>], 3.0), ...]
         """
-        results: List[TrainingDatum] = []
+        results: List[TrainingDatum[LabelT]] = []
 
         # Resolve each row's deck, then that deck's cards, independently;
         # skip rows that fail deck resolution or end up with no cards at
@@ -113,7 +122,7 @@ class DeckLabelDataConstructor:
                 # NaN into a training label (see DataConstructor
                 # Protocol's "resolution failure is expected" contract).
                 continue
-            deck_cards = self._deck_cards_for_uuid(lookup, row["deck_uuid"])
+            deck_cards = self._deck_cards_for_uuid(lookup, row[self._deck_uuid_column])
             if not deck_cards:
                 continue
             results.append((deck_cards, self._label_caster(raw_label)))
@@ -129,7 +138,7 @@ class DeckLabelDataConstructor:
 
         Inputs:
             lookup: the split's holdout-filtered card lookup.
-            raw_deck_uuid: a row's "deck_uuid" cell, expected to be a
+            raw_deck_uuid: a row's deck_uuid_column cell, expected to be a
                 str parseable as a UUID.
         Output: the resolved deck's cards, as a MultiCardInput -
             omitting any of the deck's card_nocab_uuids that don't

@@ -60,13 +60,6 @@ not decks).
 
 ## Enhancements
 
-- **A read-only, `CardLookup`-shaped counterpart to `DeckBox`** for
-  least-privilege readers such as `DeckBoxDealer`, which only calls
-  `uuids_ranked_randomly()`/`get_by_uuid()` but takes a full `DeckBox`.
-  A single-path `DeckBox.load()` writes straight to the on-disk file, so
-  an accidental mutating call through a reader's reference is not
-  caught by any `save()` step.
-
 - **Abandoned StS2 runs.** Every StS2 deck source keeps them today
   (sts_gg, spire_codex_runs; the last has a
   `keep_abandoned` toggle, default on). The project favors quantity, but a

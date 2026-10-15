@@ -27,10 +27,9 @@ from pathlib import Path
 from typing import ClassVar
 from uuid import UUID
 
-import pandas as pd
-
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.metrics.card_mean_tally import CardMeanTally
 from src.data_refinement.metrics.version_metadata import (
     MetricVersionMetadata,
     write_dataframe_with_version_metadata,
@@ -48,8 +47,8 @@ class CardWinRateAtAct2Metric:
     """Accumulation metric: P(win | card in deck_at_start_of_act_2).
 
     Satisfies the Metric[dict] Protocol (src/data_refinement/metrics/
-    metric.py) structurally. accumulate() only tallies in-memory
-    per-card (win_count, total_count) pairs; finalize() does the real
+    metric.py) structurally. accumulate() only adds to an in-memory
+    CardMeanTally (../card_mean_tally.py); finalize() does the real
     per-card division and write - unlike a streaming metric, no
     output exists until finalize() runs.
     """
@@ -88,13 +87,11 @@ class CardWinRateAtAct2Metric:
             game=GameId.SLAY_THE_SPIRE_2,
             card_binder_version=card_binder.version_for(GameId.SLAY_THE_SPIRE_2),
         )
-        self._total_count: dict[UUID, int] = {}
-        self._win_count: dict[UUID, int] = {}
+        self._tally = CardMeanTally()
 
     def accumulate(self, row: dict) -> None:
         """Tally every card copy present in this run's deck as of act
-        2's start toward this metric's running per-card
-        (win_count, total_count) pairs.
+        2's start toward this metric's running per-card win rate.
 
         Inputs:
             row: one parsed sts_gg run, carrying at least "id" (str),
@@ -102,8 +99,7 @@ class CardWinRateAtAct2Metric:
                 "floor"} entries), and "hpPerFloor" (list of {"floor",
                 "actIdx", ...} entries).
         Output: none.
-        Side effects: updates self._total_count/_win_count in place,
-            once per physical copy present by act 2's start (see
+        Side effects: adds to self._tally once per physical copy present by act 2's start (see
             module docstrings' ACT-2 BOUNDARY and COPY COUNTING
             sections) - nothing updates if this run never reached act
             2. Emits one logging.error() per deck entry that fails to
@@ -144,14 +140,10 @@ class CardWinRateAtAct2Metric:
             >>> metric.finalize()
             PosixPath('data/metrics/sts_gg/card_win_rate_at_act2.parquet')
         """
-        result: list[dict] = []
-
-        # Build one output row per card seen at least once.
-        for card_uuid in self._total_count:
-            result.append(self._win_rate_row(card_uuid))
-
         write_dataframe_with_version_metadata(
-            pd.DataFrame(result), self._output_path, self._version_metadata
+            self._tally.mean_frame(self.LABEL_COLUMN),
+            self._output_path,
+            self._version_metadata,
         )
         return self._output_path
 
@@ -178,7 +170,7 @@ class CardWinRateAtAct2Metric:
 
     def _tally_card_entry(self, card_entry: dict, win: bool) -> None:
         """Resolve one deck entry's card id and fold it into this
-        metric's running per-card (win_count, total_count) pairs.
+        metric's running per-card win rate.
 
         Private helper - single consumer is accumulate().
 
@@ -186,10 +178,9 @@ class CardWinRateAtAct2Metric:
             card_entry: one row["deck"] entry, carrying at least "id".
             win: this run's own "win" field.
         Output: none.
-        Side effects: increments self._total_count[card_uuid], and
-            self._win_count[card_uuid] if win is true, when the card
-            resolves; otherwise emits one logging.error() call and
-            updates nothing.
+        Side effects: adds 1.0 (win) or 0.0 to self._tally for the
+            card when it resolves; otherwise emits one logging.error()
+            call and updates nothing.
         Exceptions: none.
         """
         card_uuid = self._card_uuid(card_entry["id"])
@@ -201,31 +192,7 @@ class CardWinRateAtAct2Metric:
             )
             return
 
-        self._total_count[card_uuid] = self._total_count.get(card_uuid, 0) + 1
-        if win:
-            self._win_count[card_uuid] = self._win_count.get(card_uuid, 0) + 1
-
-    def _win_rate_row(self, card_uuid: UUID) -> dict:
-        """Build one output row for a single already-tallied card.
-
-        Private helper - single consumer is finalize().
-
-        Inputs:
-            card_uuid: a key already present in self._total_count.
-        Output: a dict with keys "nocab_uuid" (str), "win_rate"
-            (float, self._win_count.get(card_uuid, 0) divided by
-            self._total_count[card_uuid]), and "sample_count" (int,
-            self._total_count[card_uuid]).
-        Side effects: none.
-        Exceptions: none.
-        """
-        total = self._total_count[card_uuid]
-        wins = self._win_count.get(card_uuid, 0)
-        return {
-            "nocab_uuid": str(card_uuid),
-            self.LABEL_COLUMN: wins / total,
-            "sample_count": total,
-        }
+        self._tally.add(card_uuid, 1.0 if win else 0.0)
 
     def _card_uuid(self, raw_card_id: str) -> UUID | None:
         """Look up the nocab_uuid for one sts_gg deck entry's card id.
