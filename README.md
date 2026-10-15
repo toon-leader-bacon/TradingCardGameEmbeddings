@@ -54,6 +54,7 @@ means.
 ```
 pip install -r requirements.txt -r requirements-dev.txt
 ./scripts/check.sh                      # format, lint, type-check, test
+./scripts/check.sh --live-data          # also test the real data under data/
 
 PYTHONPATH=. python3 scripts/run_data_retrieval.py --list
 PYTHONPATH=. python3 scripts/run_card_binder_ingestion.py --list

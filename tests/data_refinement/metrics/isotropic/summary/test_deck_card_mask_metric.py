@@ -74,6 +74,7 @@ def test_default_output_path() -> None:
     )
 
 
+@pytest.mark.live_data
 @pytest.mark.skipif(
     not Path("data/final/cards/dominion.jsonl").exists(),
     reason="needs the real, already-ingested Dominion CardBinder",

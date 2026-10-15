@@ -95,6 +95,7 @@ class TestIterCardQuantitiesAndNames:
     def test_empty_fragment_yields_nothing(self) -> None:
         assert list(iter_card_quantities_and_names(_fragment())) == []
 
+    @pytest.mark.live_data
     def test_against_real_fixture(self) -> None:
         if not _REAL_FRAGMENT_PATH.exists():
             pytest.skip(f"{_REAL_FRAGMENT_PATH} fixture not present")

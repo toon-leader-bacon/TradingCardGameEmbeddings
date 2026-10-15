@@ -73,6 +73,7 @@ def test_a_translator_field_is_its_games_rarity_mask_field(
     assert [RARITY_TRANSLATORS[game].masked_paths()[0][0]] == mask_metric_field
 
 
+@pytest.mark.live_data
 @pytest.mark.parametrize("game", sorted(RARITY_TRANSLATORS, key=lambda g: g.value))
 def test_every_raw_rarity_in_the_live_binder_is_mapped(game: GameId) -> None:
     path = CardBinder.default_output_path(game)
@@ -84,6 +85,7 @@ def test_every_raw_rarity_in_the_live_binder_is_mapped(game: GameId) -> None:
         translator.rarity_tier_of(card)  # raises on an unmapped value
 
 
+@pytest.mark.live_data
 def test_every_raw_pokemon_rarity_is_mapped() -> None:
     """The binder drops Pokemon rarity until its ingestion change lands,
     so pin the table against the raw set files instead."""

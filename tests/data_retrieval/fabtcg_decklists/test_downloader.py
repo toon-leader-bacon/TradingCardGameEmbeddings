@@ -160,6 +160,7 @@ class TestExtractDecklistFragment:
         assert "Dorinthea Ironsong" in fragment
         assert fragment.startswith('<section class="decklist-list-view block hidden">')
 
+    @pytest.mark.live_data
     def test_extracts_from_real_fixture_fragment(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)
         fixture_path = Path(__file__).parents[3] / "data" / "tmp" / "list_view.html"

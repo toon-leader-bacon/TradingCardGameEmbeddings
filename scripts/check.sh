@@ -7,7 +7,16 @@
 # to standardize the same checks there.
 #
 # Usage:
-#   ./scripts/check.sh
+#   ./scripts/check.sh              # skips tests marked live_data
+#   ./scripts/check.sh --live-data  # also runs them
+#
+# A live_data test (see tests/conftest.py) reads real project data under
+# data/ rather than a fixture - it checks the data, not the code, and
+# can be slow - so it only runs when asked.
+#
+# pytest runs on $PYTEST_WORKERS processes (pytest-xdist), default 4:
+# on a 10-core Mac, 4 was faster than 8 or one per core. Set it to 0 to
+# run in a single process.
 #
 # Runs every step even if an earlier one fails, so one run gives a full
 # picture rather than stopping at the first problem. Exits non-zero if
@@ -25,6 +34,14 @@
 #   $PYTHON -m pip install -r requirements.txt -r requirements-dev.txt
 
 set -uo pipefail
+
+PYTEST_MARKERS=(-m "not live_data")
+for arg in "$@"; do
+    case "$arg" in
+        --live-data) PYTEST_MARKERS=() ;;
+        *) echo "unknown argument: $arg" >&2; exit 2 ;;
+    esac
+done
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
@@ -69,7 +86,8 @@ run_step "mypy (type-check)" \
     "$PYTHON" -m mypy --ignore-missing-imports "$SRC_DIR"
 
 run_step "pytest (tests)" \
-    "$PYTHON" -m pytest "$TEST_DIR" -q
+    "$PYTHON" -m pytest "$TEST_DIR" -q -n "${PYTEST_WORKERS:-4}" \
+    ${PYTEST_MARKERS[@]+"${PYTEST_MARKERS[@]}"}
 
 echo "-- cleanup --"
 rm -rf .pytest_cache

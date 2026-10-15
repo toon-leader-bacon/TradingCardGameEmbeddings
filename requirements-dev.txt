@@ -1,6 +1,7 @@
 black
 flake8
 mypy
+pytest-xdist
 types-requests
 types-tqdm
 types-PyYAML
