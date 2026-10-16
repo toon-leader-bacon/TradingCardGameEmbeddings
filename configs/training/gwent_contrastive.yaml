@@ -35,6 +35,7 @@ holdout:
   seed: 0
   tier_ratios: [8, 1, 1]
   held_out_games: []
+  deck_split_ratios: [8, 1, 1]  # contrastive decks; optional, this is the default
 
 # 16 decks x 2 cards = 32 cards per batch
 hardware:

@@ -1,5 +1,4 @@
 # TODO
-- Formalize the git-ignored directories (logs, plans, scratch)
 
 - [ ] **A project glossary (`TERMS.md` at the root).** One place that
   defines the project's vocabulary and how the terms relate:

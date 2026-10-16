@@ -47,7 +47,9 @@ class _StubDataConstructor:
         self._deck = deck
         self._label = label
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[float]]:
         # Alternating labels: a constant label has a zero baseline
         return [
             (self._deck, self._label if i % 2 == 0 else 1.0 - self._label)

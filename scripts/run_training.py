@@ -108,6 +108,9 @@ _WHITENING_STATS_COPY_NAME = "whitening_stats.pt"
 _ROUNDS_CSV_NAME = "rounds.csv"
 _CHECKPOINTS_CSV_NAME = "checkpoints.csv"
 _DIET_SHARES_CSV_NAME = "diet_shares.csv"
+# Added to plan.seed for torch's global RNG, so dojo heads draw a
+# different stream from the model's (seeded with plan.seed itself)
+_DOJO_SEED_OFFSET = 1
 
 _logger = script_logger(__file__)
 
@@ -209,6 +212,10 @@ def main() -> int:
     require_whitening_fits_run(config.model, config.plan.holdout)
     if not command_line.check_only:
         _require_new_run_directory(config.run_directory)
+    # Dojo heads and dropout draw from torch's global RNG; the model's own
+    # initial weights are seeded separately, by build_model with plan.seed.
+    # The offset keeps the first dojo head from replaying the model's stream
+    torch.manual_seed(config.plan.seed + _DOJO_SEED_OFFSET)
 
     # Build the dojos and check each one before committing to a run
     context = DojoBuildContext(
@@ -227,7 +234,7 @@ def main() -> int:
     shares = plan_diet_shares(config.plan, dojos)
     for line in format_diet_shares(shares):
         _logger.info("%s", line)
-    model = build_model(config.model).to(config.device)
+    model = build_model(config.model, seed=config.plan.seed).to(config.device)
     _logger.info(
         "Model: %s trainable parameters", f"{trainable_parameter_count(model):,}"
     )
@@ -249,17 +256,37 @@ def main() -> int:
     return 0
 
 
-def build_model(spec: ModelSpec) -> CardEncoderModel:
+def build_model(spec: ModelSpec, seed: int | None = None) -> CardEncoderModel:
     """Construct the model spec describes (on the CPU): a CardEmbeddingPipeline
     (frozen pretrained text encoder, pooling, embedding head) as a
     SingleCardModel, or as a MultiCardModel when spec has group attention.
 
-    Inputs: spec (ModelSpec). Output: CardEncoderModel.
-    Side effects: may download the pretrained checkpoint.
+    Inputs: spec (ModelSpec); seed (int, or None for torch's current RNG
+        state). With a seed, the initial weights depend on spec and seed
+        alone, so an untrained control rebuilds a run's starting weights
+        by passing the run's plan.seed.
+    Output: CardEncoderModel.
+    Side effects: may download the pretrained checkpoint. A seeded build
+        leaves torch's global CPU RNG as it found it.
     Exceptions: whatever the text encoder or model constructors raise.
 
     Example:
-        >>> build_model(ModelSpec(EmbeddingHeadKind.RESIDUAL_MLP, "answerdotai/ModernBERT-base", 256))
+        >>> build_model(ModelSpec(EmbeddingHeadKind.RESIDUAL_MLP, "answerdotai/ModernBERT-base", 256), seed=0)
+    """
+    if seed is None:
+        return _build_unseeded_model(spec)
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(seed)
+        return _build_unseeded_model(spec)
+
+
+def _build_unseeded_model(spec: ModelSpec) -> CardEncoderModel:
+    """Private helper - single caller is build_model.
+
+    Inputs: spec (ModelSpec). Output: CardEncoderModel, initialized from
+        torch's current RNG state.
+    Side effects: may download the pretrained checkpoint; draws from
+        torch's global RNG. Exceptions: see build_model.
     """
     text_encoder = PretrainedTextEncoder(checkpoint=spec.checkpoint, trainable=False)
     card_pipeline = build_card_pipeline(spec, text_encoder)
@@ -378,8 +405,9 @@ def _build_head(spec: ModelSpec, pooled_width: int) -> EmbeddingHead:
 def require_whitening_fits_run(spec: ModelSpec, holdout: HoldoutSpec) -> None:
     """Refuse token-whitening stats the run cannot use, before any dojo is
     built: fitted on another text encoder than spec.checkpoint, or under
-    another holdout than the run's (their sample may include this run's
-    TEST or VALIDATION cards). No-op without token whitening.
+    other card tiers than the run's (their sample may include this run's
+    TEST or VALIDATION cards; the deck split does not matter). No-op
+    without token whitening.
 
     Inputs: spec (the run's model), holdout (the run's).
     Output: none.
@@ -394,10 +422,12 @@ def require_whitening_fits_run(spec: ModelSpec, holdout: HoldoutSpec) -> None:
         return
     stats = WhiteningStats.load(spec.enrichment.stats_path)
     stats.require_fitted_on(spec.checkpoint)
-    if stats.holdout != holdout:
+    # Only card tiers matter: the fit sampled TRAIN-tier cards, never decks
+    if stats.holdout.card_tier_key() != holdout.card_tier_key():
         raise ValueError(
-            f"{spec.enrichment.stats_path} was fitted under holdout "
-            f"{stats.holdout}, but this run uses {holdout}; refit it with "
+            f"{spec.enrichment.stats_path} was fitted under card tiers "
+            f"{stats.holdout.card_tier_key()}, but this run uses "
+            f"{holdout.card_tier_key()}; refit it with "
             "scripts/fit_whitening.py --holdout-from <this config>"
         )
 

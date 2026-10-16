@@ -56,8 +56,10 @@ class _CardPerRowConstructor:
     """Row i -> the card whose uuid the row names, label = i; a card the
     lookup can't see skips the row (the real constructors' convention)."""
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
-        data: List[TrainingDatum] = []
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[float]]:
+        data: List[TrainingDatum[float]] = []
         for _, row in chunk.iterrows():
             card = lookup.get_by_uuid(UUID(row["nocab_uuid"]))
             if card is not None:
@@ -511,10 +513,10 @@ class _RecordingCalibration:
     """Keeps the loss, baseline 2.0, and remembers the sample it was given."""
 
     def __init__(self) -> None:
-        self.sample: list[TrainingDatum] = []
+        self.sample: list[TrainingDatum[float]] = []
 
     def calibrate(
-        self, loss: Any, train_sample: Sequence[TrainingDatum]
+        self, loss: Any, train_sample: Sequence[TrainingDatum[float]]
     ) -> CalibratedLoss:
         self.sample = list(train_sample)
         return CalibratedLoss(loss=loss, baseline_loss=2.0)

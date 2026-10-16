@@ -75,7 +75,7 @@ class RenamedColumnDataConstructor(Generic[LabelT]):
 
         Example:
             >>> constructor.build(chunk, lookup)
-            [([<GenericCard>, ...], 19.0), ...]
+            [(<GenericCard>, {0: 0.05, 1: 0.12, 14: 0.83}), ...]
         """
         result = self._inner.build(chunk.rename(columns=self._column_renames), lookup)
         return result

@@ -5,7 +5,7 @@ import csv
 import logging
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Iterable, Protocol, Sequence
+from typing import Callable, Iterable, Protocol, Sequence
 
 from src.training.recording.reports import CheckpointRecord, DojoStatus, RoundReport
 
@@ -68,13 +68,15 @@ class LoggingRunListener:
     checkpoint path."""
 
     def on_round_end(self, report: RoundReport) -> None:
-        """Log per-dojo losses, e.g. "color_mask=1.2345 (0.62x baseline)".
+        """Log per-dojo losses, e.g. "color_mask=1.2345 (0.62x baseline)";
+        held-out dojos follow in their own "untrained heads" group, since
+        their loss is a never-trained head's.
         Input: RoundReport. Output: None. Side effects: emits log lines.
         Exceptions: none."""
-        losses = ", ".join(
-            f"{name}={split_loss.loss:.4f} ({split_loss.normalized:.2f}x baseline)"
-            for name, split_loss in report.per_dojo_test_loss.items()
-        )
+        losses = _format_losses(report, lambda name: name not in report.held_out)
+        untrained = _format_losses(report, lambda name: name in report.held_out)
+        if untrained:
+            losses += f" | untrained heads (held out): {untrained}"
         saturated = sorted(
             name
             for name, status in report.statuses.items()
@@ -94,6 +96,21 @@ class LoggingRunListener:
         """Log the checkpoint path. Input: CheckpointRecord. Output: None.
         Side effects: emits a log line. Exceptions: none."""
         logger.info("checkpoint written: %s", record.path)
+
+
+def _format_losses(report: RoundReport, include: Callable[[str], bool]) -> str:
+    """Private helper - single consumer is LoggingRunListener.
+
+    Inputs: report; include (dojo name -> whether to list it).
+    Output: "name=loss (Nx baseline), ..." for the included dojos, in
+        per_dojo_test_loss order; "" if none.
+    Side effects: none. Exceptions: none.
+    """
+    return ", ".join(
+        f"{name}={split_loss.loss:.4f} ({split_loss.normalized:.2f}x baseline)"
+        for name, split_loss in report.per_dojo_test_loss.items()
+        if include(name)
+    )
 
 
 class CsvRunListener:

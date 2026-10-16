@@ -4,7 +4,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pandas as pd
 import pytest
@@ -142,6 +142,33 @@ class TestRarityTierDojo:
         second = [card.nocab_uuid for card, _ in _examples(dojo, Split.TEST)]
 
         assert first == second
+
+    def test_a_capped_train_pass_reads_the_same_rows_every_time(
+        self, binder: CardBinder, metric_path: Path
+    ) -> None:
+        dojo = _dojo(binder, metric_path)
+
+        def capped_pass() -> list[UUID]:
+            return [
+                card.nocab_uuid
+                for batch in dojo.batches(Split.TRAIN, _BUDGET, max_examples=20)
+                for card in batch.inputs  # type: ignore[union-attr]
+            ]
+
+        first = capped_pass()
+        list(_examples(dojo, Split.TRAIN))  # an uncapped pass in between
+        assert len(first) == 20
+        assert capped_pass() == first
+
+    def test_uncapped_train_passes_draw_differently(
+        self, binder: CardBinder, metric_path: Path
+    ) -> None:
+        dojo = _dojo(binder, metric_path)
+
+        first = [card.nocab_uuid for card, _ in _examples(dojo, Split.TRAIN)]
+        second = [card.nocab_uuid for card, _ in _examples(dojo, Split.TRAIN)]
+
+        assert first != second
 
     def test_the_loss_baseline_is_calibrated_on_the_balanced_draw(
         self, binder: CardBinder, metric_path: Path

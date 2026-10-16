@@ -25,6 +25,8 @@ from src.training.diet.diet_sampler import diet_sampler_for
 from src.training.diet.dojo_batch_stream import DojoBatchStream
 from src.training.diet.dojo_fault_ledger import DojoFaultLedger
 from src.training.diet.saturation_tracker import SaturationTracker
+from src.training.gradient_clip_tally import GradientClipTally
+from src.training.learning_rate_schedule import LearningRateSchedule
 from src.training.phase_run import PhaseRun
 from src.training.plan import HardwareLimits, Phase, TrainingPlan
 from src.training.recording.checkpointer import Checkpointer
@@ -46,6 +48,9 @@ logger = logging.getLogger(__name__)
 # non-finite in true units, a real fault. Clamping also stops one bad dojo
 # from driving the shared scale toward zero.
 _MIN_LOSS_SCALE = 1.0
+
+# Param-group key holding a group's rate before the phase's lr_schedule
+_BASE_LR = "base_lr"
 
 
 class NonFiniteLossError(ValueError):
@@ -88,6 +93,39 @@ class _RoundSkips:
         self.unusable_baseline = 0
 
 
+def _apply_learning_rate_schedule(phase_run: PhaseRun) -> None:
+    """Set every optimizer group's lr to its base rate times the phase's
+    lr_schedule multiplier at phase_run.step_attempts.
+
+    Inputs: phase_run. Output: None.
+    Side effects: writes each param group's "lr". Exceptions: none.
+    """
+    phase = phase_run.phase
+    multiplier = phase.lr_schedule.multiplier(phase_run.step_attempts, phase.max_steps)
+    for group in phase_run.optimizer.param_groups:
+        group["lr"] = group[_BASE_LR] * multiplier
+
+
+def _log_learning_rate(phase_run: PhaseRun, round_index: int) -> None:
+    """Log (INFO) the schedule's multiplier at the end of a round, for a
+    phase with a non-default lr_schedule only (a constant rate would repeat
+    one line every round).
+
+    Inputs: phase_run, round_index. Output: None.
+    Side effects: logs. Exceptions: none.
+    """
+    phase = phase_run.phase
+    if phase.lr_schedule == LearningRateSchedule():
+        return
+    multiplier = phase.lr_schedule.multiplier(phase_run.step_attempts, phase.max_steps)
+    logger.info(
+        "[%s] round %d: learning rate x%.3g of encoder_lr / head_lr next",
+        phase.name,
+        round_index,
+        multiplier,
+    )
+
+
 class Trainer:
     """Trains one encoder against a suite of dojos according to a plan.
 
@@ -124,6 +162,8 @@ class Trainer:
         self._steps_taken = 0
         # Steps skipped since the last round's report
         self._skips = _RoundSkips()
+        # Per-dojo clipped steps since the last round's report
+        self._clips = GradientClipTally()
         # The encoder parameters that are trainable as built (a pretrained
         # LM frozen by its own flag stays frozen); phases toggle only these
         self._encoder_params = [p for p in model.parameters() if p.requires_grad]
@@ -163,6 +203,8 @@ class Trainer:
             for round_index in range(phase.max_rounds):
                 self._train_round(phase_run)
                 self._skips.log_and_reset(phase.name, round_index)
+                self._clips.log_and_reset(phase.name, round_index)
+                _log_learning_rate(phase_run, round_index)
                 if phase_run.faults.gave_up():
                     # Keep the last good checkpoint: current weights may be corrupt
                     stopped_early_reason = (
@@ -244,23 +286,39 @@ class Trainer:
             encoder_count = sum(p.numel() for p in self._encoder_params)
         head_count = sum(p.numel() for p in self._head_parameters(phase))
         logger.info(
-            "[%s] trainable parameters: encoder %d (lr %g), dojo heads %d (lr %g)",
+            "[%s] trainable parameters: encoder %d (lr %g), dojo heads %d (lr %g); "
+            "lr schedule %s",
             phase.name,
             encoder_count,
             phase.encoder_lr,
             head_count,
             phase.head_lr,
+            phase.lr_schedule,
         )
 
     def _build_optimizer(self, phase: Phase) -> torch.optim.Optimizer:
         """AdamW with an encoder group at encoder_lr (only if trainable)
         and a head group at head_lr; empty groups are omitted."""
+        # _BASE_LR holds the rate before lr_schedule's multiplier (torch keeps
+        # extra keys in a param group)
         groups: list[dict[str, Any]] = []
         if phase.encoder_trainable and self._encoder_params:
-            groups.append({"params": self._encoder_params, "lr": phase.encoder_lr})
+            groups.append(
+                {
+                    "params": self._encoder_params,
+                    "lr": phase.encoder_lr,
+                    _BASE_LR: phase.encoder_lr,
+                }
+            )
         head_parameters = self._head_parameters(phase)
         if head_parameters:
-            groups.append({"params": head_parameters, "lr": phase.head_lr})
+            groups.append(
+                {
+                    "params": head_parameters,
+                    "lr": phase.head_lr,
+                    _BASE_LR: phase.head_lr,
+                }
+            )
         return torch.optim.AdamW(groups)
 
     def _head_parameters(self, phase: Phase) -> list[torch.nn.Parameter]:
@@ -311,6 +369,9 @@ class Trainer:
             dojo: Dojo | None = None
             failure: Exception | None = None
             ran = False
+            # Every attempt advances the schedule, so it follows the budget
+            _apply_learning_rate_schedule(phase_run)
+            phase_run.step_attempts += 1
             try:
                 dojo = phase_run.sampler.next_dojo(active, self._rng)
                 ran = self._take_step(phase_run, dojo)
@@ -366,13 +427,16 @@ class Trainer:
         if not scaler.is_enabled():
             # A non-finite gradient raises here, skipping the step instead
             # of poisoning the weights and Adam state
-            torch.nn.utils.clip_grad_norm_(
+            norm = torch.nn.utils.clip_grad_norm_(
                 parameters, phase_run.phase.max_grad_norm, error_if_nonfinite=True
             )
+            self._clips.record(dojo.name, norm.item(), phase_run.phase.max_grad_norm)
             optimizer.step()
             self._steps_taken += 1
             return True
-        torch.nn.utils.clip_grad_norm_(parameters, phase_run.phase.max_grad_norm)
+        norm = torch.nn.utils.clip_grad_norm_(parameters, phase_run.phase.max_grad_norm)
+        # An fp16 overflow's norm is non-finite, and the tally skips it
+        self._clips.record(dojo.name, norm.item(), phase_run.phase.max_grad_norm)
         self._scaled_step(scaler, optimizer, dojo)
         return True
 
@@ -478,6 +542,7 @@ class Trainer:
             per_dojo_test_loss=losses,
             statuses=statuses,
             quarantined=phase_run.faults.quarantined_names(),
+            held_out=self._plan.held_out_dojos,
         )
 
     def _notify_round_end(self, report: RoundReport) -> None:

@@ -30,7 +30,8 @@ def _binder_with_one_card_per_tier() -> tuple[CardBinder, HoldoutSpec, dict]:
     by_tier: dict[CardTier, GenericCard] = {}
     i = 0
     while len(by_tier) < 3:
-        card = _card(f"card-{i}")
+        # Fixed width: "card-1" would also match "card-12" as a name regex
+        card = _card(f"card-{i:04d}")
         i += 1
         tier = spec.tier_of(card.nocab_uuid, card.source_game)
         if tier not in by_tier:

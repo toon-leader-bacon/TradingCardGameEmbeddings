@@ -10,30 +10,12 @@
   is unknown and may be flaky. If it recurs, the faulthandler output will
   show the native frame. Logs: `logs/regen_2026-10-08/25_*` and `25b_*`.
 
-- **Cross-game rarity metric family.** Build one metric per game,
-  each mapping that game's own rarity into a single shared rarity
-  enum. The enum was proposed as common / uncommon / rare / legendary /
-  unique-promo / not-applicable / other, but is not final. Outputs are
-  per-card parquets with one row per `nocab_uuid` and a `label` column
-  holding the enum value. That shape lets dojos (masking) and
-  `src/evaluation/` use it the same way: evaluation reads several
-  per-game parquets as one label source (`MetricParquetLabels`). This
-  is the "medium" label set for intrinsic evaluation. The "easy" set,
-  game labels, needs no metric; the "hard" set, MtG set labels, comes
-  later. The precedent is `gwent_one/rarity_mask_metric.py`, which is
-  per-game and not normalized. Open decisions:
-  - where the enum lives;
-  - how each game's values map, e.g. whether Gwent's `epic` becomes
-    `rare`/`legendary` or `other`;
-  - what games with no rarity get: `not-applicable` rows, or no metric.
+- **MtG set labels**, the "hard" label set for intrinsic evaluation
+  (the cross-game rarity tier, `cross_game/`, is the "medium" one; game
+  labels, the "easy" one, need no metric). Not started.
 
 - [ ] **FaB deck box keys cards by name.** A name printed in several pitches
   maps to one arbitrary printing, so FaB inclusion rates are per name.
-- [ ] **StS2 per-floor metrics (B2).** The spire_codex run
-  records carry per-floor `card_choices`, shop purchases, removals,
-  upgrades and rest-site choices, none used yet. Top candidates: card
-  reward pick given the deck so far (`[offered, partial deck]`, the same
-  shape as 17lands' pool_conditioned_pick), shop purchase, removal
-  target, upgrade target, rest-site choice. Needs the deck at each floor
-  rebuilt from `cards_gained`/`cards_removed`. Design note in
-  `sts2_runs/README.md`.
+- [ ] **StS2 rest-site choice metric** (BRAINSTORM #26). The other
+  per-floor picks (card reward, shop purchase, removal, upgrade) are
+  built; see `sts2_runs/README.md`, "Per-floor metrics".

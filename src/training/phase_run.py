@@ -25,6 +25,9 @@ class PhaseRun:
         one per phase, like the optimizer it steps.
     weighting: the plan's loss weighting, applied to every step's loss;
         None trains on the raw loss.
+    step_attempts: optimizer steps attempted so far this phase, including
+        skipped and failed ones: the step lr_schedule is evaluated at, so
+        the schedule follows the step budget whatever fails.
     """
 
     phase: Phase
@@ -35,3 +38,4 @@ class PhaseRun:
     faults: DojoFaultLedger
     scaler: torch.amp.GradScaler
     weighting: LossWeighting | None
+    step_attempts: int = 0

@@ -118,9 +118,10 @@ training catalog holds `GenericDojo[Any]`, since it mixes label types.
 
 Every cell passes `GenericDojo` a `LossCalibration`
 (`../loss/loss_calibration.py`). As its last construction step,
-`GenericDojo` builds an evenly strided, unmodded sample of the TRAIN
-split through the data constructor (every row up to 20,000 TRAIN rows,
-then every k-th row) and hands it to the calibration. The result, one
+`GenericDojo` builds an unmodded sample of the TRAIN split through the
+data constructor (the first 20,000 TRAIN rows, or every row of a smaller
+split; a uniform random sample, since splits are shuffled when written)
+and hands it to the calibration. The result, one
 `CalibratedLoss`, holds:
 
 - the loss `compute_loss` scores with (`loss_calculator`). Regression

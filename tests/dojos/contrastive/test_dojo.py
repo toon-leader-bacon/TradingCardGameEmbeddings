@@ -19,7 +19,7 @@ from src.dojos.file_managers.deck_box_dealer import DeckBoxDealer
 from src.dojos.mods.card_field_mods import RandomKeyMaskMod
 from src.dojos.mods.mod import MASK_TOKEN
 from src.dojos.mods.mod_pipeline import ModPipeline
-from src.schema.holdout import HoldoutSpec
+from src.schema.holdout import HoldoutSpec, UnknownDeckSplitError
 from src.schema.splits import Split
 from src.schema.card import GenericCard, GenericDeck, Provenance
 from src.schema.data_source import DataSource
@@ -72,8 +72,20 @@ class _RecordingLoss:
         return torch.tensor(0.0)
 
 
+def _deck_holdout(
+    deck_split_ratios: tuple[float, float, float] = (1, 0, 0),
+) -> HoldoutSpec:
+    """Every card visible; decks split by deck_split_ratios."""
+    return HoldoutSpec(
+        seed=1,
+        tier_ratios=(1, 0, 0),
+        held_out_games=frozenset(),
+        deck_split_ratios=deck_split_ratios,
+    )
+
+
 def _dealer_with_decks(
-    count: int, split_ratios: list[float] = [1, 0, 0]
+    count: int, deck_split_ratios: tuple[float, float, float] = (1, 0, 0)
 ) -> DeckBoxDealer:
     box = DeckBox()
     for _ in range(count):
@@ -83,7 +95,7 @@ def _dealer_with_decks(
     # fresh tempdir per call avoids threading a tmp_path fixture
     # through every one of this module's test methods.
     index_path = Path(tempfile.mkdtemp()) / "dealer.db"
-    return DeckBoxDealer(box, GameId.MTG, index_path, split_ratios=split_ratios, seed=1)
+    return DeckBoxDealer(box, GameId.MTG, index_path, _deck_holdout(deck_split_ratios))
 
 
 _BUDGET = BatchBudget(max_cost=10, cost_of=lambda card: 1)
@@ -115,7 +127,7 @@ class TestBatches:
             dealer=_dealer_with_decks(8),
             pair_constructor=pair_constructor,
             card_lookup=CardBinder(),
-            holdout=HoldoutSpec.no_holdout(),
+            holdout=_deck_holdout(),
             strict_version_check=False,
             decks_per_sample=2,
         )
@@ -140,7 +152,7 @@ class TestMalformedBatch:
             dealer=_dealer_with_decks(4),
             pair_constructor=_ScriptedPairConstructor([malformed]),
             card_lookup=CardBinder(),
-            holdout=HoldoutSpec.no_holdout(),
+            holdout=_deck_holdout(),
             strict_version_check=False,
             decks_per_sample=2,
             contrastive_loss=MissingCardInfoNCELoss(),
@@ -156,7 +168,7 @@ class TestComputeLoss:
             dealer=_dealer_with_decks(1),
             pair_constructor=_ScriptedPairConstructor([]),
             card_lookup=CardBinder(),
-            holdout=HoldoutSpec.no_holdout(),
+            holdout=_deck_holdout(),
             strict_version_check=False,
         )
         batch = ContrastiveBatch(
@@ -174,7 +186,7 @@ class TestComputeLoss:
             dealer=_dealer_with_decks(1),
             pair_constructor=_ScriptedPairConstructor([]),
             card_lookup=CardBinder(),
-            holdout=HoldoutSpec.no_holdout(),
+            holdout=_deck_holdout(),
             strict_version_check=False,
             contrastive_loss=recording_loss,
         )
@@ -201,7 +213,7 @@ class TestBudget:
             dealer=_dealer_with_decks(6),
             pair_constructor=_ScriptedPairConstructor([]),
             card_lookup=CardBinder(),
-            holdout=HoldoutSpec.no_holdout(),
+            holdout=_deck_holdout(),
             strict_version_check=False,
         )
 
@@ -219,7 +231,7 @@ class TestBudget:
             dealer=_dealer_with_decks(6),
             pair_constructor=_ScriptedPairConstructor([heavy]),
             card_lookup=CardBinder(),
-            holdout=HoldoutSpec.no_holdout(),
+            holdout=_deck_holdout(),
             strict_version_check=False,
             decks_per_sample=2,
         )
@@ -237,7 +249,7 @@ class TestBudget:
             dealer=_dealer_with_decks(6),
             pair_constructor=_ScriptedPairConstructor([good, good, good]),
             card_lookup=CardBinder(),
-            holdout=HoldoutSpec.no_holdout(),
+            holdout=_deck_holdout(),
             strict_version_check=False,
             decks_per_sample=2,
         )
@@ -251,7 +263,7 @@ class TestBudget:
             dealer=_dealer_with_decks(6),
             pair_constructor=_ScriptedPairConstructor([]),
             card_lookup=CardBinder(),
-            holdout=HoldoutSpec.no_holdout(),
+            holdout=_deck_holdout(),
             strict_version_check=False,
         )
 
@@ -266,7 +278,7 @@ class TestVersionCheck:
                 dealer=_dealer_with_decks(2),
                 pair_constructor=_ScriptedPairConstructor([]),
                 card_lookup=CardBinder(),
-                holdout=HoldoutSpec.no_holdout(),
+                holdout=_deck_holdout(),
             )
 
     def test_passes_when_dealers_recorded_version_matches(self, tmp_path: Path) -> None:
@@ -279,14 +291,14 @@ class TestVersionCheck:
             DeckBox.load([path]),
             GameId.MTG,
             tmp_path / "dealer.db",
-            split_ratios=[1, 0, 0],
+            _deck_holdout(),
         )
 
         dojo = ContrastiveDojo(
             dealer=dealer,
             pair_constructor=_ScriptedPairConstructor([]),
             card_lookup=binder,
-            holdout=HoldoutSpec.no_holdout(),
+            holdout=_deck_holdout(),
         )
 
         assert dojo.example_count(Split.TRAIN) == 1
@@ -303,7 +315,7 @@ class TestVersionCheck:
             DeckBox.load([path]),
             GameId.MTG,
             tmp_path / "dealer.db",
-            split_ratios=[1, 0, 0],
+            _deck_holdout(),
         )
 
         with pytest.raises(ValueError, match="CardBinder"):
@@ -311,7 +323,28 @@ class TestVersionCheck:
                 dealer=dealer,
                 pair_constructor=_ScriptedPairConstructor([]),
                 card_lookup=binder,
-                holdout=HoldoutSpec.no_holdout(),
+                holdout=_deck_holdout(),
+            )
+
+    def test_a_dealer_under_another_deck_split_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="splits decks by"):
+            ContrastiveDojo(
+                dealer=_dealer_with_decks(2, deck_split_ratios=(1, 0, 0)),
+                pair_constructor=_ScriptedPairConstructor([]),
+                card_lookup=CardBinder(),
+                holdout=_deck_holdout((0, 1, 0)),
+                strict_version_check=False,
+            )
+
+    def test_a_holdout_with_no_deck_split_is_refused(self) -> None:
+        unknown = HoldoutSpec(1, (1, 0, 0), frozenset(), deck_split_ratios=None)
+        with pytest.raises(UnknownDeckSplitError):
+            ContrastiveDojo(
+                dealer=_dealer_with_decks(2),
+                pair_constructor=_ScriptedPairConstructor([]),
+                card_lookup=CardBinder(),
+                holdout=unknown,
+                strict_version_check=False,
             )
 
     def test_strict_version_check_false_skips_a_real_mismatch(self) -> None:
@@ -319,7 +352,7 @@ class TestVersionCheck:
             dealer=_dealer_with_decks(2),
             pair_constructor=_ScriptedPairConstructor([]),
             card_lookup=CardBinder(),
-            holdout=HoldoutSpec.no_holdout(),
+            holdout=_deck_holdout(),
             strict_version_check=False,
         )
 
@@ -342,10 +375,11 @@ class TestMods:
 
     def _dojo(self, batch: ContrastiveBatch, mods: list) -> ContrastiveDojo:
         return ContrastiveDojo(
-            dealer=_dealer_with_decks(10, split_ratios=[1, 1, 0]),
+            # Hash-split, so enough decks that both splits fill two samples
+            dealer=_dealer_with_decks(40, deck_split_ratios=(1, 1, 0)),
             pair_constructor=_ScriptedPairConstructor([batch] * 3),
             card_lookup=CardBinder(),
-            holdout=HoldoutSpec.no_holdout(),
+            holdout=_deck_holdout((1, 1, 0)),
             strict_version_check=False,
             decks_per_sample=2,
             mod_pipeline=ModPipeline(mods),
@@ -382,7 +416,7 @@ class TestBaselineLoss:
             dealer=_dealer_with_decks(1),
             pair_constructor=_ScriptedPairConstructor([]),
             card_lookup=CardBinder(),
-            holdout=HoldoutSpec.no_holdout(),
+            holdout=_deck_holdout(),
             strict_version_check=False,
         )
         batch = ContrastiveBatch(
@@ -397,7 +431,7 @@ class TestBaselineLoss:
             dealer=_dealer_with_decks(1),
             pair_constructor=_ScriptedPairConstructor([]),
             card_lookup=CardBinder(),
-            holdout=HoldoutSpec.no_holdout(),
+            holdout=_deck_holdout(),
             strict_version_check=False,
         )
         with pytest.raises(TypeError):

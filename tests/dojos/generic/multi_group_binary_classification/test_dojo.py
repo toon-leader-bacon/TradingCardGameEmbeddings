@@ -51,7 +51,9 @@ class _StubDataConstructor:
     def __init__(self, group: MultiGroupInput) -> None:
         self._group = group
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[float]]:
         return [(self._group, float(i % 2)) for i in range(len(chunk))]
 
 

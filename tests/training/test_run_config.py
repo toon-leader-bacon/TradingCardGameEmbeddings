@@ -15,7 +15,9 @@ from src.dojos.mods.mod_specs import (
     WeightedFieldMaskSpec,
 )
 from src.schema.game_id import GameId
+from src.schema.holdout import DEFAULT_DECK_SPLIT_RATIOS
 from src.dojos.loss.regression_objective import RegressionLossKind
+from src.training.learning_rate_schedule import LearningRateSchedule
 from src.training.loss_weighting import DEFAULT_BASELINE_FLOOR, LossWeighting
 from src.training.plan import (
     DojoGroupRow,
@@ -146,6 +148,31 @@ class TestParseRunConfig:
         assert config.plan.phases[0].max_grad_norm == 0.5
         assert config.plan.faults.max_consecutive_failures == 3
 
+    def test_a_phase_without_an_lr_schedule_keeps_a_constant_rate(self) -> None:
+        config = parse_run_config(_document())
+        assert config.plan.phases[0].lr_schedule == LearningRateSchedule()
+
+    def test_a_phase_lr_schedule_is_parsed(self) -> None:
+        schedule = {"warmup_steps": 5, "decay": "cosine", "min_lr_fraction": 0.1}
+        config = parse_run_config(_with(["phases", 0, "lr_schedule"], schedule))
+        assert config.plan.phases[0].lr_schedule == LearningRateSchedule(
+            5, "cosine", 0.1
+        )
+
+    def test_an_unknown_lr_decay_is_refused(self) -> None:
+        document = _with(["phases", 0, "lr_schedule"], {"decay": "step"})
+        with pytest.raises(ValueError, match="decay"):
+            parse_run_config(document)
+
+    def test_deck_split_ratios_are_parsed(self) -> None:
+        document = _with(["holdout", "deck_split_ratios"], [6, 2, 2])
+        config = parse_run_config(document)
+        assert config.plan.holdout.deck_split_ratios == (6.0, 2.0, 2.0)
+
+    def test_absent_deck_split_ratios_take_the_default(self) -> None:
+        config = parse_run_config(_document())
+        assert config.plan.holdout.deck_split_ratios == DEFAULT_DECK_SPLIT_RATIOS
+
     def test_held_out_games_are_parsed(self) -> None:
         document = _with(["holdout", "held_out_games"], ["gwent"])
         config = parse_run_config(document)
@@ -214,6 +241,9 @@ class TestParseRunConfig:
             (["dojos"], ["a", 1]),
             (["dojos"], "a"),
             (["holdout", "tier_ratios"], [8, 1]),
+            (["holdout", "deck_split_ratios"], [8, 1]),
+            (["holdout", "deck_split_ratios"], [8, "a", 1]),
+            (["holdout", "deck_split_ratios"], None),
             (["phases"], [1]),
         ],
     )

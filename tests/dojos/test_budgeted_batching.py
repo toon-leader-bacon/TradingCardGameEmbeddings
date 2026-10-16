@@ -21,7 +21,7 @@ def _card() -> GenericCard:
     )
 
 
-def _datum(card_count: int) -> TrainingDatum:
+def _datum(card_count: int) -> TrainingDatum[float]:
     return ([_card() for _ in range(card_count)], 0.0)
 
 

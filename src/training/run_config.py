@@ -30,7 +30,7 @@ import yaml
 from src.dojos.loss.regression_objective import RegressionLossKind
 from src.dojos.mods.mod_specs import ModSpec
 from src.schema.game_id import GameId
-from src.schema.holdout import HoldoutSpec
+from src.schema.holdout import DEFAULT_DECK_SPLIT_RATIOS, HoldoutSpec
 from src.training.config_parsing.config_section import (
     ConfigSection,
     build_flat_dataclass,
@@ -40,6 +40,7 @@ from src.training.config_parsing.config_section import (
 from src.training.config_parsing.diet_parsing import parse_diet
 from src.training.config_parsing.mod_parsing import parse_mod_overrides
 from src.training.config_parsing.model_parsing import parse_model
+from src.training.learning_rate_schedule import LearningRateSchedule
 from src.training.loss_weighting import DEFAULT_BASELINE_FLOOR, LossWeighting
 from src.training.model_spec import ModelSpec
 from src.training.plan import (
@@ -295,10 +296,14 @@ def _parse_phase(section: ConfigSection, default_dojos: tuple[str, ...]) -> Phas
             SaturationSpec, section.required_section("saturation")
         ),
     }
-    # A dict (not keywords) so an absent max_grad_norm keeps Phase's own
-    # default rather than a copy of it here
+    # A dict (not keywords) so an absent max_grad_norm or lr_schedule keeps
+    # Phase's own default rather than a copy of it here
     if section.has("max_grad_norm"):
         fields["max_grad_norm"] = section.required("max_grad_norm", float)
+    if section.has("lr_schedule"):
+        fields["lr_schedule"] = build_flat_dataclass(
+            LearningRateSchedule, section.required_section("lr_schedule")
+        )
     section.reject_unread_keys()
     return construct_at(section.where, lambda: Phase(**fields))
 
@@ -380,7 +385,9 @@ def _expanded_dojo_entries(
 
 def _parse_holdout(section: ConfigSection) -> HoldoutSpec:
     """{"seed", "tier_ratios": [train, test, validation], "held_out_games":
-    [GameId values]} -> HoldoutSpec; held_out_games optional (empty).
+    [GameId values], "deck_split_ratios": [train, test, validation]} ->
+    HoldoutSpec; held_out_games optional (empty), deck_split_ratios
+    optional (HoldoutSpec's default).
 
     Inputs: section ("holdout"). Output: HoldoutSpec.
     Side effects: none.
@@ -388,13 +395,11 @@ def _parse_holdout(section: ConfigSection) -> HoldoutSpec:
         an unknown game.
     """
     seed = section.required("seed", int)
-    ratios_location = section.location_of("tier_ratios")
-    ratios = section.required_list("tier_ratios")
-    if len(ratios) != _TIER_COUNT:
-        raise ValueError(f"{ratios_location} must have {_TIER_COUNT} numbers")
-    train, test, validation = (
-        checked_scalar(ratio, float, f"{ratios_location}.{index}")
-        for index, ratio in enumerate(ratios)
+    tier_ratios = _parse_ratios(section, "tier_ratios")
+    deck_split_ratios = (
+        _parse_ratios(section, "deck_split_ratios")
+        if section.has("deck_split_ratios")
+        else DEFAULT_DECK_SPLIT_RATIOS
     )
     games = frozenset(
         _parse_game(value, section.location_of("held_out_games"))
@@ -404,9 +409,31 @@ def _parse_holdout(section: ConfigSection) -> HoldoutSpec:
     return construct_at(
         section.where,
         lambda: HoldoutSpec(
-            seed=seed, tier_ratios=(train, test, validation), held_out_games=games
+            seed=seed,
+            tier_ratios=tier_ratios,
+            held_out_games=games,
+            deck_split_ratios=deck_split_ratios,
         ),
     )
+
+
+def _parse_ratios(section: ConfigSection, key: str) -> tuple[float, float, float]:
+    """section[key] as (train, test, validation) ratios.
+
+    Inputs: section, key (a required three-number list).
+    Output: three floats. Side effects: marks key read.
+    Exceptions: ValueError naming the location if key is missing or not a
+        list of three numbers.
+    """
+    location = section.location_of(key)
+    ratios = section.required_list(key)
+    if len(ratios) != _TIER_COUNT:
+        raise ValueError(f"{location} must have {_TIER_COUNT} numbers")
+    train, test, validation = (
+        checked_scalar(ratio, float, f"{location}.{index}")
+        for index, ratio in enumerate(ratios)
+    )
+    return (train, test, validation)
 
 
 def _parse_game(value: str, where: str) -> GameId:

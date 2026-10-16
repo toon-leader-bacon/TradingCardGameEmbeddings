@@ -21,8 +21,8 @@ install) is in `Notes.md`.
   step's loss is divided by the dojo's baseline and scaled by a per-run
   `loss_weights:` entry (`loss_weighting.py`; `baseline_floor` 0.05 from
   `scripts/survey_dojo_baselines.py`). Still open:
-  - a per-dojo grad-clip counter in the round log, and a look at the
-    clip rate;
+  - a look at the clip rate (each round now logs it, with the
+    most-clipped dojos: `GradientClipTally`);
   - a diet whose weights shift over time;
   - two-level diet sampling (below);
   - much later, as experiments: learned per-dojo weights (uncertainty
@@ -90,7 +90,7 @@ install) is in `Notes.md`.
   re-masks the target, so up to half the draws do nothing yet count as
   changed in the tally. Per-dojo mask tables would fix it if it matters.
 - [ ] **Experiment: subsample common cards in contrastive pairs.**
-  `SingleCardPairConstructor` (`src/dojos/contrastive/pair_constructor.py`)
+  `SingleCardPairConstructor` (`src/dojos/contrastive/styles/single_card.py`)
   samples from a deck's full card multiset, so base cards (basic lands,
   Copper/Estate/Province) fill many positive pairs. They are low-signal
   but not worthless, so the default stays unchanged. Measured 2026-09-30
@@ -123,16 +123,17 @@ install) is in `Notes.md`.
   VALIDATION decks, as the share of 2-card positive pairs with at least
   one staple (df > 0.5): t = inf 79.8%, 0.3 66.3%, 0.1 53.9%, 0.03 42.5%,
   0.01 42.2% (98.8% of decks kept). It levels off near 42% because decks
-  hold many staple copies. Suggested arms: inf, 0.1, 0.01.
-  `MultiCardPairConstructor` is not wired up, because its item sampler is
-  still a stub.
+  hold many staple copies. Suggested arms: inf, 0.1, 0.01. Every
+  contrastive style takes the knob (the multi-card ones through
+  `SliceSampler`, `pair_constructor.py`).
 
 ## Training driver
 
 - [ ] **Checkpoint size and contents.** Only the best checkpoint per
   phase plus `latest/` are kept, but each holds the frozen LM too (~1.2
-  GB, twice: `state.pt` and `encoder.pt`). The manifest stores only
-  `repr(plan)`, not the run config.
+  GB, twice: `state.pt` and `encoder.pt`). Each checkpoint's manifest
+  stores only `repr(plan)`; the run config is recorded once, as the run
+  directory's `run_config.yaml`.
 - [ ] **Set `max_batch_cost` sensibly.** It counts cards, not tokens, and a
   40-card deck counts as 40. Start small (~32) and raise it while watching
   VRAM.
@@ -141,26 +142,20 @@ install) is in `Notes.md`.
 - [ ] **Learn pre-norm vs post-norm** (`group_attention.norm_first`).
   Defaulted to pre-norm (`true`): LayerNorm before attention and the
   feed-forward block rather than after, the usual choice now because it
-  trains stably without a learning-rate warmup, which the trainer does
-  not have. torch's own default is post-norm. Read up on it, or ask for an
+  trains stably without a learning-rate warmup (the trainer has one only
+  when a phase sets `lr_schedule:`). torch's own default is post-norm. Read up on it, or ask for an
   explanation, and decide whether it deserves an ablation.
-- [ ] **Seed the model's initial weights.** `scripts/run_training.py`
-  calls no `torch.manual_seed`. Only the dojos and diet are seeded, so an
-  untrained control can't reproduce a run's starting weights
-  (2026-10-11_model_by_diet_r2, step 2 Log entry).
 - [ ] **Log training loss per round, per dojo.** Without it, a dojo whose
   TEST is worse than the mean predictor can't be told apart as
-  overfitting or as a TRAIN/TEST label shift (same experiment,
+  overfitting or as a TRAIN/TEST label shift (2026-10-11_model_by_diet_r2,
   Corrections).
-- [ ] **Held-out dojos in the training-time TEST.** Their heads are never
-  trained, so their loss is a random head's. Either drop them from TEST,
-  or label them "untrained head" in the console and logs.
 
 ## Housekeeping
 
 - [ ] **Document the ROCm torch install in `requirements.txt`** (command in
   `Notes.md`). `scripts/check.sh` now runs every tool as
-  `$PYTHON -m <tool>`, defaulting to the project `venv/`. On the Windows
+  `$PYTHON -m <tool>`, defaulting to the project `venv/`, and needs
+  `pytest-xdist` (in `requirements-dev.txt`). On the Windows
   box, either install `requirements-dev.txt` into the ROCm venv and run
   `PYTHON=G:/Projects/venvs/tcg-rocm/Scripts/python.exe ./scripts/check.sh`,
   or make the project `venv/` the ROCm one. Decide which.

@@ -13,6 +13,7 @@ from typing import get_args
 
 from src.encoder_model.precision import Precision
 from src.schema.holdout import HoldoutSpec
+from src.training.learning_rate_schedule import LearningRateSchedule
 from src.training.loss_weighting import LossWeighting
 
 
@@ -262,6 +263,9 @@ class Phase:
     max_rounds: hard cap on rounds if saturation is never reached.
     max_grad_norm: gradients are clipped to this norm; a non-finite
         gradient skips the step instead of poisoning the weights.
+    lr_schedule: the multiplier on encoder_lr and head_lr over the
+        phase's max_rounds x steps_per_round steps (warmup, then constant
+        or cosine decay); the default keeps both rates constant.
     """
 
     name: str
@@ -274,6 +278,7 @@ class Phase:
     max_rounds: int
     saturation: SaturationSpec
     max_grad_norm: float = 1.0
+    lr_schedule: LearningRateSchedule = LearningRateSchedule()
 
     def __post_init__(self) -> None:
         if self.steps_per_round < 1 or self.max_rounds < 1:
@@ -285,6 +290,13 @@ class Phase:
         # `not x >= 0` also rejects NaN
         if not (self.encoder_lr >= 0 and self.head_lr >= 0 and self.max_grad_norm > 0):
             raise ValueError("learning rates must be >= 0 and max_grad_norm > 0")
+        # A warmup that outlasts the phase never reaches the full rate
+        if self.lr_schedule.warmup_steps >= self.max_steps:
+            raise ValueError(
+                f"phase {self.name!r}: lr_schedule.warmup_steps "
+                f"({self.lr_schedule.warmup_steps}) must be below the phase's "
+                f"max_rounds x steps_per_round ({self.max_steps})"
+            )
         if not _PHASE_NAME.fullmatch(self.name):
             raise ValueError(f"phase name {self.name!r} must match [A-Za-z0-9_.-]+")
         # A table diet names its own dojos: the phase's list must be the same
@@ -294,6 +306,12 @@ class Phase:
             raise ValueError(
                 f"phase {self.name!r} dojos differ from its diet table's dojos"
             )
+
+    @property
+    def max_steps(self) -> int:
+        """The phase's step budget, max_rounds x steps_per_round: what
+        lr_schedule decays over. Saturation may end the phase sooner."""
+        return self.max_rounds * self.steps_per_round
 
 
 @dataclass(frozen=True)

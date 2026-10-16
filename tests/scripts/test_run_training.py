@@ -116,8 +116,17 @@ def test_stats_from_another_holdout_are_refused(tmp_path: Path) -> None:
     script = _load_script()
     spec = _whitening_spec(tmp_path, HoldoutSpec.no_holdout(seed=1))
     script.require_whitening_fits_run(spec, HoldoutSpec.no_holdout(seed=1))
-    with pytest.raises(ValueError, match="holdout"):
+    with pytest.raises(ValueError, match="card tiers"):
         script.require_whitening_fits_run(spec, HoldoutSpec.no_holdout(seed=2))
+
+
+def test_stats_under_another_deck_split_are_accepted(tmp_path: Path) -> None:
+    # Whitening samples cards, never decks: only card tiers must match
+    script = _load_script()
+    fitted_under = HoldoutSpec(1, (8, 1, 1), frozenset(), deck_split_ratios=None)
+    spec = _whitening_spec(tmp_path, fitted_under)
+    run_holdout = HoldoutSpec(1, (8, 1, 1), frozenset(), deck_split_ratios=(6, 2, 2))
+    script.require_whitening_fits_run(spec, run_holdout)
 
 
 def test_a_run_without_whitening_needs_no_stats() -> None:
@@ -132,6 +141,39 @@ def test_the_residual_mlp_head_takes_its_sizes() -> None:
     built = script.build_card_pipeline(spec, FakeTextEncoder()).embedding_head
     assert len(built.blocks) == 5
     assert built.input_projection.out_features == 32
+
+
+def _seeded_weights(
+    script: ModuleType, monkeypatch: pytest.MonkeyPatch, seed: int
+) -> list[torch.Tensor]:
+    monkeypatch.setattr(script, "PretrainedTextEncoder", lambda **_: FakeTextEncoder())
+    spec = ModelSpec(EmbeddingHeadKind.RESIDUAL_MLP, "ckpt", 16)
+    model = script.build_model(spec, seed=seed)
+    return [p.detach().clone() for p in model.parameters() if p.requires_grad]
+
+
+def test_a_seeded_model_starts_from_the_same_weights(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    script = _load_script()
+    first = _seeded_weights(script, monkeypatch, seed=3)
+    torch.rand(100)  # whatever ran in between does not matter
+    second = _seeded_weights(script, monkeypatch, seed=3)
+    other = _seeded_weights(script, monkeypatch, seed=4)
+
+    assert all(torch.equal(a, b) for a, b in zip(first, second, strict=True))
+    assert not all(torch.equal(a, b) for a, b in zip(first, other, strict=True))
+
+
+def test_a_seeded_build_leaves_the_global_rng_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    script = _load_script()
+    torch.manual_seed(0)
+    expected = torch.rand(3)
+    torch.manual_seed(0)
+    _seeded_weights(script, monkeypatch, seed=3)
+    assert torch.equal(torch.rand(3), expected)
 
 
 def test_trainable_parameter_count_skips_frozen_parameters() -> None:

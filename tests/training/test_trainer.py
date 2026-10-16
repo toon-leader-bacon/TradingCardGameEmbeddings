@@ -9,6 +9,7 @@ import torch
 from src.dojos.dojo import Dojo
 from src.schema.holdout import HoldoutSpec
 from src.encoder_model.precision import Precision
+from src.training.learning_rate_schedule import LearningRateSchedule
 from src.training.loss_weighting import LossWeighting
 from src.training.plan import FaultPolicy, HardwareLimits
 from src.training.recording.checkpointer import DirectoryCheckpointer
@@ -267,6 +268,7 @@ class TestRun:
         ).run()
         assert result.final_report is not None
         assert "held_out" in result.final_report.per_dojo_test_loss
+        assert result.final_report.held_out == frozenset({"held_out"})
         assert result.stopped_early_reason is None
 
     def test_the_run_is_reproducible_for_a_seed(self, tmp_path: Path) -> None:
@@ -636,6 +638,89 @@ class TestLossWeighting:
         assert result.stopped_early_reason is None
         assert not torch.equal(before, model.layer.weight)
         assert all(torch.isfinite(p).all() for p in model.parameters())
+
+
+class TestGradientClipLog:
+    def test_each_round_logs_how_many_steps_were_clipped(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.INFO):
+            _trainer(
+                tmp_path,
+                [FakeDojo("a")],
+                max_grad_norm=1e-9,
+                steps_per_round=4,
+                max_rounds=1,
+            ).run()
+        assert "round 0: gradients clipped on 4 of 4 step(s); most: a 4/4" in (
+            caplog.text
+        )
+
+    def test_a_loose_limit_clips_nothing(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.INFO):
+            _trainer(
+                tmp_path,
+                [FakeDojo("a")],
+                max_grad_norm=1e9,
+                steps_per_round=4,
+                max_rounds=1,
+            ).run()
+        assert "round 0: gradients clipped on 0 of 4 step(s)" in caplog.text
+
+
+class _LearningRateRecorder(DirectoryCheckpointer):
+    """Records every optimizer group's lr whenever latest/ is saved (once a
+    round, after its steps)."""
+
+    def __init__(self, run_directory: Path) -> None:
+        super().__init__(run_directory)
+        self.learning_rates: list[list[float]] = []
+
+    def save_latest(self, model, dojos, optimizer, plan, report):  # type: ignore[no-untyped-def]
+        self.learning_rates.append([g["lr"] for g in optimizer.param_groups])
+        return super().save_latest(model, dojos, optimizer, plan, report)
+
+
+class TestLearningRateSchedule:
+    def test_the_optimizer_runs_at_the_scheduled_rate(self, tmp_path: Path) -> None:
+        # The last attempt of round 0 is step 3 (multiplier 4/8), of round 1
+        # step 7 (8/8); encoder_lr and head_lr are both 0.01
+        recorder = _LearningRateRecorder(tmp_path)
+        _trainer(
+            tmp_path,
+            [FakeDojo("a")],
+            checkpointer=recorder,
+            steps_per_round=4,
+            max_rounds=3,
+            lr_schedule=LearningRateSchedule(warmup_steps=8),
+        ).run()
+        assert recorder.learning_rates[:2] == [
+            [pytest.approx(0.005)] * 2,
+            [pytest.approx(0.01)] * 2,
+        ]
+
+    def test_each_round_logs_the_next_multiplier(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.INFO):
+            _trainer(
+                tmp_path,
+                [FakeDojo("a")],
+                steps_per_round=4,
+                max_rounds=3,
+                lr_schedule=LearningRateSchedule(warmup_steps=8),
+            ).run()
+        assert "round 0: learning rate x0.625" in caplog.text
+        assert "round 1: learning rate x1 " in caplog.text
+
+    def test_a_constant_rate_logs_no_multiplier(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.INFO):
+            _trainer(tmp_path, [FakeDojo("a")], max_rounds=1).run()
+        assert "learning rate x" not in caplog.text
 
 
 def test_fake_dojo_satisfies_the_protocol() -> None:

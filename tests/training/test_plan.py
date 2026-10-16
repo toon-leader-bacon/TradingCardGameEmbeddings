@@ -1,5 +1,6 @@
 import pytest
 
+from src.training.learning_rate_schedule import LearningRateSchedule
 from src.training.loss_weighting import LossWeighting
 from src.training.plan import FaultPolicy, HardwareLimits, Temperature
 from tests.training.fakes import make_phase, make_plan, saturation_spec
@@ -93,3 +94,14 @@ class TestLossWeighting:
             make_plan(
                 (make_phase(("a",)),), loss_weighting=LossWeighting({"typo": 2.0})
             )
+
+
+@pytest.mark.parametrize("warmup_steps", [12, 50])
+def test_a_warmup_as_long_as_the_phase_is_refused(warmup_steps: int) -> None:
+    with pytest.raises(ValueError, match="warmup_steps"):
+        make_phase(
+            ("a",),
+            steps_per_round=4,
+            max_rounds=3,
+            lr_schedule=LearningRateSchedule(warmup_steps=warmup_steps),
+        )

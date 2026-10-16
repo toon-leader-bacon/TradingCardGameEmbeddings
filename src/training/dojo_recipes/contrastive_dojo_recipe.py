@@ -1,6 +1,7 @@
 """ContrastiveDojoRecipe: a catalog contrastive dojo over one game's final
 deck box, with its split index and optional staple subsampling."""
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,9 @@ from src.training.dojo_recipes.dojo_build_context import DojoBuildContext
 
 # Contrastive dojos keep their deck split index here (see DeckBoxDealer)
 _CONTRASTIVE_INDEX_DIRECTORY = Path("data/splits/contrastive")
+
+# Hex digits of the deck split key's sha256 in a split index's file name
+_SPLIT_TAG_LENGTH = 12
 
 # TRAIN decks a staple-subsampling document frequency is counted over
 _DOCUMENT_FREQUENCY_SAMPLE_DECKS = 20_000
@@ -42,7 +46,9 @@ class ContrastiveDojoRecipe:
 
     def build(self, name: str, context: DojoBuildContext) -> Dojo:
         """See DojoRecipe.build. The dealer keeps its split index at
-        data/splits/contrastive/<name>.db (seeded by context.rng_seed);
+        data/splits/contrastive/<name>.<split tag>.db, the tag naming
+        context.holdout's deck split for this game, so runs under
+        different holdouts never share (or rebuild) one index file;
         mods come from context.mod_overrides[name] if present, else the
         game's defaults, each built with its own seed. A
         context.staple_thresholds[name] turns on staple subsampling, its
@@ -51,8 +57,10 @@ class ContrastiveDojoRecipe:
         dealer = DeckBoxDealer(
             context.shelf.deck_box(self.deck_box_path),
             self.game,
-            _contrastive_index_path(name),
-            seed=context.rng_seed,
+            _contrastive_index_path(
+                name, _deck_split_tag(context.holdout.deck_split_key(self.game))
+            ),
+            context.holdout,
         )
         # The style builds the pair constructor and loss as a matched set
         pair_constructor = self.style.pair_constructor(
@@ -70,10 +78,18 @@ class ContrastiveDojoRecipe:
         )
 
 
-def _contrastive_index_path(name: str) -> Path:
+def _contrastive_index_path(name: str, split_tag: str) -> Path:
     """Where a contrastive dojo's deck split index lives.
-    Inputs: name. Output: Path. Side effects: none. Exceptions: none."""
-    return _CONTRASTIVE_INDEX_DIRECTORY / f"{name}.db"
+    Inputs: name, split_tag (_deck_split_tag's). Output: Path.
+    Side effects: none. Exceptions: none."""
+    return _CONTRASTIVE_INDEX_DIRECTORY / f"{name}.{split_tag}.db"
+
+
+def _deck_split_tag(deck_split_key: str) -> str:
+    """A short, file-name-safe tag of one game's deck split.
+    Inputs: deck_split_key (HoldoutSpec.deck_split_key's). Output: str
+    (hex). Side effects: none. Exceptions: none."""
+    return hashlib.sha256(deck_split_key.encode()).hexdigest()[:_SPLIT_TAG_LENGTH]
 
 
 def _staple_subsampling(
@@ -82,7 +98,7 @@ def _staple_subsampling(
     """name's staple subsampling, or None (t = inf) when the run config
     names no threshold for it. Its document frequency comes from
     cached_document_frequency, cached at
-    data/splits/contrastive/<name>.document_frequency.json.
+    data/splits/contrastive/<name>.<split tag>.document_frequency.json.
 
     Inputs: name, dealer (the dojo's), context.
     Output: StapleSubsampling | None.
@@ -93,7 +109,10 @@ def _staple_subsampling(
     threshold = context.staple_thresholds.get(name)
     if threshold is None:
         return None
-    cache_path = _CONTRASTIVE_INDEX_DIRECTORY / f"{name}.document_frequency.json"
+    split_tag = _deck_split_tag(dealer.deck_split_key)
+    cache_path = (
+        _CONTRASTIVE_INDEX_DIRECTORY / f"{name}.{split_tag}.document_frequency.json"
+    )
     frequency = cached_document_frequency(
         dealer, cache_path, _DOCUMENT_FREQUENCY_SAMPLE_DECKS
     )

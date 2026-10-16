@@ -67,11 +67,6 @@ not decks).
   starter decks. If that ever shows up as noise, filter only runs
   abandoned before the first boss (map_point_history / acts give the
   floor reached) rather than all of them.
-- **Contrastive split indexes persist across training runs.**
-  `DeckBoxDealer` writes `data/splits/contrastive/<dojo>.db` on a dojo's
-  first build and reuses it afterwards, so decks added by a later
-  re-ingest are never assigned a split. After re-ingesting a game's deck
-  box, delete that game's index (or pass `force_resplit`).
 - **Hearthstone's next card ingestion invalidates its 8 mask metrics
   once.** `build_or_update_card_binder()` seeds each game's Unknown
   sentinel (since 2026-10-02), and Hearthstone's binder does not carry it

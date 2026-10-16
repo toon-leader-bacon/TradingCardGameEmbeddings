@@ -48,7 +48,9 @@ class _StubDataConstructor:
     def __init__(self, card: GenericCard) -> None:
         self._card = card
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[float]]:
         # Alternating labels: calibration rejects a constant regression label
         return [(self._card, 1.0 + i % 2) for i in range(len(chunk))]
 
@@ -170,7 +172,9 @@ class _OutlierDataConstructor:
     def __init__(self, card: GenericCard) -> None:
         self._card = card
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[float]]:
         labels = [40.0 if i == 0 else float(i % 2) for i in range(len(chunk))]
         return [(self._card, label) for label in labels]
 

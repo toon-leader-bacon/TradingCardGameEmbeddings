@@ -69,7 +69,8 @@ class ContrastiveDojo:
             card_lookup: the full card store; each split's batches are
                 built through a VisibleCardLookup of it.
             holdout: which cards each split may see (must equal the
-                training plan's spec).
+                training plan's spec), and which split each deck is in
+                (must be the spec dealer was built from).
             decks_per_sample: upper bound on decks per batch; a smaller
                 BatchBudget lowers it (see batches()).
             contrastive_loss: the batch-level loss compute_loss
@@ -90,9 +91,11 @@ class ContrastiveDojo:
         Output: none (constructor).
         Side effects: none of its own beyond the check below (one
             logging.warning() when strict_version_check is False).
-        Exceptions: ValueError if strict_version_check is True and
-            dealer's recorded CardBinder version is missing or doesn't
-            match card_lookup's current one.
+        Exceptions: ValueError if dealer's deck split is not holdout's
+            (UnknownDeckSplitError, a ValueError, if holdout has none),
+            or if strict_version_check is True and dealer's recorded
+            CardBinder version is missing or doesn't match card_lookup's
+            current one.
         """
         self.name = name
         self.holdout = holdout
@@ -101,6 +104,7 @@ class ContrastiveDojo:
         self._decks_per_sample = decks_per_sample
         self._contrastive_loss = contrastive_loss or SingleCardInfoNCELoss()
         self._mod_pipeline = mod_pipeline or ModPipeline([])
+        self._require_dealer_split_matches(dealer, holdout)
         self._check_deck_box_version(dealer, card_lookup, strict_version_check)
         self._lookups = {
             split: VisibleCardLookup(card_lookup, holdout, split) for split in Split
@@ -280,6 +284,25 @@ class ContrastiveDojo:
         if cost > budget.max_cost:
             raise ValueError(
                 f"Contrastive batch costs {cost}, over budget {budget.max_cost}"
+            )
+
+    def _require_dealer_split_matches(
+        self, dealer: DeckBoxDealer, holdout: HoldoutSpec
+    ) -> None:
+        """Raise unless dealer splits decks by holdout: the dojo hides cards
+        by holdout and deals decks by the dealer's split, and the two must
+        be one spec.
+
+        Private helper - single caller is __init__.
+        Inputs: dealer, holdout. Output: None. Side effects: none.
+        Exceptions: ValueError on a mismatch; UnknownDeckSplitError if
+            holdout has no deck split.
+        """
+        expected = holdout.deck_split_key(dealer.source_game)
+        if dealer.deck_split_key != expected:
+            raise ValueError(
+                f"{self.name}: the dealer splits decks by {dealer.deck_split_key}, "
+                f"but this dojo's holdout splits them by {expected}"
             )
 
     def _check_deck_box_version(

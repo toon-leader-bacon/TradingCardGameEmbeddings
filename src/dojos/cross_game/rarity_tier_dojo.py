@@ -73,8 +73,8 @@ class RarityTierDojo(SingleCardFixedClassificationDojo[str]):
         DEFAULT_OUTPUT_PATH), name, rng_seed, strict_version_check,
         translators (game -> RarityTranslator; defaults to the six games).
     Output: n/a.
-    Side effects: may write split files; reads a strided TRAIN sample to
-        calibrate the loss (see GenericDojo).
+    Side effects: may write split files; reads a TRAIN sample (the start
+        of this dojo's own draw) to calibrate the loss (see GenericDojo).
     Exceptions: see SingleCardFixedClassificationDojo; ValueError from
         GenericDojo._check_multi_game_versions if the metric file's
         recorded binder version for any game is stale.
@@ -95,7 +95,9 @@ class RarityTierDojo(SingleCardFixedClassificationDojo[str]):
         translators: Mapping[GameId, RarityTranslator] = RARITY_TRANSLATORS,
     ) -> None:
         # Set before super().__init__: its loss calibration already reads
-        # TRAIN through _chunks
+        # TRAIN through _chunks. Uncapped passes share one rng, so each
+        # epoch draws differently; a capped pass restarts from the seed
+        self._rng_seed = rng_seed
         self._balance_rng = random.Random(rng_seed)
 
         super().__init__(
@@ -115,24 +117,28 @@ class RarityTierDojo(SingleCardFixedClassificationDojo[str]):
             ),
         )
 
-    def _chunks(self, split: Split) -> Iterable[pd.DataFrame]:
+    def _chunks(self, split: Split, capped: bool) -> Iterable[pd.DataFrame]:
         """TRAIN: rows drawn evenly across games; other splits: file order.
 
-        Inputs: split. Output: DataFrame chunks; TRAIN's sum to its
-            non-OTHER row count, with each game equally likely per draw.
-        Side effects: reads the split file; advances the balance rng for
-            TRAIN.
+        Inputs: split; capped (see GenericDojo._chunks): a capped TRAIN
+            pass draws from a fresh rng seeded with rng_seed, so it yields
+            the same prefix every time (for an unseeded dojo, not
+            reproducible); an uncapped one continues the shared rng.
+        Output: DataFrame chunks; TRAIN's sum to its non-OTHER row count,
+            with each game equally likely per draw.
+        Side effects: reads the split file; advances the shared balance
+            rng for an uncapped TRAIN pass.
         Exceptions: FileNotFoundError if the split files are missing.
         """
         if split is not Split.TRAIN:
-            return super()._chunks(split)
+            return super()._chunks(split, capped)
         # OTHER rows are removed before balancing, so every game's share of
         # the trained examples is even
         return GameBalancedChunkReader(
             self.file_manager.split_path(split),
             _BALANCE_COLUMN,
             ROWS_PER_CHUNK,
-            self._balance_rng,
+            random.Random(self._rng_seed) if capped else self._balance_rng,
             keep_row=is_trainable_row,
         )
 

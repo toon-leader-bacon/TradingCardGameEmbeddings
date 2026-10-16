@@ -175,8 +175,10 @@ class GenericDojo(Generic[LabelT]):
 
         Inputs: split (Split), budget (BatchBudget), max_examples (int |
             None): keep only the first N examples in _chunks() order (the
-            split file's fixed order unless a subclass overrides _chunks), so
-            a capped pass is deterministic when _chunks is.
+            split file's fixed order unless a subclass overrides _chunks).
+            A capped pass reads the same rows every time: an override that
+            draws at random restarts from its seed (see _chunks). TRAIN
+            mods with their own RNG still vary.
         Output: iterator of Batch, each costing at most budget.max_cost.
         Side effects: reads the split's parquet file.
         Exceptions: ValueError if one example alone exceeds the budget;
@@ -304,7 +306,7 @@ class GenericDojo(Generic[LabelT]):
         """Stream a split's examples in _chunks() order, modded and truncated."""
         lookup = self._lookups[split]
         emitted = 0
-        for chunk in self._chunks(split):
+        for chunk in self._chunks(split, capped=max_examples is not None):
             data: List[TrainingDatum[LabelT]] = self.data_constructor.build(
                 chunk, lookup
             )
@@ -315,13 +317,18 @@ class GenericDojo(Generic[LabelT]):
                 emitted += 1
                 yield datum
 
-    def _chunks(self, split: Split) -> Iterable[pd.DataFrame]:
+    def _chunks(self, split: Split, capped: bool) -> Iterable[pd.DataFrame]:
         """A split's rows as DataFrame chunks, in the order examples are
         built and the loss calibrated. The seam a dojo overrides to change
         what it trains on (the cross-game dojo draws TRAIN rows evenly
         across games); the default is the split file in file order.
 
-        Inputs: split. Output: an iterable of DataFrames (each at most
+        Inputs: split; capped (True when the caller reads only a prefix: a
+            batches() pass with max_examples, or the calibration sample).
+            An override that draws rows at random must give a capped pass
+            the same order every time, so a capped pass is reproducible;
+            the default ignores it (file order always is).
+        Output: an iterable of DataFrames (each at most
             ROWS_PER_CHUNK rows) of the rows this dojo trains or evaluates on
             - by default exactly the split file's rows.
         Side effects: reads the split file.
@@ -354,7 +361,7 @@ class GenericDojo(Generic[LabelT]):
 
         # Build chunks until the cap's rows are read, cutting the last one
         rows_read = 0
-        for chunk in self._chunks(Split.TRAIN):
+        for chunk in self._chunks(Split.TRAIN, capped=True):
             kept_rows = chunk.iloc[: _CALIBRATION_SAMPLE_CAP - rows_read]
             rows_read += len(kept_rows)
             result.extend(self.data_constructor.build(kept_rows, lookup))

@@ -40,6 +40,9 @@ Top level:
   dojos, which `DietRule`, learning rates, whether the encoder is frozen,
   and when to stop (`SaturationSpec`). Also `HardwareLimits`. Frozen and
   validated on construction, so a run is described entirely by its plan.
+- [learning_rate_schedule.py](learning_rate_schedule.py):
+  `LearningRateSchedule`, a phase's warmup and decay multiplier on its
+  learning rates.
 - [round_evaluation.py](round_evaluation.py): `evaluate_split_losses`, a
   capped, deterministic scoring pass over one split for every dojo, at a
   given precision. Each dojo gets a `SplitLoss`: its example-weighted mean
@@ -74,8 +77,9 @@ Top level:
   single-card model. The driver logs the trainable parameter count, so
   arms meant to be the same size can be checked under `--check`. With
   token whitening, the driver refuses stats fitted on another
-  `checkpoint` or under another `holdout` than the run's (before any dojo
-  is built), and copies the stats file into the run directory as
+  `checkpoint` or under other card tiers than the run's
+  (`HoldoutSpec.card_tier_key`; the deck split does not matter) before any
+  dojo is built, and copies the stats file into the run directory as
   `whitening_stats.pt`; the recorded `run_config.yaml` points at that
   copy.
 - [model_spec.py](model_spec.py): `ModelSpec` and the pooling, enrichment
@@ -178,6 +182,17 @@ the raw loss, the control for comparing the two losses (it is an error
 alongside `loss_weights:` or `baseline_floor:`). Only the three regression
 cells take the objective; the catalog binds it in `_constructor_for`.
 
+**Learning-rate schedule:** a phase's optional `lr_schedule:` section
+(`LearningRateSchedule`, `learning_rate_schedule.py`) scales its
+`encoder_lr` and `head_lr` alike: `warmup_steps` (linear from near 0,
+default 0), then `decay: constant` (the default) or `cosine`, which
+falls to `min_lr_fraction` of the base rate at the phase's last possible
+step (`max_rounds × steps_per_round`; saturation can end the phase
+before the decay finishes). The step count includes skipped and failed
+steps, so the schedule follows the budget. A phase with a schedule logs
+its multiplier at the end of each round. Example:
+`lr_schedule: {warmup_steps: 500, decay: cosine, min_lr_fraction: 0.1}`.
+
 **Saturation:** a dojo whose normalized TEST loss has stopped improving
 (no gain larger than `epsilon` for `patience_rounds` rounds) leaves the
 diet. It re-enters if its normalized loss rises more than
@@ -230,7 +245,10 @@ Points worth knowing:
 - One `BatchBudget` (from `HardwareLimits.max_batch_cost` and `cost_of`)
   is passed to every dojo, so no dojo owns a batch size.
 - Held-out dojos (`TrainingPlan.held_out_dojos`) are evaluated every round
-  but never trained on.
+  but never trained on, so their TEST loss is a never-trained head's.
+  `RoundReport.held_out` names them, and the round's log line lists them
+  apart, under "untrained heads (held out)". The rounds CSV marks them
+  only by an empty status, as it does any dojo outside the phase's diet.
 - A phase with `encoder_trainable=False` keeps the encoder in eval mode
   (no dropout) while the dojo heads train; the heads are not part of the
   model, so their mode is untouched.
@@ -253,7 +271,9 @@ Points worth knowing:
   (exception, out-of-memory, non-finite loss or gradient), evaluation,
   checkpoint save or listener is logged and skipped. Gradients are clipped
   to `Phase.max_grad_norm`, and a non-finite gradient skips the step before
-  it can reach the weights. Under `HardwareLimits(precision="fp16")` the
+  it can reach the weights. Each round logs how many steps were clipped
+  and the most-clipped dojos (`GradientClipTally`,
+  `gradient_clip_tally.py`). Under `HardwareLimits(precision="fp16")` the
   loss is scaled by a per-phase `GradScaler` and gradients are unscaled
   before clipping; an fp16 overflow only skips the step and halves the
   scale, and counts as a failure only once the scale is at its floor of 1
@@ -304,6 +324,10 @@ defaults it left out are not written),
 the script's full log from its first line (see `src/run_logging.py`;
 `--log-file` and `--log-level` adjust it). Batch cost
 is one per card, for preflight and training alike (`card_cost`).
+`plan.seed` (offset by 1) seeds torch's global RNG before the dojos are
+built (their heads, dropout) and, separately, the model's initial weights:
+`build_model(spec, seed=plan.seed)` rebuilds a run's starting weights
+exactly, which is what an untrained control needs.
 
 Directly from code, assuming `model` is a `SingleCardModel`/`MultiCardModel`
 and `dojos` is a list of constructed `Dojo`s:

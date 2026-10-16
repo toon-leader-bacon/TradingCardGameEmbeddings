@@ -87,9 +87,9 @@ metrics too.
     stamped version, or `None` when never stamped or cleared by an
     unfinished run; callers treat `None` as stale.
   - `uuids_ranked_randomly(game, seed)`: a seeded, reproducible ranking
-    computed inside SQLite, which `DeckBoxDealer`
-    (`src/dojos/file_managers/deck_box_dealer.py`) turns into exact-ratio
-    splits.
+    computed inside SQLite (the held-out-deck-card metric samples decks
+    with it). Training's deck splits come from the `HoldoutSpec` instead
+    (`src/dojos/file_managers/deck_box_dealer.py`).
   - `load([])` opens an empty in-memory box; `load([path])` connects
     straight to `path`; `load([p1, p2, ...])` merges read-only into
     memory, last path wins. `save()` commits any pending writes and

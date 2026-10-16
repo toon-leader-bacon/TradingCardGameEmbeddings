@@ -59,7 +59,9 @@ class _StubDataConstructor:
         self._card = card
         self._label = label
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[str]]:
         # Alternating with _OTHER_LABEL: one class only has a zero baseline
         return [
             (self._card, self._label if i % 2 == 0 else _OTHER_LABEL)

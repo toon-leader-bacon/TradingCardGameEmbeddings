@@ -1,13 +1,13 @@
 """WhiteningStats: a fitted whitening (mean and projection) plus where it
 came from, saved to and loaded from a .pt file."""
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import torch
 
-from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
 
 _KEYS = ("checkpoint", "holdout", "card_count", "mean", "projection")
@@ -89,13 +89,7 @@ class WhiteningStats:
             >>> stats.save(Path("data/whitening/modernbert_tokens.pt"))
         """
         # Plain types and tensors only, so load() can use weights_only
-        holdout = {
-            "seed": self.holdout.seed,
-            "tier_ratios": list(self.holdout.tier_ratios),
-            "held_out_games": sorted(
-                game.value for game in self.holdout.held_out_games
-            ),
-        }
+        holdout = self.holdout.to_json()
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(
             {
@@ -129,20 +123,30 @@ class WhiteningStats:
         tensors = (raw["mean"], raw["projection"])
         if not all(isinstance(tensor, torch.Tensor) for tensor in tensors):
             raise ValueError(f"{path}: mean and projection must be tensors")
-        holdout = raw["holdout"]
-        holdout_keys = ("seed", "tier_ratios", "held_out_games")
-        if not isinstance(holdout, dict) or any(
-            key not in holdout for key in holdout_keys
-        ):
-            raise ValueError(f"{path}: holdout must be a mapping with {holdout_keys}")
         return WhiteningStats(
             checkpoint=raw["checkpoint"],
-            holdout=HoldoutSpec(
-                seed=holdout["seed"],
-                tier_ratios=tuple(holdout["tier_ratios"]),
-                held_out_games=frozenset(GameId(g) for g in holdout["held_out_games"]),
-            ),
+            holdout=_holdout_of(path, raw["holdout"]),
             card_count=raw["card_count"],
             mean=raw["mean"],
             projection=raw["projection"],
         )
+
+
+def _holdout_of(path: Path, stored: object) -> HoldoutSpec:
+    """The HoldoutSpec a stats file recorded: HoldoutSpec.to_json() text, or
+    the field mapping files written before decks were split by the spec
+    stored (which loads with an unknown deck split).
+
+    Inputs: path (for the message), stored (the file's "holdout" value).
+    Output: HoldoutSpec. Side effects: none.
+    Exceptions: ValueError naming path if stored is neither, or does not
+        parse (HoldoutSpec.from_json).
+    """
+    try:
+        if isinstance(stored, str):
+            return HoldoutSpec.from_json(stored)
+        if isinstance(stored, dict):
+            return HoldoutSpec.from_json(json.dumps(stored))
+    except (ValueError, TypeError) as error:
+        raise ValueError(f"{path}: unreadable holdout: {error}") from error
+    raise ValueError(f"{path}: holdout must be HoldoutSpec JSON, got {stored!r}")

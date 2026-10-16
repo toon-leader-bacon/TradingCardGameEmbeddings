@@ -199,8 +199,10 @@ class TestRandomEmbeddingsMirrorInputNesting:
 class _CardPerRowConstructor:
     """Row i -> the card whose uuid the row names, label = i."""
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
-        data: List[TrainingDatum] = []
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[float]]:
+        data: List[TrainingDatum[float]] = []
         for _, row in chunk.iterrows():
             card = lookup.get_by_uuid(UUID(row["nocab_uuid"]))
             if card is not None:

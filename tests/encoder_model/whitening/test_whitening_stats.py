@@ -40,6 +40,32 @@ def test_save_and_load_round_trip(tmp_path: Path) -> None:
     assert torch.equal(loaded.projection, _stats().projection)
 
 
+def test_a_file_from_before_deck_splits_loads_with_an_unknown_deck_split(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "old.pt"
+    _stats().save(path)
+    raw = torch.load(path, weights_only=True)
+    raw["holdout"] = {"seed": 3, "tier_ratios": [8, 1, 1], "held_out_games": ["gwent"]}
+    torch.save(raw, path)
+
+    loaded = WhiteningStats.load(path)
+
+    assert loaded.holdout.deck_split_ratios is None
+    assert loaded.holdout.card_tier_key() == HOLDOUT.card_tier_key()
+
+
+def test_an_unreadable_holdout_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "bad.pt"
+    _stats().save(path)
+    raw = torch.load(path, weights_only=True)
+    raw["holdout"] = 7
+    torch.save(raw, path)
+
+    with pytest.raises(ValueError, match="holdout"):
+        WhiteningStats.load(path)
+
+
 def test_a_file_that_is_not_stats_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "other.pt"
     torch.save({"weights": torch.zeros(2)}, path)

@@ -60,6 +60,9 @@ class RoundReport:
     statuses: ACTIVE/SATURATED for the current phase's dojos only.
     elapsed_seconds: monotonic wall-clock seconds from the start of
         Trainer.run() to this round's scoring, for loss-vs-time plots.
+    held_out: the plan's held-out dojos. Their heads are never trained, so
+        their TEST loss is a random head's on the current encoder, not a
+        learned score.
     """
 
     phase: str
@@ -69,6 +72,7 @@ class RoundReport:
     per_dojo_test_loss: Mapping[str, SplitLoss]
     statuses: Mapping[str, DojoStatus]
     quarantined: frozenset[str]
+    held_out: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)

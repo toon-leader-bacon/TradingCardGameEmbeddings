@@ -1,4 +1,6 @@
 import csv
+import logging
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -11,6 +13,7 @@ from src.training.recording.reports import (
 )
 from src.training.recording.run_listener import (
     CsvRunListener,
+    LoggingRunListener,
     RoundRow,
     read_rounds_csv,
 )
@@ -276,3 +279,24 @@ class TestReadRoundsCsv:
         path.write_text(f"{_LEGACY_HEADER}\n")
         with pytest.raises(ValueError, match="header"):
             CsvRunListener(path).on_round_end(_report())
+
+
+class TestLoggingRunListener:
+    def test_held_out_dojos_are_logged_as_untrained_heads(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        report = replace(_report(), held_out=frozenset({"faction_mask"}))
+        with caplog.at_level(logging.INFO):
+            LoggingRunListener().on_round_end(report)
+        trained, untrained = caplog.text.split("untrained heads (held out):")
+        assert "color_mask=0.5000 (0.25x baseline)" in trained
+        assert "faction_mask" not in trained
+        assert "faction_mask=1.2500 (1.25x baseline)" in untrained
+
+    def test_a_run_without_held_out_dojos_logs_no_untrained_group(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.INFO):
+            LoggingRunListener().on_round_end(_report())
+        assert "color_mask=0.5000" in caplog.text
+        assert "untrained heads" not in caplog.text

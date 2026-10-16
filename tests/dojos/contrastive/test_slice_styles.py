@@ -338,7 +338,10 @@ class TestOddOneOutPairConstructor:
         host = _deck([staple] + host_cards)
         donor = _deck([staple] * 3 + host_cards[:3])
         frequency = DocumentFrequency(
-            card_binder_version="v", deck_count=1, shares={staple: 1.0}
+            card_binder_version="v",
+            deck_split_key="k",
+            deck_count=1,
+            shares={staple: 1.0},
         )
         thinning = StapleSubsampling(threshold=0.09, frequency=frequency)
 

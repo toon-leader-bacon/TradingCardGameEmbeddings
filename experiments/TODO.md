@@ -202,7 +202,10 @@ LayerNorm + `encoder_lr` pilot ([2026-10-10_lr_pilot](2026-10-10_lr_pilot/NOTEBO
 - **Center the frozen features** (code, small). ModernBERT is frozen, so
   its mean pooled vector over the card binder is a constant: compute it
   once and subtract it (optionally whiten, "all-but-the-top") before the
-  head. Removes the anisotropy at the source.
+  head. Removes the anisotropy at the source. **Built** as token
+  whitening (`model.enrichment`, before pooling) and measured in the
+  pooling pilot; whitening the pooled vector instead is still open
+  (`src/encoder_model/TODO.md`).
 - **Center before the cosine** (code, small). Subtract the batch mean
   (or a running mean, as DINO does) from the embeddings inside the
   contrastive losses, so a shared offset added later (the attention
@@ -281,10 +284,11 @@ LayerNorm + `encoder_lr` pilot ([2026-10-10_lr_pilot](2026-10-10_lr_pilot/NOTEBO
 
 ### Optimizer
 
-- **LR schedule** (code, small). The trainer has no warmup or decay.
-  Linear warmup over a few hundred steps, then cosine decay, is the
-  default for transformers. It limits the two risky ends: large early
-  steps through random heads, and thrashing late in the run.
+- **LR schedule** (config-only; built as a phase's `lr_schedule:`,
+  `src/training/README.md`). Linear warmup over a few hundred steps, then
+  cosine decay, is the default for transformers. It limits the two risky
+  ends: large early steps through random heads, and thrashing late in the
+  run. Not yet tried in a run.
 - **`head_lr` sweep** (config-only). Because of the near-sign-descent
   effect above, `head_lr` 3e-4 vs. 1e-3 may matter as much as
   `encoder_lr`.
@@ -297,7 +301,8 @@ LayerNorm + `encoder_lr` pilot ([2026-10-10_lr_pilot](2026-10-10_lr_pilot/NOTEBO
   but does not stop all cards sharing one direction. One fix: center
   the pooled ModernBERT features with a running mean before the head,
   as in whitening / "all-but-the-top". Track it with mean pairwise cos
-  (`2026-10-09_model_by_diet/analysis/embedding_scale.py`).
+  (`2026-10-09_model_by_diet/analysis/embedding_scale.py`). Token
+  whitening is built; see "Center the frozen features" above.
 - **Token-level head; thawing ModernBERT's top layers**: see
   `src/encoder_model/TODO.md` and series 3.
 

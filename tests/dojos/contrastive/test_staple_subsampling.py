@@ -33,7 +33,7 @@ def _deck(*card_uuids: UUID) -> GenericDeck:
 
 
 def _table(shares: dict[UUID, float], deck_count: int = 100) -> DocumentFrequency:
-    return DocumentFrequency("v1", deck_count, shares)
+    return DocumentFrequency("v1", "split-a", deck_count, shares)
 
 
 class TestDocumentFrequency:
@@ -41,7 +41,7 @@ class TestDocumentFrequency:
         other = uuid4()
         decks = [_deck(_STAPLE, _STAPLE, _STAPLE), _deck(_STAPLE, other)]
 
-        table = DocumentFrequency.from_decks(decks, "v1")
+        table = DocumentFrequency.from_decks(decks, "v1", "split-a")
 
         assert table.deck_count == 2
         assert table.share_of(_STAPLE) == 1.0
@@ -54,14 +54,14 @@ class TestDocumentFrequency:
 
     def test_an_empty_sample_raises(self) -> None:
         with pytest.raises(ValueError):
-            DocumentFrequency.from_decks([], "v1")
+            DocumentFrequency.from_decks([], "v1", "split-a")
 
     @pytest.mark.parametrize(
         ("deck_count", "share"), [(0, 0.5), (10, 0.0), (10, 1.5), (10, math.nan)]
     )
     def test_validates(self, deck_count: int, share: float) -> None:
         with pytest.raises(ValueError):
-            DocumentFrequency("v1", deck_count, {_STAPLE: share})
+            DocumentFrequency("v1", "split-a", deck_count, {_STAPLE: share})
 
 
 class TestStapleSubsampling:
@@ -89,11 +89,18 @@ class TestStapleSubsampling:
 
 
 class _FakeDealer:
-    """A DeckBoxDealer stand-in: a version and a fixed TRAIN deck list."""
+    """A DeckBoxDealer stand-in: a version, a deck split key and a fixed
+    TRAIN deck list."""
 
-    def __init__(self, decks: list[GenericDeck], version: str | None = "v1") -> None:
+    def __init__(
+        self,
+        decks: list[GenericDeck],
+        version: str | None = "v1",
+        deck_split_key: str = "split-a",
+    ) -> None:
         self.decks = decks
         self.card_binder_version = version
+        self.deck_split_key = deck_split_key
         self.reads = 0
 
     def deck_count(self, split: Split) -> int:
@@ -131,6 +138,32 @@ class TestCachedDocumentFrequency:
         table = cached_document_frequency(new_dealer, cache, 5)
 
         assert table.card_binder_version == "v2"
+
+    def test_a_new_deck_split_recounts(self, tmp_path: Path) -> None:
+        cache = tmp_path / "df.json"
+        old_dealer: Any = _FakeDealer([_deck(_STAPLE)], deck_split_key="split-a")
+        new_dealer: Any = _FakeDealer([_deck(_RARE)], deck_split_key="split-b")
+        cached_document_frequency(old_dealer, cache, 5)
+
+        table = cached_document_frequency(new_dealer, cache, 5)
+
+        assert table.deck_split_key == "split-b"
+        assert table.share_of(_RARE) == 1.0
+
+    def test_a_cache_from_before_deck_split_keys_is_recounted(
+        self, tmp_path: Path
+    ) -> None:
+        cache = tmp_path / "df.json"
+        cache.write_text(
+            '{"card_binder_version": "v1", "deck_count": 1, "shares": {}}',
+            encoding="utf-8",
+        )
+        dealer: Any = _FakeDealer([_deck(_RARE)])
+
+        table = cached_document_frequency(dealer, cache, 1)
+
+        assert dealer.reads == 1
+        assert table.share_of(_RARE) == 1.0
 
     def test_an_unreadable_cache_is_recounted(self, tmp_path: Path) -> None:
         cache = tmp_path / "df.json"

@@ -49,7 +49,9 @@ class _StubDataConstructor:
         self._option_cards = option_cards
         self._pick_index = pick_index
 
-    def build(self, chunk: pd.DataFrame, lookup: CardLookup) -> List[TrainingDatum]:
+    def build(
+        self, chunk: pd.DataFrame, lookup: CardLookup
+    ) -> List[TrainingDatum[int]]:
         return [(self._option_cards, self._pick_index) for _ in range(len(chunk))]
 
 

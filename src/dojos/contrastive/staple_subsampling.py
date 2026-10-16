@@ -10,13 +10,14 @@ the share of the game's decks containing the card. t = inf keeps every
 card (no change); a moderate t thins the staples; a tiny t nearly always
 drops them.
 
-df comes from a deck box's TRAIN split (a fixed, seeded sample of decks,
-read through its DeckBoxDealer) and is cached as a small JSON file under
-data/splits/. The cache key is the box's CardBinder version plus the
-sample size, so a rebuilt dojo reuses it. A box re-minted against a new
-binder version gets recounted. A box re-ingested against the same version,
-or a rebuilt split index, does not: delete the cache file in those cases,
-as you would the split index. The deck box itself is only read.
+df comes from a deck box's TRAIN split (a fixed sample of decks in deck
+uuid order, read through its DeckBoxDealer) and is cached as a small JSON file under
+data/splits/. The cache key is the box's CardBinder version, the holdout's
+deck split (DeckBoxDealer.deck_split_key) and the sample size, so a rebuilt
+dojo reuses it, while a box re-minted against a new binder version or a
+changed deck split gets recounted. A box re-ingested against the same
+version does not: delete the cache file in that case, as you would the
+split index. The deck box itself is only read.
 
 The held-out-card metric uses the same formula for its candidate
 sampling (data_refinement/metrics/generic/held_out_deck_card/
@@ -44,12 +45,15 @@ class DocumentFrequency:
     """The share of a sample of one game's decks that contains each card.
 
     card_binder_version: the CardBinder version the decks were minted
-        against (the cache key). deck_count: decks in the sample (> 0).
+        against. deck_split_key: the HoldoutSpec deck split the TRAIN
+        decks came from (HoldoutSpec.deck_split_key). Both are cache keys.
+        deck_count: decks in the sample (> 0).
     shares: card uuid -> share of the sample's decks containing it, in
         (0, 1]; a card absent from the sample has share 0.
     """
 
     card_binder_version: str
+    deck_split_key: str
     deck_count: int
     shares: Mapping[UUID, float]
 
@@ -63,16 +67,17 @@ class DocumentFrequency:
 
     @classmethod
     def from_decks(
-        cls, decks: Iterable[GenericDeck], card_binder_version: str
+        cls, decks: Iterable[GenericDeck], card_binder_version: str, deck_split_key: str
     ) -> "DocumentFrequency":
         """Count, for each card, the decks that contain it at least once.
 
-        Inputs: decks (a non-empty sample), card_binder_version.
+        Inputs: decks (a non-empty sample), card_binder_version,
+            deck_split_key.
         Output: DocumentFrequency. Side effects: none.
         Exceptions: ValueError if decks is empty.
 
         Example:
-            >>> DocumentFrequency.from_decks([deck_a, deck_b], "v1").share_of(copper)
+            >>> DocumentFrequency.from_decks([deck_a, deck_b], "v1", key).share_of(copper)
             1.0
         """
         containing: dict[UUID, int] = {}
@@ -84,7 +89,7 @@ class DocumentFrequency:
         if not deck_count:
             raise ValueError("cannot measure document frequency over no decks")
         shares = {card: count / deck_count for card, count in containing.items()}
-        return cls(card_binder_version, deck_count, shares)
+        return cls(card_binder_version, deck_split_key, deck_count, shares)
 
     def share_of(self, card_uuid: UUID) -> float:
         """card_uuid's share of decks; 0.0 for a card the sample lacks.
@@ -98,6 +103,7 @@ class DocumentFrequency:
         return json.dumps(
             {
                 "card_binder_version": self.card_binder_version,
+                "deck_split_key": self.deck_split_key,
                 "deck_count": self.deck_count,
                 "shares": {str(card): share for card, share in self.shares.items()},
             }
@@ -117,7 +123,12 @@ class DocumentFrequency:
         """
         raw = json.loads(text)
         shares = {UUID(card): float(share) for card, share in raw["shares"].items()}
-        return cls(str(raw["card_binder_version"]), int(raw["deck_count"]), shares)
+        return cls(
+            str(raw["card_binder_version"]),
+            str(raw["deck_split_key"]),
+            int(raw["deck_count"]),
+            shares,
+        )
 
 
 @dataclass(frozen=True)
@@ -179,11 +190,13 @@ def cached_document_frequency(
     dealer: DeckBoxDealer, cache_path: Path, sample_decks: int
 ) -> DocumentFrequency:
     """dealer's TRAIN document frequency, from cache_path when it matches
-    the box's CardBinder version and sample size, else counted and cached.
+    the box's CardBinder version, the dealer's deck split and the sample
+    size, else counted and cached. A cache file from before deck splits
+    were keyed lacks deck_split_key: it is unreadable here, so recounted.
 
     The sample is the first sample_decks TRAIN decks in the dealer's fixed
-    (seeded) order, or the whole split if smaller, so a recount gives the
-    same table.
+    order (by hash-derived deck uuid, so effectively random), or the whole
+    split if smaller, so a recount gives the same table.
 
     Inputs: dealer, cache_path (a JSON file under data/splits/),
         sample_decks (> 0).
@@ -209,13 +222,14 @@ def cached_document_frequency(
     if (
         cached is not None
         and cached.card_binder_version == version
+        and cached.deck_split_key == dealer.deck_split_key
         and cached.deck_count == expected_count
     ):
         return cached
 
     # Otherwise count a fixed TRAIN sample and cache it
     result = DocumentFrequency.from_decks(
-        _first_train_decks(dealer, sample_decks), version
+        _first_train_decks(dealer, sample_decks), version, dealer.deck_split_key
     )
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(result.to_json(), encoding="utf-8")

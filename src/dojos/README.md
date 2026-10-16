@@ -31,7 +31,9 @@ Card holdout: each dojo is built with a `CardLookup` and a `HoldoutSpec`
 (`src/schema/holdout.py`) and reads cards through one `VisibleCardLookup`
 per split, so a TRAIN example never contains a TEST- or VALIDATION-tier
 card (TEST sees TRAIN+TEST; VALIDATION sees all). Row splits (8/1/1)
-layer under it. They are by row, by deck for contrastive, or by
+layer under it. They are by row, by deck for contrastive (the
+`HoldoutSpec`'s own deck split, `deck_split_of`, so every contrastive dojo
+and evaluation built from one spec agrees on which decks are which), or by
 `DojoConfig.split_group_column` for a metric with several rows per deck
 or kingdom (the held-out-card dojos and four isotropic dojos), so those
 rows never straddle TRAIN and TEST.
@@ -138,9 +140,14 @@ rows never straddle TRAIN and TEST.
   metadata `nocab_split_order: uniform_shuffle`; `splits_exist()` treats
   a file without it as missing, so splits written before this rule are
   rebuilt on the next construction.
-  `DeckBoxDealer` does the same for a `DeckBox`: a seeded, exact-ratio
-  split assignment kept in its own small SQLite index, and fixed-size
-  deck samples per split read straight from SQLite.
+  `DeckBoxDealer` does the same for a `DeckBox`: each deck's split is the
+  `HoldoutSpec`'s (`deck_split_of`, a hash, so approximate ratios and
+  stable as the box grows), cached in its own small SQLite index that is
+  rebuilt when the spec's deck split or the box's deck set changes (the
+  contrastive recipe names it `data/splits/contrastive/<dojo>.<split
+  tag>.db`, so runs under different holdouts keep separate files), and
+  fixed-size deck samples per split read straight from SQLite (fixed order:
+  by deck uuid).
   `GameBalancedChunkReader` reads one split file as a pass of rows drawn
   evenly across the values of a column (a game), optionally dropping rows
   first (`keep_row`); a dojo returns it from `GenericDojo._chunks` to
@@ -156,7 +163,9 @@ rows never straddle TRAIN and TEST.
   augmentations are one train-only `PerGameMod` too. TRAIN rows are drawn
   evenly across games (and the OTHER rows dropped first), through
   `GenericDojo._chunks`, for training and for the loss calibration alike,
-  so TRAIN passes are random; TEST and VALIDATION are read in file order.
+  so uncapped TRAIN passes are random (a capped one, such as the
+  calibration sample, restarts from the seed and reads the same rows each
+  time); TEST and VALIDATION are read in file order.
   Its `RarityTierDataConstructor` drops OTHER rows. Catalog key
   `cross_game.rarity_tier`, built by `MultiGameCardDojoRecipe`.
 - **`contrastive/`** - `ContrastiveDojo`, below.
@@ -317,8 +326,9 @@ Files:
   kept with probability `min(1, sqrt(t / df))` (word2vec subsampling),
   where `df` is the card's share of decks (`DocumentFrequency`).
   `df` is counted once over the first 20,000 TRAIN decks, in the
-  dealer's seeded order. It is cached as JSON under `data/splits/` and
-  keyed by the box's CardBinder version and the sample size. The deck box
+  dealer's fixed (deck uuid) order. It is cached as JSON under
+  `data/splits/` and keyed by the box's CardBinder version, the dealer's
+  deck split key and the sample size. The deck box
   is only read. A deck thinned below what its style needs is skipped. No
   subsampling (`t = inf`, the default) is the old path and draws nothing
   extra from the RNG. A run config's `staple_subsampling:` sets `t` per
