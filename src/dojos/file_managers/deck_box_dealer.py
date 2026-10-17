@@ -399,9 +399,9 @@ class DeckBoxDealer:
             yield UUID(row["deck_uuid"])
 
     def _decks_by_uuids(self, uuids: list[UUID]) -> list[GenericDeck]:
-        """Look up a group of decks by uuid, in order, via
-        self._deck_box.get_by_uuid() - never a join against DeckBox's
-        internal schema.
+        """Look up a group of decks by uuid, in order, via one
+        self._deck_box.get_by_uuids() call - never a join against
+        DeckBox's internal schema.
 
         Private helper - single consumer is decks_for().
         Inputs: uuids. Output: the decks, in uuids' order.
@@ -409,8 +409,7 @@ class DeckBoxDealer:
         Exceptions: RuntimeError if a uuid is no longer in deck_box.
         """
         result: list[GenericDeck] = []
-        for nocab_uuid in uuids:
-            deck = self._deck_box.get_by_uuid(nocab_uuid)
+        for nocab_uuid, deck in zip(uuids, self._deck_box.get_by_uuids(uuids)):
             if deck is None:
                 raise RuntimeError(
                     f"DeckBoxDealer: {nocab_uuid} no longer resolves in "
