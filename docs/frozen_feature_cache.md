@@ -39,6 +39,20 @@ encoder (ModernBERT) stops re-encoding the same card text every step.
 - **Cache technology:** undecided. Possibly experiment with a few options
   later.
 
+## Plan
+
+**Step 1: define the cache store interface.** A small protocol that the
+model talks to, so the eviction/admission policy and the storage
+technology can each be swapped without touching the model:
+
+- `get_many(keys) -> (features, miss_mask)`: one batched lookup.
+- `put_many(keys, features)`: one batched insert; the store's policy
+  decides what is admitted or evicted.
+
+Candidate policies (always admit, admit on second hit, freeze when
+full) and backends (plain dict, tensor slab on GPU or pinned CPU,
+memmap/LMDB on disk) plug in behind it. Later steps: to be discussed.
+
 ## Relevant code today
 
 **Model** (`src/encoder_model/`):
