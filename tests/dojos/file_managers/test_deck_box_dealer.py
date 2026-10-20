@@ -343,3 +343,21 @@ class TestDecksForSplit:
         }
 
         assert first == second
+
+    def test_groups_hold_each_decks_full_content(self, tmp_path: Path) -> None:
+        box, uuids = _box_with_decks(6)
+        dealer = _dealer(box, tmp_path, _holdout(deck_split_ratios=(1, 0, 0)))
+
+        dealt = [deck for group in dealer.training_decks(3) for deck in group]
+
+        assert sorted(dealt, key=lambda deck: str(deck.nocab_uuid)) == [
+            box.get_by_uuid(nocab_uuid) for nocab_uuid in sorted(uuids, key=str)
+        ]
+
+    def test_a_deck_deleted_after_indexing_raises(self, tmp_path: Path) -> None:
+        box, uuids = _box_with_decks(4)
+        dealer = _dealer(box, tmp_path, _holdout(deck_split_ratios=(1, 0, 0)))
+        box.delete(uuids[0])
+
+        with pytest.raises(RuntimeError, match="no longer resolves"):
+            list(dealer.training_decks(4))

@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from src.data_refinement.deck_box import _deck_tables
 from src.data_refinement.deck_box.deck_box import DeckBatchLostError, DeckBox
 from src.schema.card import GenericDeck, Provenance
 from src.schema.data_source import DataSource
@@ -202,6 +203,63 @@ class TestGetByUuid:
         box = DeckBox()
 
         assert box.get_by_uuid(uuid4()) is None
+
+
+class TestGetByUuids:
+    def test_matches_get_by_uuid_in_input_order(self) -> None:
+        box = DeckBox()
+        repeated = uuid4()
+        first = _deck("Burn", [repeated, uuid4(), repeated, uuid4()])
+        second = _deck("Control", [uuid4()], provenance=_provenance())
+        box.create(first)
+        box.create(second)
+        missing = uuid4()
+
+        found = box.get_by_uuids([second.nocab_uuid, missing, first.nocab_uuid])
+
+        assert found == [
+            box.get_by_uuid(second.nocab_uuid),
+            None,
+            box.get_by_uuid(first.nocab_uuid),
+        ]
+        assert found[2] is not None
+        assert sorted(found[2].card_nocab_uuids, key=str) == sorted(
+            first.card_nocab_uuids, key=str
+        )
+
+    def test_empty_input(self) -> None:
+        assert DeckBox().get_by_uuids([]) == []
+
+    def test_a_repeated_uuid_yields_distinct_objects(self) -> None:
+        box = DeckBox()
+        deck = _deck("Burn", [uuid4()])
+        box.create(deck)
+
+        once, twice = box.get_by_uuids([deck.nocab_uuid, deck.nocab_uuid])
+
+        assert once == twice == deck
+        assert once is not twice
+        assert once.card_nocab_uuids is not twice.card_nocab_uuids
+
+    def test_more_uuids_than_one_query_holds(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(_deck_tables, "_MAX_IN_PARAMETERS", 2)
+        box = DeckBox()
+        decks = [_deck(f"deck {index}", [uuid4(), uuid4()]) for index in range(5)]
+        for deck in decks:
+            box.create(deck)
+
+        assert box.get_by_uuids([deck.nocab_uuid for deck in decks]) == decks
+
+    def test_reads_a_saved_box(self, tmp_path: Path) -> None:
+        box = DeckBox()
+        deck = _deck("Burn", [uuid4(), uuid4()])
+        box.create(deck)
+        path = tmp_path / "decks.db"
+        box.save(path, GameId.MTG, "binder-v1")
+
+        assert DeckBox.load([path]).get_by_uuids([deck.nocab_uuid]) == [deck]
 
 
 class TestAllUuids:

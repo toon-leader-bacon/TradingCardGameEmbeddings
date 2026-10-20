@@ -121,6 +121,15 @@ Proposed experiments:
   results match an uncached run.
 - [ ] **E. Seeds** of `single_contrastive`, `multi_contrastive` and
   `single_mixed`, before any model or diet ranking is trusted.
+- [ ] **F. A finite pool of augmentations (offline augmentation).**
+  Instead of a fresh random seed for noise mods (key shuffle, random key
+  mask) on every draw, each card gets one of K fixed seeds. Noise mods
+  then become cacheable: K text versions per card, each encoded once
+  (`docs/frozen_feature_cache.md`). The question: how small can K be
+  before the regularization benefit is lost? Arms: K = 1, 2, 4, 8, 16
+  against fresh-per-draw and against mods off, same diet and steps.
+  Needs D's cache, plus a per-card seed pool in the mods
+  (`src/dojos/mods/`).
 - [ ] Contrastive-only at 10k steps, to separate "metric hurts" from
   "mixed gets half the contrastive steps".
 - [ ] Probe the per-round checkpoints: is the trade between deck AUC and

@@ -93,7 +93,7 @@ import sqlite3
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import ClassVar, Iterator
+from typing import ClassVar, Iterator, Sequence
 from uuid import UUID
 
 from src.data_refinement.deck_box._deck_tables import (
@@ -409,6 +409,34 @@ class DeckBox:
         if deck_row is None:
             return None
         return deck_from_row(deck_row, self._tables.deck_cards(nocab_uuid))
+
+    def get_by_uuids(self, nocab_uuids: Sequence[UUID]) -> list[GenericDeck | None]:
+        """get_by_uuid() for many uuids at once, in two queries per 500
+        uuids rather than two per uuid.
+
+        Inputs:
+            nocab_uuids: identities to look up; duplicates allowed.
+        Output: one entry per input, same order: a freshly-constructed
+            GenericDeck (a distinct object even for a repeated uuid), or
+            None where no deck has that nocab_uuid.
+        Side effects: none.
+        Exceptions: none.
+
+        Example:
+            >>> box.get_by_uuids([uuid_a, uuid_b])
+            [GenericDeck(...), None]
+        """
+        uuids = list(nocab_uuids)
+        rows = self._tables.deck_rows_by_uuids(uuids)
+        cards = self._tables.deck_cards_by_uuids(list(rows))
+        return [
+            (
+                deck_from_row(rows[nocab_uuid], list(cards.get(nocab_uuid, [])))
+                if nocab_uuid in rows
+                else None
+            )
+            for nocab_uuid in uuids
+        ]
 
     def all_uuids(self, source_game: GameId | None = None) -> Iterator[UUID]:
         """Every nocab_uuid currently stored in this box.
