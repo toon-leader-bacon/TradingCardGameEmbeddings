@@ -24,8 +24,9 @@ The MVP must not have to be rewritten to add them.
 
 **Scope:**
 - Cut point: after pooling (one fixed-size vector per card).
-- Workload: contrastive dojo diets with mods off (see "Mods" below), plus
-  TEST and evaluation passes for any dojo.
+- Workload: contrastive dojo diets, plus TEST and evaluation passes for
+  any dojo. Mods are supported from the start (see "Mods" below), but the
+  first runs use mods off; modded diets come in around v1.2.
 - One tier: VRAM, with a configurable size.
 - Both models: the cache sits behind `CardEmbeddingPipeline.embed()`,
   which the single-card and multi-card models both call.
@@ -90,10 +91,12 @@ The MVP must not have to be rewritten to add them.
     synchronously), and warms their cards. The lookahead depth is a
     config knob. Start with a thread and a bounded queue; move to
     processes only if the GIL limits it.
-- **v1.2 Swappable eviction and admission policies**, for experiments:
-  always admit, admit on second hit (TinyLFU-style), freeze when full,
-  LRU. These matter most for contrastive diets, whose card use is heavily
-  skewed (staples in most decks, a long tail of rare cards).
+- **v1.2 Swappable eviction and admission policies, and modded diets**,
+  for experiments: always admit, admit on second hit (TinyLFU-style),
+  freeze when full, LRU. These matter most for contrastive diets, whose
+  card use is heavily skewed (staples in most decks, a long tail of rare
+  cards), and for modded diets, where the deterministic-mod flag keeps
+  noise texts out of the cache.
 - **v1.3 More cut points:** after BERT (token states) and after token
   whitening. Needs ragged storage (one flat buffer plus offsets per
   card) and makes the RAM and disk tiers essential (roughly 400 KB per
@@ -112,20 +115,24 @@ The MVP must not have to be rewritten to add them.
 
 ## Mods
 
+- **Supported in v1 for free.** The key is a hash of the text, so a
+  modded card is just another key: one entry per distinct (card, mod)
+  text. No mod-specific cache code is needed for correctness.
 - Deterministic mods (required task masks, `MaskTargetKeyMod`) give a
-  fixed text per card, so each version is cached like any other card:
-  one entry per (card, mod) text.
+  fixed text per card, so each version hits after its first encode.
 - Randomized noise mods (key shuffle, random key mask) give nearly
-  unique text every draw. Those texts always miss. Mods should declare
-  whether they are deterministic, so a card touched by a random mod is
-  encoded without being admitted to the cache.
-- **The MVP premise needs a config change.** Default mods apply to every
+  unique text every draw. Those texts always miss, and under an
+  always-admit policy they fill the cache with entries never read again:
+  correct, but wasteful. The fix is an efficiency feature, not a
+  correctness one (v1.2): mods declare whether they are deterministic,
+  and a card touched by a random mod is encoded without being admitted.
+- **The first runs need a config change.** Default mods apply to every
   dojo, contrastive ones included (`src/dojos/augmentation_defaults.py`),
-  and r2 configs had no `mods:` section, so they were on. The MVP's
-  contrastive diet therefore needs mods off (`mods:` per dojo). Those
-  defaults mask each game's deck-defining field (faction, set, color) so
-  same-deck positives cannot be solved from that field alone. Turning
-  them off may make contrastive too easy; experiment F (K fixed
+  and r2 configs had no `mods:` section, so they were on. The first
+  cached contrastive runs therefore set mods off (`mods:` per dojo).
+  Those defaults mask each game's deck-defining field (faction, set,
+  color) so same-deck positives cannot be solved from that field alone.
+  Turning them off may make contrastive too easy; experiment F (K fixed
   augmentations per card) would keep them and stay cacheable.
 - Heavy noise mods and the cache work against each other: the training
   README should say so.
