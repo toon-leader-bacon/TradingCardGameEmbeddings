@@ -78,6 +78,34 @@ The MVP must not have to be rewritten to add them.
    prototype showed). This is a test, and experiment D checks it on a
    real run.
 
+## Filling the VRAM tier
+
+Three ways, from simplest to most involved; all go through `put_many`.
+
+1. **Fill on demand (MVP default).** A miss in `embed()` is encoded and
+   admitted. With no prior loading, the cache warms itself as training
+   goes; the policy decides what stays. When everything fits, every card
+   costs one BERT encode the first time it is seen, then always hits.
+2. **Warm up front (MVP).** `model.warm(cards)` encodes a known set (a
+   game, a card-binder query) in large batches before training. This is
+   PaGraph's static pre-fill of hot nodes.
+3. **Prefetch with lookahead (v1.1).** The prefetch worker already holds
+   the next k built batches, so it knows exactly which cards they need;
+   the dojos do not have to predict anything. Before batch i+k is used,
+   its missing keys are brought in: copied from the RAM or disk tier when
+   present there, otherwise encoded by BERT in one large batch.
+   - Copies are batched and use pinned memory with `non_blocking=True`,
+     ideally on a separate CUDA stream, so they overlap the current
+     step instead of stalling between steps.
+   - Prefetched entries are pinned until the batch that needs them has
+     run, so eviction cannot remove them first. The policy chooses
+     victims only among unpinned entries. Never evicting keys the
+     lookahead window still needs is a cheap approximation of Belady's
+     optimal policy.
+   - Policies still matter with perfect lookahead: they decide what
+     stays in VRAM across windows (staples) instead of being copied in
+     again.
+
 ## After the MVP
 
 - **v1.1 CPU RAM and disk tiers, plus prefetch.** Critical; built right
