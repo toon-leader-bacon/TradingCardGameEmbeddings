@@ -54,12 +54,17 @@ class CardShelf:
         return MultiGameCardLookup({game: self.card_binder(game) for game in games})
 
     def deck_box(self, path: Path) -> DeckBox:
-        """The DeckBox at path, loaded on first request.
+        """The DeckBox at path, opened read-only on first request.
+
+        Training never writes a deck box, so a stray write through the
+        returned box raises instead of changing the file. Its connection
+        may be read from any one thread at a time (see
+        DeckBox.open_read_only), so dojos built here can be read by a
+        prefetch worker.
 
         Inputs: path (Path). Output: DeckBox.
-        Side effects: reads the deck box on first call per path.
-        Exceptions: FileNotFoundError if path does not exist (DeckBox.load
-            would silently return an empty box).
+        Side effects: opens the deck box on first call per path.
+        Exceptions: FileNotFoundError if path does not exist.
 
         Example:
             >>> CardShelf().deck_box(STS_GG_DECK_BOX_PATH)
@@ -70,5 +75,5 @@ class CardShelf:
                     f"no deck box at {path}; run scripts/run_metrics.py for "
                     "the metric source that writes it"
                 )
-            self._deck_boxes[path] = DeckBox.load([path])
+            self._deck_boxes[path] = DeckBox.open_read_only(path)
         return self._deck_boxes[path]

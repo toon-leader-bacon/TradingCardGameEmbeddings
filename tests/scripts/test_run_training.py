@@ -9,14 +9,21 @@ import torch
 import yaml
 
 from src.encoder_model.enrichment.token_whitening import TokenWhitening
+from src.encoder_model.feature_cache.feature_storage_dtype import FeatureStorageDtype
 from src.encoder_model.pooling.attention_pooling import AttentionPooling
 from src.encoder_model.pooling.mean_pooling import MeanPooling
 from src.encoder_model.pooling.transformer_pooling import TransformerPooling
 from src.encoder_model.whitening.whitening_stats import WhiteningStats
+from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
+from src.training.diet.prefetching_batch_streams import NO_BATCH_WARMING
+from src.training.plan import HardwareLimits
 from src.training.model_spec import (
     AttentionPoolingSpec,
     EmbeddingHeadKind,
+    DiskTierSpec,
+    FeatureCacheSpec,
+    MemoryTierSpec,
     MeanPoolingSpec,
     ModelSpec,
     TokenWhiteningSpec,
@@ -202,13 +209,13 @@ def test_the_run_directory_records_the_config(tmp_path: Path) -> None:
 
 
 def test_cpu_is_always_an_available_device() -> None:
-    _load_script()._require_device(torch.device("cpu"))
+    _load_script().require_device(torch.device("cpu"))
 
 
 @pytest.mark.skipif(torch.cuda.is_available(), reason="needs a machine without a GPU")
 def test_cuda_without_a_gpu_is_refused() -> None:
     with pytest.raises(RuntimeError, match="no GPU"):
-        _load_script()._require_device(torch.device("cuda"))
+        _load_script().require_device(torch.device("cuda"))
 
 
 def test_every_card_costs_one() -> None:
@@ -242,3 +249,121 @@ def test_a_run_without_whitening_records_its_config_unchanged(tmp_path: Path) ->
     assert script._with_run_whitening_stats(document, config) is document
     script._copy_whitening_stats(config)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_a_feature_cache_spec_attaches_a_sized_cache() -> None:
+    script = _load_script()
+    cache_spec = FeatureCacheSpec(
+        storage_dtype=FeatureStorageDtype.FP16, vram=MemoryTierSpec(1)
+    )
+    spec = ModelSpec(
+        EmbeddingHeadKind.LINEAR_PROJECTION, "ckpt", 16, feature_cache=cache_spec
+    )
+    cache = script.build_card_pipeline(spec, FakeTextEncoder()).feature_cache
+    assert cache is not None
+    # 1 MiB of HIDDEN-wide fp16 rows
+    assert cache.stats().tiers[0].capacity_rows == 2**20 // (HIDDEN * 2)
+    assert cache.fingerprint.pooling == "mean"
+
+
+def test_no_feature_cache_spec_builds_no_cache() -> None:
+    script = _load_script()
+    spec = ModelSpec(EmbeddingHeadKind.LINEAR_PROJECTION, "ckpt", 16)
+    assert script.build_card_pipeline(spec, FakeTextEncoder()).feature_cache is None
+
+
+class _WarmRecorder:
+    """Fake model: records warm() calls and reports no cache stats."""
+
+    def __init__(self) -> None:
+        self.warmed: list[tuple[int, str]] = []
+
+    def warm(self, cards: list[Any], precision: str) -> None:
+        self.warmed.append((len(cards), precision))
+
+    def feature_cache_stats(self) -> None:
+        return None
+
+
+class _FakeShelf:
+    """Fake CardShelf: every game's binder holds `count` placeholder cards."""
+
+    def __init__(self, count_by_game: dict[GameId, int]) -> None:
+        self._count_by_game = count_by_game
+
+    def card_binder(self, game: GameId) -> Any:
+        count = self._count_by_game[game]
+        return SimpleNamespace(all_cards=lambda source_game: [object()] * count)
+
+
+def test_warm_feature_cache_warms_every_listed_game_at_the_run_precision() -> None:
+    script = _load_script()
+    model = _WarmRecorder()
+    config = SimpleNamespace(
+        warm_feature_cache=(GameId.GWENT, GameId.MTG),
+        limits=SimpleNamespace(precision="fp16"),
+    )
+    shelf = _FakeShelf({GameId.GWENT: 3, GameId.MTG: 5})
+    script.warm_feature_cache(model, config, shelf)
+    assert model.warmed == [(3, "fp16"), (5, "fp16")]
+
+
+def test_warm_feature_cache_without_games_does_nothing() -> None:
+    script = _load_script()
+    model = _WarmRecorder()
+    config = SimpleNamespace(
+        warm_feature_cache=(), limits=SimpleNamespace(precision="fp16")
+    )
+    script.warm_feature_cache(model, config, _FakeShelf({}))
+    assert model.warmed == []
+
+
+def test_a_disk_tier_needs_a_text_encoder_with_a_revision(tmp_path: Path) -> None:
+    script = _load_script()
+    disk = DiskTierSpec(tmp_path / "f.sqlite", 1)
+    spec = ModelSpec(
+        EmbeddingHeadKind.LINEAR_PROJECTION,
+        "ckpt",
+        16,
+        feature_cache=FeatureCacheSpec(disk=disk),
+    )
+    # FakeTextEncoder has no source, so its rows may not persist
+    with pytest.raises(ValueError, match="known revision"):
+        script.build_card_pipeline(spec, FakeTextEncoder())
+
+
+def test_closing_feature_cache_closes_even_when_the_body_raises() -> None:
+    script = _load_script()
+    closed: list[bool] = []
+    model = SimpleNamespace(close_feature_cache=lambda: closed.append(True))
+    with pytest.raises(RuntimeError):
+        with script.closing_feature_cache(model):
+            raise RuntimeError("boom")
+    assert closed == [True]
+
+
+def _model_with(cache: object) -> Any:
+    return SimpleNamespace(card_pipeline=SimpleNamespace(feature_cache=cache))
+
+
+def test_batch_warmer_for_warms_nothing_without_prefetch_or_without_a_cache() -> None:
+    script = _load_script()
+    cached = _model_with(SimpleNamespace())
+    off = HardwareLimits(max_batch_cost=8, precision="fp16")
+    on = HardwareLimits(max_batch_cost=8, precision="fp16", prefetch_depth=4)
+    assert script.batch_warmer_for(cached, off) is NO_BATCH_WARMING
+    assert script.batch_warmer_for(_model_with(None), on) is NO_BATCH_WARMING
+
+
+def test_batch_warmer_for_warms_a_cached_model_and_checks_its_precision() -> None:
+    script = _load_script()
+    fingerprint = SimpleNamespace(compute_precision="fp16")
+    model = _model_with(SimpleNamespace(fingerprint=fingerprint))
+    warmer = script.batch_warmer_for(
+        model, HardwareLimits(max_batch_cost=8, precision="fp16", prefetch_depth=4)
+    )
+    assert warmer is not NO_BATCH_WARMING
+    with pytest.raises(ValueError, match="built for fp16"):
+        script.batch_warmer_for(
+            model, HardwareLimits(max_batch_cost=8, precision="fp32", prefetch_depth=4)
+        )

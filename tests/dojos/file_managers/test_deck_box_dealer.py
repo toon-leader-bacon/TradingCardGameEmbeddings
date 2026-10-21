@@ -1,4 +1,5 @@
 import sqlite3
+import threading
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -361,3 +362,27 @@ class TestDecksForSplit:
 
         with pytest.raises(RuntimeError, match="no longer resolves"):
             list(dealer.training_decks(4))
+
+
+class TestReadFromAnotherThread:
+    def test_a_dealer_built_on_one_thread_deals_on_another(
+        self, tmp_path: Path
+    ) -> None:
+        # The prefetch worker's case: built here, read on a worker thread
+        memory_box, uuids = _box_with_decks(5)
+        memory_box.save(tmp_path / "mtg.db", GameId.MTG, "binder-v1")
+        box = DeckBox.open_read_only(tmp_path / "mtg.db")
+        dealer = _dealer(box, tmp_path, _holdout(deck_split_ratios=(1, 0, 0)))
+        dealt: list[UUID] = []
+        counted: list[int] = []
+
+        def deal() -> None:
+            counted.append(dealer.deck_count(Split.TRAIN))
+            dealt.extend(_dealt_uuids(dealer, Split.TRAIN))
+
+        worker = threading.Thread(target=deal)
+        worker.start()
+        worker.join(timeout=5)
+
+        assert counted == [5]
+        assert sorted(dealt) == sorted(uuids)

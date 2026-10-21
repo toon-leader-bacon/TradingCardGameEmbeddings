@@ -84,10 +84,13 @@ class FakeDojo:
         self._baseline = baseline
         self.unusable_baseline = unusable_baseline
         self.head_device: torch.device | None = None
+        self.train_requests = 0  # batches(TRAIN) calls, failed ones included
 
     def batches(
         self, split: Split, budget: BatchBudget, max_examples: int | None = None
     ) -> Iterator[DojoBatch]:
+        if split is Split.TRAIN:
+            self.train_requests += 1
         if self._fail == split.value:
             raise RuntimeError(f"{self.name} cannot serve {split}")
         for index in range(self._n_batches):

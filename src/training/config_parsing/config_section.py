@@ -8,9 +8,11 @@ other config_parsing/ modules).
 
 import dataclasses
 import math
+from enum import StrEnum
 from typing import Any, Callable, Literal, Mapping, TypeVar, cast, get_origin
 
 _T = TypeVar("_T")
+_ChoiceT = TypeVar("_ChoiceT", bound=StrEnum)
 
 
 class ConfigSection:
@@ -67,6 +69,31 @@ class ConfigSection:
         if key not in self._raw:
             return default
         return self.required(key, expected_type)
+
+    def optional_choice(
+        self, key: str, choices: type[_ChoiceT], default: _ChoiceT
+    ) -> _ChoiceT:
+        """The string at key read as one of a StrEnum's values, or default
+        when key is absent.
+
+        Inputs: key, choices (the StrEnum), default.
+        Output: the matching member, or default.
+        Side effects: records key as read.
+        Exceptions: ValueError naming key's location and the valid values,
+            for a non-string or a value no member has.
+
+        Example:
+            >>> section.optional_choice("cut", FeatureCut, FeatureCut.POOLED)
+            <FeatureCut.POOLED: 'pooled'>
+        """
+        text = self.optional(key, str, default.value)
+        try:
+            return choices(text)
+        except ValueError:
+            wanted = [choice.value for choice in choices]
+            raise ValueError(
+                f"{self.location_of(key)} is {text!r}, want one of {wanted}"
+            ) from None
 
     def required_str_list(self, key: str) -> tuple[str, ...]:
         """The list of strings at key.

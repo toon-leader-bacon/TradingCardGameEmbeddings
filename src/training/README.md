@@ -81,10 +81,49 @@ Top level:
   (`HoldoutSpec.card_tier_key`; the deck split does not matter) before any
   dojo is built, and copies the stats file into the run directory as
   `whitening_stats.pt`; the recorded `run_config.yaml` points at that
-  copy.
-- [model_spec.py](model_spec.py): `ModelSpec` and the pooling, enrichment
-  and group-attention specs inside it, the frozen form of the `model:`
-  section above.
+  copy. An optional `model.feature_cache:` caches each card text's
+  pooled vector, so the frozen stages run once per distinct text
+  (`../encoder_model/README.md`):
+
+  ```yaml
+  feature_cache:
+    storage_dtype: fp16                       # fp32 (default) | fp16 | bf16
+    vram: {capacity_mib: 512, policy: lru}    # lru | fifo | lfu | fill_until_full
+    ram:  {capacity_mib: 4096, admission: first_offer}  # | second_offer
+    disk: {path: data/feature_cache/features.sqlite, capacity_mib: 20480,
+           write: warm_only}                  # warm_only | all
+  ```
+
+  - An empty section means a single 512 MiB VRAM tier. Naming any tier
+    gives exactly the tiers named.
+  - It needs `pooling: {kind: mean}`, because attention and transformer
+    pooling are trainable.
+  - A disk tier needs a Hugging Face checkpoint (one with a commit
+    hash). The disk stores only warm-ups unless `write: all`.
+  - The top-level `warm_feature_cache: [gwent, mtg]` (it requires the
+    cache) encodes every card of those games before the first step, at
+    `hardware.precision`, at roughly 200 cards/s on the RX 6800 (under
+    a second when they are already on disk).
+  - `scripts/warm_feature_cache.py <config>` does the same without
+    training, to fill the disk.
+  - The driver logs each tier's totals after warming and after training,
+    and closes the cache however the run ends.
+  - `policy` picks a memory tier's eviction (`fifo` suits the RAM tier,
+    which never sees VRAM's hits), and `admission: second_offer` stores
+    a text only the second time it misses.
+  - Random mods (key shuffle, random key mask, weighted field mask)
+    stamp the cards they change as do-not-cache: those texts are encoded
+    every time and never stored, so cached runs can keep their default
+    mods, and `write: all` is safe with them on.
+- [model_spec.py](model_spec.py): `ModelSpec` and the pooling, enrichment,
+  feature-cache and group-attention specs inside it, the frozen form of
+  the `model:` section above. `pooling_label(spec)` gives a pooling's
+  stable name for a feature cache fingerprint.
+- [feature_cache_assembly.py](feature_cache_assembly.py): a
+  `FeatureCacheSpec` -> the `PooledFeatureCache` it describes.
+  `build_fingerprint` names the frozen stages' rows, and
+  `assemble_feature_cache` chains the VRAM, RAM and disk tiers it sets.
+  `scripts/run_training.py`'s `build_card_pipeline` calls both.
 - [config_parsing/](config_parsing/): the parsers `run_config.py` delegates
   to. `config_section.py` holds `ConfigSection`, the typed, key-checked
   reader of one mapping (every getter records its key, so unread keys
@@ -208,7 +247,7 @@ that overfit before saturating stays out instead of flip-flopping.
 sequenceDiagram
     participant T as Trainer
     participant S as DietSampler
-    participant B as DojoBatchStream
+    participant B as BatchFeed
     participant M as Encoder model
     participant D as Dojo
     participant E as evaluate_split_losses
@@ -216,13 +255,14 @@ sequenceDiagram
     participant C as Checkpointer / Listeners
 
     loop each Phase
-        T->>T: open phase (optimizer, tracker, sampler, streams)
+        T->>T: open phase (optimizer, tracker, sampler, batch feed)
         loop each Round (until phase_done or max_rounds)
             T->>K: active_dojo_names()
-            loop steps_per_round
-                T->>S: next_dojo(active)
-                S-->>T: dojo
-                T->>B: next_batch()
+            T->>S: next_dojo(active) x steps_per_round
+            S-->>T: round schedule
+            T->>B: begin_round(schedule)
+            loop each scheduled step
+                T->>B: next_batch(dojo.name)
                 B->>D: batches(TRAIN, budget)
                 B-->>T: batch
                 T->>M: model(batch.inputs)
@@ -230,6 +270,7 @@ sequenceDiagram
                 T->>D: compute_loss(embeddings, batch)
                 D-->>T: loss (backward + optimizer step)
             end
+            T->>B: end_round() (worker idle)
             T->>E: TEST losses, ALL dojos
             E-->>T: per-dojo loss
             T->>K: record_round(losses)
@@ -241,7 +282,21 @@ sequenceDiagram
 
 Points worth knowing:
 
-- The diet is re-decided only at round boundaries, from the ACTIVE dojos.
+- The diet is re-decided only at round boundaries, from the ACTIVE dojos:
+  each round's dojo order is drawn up front as a `RoundSchedule`. A
+  quarantine mid-round redraws the rest of the round.
+- Batches come from a `BatchFeed` (`diet/batch_feed.py`), one per phase,
+  in schedule order (see `diet/README.md`, "Prefetch").
+  - With `hardware.prefetch_depth: N` (default 0), a worker thread builds
+    the next N scheduled steps while the GPU trains.
+    `scripts/run_training.py` passes a `batch_warmer` that pins and warms
+    their cards in the model's feature cache, if it has one.
+  - The feed's round ends before each evaluation; the worker never
+    builds past a round, so it is already idle. Runs are reproducible
+    across depths.
+  - The feed is closed when the phase ends.
+  - A feed error (a dead worker, a call out of schedule order) ends the
+    run early ("batch feed failed"), never blaming a dojo.
 - One `BatchBudget` (from `HardwareLimits.max_batch_cost` and `cost_of`)
   is passed to every dojo, so no dojo owns a batch size.
 - Held-out dojos (`TrainingPlan.held_out_dojos`) are evaluated every round
@@ -294,7 +349,7 @@ Points worth knowing:
   rollback to the best checkpoint after divergence.
 - Not built: gradient accumulation, GradCache, several tasks per step,
   per-dojo step size on the shared encoder, staged partial unfreezing,
-  cached card encodings while the LM is frozen, token-aware `cost_of`,
+  token-aware `cost_of`,
   saving `GradScaler` state for resume, Hugging Face export.
 
 ## How to run

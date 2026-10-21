@@ -42,13 +42,12 @@ class MultiCardModel(CardEncoderModel):
         Exceptions: AssertionError from torch if card_pipeline.output_dim
             is not divisible by num_heads.
         """
-        super().__init__()
         # Dependency injection, the same seam as SingleCardModel: the
         # card pipeline turns each card into a base embedding
         # (card_pipeline.output_dim wide). self_attention below then lets
         # every card in a group attend to every other card, at that same
         # width: the pipeline is the one source of the embedding size.
-        self.card_pipeline: CardEmbeddingPipeline = card_pipeline
+        super().__init__(card_pipeline)
         width = card_pipeline.output_dim
 
         encoder_layer = nn.TransformerEncoderLayer(

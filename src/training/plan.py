@@ -377,13 +377,23 @@ class HardwareLimits:
         "fp16" also scales the loss with a GradScaler so small gradients
         do not underflow; "bf16" has float32's range and needs none. Pick
         by hardware: the RX 6800 runs fp16 about 3x faster than bf16.
+    prefetch_depth: scheduled steps whose batches a worker thread builds
+        ahead of the trainer while the GPU trains, pinning and warming
+        their cards in the feature cache when the model has one
+        (src/training/diet/README.md, "Prefetch"). 0, the default,
+        builds each batch on the training thread when needed. The worker
+        never builds past a round, so runs are reproducible across
+        depths.
     """
 
     max_batch_cost: int
     precision: Precision = "fp32"
+    prefetch_depth: int = 0
 
     def __post_init__(self) -> None:
         if self.max_batch_cost < 1:
             raise ValueError("max_batch_cost must be >= 1")
         if self.precision not in get_args(Precision):
             raise ValueError(f"precision must be one of {get_args(Precision)}")
+        if self.prefetch_depth < 0:
+            raise ValueError("prefetch_depth must be >= 0")

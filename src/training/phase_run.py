@@ -4,9 +4,9 @@ from dataclasses import dataclass
 
 import torch
 
+from src.training.diet.batch_feed import BatchFeed
 from src.training.diet.diet_sampler import DietSampler
 from src.training.diet.dojo_fault_ledger import DojoFaultLedger
-from src.training.diet.dojo_batch_stream import DojoBatchStream
 from src.training.loss_weighting import LossWeighting
 from src.training.plan import Phase
 from src.training.diet.saturation_tracker import SaturationTracker
@@ -19,7 +19,8 @@ class PhaseRun:
     optimizer: encoder (if trainable) at encoder_lr + phase dojos' heads at head_lr.
     tracker: saturation state of the phase's dojos.
     sampler: the phase's diet policy.
-    streams: dojo name -> endless TRAIN batches.
+    feed: the phase's endless TRAIN batches by dojo name (direct or
+        prefetched); the Trainer closes it when the phase ends.
     faults: failure counts and dojo quarantine.
     scaler: fp16 loss scaler (a disabled pass-through at other precisions);
         one per phase, like the optimizer it steps.
@@ -34,7 +35,7 @@ class PhaseRun:
     optimizer: torch.optim.Optimizer
     tracker: SaturationTracker
     sampler: DietSampler
-    streams: dict[str, DojoBatchStream]
+    feed: BatchFeed
     faults: DojoFaultLedger
     scaler: torch.amp.GradScaler
     weighting: LossWeighting | None

@@ -125,7 +125,7 @@ Proposed experiments:
   Instead of a fresh random seed for noise mods (key shuffle, random key
   mask) on every draw, each card gets one of K fixed seeds. Noise mods
   then become cacheable: K text versions per card, each encoded once
-  (`docs/frozen_feature_cache.md`). The question: how small can K be
+  (`plans/frozen_feature_cache.md`). The question: how small can K be
   before the regularization benefit is lost? Arms: K = 1, 2, 4, 8, 16
   against fresh-per-draw and against mods off, same diet and steps.
   Needs D's cache, plus a per-card seed pool in the mods

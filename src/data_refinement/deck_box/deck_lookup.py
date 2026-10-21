@@ -13,9 +13,10 @@ writes straight to the on-disk file, so a stray mutating call through a
 reader's reference has no save() step that could catch it. Every dojo,
 data constructor and DeckBoxDealer types its deck box as DeckLookup.
 
-Like CardLookup, no runtime enforcement: a caller holding a DeckBox
-typed as DeckLookup could still cast it and write. Only the type checker
-guards this.
+Like CardLookup, the Protocol itself enforces nothing at runtime: a caller
+holding a DeckBox typed as DeckLookup could still cast it and write. A box
+from DeckBox.open_read_only() (what training's CardShelf hands out) also
+refuses writes at runtime.
 """
 
 from typing import Iterable, Protocol, Sequence

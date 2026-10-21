@@ -275,3 +275,20 @@ class TestWeightedFieldMaskMod:
             MASK_TOKEN,
             str({"armor": MASK_TOKEN, "tags": ["Human", "Blindeyes"]}),
         }
+
+
+class TestDoNotCacheStamp:
+    def test_a_changed_card_is_stamped(self) -> None:
+        mod = RandomKeyMaskMod(rng_seed=0)
+        masked, _ = mod.apply_single((_gwent_card(), 0))
+        assert masked.cacheable is False
+
+    def test_an_unchanged_card_is_not_stamped(self) -> None:
+        card = _gwent_card()
+        mod = RandomKeyMaskMod(probability=0.0, rng_seed=0)
+        passed, _ = mod.apply_single((card, 0))
+        assert passed is card and passed.cacheable is True
+
+    def test_every_card_field_mod_is_random(self) -> None:
+        for mod_class in (ShuffleKeysMod, RandomKeyMaskMod, WeightedFieldMaskMod):
+            assert mod_class.deterministic_cards is False

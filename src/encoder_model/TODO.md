@@ -22,8 +22,11 @@ exist but are not yet compared; see `README.md` and
   `AttentionPooling` and `TransformerPooling` read every card's token
   states each step. With the LM frozen those never change, so caching
   them makes pooling training far faster (fp16 token states: gwent
-  ~175 MB, MTG ~9 GB; not built yet). Caching only covers cards the dojo passes through unmodified;
-  mods that change card text (masking, key shuffles) bypass it.
+  ~175 MB, MTG ~9 GB). The pooled cut exists (`feature_cache/`, mean
+  pooling only); a token-level cut needs ragged storage and a RAM/disk
+  tier (`plans/frozen_feature_cache.md`, v1.3). Random noise mods
+  (key shuffle, random key mask) give a new text on nearly every draw,
+  so they gain nothing from any cache.
 - [ ] **Whitening after pooling.** `TokenWhitening` whitens
   tokens before pooling only. Offline, whitening the mean-pooled card
   vector instead scored best (`experiments/2026-10-10_pooling_probe/NOTEBOOK.md`). After a
@@ -33,6 +36,24 @@ exist but are not yet compared; see `README.md` and
   rounds, at phase boundaries, or a running estimate (BatchNorm-style).
   Decide the cadence, and whether a trainable head right after it makes
   it redundant.
+- [ ] **Shrink the disk tier's rows.** `SqliteFeatureStore`'s file runs
+  about 3x its row payload: every `features` row repeats the 64-character
+  fingerprint digest as `TEXT`, and the default 4 KiB page holds only
+  about two 1.5 KB pooled rows. A row should hold little more than a
+  small integer row-set id (a foreign key into `row_sets`, which keeps
+  the digest once), the 16-byte text key and the vector, plus a larger
+  `page_size`. Optionally add the card's `nocab_uuid` as a plain column,
+  so a row's text can be recovered from the card binder later. It cannot
+  replace the text key: a mod keeps the uuid and changes the text, so one
+  uuid has many rows. Storing it means threading uuids through
+  `PooledFeatureCache.features` and `FeatureStore.put_many`, which take
+  texts and keys only today.
+- [ ] **Avoid the round trip on a disk hit with a RAM tier.** A disk hit is
+  decoded on the CPU, moved to the caller's device, and then promotion
+  copies it back to the pinned RAM slab: CPU -> GPU -> CPU per hit.
+  Cheap at pooled widths (1.5 KB a row), but it grows with v1.3's
+  token-level cuts (~400 KB a card). `TieredFeatureStore` could promote
+  host-side rows to host tiers before the copy to `device`.
 - [ ] **A card encoder that reads the token sequence directly.** Shelved
   2026-10-10 when the model was split into text
   encoder -> optional token enrichment -> token pooling -> embedding

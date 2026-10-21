@@ -3,7 +3,6 @@
 import copy
 import random
 from datetime import datetime, timezone
-from typing import Iterator
 from uuid import uuid4
 
 import pytest
@@ -11,18 +10,9 @@ import pytest
 from src.dojos.mods.common_mods import MaskTargetKeyMod, ShuffleDeckMod
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.card import GenericCard, Provenance
-from src.schema.card_factory import MissingPathPolicy
+from src.schema.card_factory import GenericCardFactory, MissingPathPolicy
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
-
-
-@pytest.fixture(autouse=True)
-def _restore_global_random() -> Iterator[None]:
-    """ShuffleDeckMod uses the global `random`; reseeding it here must not
-    leak into other tests."""
-    state = random.getstate()
-    yield
-    random.setstate(state)
 
 
 def _card(raw_content: dict) -> GenericCard:
@@ -113,23 +103,29 @@ def test_shuffle_deck_returns_new_list_and_leaves_input_order_unchanged() -> Non
 
 def test_shuffle_deck_is_a_permutation_sharing_the_same_card_objects() -> None:
     deck = [_card({"i": i}) for i in range(8)]
-    random.seed(0)
 
-    shuffled, _ = ShuffleDeckMod().apply_single((deck, 0))
+    shuffled, _ = ShuffleDeckMod(rng_seed=0).apply_single((deck, 0))
 
     assert isinstance(shuffled, list)
     assert sorted(map(id, shuffled)) == sorted(map(id, deck))
 
 
-def test_shuffle_deck_is_reproducible_under_the_global_seed() -> None:
+def test_shuffle_deck_is_reproducible_under_its_own_seed() -> None:
     deck = [_card({"i": i}) for i in range(8)]
 
-    random.seed(42)
-    first, _ = ShuffleDeckMod().apply_single((deck, 0))
-    random.seed(42)
-    second, _ = ShuffleDeckMod().apply_single((deck, 0))
+    first, _ = ShuffleDeckMod(rng_seed=42).apply_single((deck, 0))
+    second, _ = ShuffleDeckMod(rng_seed=42).apply_single((deck, 0))
 
     assert first == second
+
+
+def test_shuffle_deck_leaves_the_global_random_untouched() -> None:
+    deck = [_card({"i": i}) for i in range(8)]
+    state = random.getstate()
+
+    ShuffleDeckMod(rng_seed=0).apply_single((deck, 0))
+
+    assert random.getstate() == state
 
 
 def test_shuffle_deck_of_an_empty_deck_returns_a_new_empty_list() -> None:
@@ -167,3 +163,16 @@ def test_pipeline_of_several_masks_never_mutates_inputs() -> None:
         "faction-duo": "[MASK]",
     }
     assert [card.raw_content for card in cards] == snapshots
+
+
+class TestMaskTargetKeyModStamp:
+    def test_its_masked_cards_stay_cacheable(self) -> None:
+        masked, _ = MaskTargetKeyMod("faction").apply_single(
+            (_card({"faction": "x"}), 0)
+        )
+        assert masked.cacheable is True
+
+    def test_a_stamp_from_an_earlier_mod_is_kept(self) -> None:
+        stamped = GenericCardFactory.stamp_do_not_cache(_card({"faction": "x"}))
+        masked, _ = MaskTargetKeyMod("faction").apply_single((stamped, 0))
+        assert masked.cacheable is False

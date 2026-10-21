@@ -28,11 +28,19 @@ from src.training.plan import (
     Temperature,
     Uniform,
 )
+from src.encoder_model.feature_cache.feature_storage_dtype import FeatureStorageDtype
 from src.training.model_spec import (
+    AdmissionKind,
     AttentionPoolingSpec,
     EmbeddingHeadKind,
+    DiskTierSpec,
+    DiskWrite,
+    FeatureCacheSpec,
+    FeatureCut,
     GroupAttentionSpec,
     MeanPoolingSpec,
+    MemoryTierSpec,
+    SlotPolicyKind,
     TokenWhiteningSpec,
     TransformerPoolingSpec,
 )
@@ -117,6 +125,12 @@ class TestParseRunConfig:
         assert config.plan.holdout.tier_ratios == (8.0, 1.0, 1.0)
         assert config.limits.max_batch_cost == 16
         assert config.limits.precision == "fp16"
+        assert config.limits.prefetch_depth == 0  # off unless asked for
+
+    def test_hardware_prefetch_depth_is_parsed(self) -> None:
+        document = _document()
+        cast(dict[str, Any], document["hardware"])["prefetch_depth"] = 4
+        assert parse_run_config(document).limits.prefetch_depth == 4
 
     def test_a_phase_without_dojos_trains_every_non_held_out_dojo(self) -> None:
         phase = parse_run_config(_document()).plan.phases[0]
@@ -799,3 +813,78 @@ class TestPoolingAndEnrichment:
     ) -> None:
         with pytest.raises(ValueError, match=message):
             parse_run_config(_with(path, value))
+
+
+class TestFeatureCache:
+    def test_no_cache_and_no_warming_by_default(self) -> None:
+        config = parse_run_config(_document())
+        assert config.model.feature_cache is None
+        assert config.warm_feature_cache == ()
+
+    def test_an_empty_section_takes_the_defaults(self) -> None:
+        model = parse_run_config(_with(["model", "feature_cache"], {})).model
+        assert model.feature_cache == FeatureCacheSpec()
+
+    def test_every_key_parses(self) -> None:
+        section = {
+            "cut": "pooled",
+            "storage_dtype": "fp16",
+            "vram": {"capacity_mib": 64, "policy": "fill_until_full"},
+            "ram": {"capacity_mib": 256, "policy": "lfu", "admission": "second_offer"},
+            "disk": {"path": "data/fc.sqlite", "capacity_mib": 1024, "write": "all"},
+        }
+        model = parse_run_config(_with(["model", "feature_cache"], section)).model
+        assert model.feature_cache == FeatureCacheSpec(
+            FeatureCut.POOLED,
+            FeatureStorageDtype.FP16,
+            MemoryTierSpec(64, SlotPolicyKind.FILL_UNTIL_FULL),
+            MemoryTierSpec(256, SlotPolicyKind.LFU, AdmissionKind.SECOND_OFFER),
+            DiskTierSpec(Path("data/fc.sqlite"), 1024, DiskWrite.ALL),
+        )
+
+    def test_naming_any_tier_drops_the_default_vram_tier(self) -> None:
+        section = {"disk": {"path": "data/fc.sqlite", "capacity_mib": 10}}
+        model = parse_run_config(_with(["model", "feature_cache"], section)).model
+        assert model.feature_cache is not None
+        assert model.feature_cache.vram is None
+        assert model.feature_cache.disk == DiskTierSpec(Path("data/fc.sqlite"), 10)
+
+    def test_warm_games_parse_beside_a_cache(self) -> None:
+        document = _with(["model", "feature_cache"], {})
+        document["warm_feature_cache"] = ["gwent", "mtg"]
+        config = parse_run_config(document)
+        assert config.warm_feature_cache == (GameId.GWENT, GameId.MTG)
+
+    @pytest.mark.parametrize(
+        ("section", "message"),
+        [
+            ({"cut": "tokens"}, "config.model.feature_cache.cut"),
+            ({"storage_dtype": "int8"}, "config.model.feature_cache.storage_dtype"),
+            ({"capacity_mib": 64}, "capacity_mib"),
+            ({"vram": {"capacity_mib": 0}}, "capacity_mib"),
+            ({"vram": {}}, "config.model.feature_cache.vram.capacity_mib"),
+            ({"ram": {"capacity_mib": 8, "policy": "mru"}}, "feature_cache.ram.policy"),
+            ({"disk": {"capacity_mib": 8}}, "feature_cache.disk.path"),
+            ({"disk": {"path": "x", "capacity_mib": 8, "write": "some"}}, "disk.write"),
+            ({"size": 1}, "size"),
+        ],
+    )
+    def test_a_bad_section_raises(self, section: Any, message: str) -> None:
+        with pytest.raises(ValueError, match=message):
+            parse_run_config(_with(["model", "feature_cache"], section))
+
+    def test_a_pooled_cut_after_a_trainable_pooling_raises(self) -> None:
+        document = _with(["model", "feature_cache"], {})
+        document["model"]["pooling"] = {"kind": "attention"}
+        with pytest.raises(ValueError, match="needs mean pooling"):
+            parse_run_config(document)
+
+    def test_warming_without_a_cache_raises(self) -> None:
+        with pytest.raises(ValueError, match="needs a model.feature_cache"):
+            parse_run_config(_with(["warm_feature_cache"], ["gwent"]))
+
+    def test_an_unknown_warm_game_raises(self) -> None:
+        document = _with(["model", "feature_cache"], {})
+        document["warm_feature_cache"] = ["chess"]
+        with pytest.raises(ValueError, match="unknown game 'chess'"):
+            parse_run_config(document)

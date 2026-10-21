@@ -15,6 +15,10 @@ two rules:
 Each mod keeps a ModTally of how many cards it saw and how many it
 actually changed, so a mod that silently never fires (e.g. a key renamed
 at ingestion) can be reported before a run.
+
+Every mod here draws at random, so each card it changes carries the
+do-not-cache stamp (Mod.stamped_if_random); a card it passes through
+unchanged keeps its own.
 """
 
 import dataclasses
@@ -156,8 +160,9 @@ class CardFieldMod(Mod):
 
     def _guarded_modified_card(self, card: GenericCard) -> GenericCard:
         """modified_card(card), or card unchanged if it raises; counts the
-        card in self.tally. The first failure is logged at warning level
-        (it is a bug or unexpected data), later ones at debug.
+        card in self.tally. A changed card goes through stamped_if_random.
+        The first failure is logged at warning level (it is a bug or
+        unexpected data), later ones at debug.
 
         Inputs: card. Output: GenericCard.
         Side effects: updates self.tally; may log. Exceptions: none.
@@ -177,6 +182,7 @@ class CardFieldMod(Mod):
             return card
         if result is not card:
             self.tally.cards_changed += 1
+            result = self.stamped_if_random(result)
         return result
 
 

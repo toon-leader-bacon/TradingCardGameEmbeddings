@@ -517,3 +517,24 @@ class TestHasField:
     def test_malformed_path_still_raises(self) -> None:
         with pytest.raises(ValueError):
             GenericCardFactory.has_field(_card({}), ())
+
+
+class TestStampDoNotCache:
+    def test_returns_a_stamped_copy_and_leaves_the_card_alone(self) -> None:
+        card = _card({"name": "Bolt"})
+        stamped = GenericCardFactory.stamp_do_not_cache(card)
+        assert (card.cacheable, stamped.cacheable) == (True, False)
+        assert stamped.raw_content is card.raw_content
+
+    def test_a_stamped_card_is_returned_as_is(self) -> None:
+        stamped = GenericCardFactory.stamp_do_not_cache(_card({"name": "Bolt"}))
+        assert GenericCardFactory.stamp_do_not_cache(stamped) is stamped
+
+    def test_the_stamp_survives_a_later_edit(self) -> None:
+        stamped = GenericCardFactory.stamp_do_not_cache(_card({"name": "Bolt"}))
+        edited = GenericCardFactory.with_field(stamped, ("name",), "[MASK]")
+        assert edited.cacheable is False
+
+    def test_equality_ignores_the_stamp(self) -> None:
+        card = _card({"name": "Bolt"})
+        assert GenericCardFactory.stamp_do_not_cache(card) == card

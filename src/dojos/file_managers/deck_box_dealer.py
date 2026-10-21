@@ -248,13 +248,19 @@ class DeckBoxDealer:
         """Connect to (creating, and creating its parent directory and
         schema, if needed) index_path.
 
+        The connection is writable, because __init__ builds the index
+        through it, but it is written only during construction. After
+        that it is only read, and may be read from any thread, one
+        thread at a time (SQLite here is built serialized), so a dealer
+        built on one thread can be read by a prefetch worker on another.
+
         Private helper - single consumer is __init__.
         Inputs: index_path. Output: an open sqlite3.Connection.
         Side effects: creates the parent directory, the file and its tables
         if missing. Exceptions: OSError / sqlite3.Error on failure.
         """
         index_path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(str(index_path))
+        connection = sqlite3.connect(str(index_path), check_same_thread=False)
         connection.row_factory = sqlite3.Row
         connection.executescript(_SCHEMA_DDL)
         connection.commit()

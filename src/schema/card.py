@@ -15,7 +15,7 @@ mapping is AliasLedger's job instead
 src/data_refinement/card_binder/README.md for the full design).
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
 
@@ -79,6 +79,14 @@ class GenericCard:
     set or use one as a dict key — it isn't genuinely hashable despite
     looking like it should be.
 
+    cacheable: False once a random mod built this card (the do-not-cache
+    stamp, GenericCardFactory.stamp_do_not_cache): its text is one draw
+    of many, so a feature cache encodes it without storing it. A training
+    time mark only: the card binder never writes it, and every ingested
+    card has the default. dataclasses.replace keeps it, so a stamp
+    survives every later mod. Equality ignores it: a stamped card equals
+    an unstamped one with the same content.
+
     Inputs: none (data holder).
     Output: n/a.
     Side effects: none.
@@ -90,6 +98,7 @@ class GenericCard:
     name: str
     raw_content: dict
     provenance: Provenance
+    cacheable: bool = field(default=True, compare=False)
 
 
 @dataclass(frozen=True)

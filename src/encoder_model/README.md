@@ -66,15 +66,27 @@ so each card's embedding is contextualized by the rest of its group.
   embedding scale cannot drift; the multi-card model's self-attention
   stack ends in the same norm.
 - `card_embedding_pipeline.py` - `CardEmbeddingPipeline(text_encoder,
-  enrichment, pooling, embedding_head)`: the one place the stages are
-  chained. `embed(cards)` serializes, encodes, enriches (when an
-  enrichment is given), pools and projects; every card is independent.
-  Every stage reports `input_dim`/`output_dim` (the text encoder only
+  enrichment, pooling, embedding_head, feature_cache=None)`: the one
+  place the stages are chained. `embed(cards)` serializes, encodes,
+  enriches (when an enrichment is given), pools and projects; every card
+  is independent. With a `feature_cache` (see `feature_cache/`), the
+  stages before the head run only on texts the cache has not seen, and
+  `warm(cards, precision)` fills it ahead of time. The constructor
+  refuses a cache when any stage before the head is trainable. Every
+  stage reports `input_dim`/`output_dim` (the text encoder only
   `output_dim`), and the constructor raises `ValueError` if adjacent
   widths differ. Its `output_dim` is the one source of a model's
   embedding width.
-- `card_encoder_model.py` - `CardEncoderModel`, the Template Method base
-  of both models. A subclass supplies `embed_together(cards)`, for cards
+- `feature_cache/` - `PooledFeatureCache`, the pooled vector of each card
+  text, kept in a chain of tiers. The VRAM and pinned-RAM tiers are
+  slabs under a swappable `SlotPolicy` (LRU by default). The disk tier
+  is SQLite, one row set per frozen-stage fingerprint, so runs share
+  encodes. The cache is keyed by the serialized text, so modded cards
+  get their own entries, and it is never part of `state_dict()`.
+- `card_encoder_model.py` - `CardEncoderModel(card_pipeline)`, the
+  Template Method base of both models; it owns the `card_pipeline` and
+  exposes `warm(cards, precision)` and `feature_cache_stats()`. A
+  subclass supplies `embed_together(cards)`, for cards
   of one group that may see each other, and `embed_apart(cards)`, for
   unrelated cards in one batched pass. The base maps every input shape
   in `src/schema/type_hints.py` onto those two. It has one explicit

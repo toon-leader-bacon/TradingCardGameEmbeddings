@@ -34,7 +34,12 @@ class MaskTargetKeyMod(Mod):
     Inputs (constructor): key (str | FieldPath), train_only (bool),
         missing (MissingPathPolicy).
     Side effects: none; the input card is never mutated.
+
+    Deterministic: one card always masks to one text, so its cards stay
+    cacheable.
     """
+
+    deterministic_cards = True
 
     def __init__(
         self,
@@ -72,29 +77,38 @@ class MaskTargetKeyMod(Mod):
         masked = GenericCardFactory.with_field(
             card, self._path, MASK_TOKEN, self.missing
         )
+        if masked is not card:
+            masked = self.stamped_if_random(masked)
         return (masked, label)
 
 
 class ShuffleDeckMod(Mod):
     """Reorder the cards of a multi-card datum.
 
-    Returns a new list in random order (random.sample from the global
-    `random` module, as before) and never shuffles the caller's list in
-    place. The card objects themselves are shared, not copied.
+    Returns a new list in random order (random.sample from this mod's own
+    random.Random, never the global `random`) and never shuffles the
+    caller's list in place. The card objects themselves are shared, not
+    copied.
 
-    Side effects: advances the global `random` state; `data` is unchanged.
+    Inputs (constructor): train_only (see Mod), rng_seed (None:
+        nondeterministic).
+    Side effects: advances self.rng; `data` is unchanged.
     """
+
+    def __init__(self, train_only: bool = True, rng_seed: int | None = None) -> None:
+        super().__init__(train_only=train_only)
+        self.rng = random.Random(rng_seed)
 
     def apply_single(self, data: TrainingDatum[LabelT]) -> TrainingDatum[LabelT]:
         """A new datum with the same cards in a random order.
 
         Inputs: data, a multi-card TrainingDatum (list[GenericCard], label).
         Output: TrainingDatum with a new list and the same label.
-        Side effects: advances the global `random` state.
+        Side effects: advances self.rng.
         Exceptions: AssertionError if the input is not a list of cards.
 
         Example:
-            >>> deck, label = ShuffleDeckMod().apply_single(([a, b, c], 1))
+            >>> deck, label = ShuffleDeckMod(rng_seed=0).apply_single(([a, b, c], 1))
             >>> sorted(deck, key=id) == sorted([a, b, c], key=id)
             True
         """
@@ -103,4 +117,4 @@ class ShuffleDeckMod(Mod):
             isinstance(card, GenericCard) for card in deck
         ), "ShuffleDeckMod expects a multi-card TrainingDatum"
         cards = cast(List[GenericCard], deck)  # checked element-wise just above
-        return (random.sample(cards, len(cards)), label)
+        return (self.rng.sample(cards, len(cards)), label)

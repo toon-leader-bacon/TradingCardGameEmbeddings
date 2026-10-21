@@ -84,6 +84,9 @@ class RunConfig:
     regression_loss: the loss every regression dojo trains with (mse,
         today's, or huber); the run's DojoBuildContext carries the matching
         RegressionObjective.
+    warm_feature_cache: games whose every card is encoded into the model's
+        feature cache before training (top-level `warm_feature_cache:
+        [gwent, mtg]`); empty by default. Needs model.feature_cache.
     """
 
     run_directory: Path
@@ -95,6 +98,7 @@ class RunConfig:
     mod_overrides: Mapping[str, tuple[ModSpec, ...]] = field(default_factory=dict)
     staple_thresholds: Mapping[str, float] = field(default_factory=dict)
     regression_loss: RegressionLossKind = RegressionLossKind.MSE
+    warm_feature_cache: tuple[GameId, ...] = ()
 
     def __post_init__(self) -> None:
         # No duplicate dojos (the Trainer keys dojos by name and would
@@ -120,6 +124,9 @@ class RunConfig:
             raise ValueError(
                 f"staple_subsampling names {unknown_thresholds}, not in dojos"
             )
+        # Warming needs a cache to warm
+        if self.warm_feature_cache and self.model.feature_cache is None:
+            raise ValueError("warm_feature_cache needs a model.feature_cache section")
 
 
 def read_config_document(path: Path) -> ConfigDocument:
@@ -253,6 +260,10 @@ def parse_run_config(
     staple_thresholds = _parse_staple_thresholds(
         top.optional_section("staple_subsampling")
     )
+    warm_feature_cache = tuple(
+        _parse_game(value, top.location_of("warm_feature_cache"))
+        for value in top.optional_str_list("warm_feature_cache")
+    )
     top.reject_unread_keys()
     result = construct_at(
         "config",
@@ -266,6 +277,7 @@ def parse_run_config(
             mod_overrides=mod_overrides,
             staple_thresholds=staple_thresholds,
             regression_loss=regression_loss,
+            warm_feature_cache=warm_feature_cache,
         ),
     )
     return result
@@ -484,14 +496,9 @@ def _parse_regression_loss(top: ConfigSection) -> RegressionLossKind:
     Exceptions: ValueError, naming the key's config location, for a value
         that is not one of the kind names.
     """
-    text = top.optional("regression_loss", str, RegressionLossKind.MSE.value)
-    try:
-        return RegressionLossKind(text)
-    except ValueError:
-        wanted = [kind.value for kind in RegressionLossKind]
-        raise ValueError(
-            f"{top.location_of('regression_loss')} is {text!r}, want one of {wanted}"
-        ) from None
+    return top.optional_choice(
+        "regression_loss", RegressionLossKind, RegressionLossKind.MSE
+    )
 
 
 def _parse_loss_weighting(top: ConfigSection) -> LossWeighting | None:

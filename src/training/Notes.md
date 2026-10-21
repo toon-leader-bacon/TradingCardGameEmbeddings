@@ -371,6 +371,34 @@ Checked every dojo that uses `MaskTargetKeyMod` against the real, lean
   abstract; it needed checking against real data to actually find - the
   fix is recorded there with these two as concrete examples.
 
+## 10. Batch prefetch smoke (2026-10-21)
+
+The RX 6800 setup:
+- fp16, `contrastive.gwent`, mods off;
+- a cold VRAM-only feature cache (no warming);
+- 32 cards per batch, 2 rounds of 50 steps.
+
+`hardware.prefetch_depth` 0 against 4:
+
+| | depth 0 | depth 4 |
+|---|---|---|
+| `elapsed_seconds` at step 100 (2 rounds incl. eval + checkpoints) | 25.4 s | 21.9 s |
+| round 1 training steps alone (log timestamps) | ~9 s | ~7 s |
+| wait for queues to fill before each evaluation | - | 0.00 s |
+| cards encoded | 899 | 895 |
+
+- Whole run: about 1.16x faster.
+- Training steps alone: about 1.3x faster.
+- The fill-before-pause costs nothing here: the worker keeps its queues
+  full between steps.
+- The TEST losses differ slightly between the two runs (2.720 against
+  2.738 at round 1). That is expected for this dojo: the deck dealer's
+  TRAIN reshuffle is an unseeded `ORDER BY RANDOM()`, so even depth-0
+  runs are not reproducible.
+- The cache stats count each prefetched text twice (once warmed, once
+  looked up in the step), so "texts" rises from 4,224 to 7,552 while
+  "encoded" stays the same.
+
 ## Sources
 
 - AMD ROCm Windows compatibility matrix:

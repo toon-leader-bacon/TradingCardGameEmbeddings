@@ -21,9 +21,16 @@ from src.encoder_model.precision import (
 )
 from src.schema.card import GenericCard
 from src.schema.splits import Split
+from src.training.diet.batch_feed import open_batch_feed
 from src.training.diet.diet_sampler import diet_sampler_for
 from src.training.diet.dojo_batch_stream import DojoBatchStream
 from src.training.diet.dojo_fault_ledger import DojoFaultLedger
+from src.training.diet.batch_feed_errors import BatchFeedError
+from src.training.diet.prefetching_batch_streams import (
+    NO_BATCH_WARMING,
+    BatchWarmer,
+)
+from src.training.diet.round_schedule import RoundSchedule, draw_round_schedule
 from src.training.diet.saturation_tracker import SaturationTracker
 from src.training.gradient_clip_tally import GradientClipTally
 from src.training.learning_rate_schedule import LearningRateSchedule
@@ -93,6 +100,21 @@ class _RoundSkips:
         self.unusable_baseline = 0
 
 
+@dataclass(frozen=True)
+class _PhaseOutcome:
+    """What one phase hands back to run().
+
+    report: the phase's last RoundReport; None if it reported no round.
+    best: its best checkpoint; None if it saved none.
+    stopped_early_reason: why the whole run must stop now; None to go on
+        to the next phase.
+    """
+
+    report: RoundReport | None
+    best: CheckpointRecord | None
+    stopped_early_reason: str | None
+
+
 def _apply_learning_rate_schedule(phase_run: PhaseRun) -> None:
     """Set every optimizer group's lr to its base rate times the phase's
     lr_schedule multiplier at phase_run.step_attempts.
@@ -133,7 +155,9 @@ class Trainer:
         held-out ones), plan, limits, checkpointer (None: never save, e.g.
         evaluation's extrinsic runs, smoke tests, dry runs), listeners,
         cost_of (per-card batch cost; 1 per card by default, upgradable to
-        token count without touching any dojo).
+        token count without touching any dojo), batch_warmer (how the
+        prefetch worker reserves each built batch's cards; nothing by
+        default; used only when limits.prefetch_depth >= 1).
     Exceptions (constructor): ValueError if any dojo.holdout != plan.holdout,
         if a phase names an unregistered dojo, or if a phase's diet
         includes a held-out dojo.
@@ -149,6 +173,7 @@ class Trainer:
         listeners: Sequence[RunListener],
         *,
         cost_of: Callable[[GenericCard], int] = lambda card: 1,
+        batch_warmer: BatchWarmer = NO_BATCH_WARMING,
     ) -> None:
         self._model = model
         self._dojos = {dojo.name: dojo for dojo in dojos}
@@ -159,6 +184,8 @@ class Trainer:
         self._budget = BatchBudget(limits.max_batch_cost, cost_of)
         self._rng = random.Random(plan.seed)
         self._precision = limits.precision
+        self._prefetch_depth = limits.prefetch_depth
+        self._batch_warmer = batch_warmer
         self._steps_taken = 0
         # Steps skipped since the last round's report
         self._skips = _RoundSkips()
@@ -182,8 +209,12 @@ class Trainer:
         Side effects: updates model and dojo-head weights; writes
             checkpoints (if a checkpointer was given); notifies listeners;
             logs every recovered failure.
-        Exceptions: none for step, evaluation, checkpoint or listener
-            failures (logged and skipped). KeyboardInterrupt propagates.
+        Exceptions: none for step, evaluation, checkpoint, listener or
+            batch feed failures (logged and skipped; a feed error,
+            BatchFeedError, ends the run early with that reason and is
+            never counted against a dojo). Every phase's
+            batch feed is closed when the phase ends, however it ends.
+            KeyboardInterrupt propagates.
 
         Example:
             >>> result = Trainer(model, dojos, plan, limits, ckpt, []).run()
@@ -196,36 +227,85 @@ class Trainer:
         device = parameter_device(self._model)
         for dojo in self._dojos.values():
             dojo.move_head_to(device)
-        # Train each phase to saturation, its round cap, or too many failures
+        # Train each phase; its feed's worker never outlives it
         for phase in self._plan.phases:
             phase_run = self._open_phase(phase)
-            best: CheckpointRecord | None = None  # best is per phase
-            for round_index in range(phase.max_rounds):
-                self._train_round(phase_run)
-                self._skips.log_and_reset(phase.name, round_index)
-                self._clips.log_and_reset(phase.name, round_index)
-                _log_learning_rate(phase_run, round_index)
-                if phase_run.faults.gave_up():
-                    # Keep the last good checkpoint: current weights may be corrupt
-                    stopped_early_reason = (
-                        f"too many consecutive failures in {phase.name!r}"
-                    )
-                    break
-                report = self._evaluate_round(phase_run, round_index, run_started)
-                self._notify_round_end(report)
-                best = self._checkpoint_if_best(best, phase_run, report)
-                self._checkpoint_latest(phase_run, report)
-                quarantined = phase_run.faults.quarantined_names()
-                if quarantined.issuperset(phase.dojo_names):
-                    stopped_early_reason = f"every dojo quarantined in {phase.name!r}"
-                    break
-                if phase_run.tracker.phase_done(quarantined):
-                    break
-            # A phase that gave up before any checkpoint keeps the earlier one
-            last_good = best or last_good
-            if stopped_early_reason:
+            try:
+                outcome = self._run_phase(phase_run, run_started)
+            finally:
+                phase_run.feed.close()
+            # A phase that reported or saved nothing keeps the earlier ones
+            report = outcome.report or report
+            last_good = outcome.best or last_good
+            if outcome.stopped_early_reason:
+                stopped_early_reason = outcome.stopped_early_reason
                 break
         return TrainingResult(report, last_good, stopped_early_reason)
+
+    def _run_phase(self, phase_run: PhaseRun, run_started: float) -> _PhaseOutcome:
+        """Train one phase's rounds: to saturation, its round cap, too many
+        failures, every dojo quarantined, or a batch feed error. Each
+        round's steps run on its own schedule, and the feed's round is
+        ended before its evaluation and checkpoints.
+
+        Inputs: phase_run (from _open_phase), run_started (time.monotonic()).
+        Output: _PhaseOutcome.
+        Side effects: as run(), for this phase; begins and ends rounds of
+            phase_run.feed (does not close it).
+        Exceptions: none for step, evaluation, checkpoint, listener or
+            batch feed failures. KeyboardInterrupt propagates.
+
+        Example:
+            >>> outcome = self._run_phase(self._open_phase(phase), time.monotonic())
+        """
+        phase = phase_run.phase
+        report: RoundReport | None = None
+        best: CheckpointRecord | None = None
+        for round_index in range(phase.max_rounds):
+            # Steps: the worker builds ahead while the GPU trains
+            try:
+                self._train_round(phase_run)
+            except BatchFeedError as error:
+                return self._outcome_after_feed_error(phase_run, report, best, error)
+            # Evaluation and checkpoints: the worker idle, dojos see only this thread
+            phase_run.feed.end_round()
+            self._skips.log_and_reset(phase.name, round_index)
+            self._clips.log_and_reset(phase.name, round_index)
+            _log_learning_rate(phase_run, round_index)
+            if phase_run.faults.gave_up():
+                # Keep the last good checkpoint: current weights may be corrupt
+                reason = f"too many consecutive failures in {phase.name!r}"
+                return _PhaseOutcome(report, best, reason)
+            report = self._evaluate_round(phase_run, round_index, run_started)
+            self._notify_round_end(report)
+            best = self._checkpoint_if_best(best, phase_run, report)
+            self._checkpoint_latest(phase_run, report)
+            quarantined = phase_run.faults.quarantined_names()
+            if quarantined.issuperset(phase.dojo_names):
+                reason = f"every dojo quarantined in {phase.name!r}"
+                return _PhaseOutcome(report, best, reason)
+            if phase_run.tracker.phase_done(quarantined):
+                break
+        return _PhaseOutcome(report, best, None)
+
+    def _outcome_after_feed_error(
+        self,
+        phase_run: PhaseRun,
+        report: RoundReport | None,
+        best: CheckpointRecord | None,
+        error: BatchFeedError,
+    ) -> _PhaseOutcome:
+        """Log (ERROR, with any worker error chained) that the batch feed
+        failed, and end the run keeping what this phase already has.
+        Private helper - single consumer is _run_phase.
+
+        Inputs: phase_run, report and best (this phase's so far), error.
+        Output: _PhaseOutcome with stopped_early_reason naming the phase.
+        Side effects: logs. Exceptions: none.
+        """
+        name = phase_run.phase.name
+        logger.error("[%s] batch feed failed; ending the run", name, exc_info=error)
+        return _PhaseOutcome(report, best, f"batch feed failed in {name!r}: {error}")
 
     def _validate_plan_against_dojos(self, dojos: Sequence[Dojo]) -> None:
         """Fail fast, before an overnight run starts, if the plan and dojos
@@ -254,21 +334,23 @@ class Trainer:
 
     def _open_phase(self, phase: Phase) -> PhaseRun:
         """Build the optimizer (two param groups; encoder frozen if not
-        encoder_trainable), tracker, sampler, batch streams and fault
-        ledger (from plan.faults)."""
+        encoder_trainable), tracker, sampler, batch feed (direct, or
+        prefetching at limits.prefetch_depth >= 1; the caller must close
+        it) and fault ledger (from plan.faults)."""
         for parameter in self._encoder_params:
             parameter.requires_grad_(phase.encoder_trainable)
         optimizer = self._build_optimizer(phase)
         self._log_trainable_parameters(phase)
+        streams = {
+            name: DojoBatchStream(self._dojos[name], self._budget)
+            for name in phase.dojo_names
+        }
         return PhaseRun(
             phase=phase,
             optimizer=optimizer,
             tracker=SaturationTracker(phase.saturation, phase.dojo_names),
             sampler=diet_sampler_for(phase.diet_rule),
-            streams={
-                name: DojoBatchStream(self._dojos[name], self._budget)
-                for name in phase.dojo_names
-            },
+            feed=open_batch_feed(streams, self._batch_warmer, self._prefetch_depth),
             faults=DojoFaultLedger(self._plan.faults, phase.dojo_names),
             scaler=torch.amp.GradScaler(
                 device_type_of(self._model), enabled=self._precision == "fp16"
@@ -340,55 +422,111 @@ class Trainer:
         ]
 
     def _train_round(self, phase_run: PhaseRun) -> None:
-        """Take steps_per_round optimizer steps on the phase's ACTIVE dojos.
+        """Take steps_per_round optimizer steps on the phase's ACTIVE dojos,
+        in the order of a schedule drawn when the round starts.
 
         A failing step (exception, out-of-memory, non-finite loss) is
-        logged, skipped and counted; it never ends the run by itself.
+        logged, skipped and counted; it never ends the run by itself. A
+        quarantine mid-round redraws the rest of the round from the dojos
+        still active and reschedules the feed.
 
-        Inputs: phase_run (the phase's optimizer, tracker, sampler,
-            streams, fault ledger).
-        Output: None; returns early if every dojo is quarantined or the
-            ledger gave_up().
+        Inputs: phase_run (the phase's optimizer, tracker, sampler, feed,
+            fault ledger).
+        Output: None; returns early if every dojo is quarantined, the
+            ledger gave_up(), or no schedule can be drawn.
         Side effects: updates model and the sampled dojos' head weights;
-            advances self._rng, the sampler and the batch streams; logs.
-        Exceptions: none for step failures. KeyboardInterrupt propagates.
+            advances self._rng and the sampler (all of a round's draws at
+            its start, the rest of it again after a quarantine); begins a
+            round of the batch feed and takes its batches; logs.
+        Exceptions: none for step failures. BatchFeedError propagates (a
+            lifecycle error, never counted against a dojo).
+            KeyboardInterrupt propagates.
 
         Example:
             >>> self._train_round(phase_run)
         """
         faults = phase_run.faults
+        steps = phase_run.phase.steps_per_round
         # A frozen encoder stays in eval mode (no dropout) while heads train;
         # dojo heads are not part of the model, so this does not touch them
         self._model.train(phase_run.phase.encoder_trainable)
         active = self._active_dojos(phase_run)
+        schedule = self._draw_schedule(phase_run, active, steps)
+        if schedule is None:
+            return
+        phase_run.feed.begin_round(schedule)
+        names = list(schedule.dojo_names)
 
-        # One optimizer step per iteration, each on one batch from one dojo
-        for _ in range(phase_run.phase.steps_per_round):
-            if not active:
-                return
-            dojo: Dojo | None = None
-            failure: Exception | None = None
-            ran = False
-            # Every attempt advances the schedule, so it follows the budget
-            _apply_learning_rate_schedule(phase_run)
-            phase_run.step_attempts += 1
-            try:
-                dojo = phase_run.sampler.next_dojo(active, self._rng)
-                ran = self._take_step(phase_run, dojo)
-            except Exception as error:
-                failure = error
-            # Recover outside the except block: inside it the traceback still
-            # pins the failed step's tensors, so an out-of-memory would not free
-            if failure is not None:
-                self._recover_from_failed_step(phase_run, dojo, failure)
-                failure = None
-            elif dojo is not None and ran:
-                # A skipped degenerate batch is neither a success nor a fault
-                faults.record_success(dojo.name)
+        # One optimizer step per scheduled step, each on one batch
+        for step_index in range(steps):
+            self._attempt_step(phase_run, self._dojos[names[step_index]])
             if faults.gave_up():
                 return
-            # A quarantine may have changed the diet
-            active = self._active_dojos(phase_run)
+
+            # A quarantine changes the diet: redraw the rest of the round
+            still_active = self._active_dojos(phase_run)
+            if still_active != active:
+                active = still_active
+                rest = self._draw_schedule(phase_run, active, steps - step_index - 1)
+                if rest is None:
+                    return
+                phase_run.feed.reschedule(rest)
+                names[step_index + 1 :] = rest.dojo_names
+
+    def _attempt_step(self, phase_run: PhaseRun, dojo: Dojo) -> None:
+        """One scheduled step: advance the learning-rate schedule, take the
+        step, and record its success or recover from its failure.
+
+        Private helper - single consumer is _train_round.
+        Inputs: phase_run, dojo (the scheduled one). Output: none.
+        Side effects: as _take_step; step_attempts grows; the fault ledger
+            records the outcome (a skipped degenerate batch is neither).
+        Exceptions: BatchFeedError propagates; any other failure is
+            recovered from.
+        """
+        failure: Exception | None = None
+        ran = False
+        # Every attempt advances the schedule, so it follows the budget
+        _apply_learning_rate_schedule(phase_run)
+        phase_run.step_attempts += 1
+        try:
+            ran = self._take_step(phase_run, dojo)
+        except BatchFeedError:
+            raise  # not a step failure: _run_phase ends the run
+        except Exception as error:
+            failure = error
+        # Recover outside the except block: inside it the traceback still
+        # pins the failed step's tensors, so an out-of-memory would not free
+        if failure is not None:
+            self._recover_from_failed_step(phase_run, dojo, failure)
+        elif ran:
+            phase_run.faults.record_success(dojo.name)
+
+    def _draw_schedule(
+        self, phase_run: PhaseRun, active: list[Dojo], steps: int
+    ) -> RoundSchedule | None:
+        """The next steps of the round, drawn from the phase's sampler; None
+        when there is nothing to draw (no active dojo, no step left) or
+        the sampler fails. A sampler failure is recorded as one failure
+        with no dojo, uses no step attempt, and ends the round: a sampler
+        that keeps failing reaches gave_up() after that many rounds.
+
+        Private helper - single consumer is _train_round.
+        Inputs: phase_run, active, steps (>= 0). Output: RoundSchedule or None.
+        Side effects: advances self._rng and the sampler; on a sampler
+            failure, records it in the fault ledger.
+        Exceptions: none.
+        """
+        if not active or steps == 0:
+            return None
+        failure: Exception
+        try:
+            return draw_round_schedule(phase_run.sampler, active, steps, self._rng)
+        except Exception as error:
+            failure = error
+        # Recover outside the except block, as for a failed step
+        self._recover_from_failed_step(phase_run, None, failure)
+        return None
 
     def _take_step(self, phase_run: PhaseRun, dojo: Dojo) -> bool:
         """One optimizer step on the dojo's next batch. Raises on any
@@ -399,7 +537,7 @@ class Trainer:
         and the step was skipped before any forward pass: that is counted
         in self._skips and is neither a success nor a fault.
         """
-        batch = phase_run.streams[dojo.name].next_batch()
+        batch = phase_run.feed.next_batch(dojo.name)
 
         # Scale first: a degenerate batch costs no forward pass
         scale = self._loss_scale_for(phase_run, dojo, batch)

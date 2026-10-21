@@ -19,11 +19,10 @@ class SingleCardModel(CardEncoderModel):
     def __init__(self, card_pipeline: CardEmbeddingPipeline):
         """Inputs: card_pipeline (its four stages fix the architecture).
         Output: none (constructor). Side effects: none. Exceptions: none."""
-        super().__init__()
         # Dependency injection: swapping any stage (text encoder,
         # enrichment, pooling, head) happens inside the CardEmbeddingPipeline, never
         # here
-        self.card_pipeline: CardEmbeddingPipeline = card_pipeline
+        super().__init__(card_pipeline)
 
     @property
     def embedding_dim(self) -> int:

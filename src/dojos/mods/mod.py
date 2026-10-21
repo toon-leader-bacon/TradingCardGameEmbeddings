@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List
+from typing import ClassVar, List
 
+from src.schema.card import GenericCard
+from src.schema.card_factory import GenericCardFactory
 from src.schema.type_hints import LabelT, TrainingDatum
 
 # What every masking mod writes in place of a hidden value
@@ -68,7 +70,16 @@ class Mod(ABC):
     tally: a ModTally for mods that count what they change (the card-field
     augmentations), None for mods that do not; ModPipeline.mod_tallies
     reports the non-None ones.
+
+    deterministic_cards: whether every card this mod builds depends on its
+    input card alone (MaskTargetKeyMod: True). Every mod that builds a
+    card passes it through stamped_if_random, which stamps it unless this
+    flag is True; the default, False, is safe for a new mod: at worst a
+    deterministic card is encoded live. A mod that builds no card (it
+    reorders or drops cards) never calls it, so its flag is unused.
     """
+
+    deterministic_cards: ClassVar[bool] = False
 
     def __init__(self, train_only: bool = True) -> None:
         self.train_only = train_only
@@ -86,6 +97,22 @@ class Mod(ABC):
         Side effects: none. Exceptions: none.
         """
         return {}
+
+    def stamped_if_random(self, card: GenericCard) -> GenericCard:
+        """card, with the do-not-cache stamp unless this mod's cards are
+        deterministic. Call it on each card this mod builds, never on a
+        card it passes through.
+
+        Inputs: card (one this mod just built). Output: GenericCard.
+        Side effects: none. Exceptions: none.
+
+        Example:
+            >>> ShuffleKeysMod().stamped_if_random(shuffled).cacheable
+            False
+        """
+        if self.deterministic_cards:
+            return card
+        return GenericCardFactory.stamp_do_not_cache(card)
 
     def apply(self, data: List[TrainingDatum[LabelT]]) -> List[TrainingDatum[LabelT]]:
         """apply_single on each datum, in order; data is unchanged.

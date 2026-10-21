@@ -8,6 +8,7 @@ that swapping the pooling (mean, attention, ...; see pooling/) never
 requires touching this contract.
 """
 
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List
@@ -50,8 +51,40 @@ class TokenEncoding:
     attention_mask: torch.Tensor
 
 
+@dataclass(frozen=True)
+class TextEncoderSource:
+    """Where a text encoder's weights came from: everything that fixes the
+    numbers it produces for a text (part of a feature cache's
+    fingerprint).
+
+    checkpoint: the Hugging Face model id or local path.
+    revision: the commit hash the checkpoint resolved to; None for a local
+        path (its weights can change under the same name).
+    max_length: the tokenizer's truncation length.
+    model_kwargs: the from_pretrained keyword arguments, as sorted
+        (name, repr(value)) pairs.
+    """
+
+    checkpoint: str
+    revision: str | None
+    max_length: int
+    model_kwargs: tuple[tuple[str, str], ...]
+
+
 class TextEncoder(nn.Module, ABC):
     """Strategy interface: batch of card text in, per-token embeddings out."""
+
+    def source(self) -> TextEncoderSource | None:
+        """Where this encoder's weights came from, or None when it has no
+        fixed source (e.g. one trained from scratch). Inputs: none.
+        Output: TextEncoderSource or None. Side effects: none.
+        Exceptions: none.
+
+        Example:
+            >>> StaticEmbeddingTextEncoder("answerdotai/ModernBERT-base", 64).source() is None
+            True
+        """
+        return None
 
     @property
     @abstractmethod
@@ -127,8 +160,12 @@ class PretrainedTextEncoder(TextEncoder):
         self.trainable = trainable
         self.max_length = max_length
         self.length_bucket_size = length_bucket_size
+        self.model_kwargs: dict = dict(model_kwargs or {})
+        # A fast tokenizer changes its padding/truncation state per call
+        # and raises "Already borrowed" when two threads use it at once
+        self._tokenizer_lock = threading.Lock()
         self.tokenizer = AutoTokenizer.from_pretrained(checkpoint)
-        self.model = AutoModel.from_pretrained(checkpoint, **(model_kwargs or {}))
+        self.model = AutoModel.from_pretrained(checkpoint, **self.model_kwargs)
 
         if not trainable:
             self.model.eval()
@@ -140,6 +177,21 @@ class PretrainedTextEncoder(TextEncoder):
         """The wrapped model's hidden size. Inputs: none. Output: int.
         Side effects: none. Exceptions: none."""
         return int(self.model.config.hidden_size)
+
+    def source(self) -> TextEncoderSource:
+        """The checkpoint, the commit hash it resolved to (None for a local
+        path), max_length and the model_kwargs. Inputs: none.
+        Output: TextEncoderSource. Side effects: none. Exceptions: none.
+
+        Example:
+            >>> encoder.source().revision
+            '8949b909ec900327062f0ebf497f51aef5e6f0c8'
+        """
+        revision = getattr(self.model.config, "_commit_hash", None)
+        kwargs = tuple(
+            sorted((name, repr(value)) for name, value in self.model_kwargs.items())
+        )
+        return TextEncoderSource(self.checkpoint, revision, self.max_length, kwargs)
 
     def train(self, mode: bool = True) -> "PretrainedTextEncoder":
         """Set train/eval mode, but keep a frozen LM in eval so its dropout
@@ -178,13 +230,14 @@ class PretrainedTextEncoder(TextEncoder):
         _encode_bucketed() for a larger one.
         """
         device = next(self.model.parameters()).device
-        tokenized = self.tokenizer(
-            texts,
-            padding=True,
-            truncation=True,
-            max_length=self.max_length,
-            return_tensors="pt",
-        ).to(device)
+        with self._tokenizer_lock:
+            tokenized = self.tokenizer(
+                texts,
+                padding=True,
+                truncation=True,
+                max_length=self.max_length,
+                return_tensors="pt",
+            ).to(device)
 
         if self.trainable:
             model_out = self.model(**tokenized)

@@ -118,6 +118,22 @@ class GenericCardFactory:
         return dataclasses.replace(card, raw_content=cast(dict, new_child))
 
     @staticmethod
+    def stamp_do_not_cache(card: GenericCard) -> GenericCard:
+        """card with the do-not-cache stamp (cacheable=False); card itself
+        when it already has it. card is unchanged.
+
+        Inputs: card. Output: GenericCard sharing card's raw_content.
+        Side effects: none. Exceptions: none.
+
+        Example:
+            >>> GenericCardFactory.stamp_do_not_cache(card).cacheable
+            False
+        """
+        if not card.cacheable:
+            return card
+        return dataclasses.replace(card, cacheable=False)
+
+    @staticmethod
     def has_field(card: GenericCard, path: FieldPath) -> bool:
         """Whether every step of path names an existing slot in card.
 

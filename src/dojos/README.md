@@ -119,7 +119,14 @@ rows never straddle TRAIN and TEST.
   (`1:PerGameMod/gwent/0:ShuffleKeysMod`).
   `MASK_TOKEN` (`mod.py`) is the one mask string every masking mod writes,
   and `ModTally` lives there too (`Mod.tally` is None for mods that keep
-  none). `mod_specs.py` holds `ModSpec`s: frozen, shareable recipes, one
+  none). **The do-not-cache stamp.** Every mod that builds a card passes
+  it through `Mod.stamped_if_random`, which sets `GenericCard.cacheable`
+  to False (`GenericCardFactory.stamp_do_not_cache`) unless the mod's
+  `deterministic_cards` is True. Only `MaskTargetKeyMod` sets it; the
+  card-field augmentations draw at random, so `CardFieldMod` stamps every
+  card it changes. Later mods keep the stamp, and a feature cache
+  encodes a stamped card's text without storing it. Mods that build no
+  card (deck mods, `ShuffleDeckMod`, `GroupSwapMod`) never stamp. `mod_specs.py` holds `ModSpec`s: frozen, shareable recipes, one
   per card-field or deck mod (`DeckModSpec` for the latter, carrying its
   `groups`), that each dojo builds into its own mods (a mod's
   random state and tally are per dojo, so mod objects are never shared).

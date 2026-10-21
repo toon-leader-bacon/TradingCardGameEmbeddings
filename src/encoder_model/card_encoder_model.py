@@ -18,6 +18,11 @@ from typing import List, Mapping, Sequence, cast
 import torch
 import torch.nn as nn
 
+from src.encoder_model.card_embedding_pipeline import CardEmbeddingPipeline
+from src.encoder_model.feature_cache.pooled_feature_cache import (
+    FeatureCacheStats,
+    FeatureReservation,
+)
 from src.encoder_model.precision import Precision, inference_context
 from src.schema.card import GenericCard
 from src.schema.type_hints import (
@@ -48,7 +53,97 @@ class CardEncoderModel(nn.Module, ABC):
     cards is a batch of single cards, never one multi-card input.
     Callers that hold one unbatched example use the explicit forward_*
     method for its shape.
+
+    Every model owns one CardEmbeddingPipeline (card_pipeline), set here so
+    the cache entry points (warm, feature_cache_stats, close_feature_cache)
+    live in one place.
     """
+
+    def __init__(self, card_pipeline: CardEmbeddingPipeline) -> None:
+        """Inputs: card_pipeline (registered as the submodule
+            "card_pipeline", so state_dict keys keep that prefix).
+        Output: none (constructor). Side effects: none. Exceptions: none.
+        """
+        super().__init__()
+        self.card_pipeline: CardEmbeddingPipeline = card_pipeline
+
+    def warm(
+        self,
+        cards: Sequence[GenericCard],
+        precision: Precision,
+        durable: bool | None = True,
+    ) -> None:
+        """Fill the card pipeline's feature cache with cards ahead of
+        training; nothing happens without a cache.
+
+        Inputs: cards (any number), precision (the run's autocast),
+            durable (see CardEmbeddingPipeline.warm).
+        Output: none.
+        Side effects: see CardEmbeddingPipeline.warm.
+        Exceptions: see CardEmbeddingPipeline.warm.
+
+        Example:
+            >>> model.warm(list(binder.all_cards(GameId.GWENT)), "fp16")
+        """
+        self.card_pipeline.warm(cards, precision, durable)
+
+    def reserve(
+        self,
+        cards: Sequence[GenericCard],
+        precision: Precision,
+        durable: bool | None = None,
+    ) -> FeatureReservation:
+        """Pin and warm one batch's cards in the card pipeline's cache.
+
+        Inputs: cards, precision, durable (see
+            CardEmbeddingPipeline.reserve).
+        Output: FeatureReservation (empty without a cache).
+        Side effects: see CardEmbeddingPipeline.reserve.
+        Exceptions: see CardEmbeddingPipeline.reserve.
+
+        Example:
+            >>> reservation = model.reserve(batch_cards, "fp16")
+        """
+        return self.card_pipeline.reserve(cards, precision, durable)
+
+    def release(self, reservation: FeatureReservation) -> None:
+        """Remove a reservation's pins (see CardEmbeddingPipeline.release).
+
+        Inputs: reservation. Output: none.
+        Side effects: see CardEmbeddingPipeline.release.
+        Exceptions: see CardEmbeddingPipeline.release.
+
+        Example:
+            >>> model.release(reservation)
+        """
+        self.card_pipeline.release(reservation)
+
+    def feature_cache_stats(self) -> FeatureCacheStats | None:
+        """The card pipeline's cache totals, or None without a cache.
+
+        Inputs: none. Output: FeatureCacheStats or None.
+        Side effects: none. Exceptions: none.
+
+        Example:
+            >>> model.feature_cache_stats().avoided_fraction
+            0.97
+        """
+        cache = self.card_pipeline.feature_cache
+        return None if cache is None else cache.stats()
+
+    def close_feature_cache(self) -> None:
+        """Close the card pipeline's feature cache (its database
+        connection); nothing without a cache.
+
+        Inputs: none. Output: none. Side effects: closes the cache, which
+            must not be used after. Exceptions: none.
+
+        Example:
+            >>> model.close_feature_cache()
+        """
+        cache = self.card_pipeline.feature_cache
+        if cache is not None:
+            cache.close()
 
     @abstractmethod
     def embed_together(self, cards: List[GenericCard]) -> List[torch.Tensor]:

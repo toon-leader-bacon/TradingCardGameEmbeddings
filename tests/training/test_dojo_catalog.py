@@ -1,11 +1,13 @@
 import inspect
 import random
+import sqlite3
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.deck_box.deck_box import DeckBox
 from src.dojos.contrastive.styles.card_in_contexts import CardInContextsStyle
 from src.dojos.contrastive.styles.cross_slice_card import CrossSliceCardStyle
 from src.dojos.contrastive.styles.missing_card import (
@@ -405,6 +407,15 @@ class TestCardShelf:
     def test_missing_deck_box_raises(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError):
             CardShelf().deck_box(tmp_path / "missing.db")
+
+    def test_deck_box_is_opened_read_only(self, tmp_path: Path) -> None:
+        path = tmp_path / "decks.db"
+        DeckBox.load([path]).flush()
+
+        box = CardShelf().deck_box(path)
+
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            box.save(path, GameId.MTG, "binder-v1")
 
     def test_missing_binder_raises(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

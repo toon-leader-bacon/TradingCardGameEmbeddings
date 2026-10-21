@@ -1,4 +1,5 @@
 import sqlite3
+import threading
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -488,6 +489,63 @@ class TestLoad:
         # copy, not a live connection to either input.
         assert len(list(DeckBox.load([first_path]).all_decks(GameId.MTG))) == 1
         assert len(list(DeckBox.load([second_path]).all_decks(GameId.MTG))) == 1
+
+
+class TestOpenReadOnly:
+    def _saved(self, tmp_path: Path) -> tuple[Path, GenericDeck]:
+        path = tmp_path / "mtg.db"
+        deck = _deck("Mono Red", [uuid4(), uuid4()])
+        box = DeckBox.load([path])
+        box.create(deck)
+        box.save(path, GameId.MTG, "binder-v1")
+        return path, deck
+
+    def test_reads_what_was_saved(self, tmp_path: Path) -> None:
+        path, deck = self._saved(tmp_path)
+
+        box = DeckBox.open_read_only(path)
+
+        assert box.get_by_uuid(deck.nocab_uuid) == deck
+        assert box.card_binder_version_for(GameId.MTG) == "binder-v1"
+
+    def test_can_be_read_from_another_thread(self, tmp_path: Path) -> None:
+        path, deck = self._saved(tmp_path)
+        box = DeckBox.open_read_only(path)
+        read: list[GenericDeck | None] = []
+
+        reader = threading.Thread(
+            target=lambda: read.extend(box.get_by_uuids([deck.nocab_uuid]))
+        )
+        reader.start()
+        reader.join(timeout=5)
+
+        assert read == [deck]
+
+    @pytest.mark.parametrize("write", ["create", "delete", "save"])
+    def test_every_write_raises_and_leaves_the_file_unchanged(
+        self, tmp_path: Path, write: str
+    ) -> None:
+        path, deck = self._saved(tmp_path)
+        box = DeckBox.open_read_only(path)
+        writes = {
+            "create": lambda: box.create(_deck("New", [uuid4()])),
+            "delete": lambda: box.delete(deck.nocab_uuid),
+            "save": lambda: box.save(path, GameId.MTG, "binder-v2"),
+        }
+
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            writes[write]()
+
+        reopened = DeckBox.load([path])
+        assert list(reopened.all_uuids()) == [deck.nocab_uuid]
+        assert reopened.card_binder_version_for(GameId.MTG) == "binder-v1"
+
+    def test_a_missing_path_raises_and_creates_nothing(self, tmp_path: Path) -> None:
+        path = tmp_path / "missing" / "mtg.db"
+
+        with pytest.raises(FileNotFoundError):
+            DeckBox.open_read_only(path)
+        assert not path.parent.exists()
 
 
 class TestSaveLoadRoundTrip:

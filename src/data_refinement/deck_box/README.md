@@ -92,7 +92,10 @@ metrics too.
     (`src/dojos/file_managers/deck_box_dealer.py`).
   - `load([])` opens an empty in-memory box; `load([path])` connects
     straight to `path`; `load([p1, p2, ...])` merges read-only into
-    memory, last path wins. `save()` commits any pending writes and
+    memory, last path wins. `open_read_only(path)` opens an existing
+    file in SQLite's read-only mode, so any write raises; its connection
+    may be read from any one thread at a time. Training opens deck boxes
+    this way (`CardShelf.deck_box`). `save()` commits any pending writes and
     stamps the version (copying the box to `path` first if it isn't
     already connected there).
   - Batched commits: each mutating call is atomic on its own (a
@@ -111,7 +114,8 @@ metrics too.
   Protocol (the `CardLookup` counterpart). Dojos, their data
   constructors and `DeckBoxDealer` take a `DeckLookup`, so a reader
   cannot write through a box that `load()` connected straight to its
-  file.
+  file. The type checker enforces this; a box from `open_read_only()`
+  also refuses writes at runtime.
 - `_deck_tables.py` — `DeckTables`, private to `deck_box.py`: one method
   per SQL statement. Row writes never commit; `create_schema()` and
   `merge_from()` do, so they run only when a box is built.

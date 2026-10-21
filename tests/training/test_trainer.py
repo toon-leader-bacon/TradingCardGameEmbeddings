@@ -1,14 +1,25 @@
 import json
 import logging
 import math
+import threading
 from pathlib import Path
+from typing import Any, Iterator, cast
 
 import pytest
 import torch
 
-from src.dojos.dojo import Dojo
+import src.training.trainer as trainer_module
+from src.dojos.dojo import BatchBudget, Dojo, DojoBatch
 from src.schema.holdout import HoldoutSpec
+from src.schema.splits import Split
 from src.encoder_model.precision import Precision
+from src.training.diet.batch_feed import BatchFeed, open_batch_feed
+from src.training.diet.round_schedule import RoundSchedule
+from src.training.diet.prefetching_batch_streams import (
+    PrefetchingBatchStreams,
+    _Lifecycle,
+)
+from src.training.round_evaluation import evaluate_split_losses
 from src.training.learning_rate_schedule import LearningRateSchedule
 from src.training.loss_weighting import LossWeighting
 from src.training.plan import FaultPolicy, HardwareLimits
@@ -18,6 +29,7 @@ from src.training.diet.saturation_tracker import SaturationTracker
 from src.training.trainer import Trainer
 from tests.training.fakes import (
     LIMITS,
+    FakeBatch,
     FakeDojo,
     FakeModel,
     make_phase,
@@ -74,6 +86,7 @@ def _trainer(
     model: FakeModel | None = None,
     plan_overrides: dict[str, object] | None = None,
     precision: Precision = "fp32",
+    prefetch_depth: int = 0,
     **phase_overrides: object,
 ) -> Trainer:
     names = phase_names or tuple(d.name for d in dojos)
@@ -82,7 +95,7 @@ def _trainer(
         model or FakeModel(),  # type: ignore[arg-type]
         dojos,  # type: ignore[arg-type]
         plan,
-        HardwareLimits(LIMITS.max_batch_cost, precision),
+        HardwareLimits(LIMITS.max_batch_cost, precision, prefetch_depth),
         checkpointer or DirectoryCheckpointer(tmp_path),  # type: ignore[arg-type]
         listeners or [],  # type: ignore[arg-type]
     )
@@ -527,6 +540,7 @@ def _first_step_gradient(
     )
     phase_run = trainer._open_phase(trainer._plan.phases[0])
     trainer._model.train()
+    phase_run.feed.begin_round(RoundSchedule((dojo.name,)))
     assert trainer._take_step(phase_run, dojo)
     assert model.layer.weight.grad is not None
     return model.layer.weight.grad.detach().clone()
@@ -746,3 +760,182 @@ class TestNormalizedDecisions:
         split_loss = result.final_report.per_dojo_test_loss["a"]
         assert split_loss.baseline_loss == 4.0
         assert seen == [{"a": split_loss.loss / 4.0}]
+
+
+class _Boom(BaseException):
+    """Not an Exception: escapes the prefetch worker's build and kills it."""
+
+
+class _SeededDojo(FakeDojo):
+    """FakeDojo whose batches come from its own torch.Generator: one shared
+    by TRAIN and TEST (shared_rng, like OddOneOut) or one per split. Records
+    the thread of every batch built, flags a TRAIN batch built while an
+    evaluation pass runs, and raises _Boom on TRAIN batch boom_at."""
+
+    evaluating = threading.Event()  # set while Trainer evaluates (patched in)
+
+    def __init__(self, name: str, shared_rng: bool, boom_at: int | None = None) -> None:
+        super().__init__(name, n_batches=5)
+        seed = sum(map(ord, name))
+        shared = torch.Generator().manual_seed(seed)
+        self._generators = {
+            Split.TRAIN: shared if shared_rng else torch.Generator().manual_seed(seed),
+            Split.TEST: shared if shared_rng else torch.Generator().manual_seed(-seed),
+        }
+        self._boom_at = boom_at
+        self.train_batches = 0
+        self.threads: dict[Split, set[str]] = {Split.TRAIN: set(), Split.TEST: set()}
+        self.train_during_evaluation = 0
+
+    def batches(
+        self, split: Split, budget: BatchBudget, max_examples: int | None = None
+    ) -> Iterator[DojoBatch]:
+        for _ in range(self._n_batches):
+            self.threads[split].add(threading.current_thread().name)
+            if split is Split.TRAIN:
+                self.train_batches += 1
+                if self.train_batches == self._boom_at:
+                    raise _Boom()
+                if _SeededDojo.evaluating.is_set():
+                    self.train_during_evaluation += 1
+            yield FakeBatch(torch.randn(4, 3, generator=self._generators[split]))
+
+
+@pytest.fixture
+def opened_feeds(monkeypatch: pytest.MonkeyPatch) -> list[BatchFeed]:
+    """Every BatchFeed the Trainer opens, and evaluation flagged on
+    _SeededDojo.evaluating while it runs."""
+    feeds: list[BatchFeed] = []
+
+    def recording_open(*args: Any) -> BatchFeed:
+        feed = open_batch_feed(*args)
+        feeds.append(feed)
+        return feed
+
+    def flagged_evaluation(*args: Any, **kwargs: Any) -> Any:
+        _SeededDojo.evaluating.set()
+        try:
+            return evaluate_split_losses(*args, **kwargs)
+        finally:
+            _SeededDojo.evaluating.clear()
+
+    monkeypatch.setattr(trainer_module, "open_batch_feed", recording_open)
+    monkeypatch.setattr(trainer_module, "evaluate_split_losses", flagged_evaluation)
+    return feeds
+
+
+def _seeded_run(
+    tmp_path: Path, depth: int, shared_rng: bool
+) -> tuple[torch.Tensor, list[dict[str, float]]]:
+    """Final encoder weights and every round's TEST losses of a fixed run."""
+    torch.manual_seed(0)
+    model = FakeModel()
+    listener = _RecordingListener()
+    dojos = [_SeededDojo("a", shared_rng), _SeededDojo("b", shared_rng)]
+    _trainer(
+        tmp_path, dojos, model=model, listeners=[listener], prefetch_depth=depth
+    ).run()
+    losses = [
+        {name: split.loss for name, split in report.per_dojo_test_loss.items()}
+        for report in listener.reports
+    ]
+    return model.layer.weight.detach().clone(), losses
+
+
+class TestPrefetch:
+    def test_a_run_is_reproducible_at_its_depth_even_with_a_shared_dojo_rng(
+        self, tmp_path: Path
+    ) -> None:
+        first = _seeded_run(tmp_path / "1", depth=2, shared_rng=True)
+        second = _seeded_run(tmp_path / "2", depth=2, shared_rng=True)
+        assert torch.equal(first[0], second[0])
+        assert first[1] == second[1]
+
+    @pytest.mark.parametrize("shared_rng", [False, True])
+    def test_prefetching_trains_on_the_same_batches_as_building_directly(
+        self, tmp_path: Path, shared_rng: bool
+    ) -> None:
+        # The worker stops at each round's end, so even a dojo drawing TRAIN
+        # and TEST from one RNG sees the same draws at every depth
+        direct = _seeded_run(tmp_path / "direct", depth=0, shared_rng=shared_rng)
+        ahead = _seeded_run(tmp_path / "ahead", depth=2, shared_rng=shared_rng)
+        assert torch.equal(direct[0], ahead[0])
+        assert direct[1] == ahead[1]
+
+    def test_train_batches_are_built_on_the_worker_never_during_evaluation(
+        self, tmp_path: Path, opened_feeds: list[BatchFeed]
+    ) -> None:
+        dojos = [_SeededDojo("a", True), _SeededDojo("b", True)]
+        _trainer(tmp_path, dojos, prefetch_depth=2).run()
+        for dojo in dojos:
+            assert dojo.threads[Split.TRAIN] == {"batch-prefetch"}
+            assert dojo.threads[Split.TEST] == {threading.main_thread().name}
+            assert dojo.train_during_evaluation == 0
+
+    def test_every_phase_s_feed_is_closed_even_when_the_phase_gives_up(
+        self, tmp_path: Path, opened_feeds: list[BatchFeed]
+    ) -> None:
+        result = _trainer(
+            tmp_path,
+            [FakeDojo("bad", fail="train")],
+            plan_overrides={"faults": FaultPolicy(100, 3)},
+            prefetch_depth=2,
+        ).run()
+        assert result.stopped_early_reason is not None
+        assert "consecutive failures" in result.stopped_early_reason
+        assert len(opened_feeds) == 1
+        feed = cast(PrefetchingBatchStreams, opened_feeds[0])
+        assert feed._state is _Lifecycle.CLOSED  # noqa: SLF001
+
+    @pytest.mark.parametrize("depth", [0, 2])
+    def test_a_quarantine_reschedules_the_rest_of_the_round(
+        self, tmp_path: Path, opened_feeds: list[BatchFeed], depth: int
+    ) -> None:
+        bad = FakeDojo("bad", fail="train")
+        result = _trainer(
+            tmp_path,
+            [FakeDojo("good"), bad],
+            plan_overrides={"faults": FaultPolicy(2, 1000)},
+            prefetch_depth=depth,
+            max_rounds=2,
+        ).run()
+        assert result.final_report is not None
+        assert result.final_report.round_index == 1
+        assert "bad" in result.final_report.quarantined
+        # Two failures quarantine it; after that it is never scheduled, so
+        # only the steps built ahead of the quarantine can ask it again
+        assert 2 <= bad.train_requests <= 2 + depth
+
+    def test_a_dead_worker_ends_the_run_without_blaming_a_dojo(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # 4 steps a round: the worker never builds past a round, so it dies
+        # building batch 9, the first of round 2, after two whole rounds
+        dojo = _SeededDojo("a", shared_rng=False, boom_at=9)
+        with caplog.at_level(logging.WARNING):
+            result = _trainer(
+                tmp_path, [dojo], prefetch_depth=2, steps_per_round=4, max_rounds=3
+            ).run()
+        assert result.stopped_early_reason is not None
+        assert "batch feed failed" in result.stopped_early_reason
+        assert result.final_report is not None
+        assert result.final_report.round_index == 1
+        assert not result.final_report.quarantined
+        assert result.best_checkpoint is not None
+        assert "step failed" not in caplog.text
+
+    def test_a_worker_dying_mid_round_is_not_counted_as_a_step_failure(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Depth 2: batches 1 and 2 arrive, building batch 3 kills the worker,
+        # so step 3's next_batch finds nothing built and a dead worker
+        dojo = _SeededDojo("a", shared_rng=False, boom_at=3)
+        with caplog.at_level(logging.WARNING):
+            result = _trainer(
+                tmp_path, [dojo], prefetch_depth=2, steps_per_round=4, max_rounds=3
+            ).run()
+        assert result.stopped_early_reason is not None
+        assert "batch feed failed" in result.stopped_early_reason
+        assert result.final_report is None  # no round finished
+        assert "step failed" not in caplog.text
+        assert "quarantining" not in caplog.text

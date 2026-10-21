@@ -621,6 +621,44 @@ class DeckBox:
             return DeckBox._connect_direct(paths[0], commit_batch_size)
         return DeckBox._merge_into_memory(paths, commit_batch_size)
 
+    @staticmethod
+    def open_read_only(path: Path) -> "DeckBox":
+        """Connect to an existing deck box file that this box can never
+        write, for readers such as training.
+
+        Unlike load([path]), a stray mutating call fails loudly instead
+        of changing the file, and nothing is created when path is
+        missing. The connection may be used from any thread, one thread
+        at a time (SQLite here is built serialized), so a box built on
+        one thread can be read by a prefetch worker on another.
+
+        Inputs:
+            path: an existing data/final/decks/<game>.db-shaped file.
+        Output: a DeckBox connected to path in SQLite's read-only mode.
+        Side effects: opens a read-only connection to path.
+        Exceptions: FileNotFoundError if path does not exist. Every
+            mutating call (create/update/replace/delete/save) on the
+            returned box raises sqlite3.OperationalError ("attempt to
+            write a readonly database").
+
+        Example:
+            >>> box = DeckBox.open_read_only(Path("data/final/decks/mtg.db"))
+            >>> box.get_by_uuid(some_uuid)
+        """
+        if not path.exists():
+            raise FileNotFoundError(f"open_read_only: no deck box at {path}")
+        box = DeckBox()
+        box._connection.close()
+        box._connection = sqlite3.connect(
+            f"{path.resolve().as_uri()}?mode=ro", uri=True, check_same_thread=False
+        )
+        # Not create_schema(): its DDL and commit are writes. The file
+        # already holds the schema; only the row factory is needed.
+        box._connection.row_factory = sqlite3.Row
+        box._tables = DeckTables(box._connection)
+        box._path = path
+        return box
+
     def save(self, path: Path, source_game: GameId, card_binder_version: str) -> None:
         """Ensure path holds this box's current source_game content,
         stamped with card_binder_version.
