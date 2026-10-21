@@ -101,10 +101,19 @@ which grows worse than linearly (`../dojos/TODO.md`, "Vectorize the
 contrastive loss"). Until it is vectorized, 32 cards per batch is the
 fastest. Two caveats:
 
-- Contrastive batches are capped at 16 decks (32 cards) whatever
-  `max_batch_cost` says; the larger batches above lifted the cap in a
-  scratch script (`TODO.md`, "`max_batch_cost` cannot enlarge
-  contrastive batches").
-- With the default mods of the time (key shuffle included), about 78% of
-  training cards were stamped do-not-cache and encoded live: 199 ms per
-  32-card step against 119 ms with mods off.
+- These runs lifted a 16-deck cap on contrastive batches in a scratch
+  script. The cap is gone since (2026-10-21): `max_batch_cost` alone sets
+  the decks per batch.
+- In these runs, a small deck box could not fill a batch (Pokemon, 159
+  TRAIN decks, failed at 512 cards and up), and every dojo's TEST pass
+  yielded nothing once a batch needed more decks than
+  `eval_examples_per_dojo` (64). Both are fixed: a split's last batch
+  holds whatever decks are left, and a capped pass trims its last batch.
+  A huge budget against a small deck box still means every batch is the
+  whole box (Pokemon at 512 cards: one 159-deck batch per step).
+- With the default mods of 2026-10-21 (field mask and key mask; key
+  shuffle no longer a default), 40% of cards were encoded live at 512
+  cards: 642 ms per step, nearly all of it the live ModernBERT forward
+  pass (peak 1.6 GiB allocated). Before the shuffle was dropped, at 32
+  cards, about 78% were live: 199 ms per step against 119 ms with mods
+  off.

@@ -55,13 +55,43 @@ class _ScriptedPairConstructor:
     """Test double: yields the given ContrastiveBatches in order,
     ignoring the actual decks/card_lookup it's called with."""
 
-    cards_per_deck = 1
+    cards_per_deck = 2
 
     def __init__(self, batches: list[ContrastiveBatch]) -> None:
         self._batches = iter(batches)
 
     def build(self, decks: list[GenericDeck], card_lookup: object) -> ContrastiveBatch:
         return next(self._batches)
+
+
+class _DeckCountingPairConstructor:
+    """Test double: records each deck sample's size and builds a small
+    usable batch (two decks of one card each) whatever it is given."""
+
+    cards_per_deck = 2
+
+    def __init__(self) -> None:
+        self.deck_counts: list[int] = []
+
+    def build(self, decks: list[GenericDeck], card_lookup: object) -> ContrastiveBatch:
+        self.deck_counts.append(len(decks))
+        return ContrastiveBatch(
+            inputs=[_card() for _ in range(4)],
+            identities=[(uuid4(),) for _ in range(4)],
+            positive_cliques=[[0, 1], [2, 3]],
+        )
+
+
+def _counting_dojo(
+    constructor: _DeckCountingPairConstructor, deck_count: int
+) -> ContrastiveDojo:
+    return ContrastiveDojo(
+        dealer=_dealer_with_decks(deck_count),
+        pair_constructor=constructor,
+        card_lookup=CardBinder(),
+        holdout=_deck_holdout(),
+        strict_version_check=False,
+    )
 
 
 class _RecordingLoss:
@@ -99,7 +129,8 @@ def _dealer_with_decks(
     return DeckBoxDealer(box, GameId.MTG, index_path, _deck_holdout(deck_split_ratios))
 
 
-_BUDGET = BatchBudget(max_cost=10, cost_of=lambda card: 1)
+# Two decks per batch (the test pair constructor costs 2 cards a deck)
+_BUDGET = BatchBudget(max_cost=4, cost_of=lambda card: 1)
 
 
 class TestBatches:
@@ -130,7 +161,6 @@ class TestBatches:
             card_lookup=CardBinder(),
             holdout=_deck_holdout(),
             strict_version_check=False,
-            decks_per_sample=2,
         )
 
         with caplog.at_level(logging.WARNING):
@@ -155,7 +185,6 @@ class TestMalformedBatch:
             card_lookup=CardBinder(),
             holdout=_deck_holdout(),
             strict_version_check=False,
-            decks_per_sample=2,
             contrastive_loss=MissingCardInfoNCELoss(),
         )
 
@@ -218,7 +247,7 @@ class TestBudget:
             strict_version_check=False,
         )
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="fits only 0 deck"):
             list(dojo.batches(Split.TRAIN, BatchBudget(1, lambda card: 1)))
 
     def test_raises_when_a_built_batch_exceeds_the_budget(self) -> None:
@@ -234,11 +263,11 @@ class TestBudget:
             card_lookup=CardBinder(),
             holdout=_deck_holdout(),
             strict_version_check=False,
-            decks_per_sample=2,
         )
 
-        with pytest.raises(ValueError):
-            list(dojo.batches(Split.TRAIN, BatchBudget(2, lambda card: 1)))
+        # Two decks fit by count (4 // 2), but these 3 cards cost 2 each
+        with pytest.raises(ValueError, match="costs 6, over budget 4"):
+            list(dojo.batches(Split.TRAIN, BatchBudget(4, lambda card: 2)))
 
     def test_max_examples_stops_after_that_many_decks(self) -> None:
         good = ContrastiveBatch(
@@ -252,12 +281,47 @@ class TestBudget:
             card_lookup=CardBinder(),
             holdout=_deck_holdout(),
             strict_version_check=False,
-            decks_per_sample=2,
         )
 
         batches = list(dojo.batches(Split.TRAIN, _BUDGET, max_examples=4))
 
         assert len(batches) == 2
+
+    def test_max_examples_trims_the_last_batch_instead_of_dropping_it(
+        self,
+    ) -> None:
+        # 3 decks per batch; the first 5 decks are 3 + 2
+        constructor = _DeckCountingPairConstructor()
+        dojo = _counting_dojo(constructor, deck_count=9)
+
+        list(dojo.batches(Split.TRAIN, BatchBudget(6, lambda card: 1), 5))
+
+        assert constructor.deck_counts == [3, 2]
+
+    def test_a_budget_larger_than_the_split_yields_one_batch_of_it(self) -> None:
+        # e.g. a small deck box under a large budget, or a capped TEST pass
+        constructor = _DeckCountingPairConstructor()
+        dojo = _counting_dojo(constructor, deck_count=5)
+
+        list(dojo.batches(Split.TRAIN, BatchBudget(200, lambda card: 1), 64))
+
+        assert constructor.deck_counts == [5]
+
+    def test_the_budget_alone_sets_the_decks_per_batch(self) -> None:
+        constructor = _DeckCountingPairConstructor()
+        dojo = _counting_dojo(constructor, deck_count=50)
+
+        list(dojo.batches(Split.TRAIN, BatchBudget(80, lambda card: 1)))
+
+        assert constructor.deck_counts == [40, 10]
+
+    def test_a_lone_trailing_deck_is_dropped(self) -> None:
+        constructor = _DeckCountingPairConstructor()
+        dojo = _counting_dojo(constructor, deck_count=5)
+
+        list(dojo.batches(Split.TRAIN, _BUDGET))
+
+        assert constructor.deck_counts == [2, 2]
 
     def test_satisfies_the_dojo_protocol_and_counts_decks(self) -> None:
         dojo: Dojo = ContrastiveDojo(
@@ -382,7 +446,6 @@ class TestMods:
             card_lookup=CardBinder(),
             holdout=_deck_holdout((1, 1, 0)),
             strict_version_check=False,
-            decks_per_sample=2,
             mod_pipeline=ModPipeline(mods),
         )
 

@@ -297,7 +297,9 @@ outcome-labelled deck dojos.
 Batch budget: a deck costs its style's cards per deck (single card 2,
 missing card 9, odd one out 8, cross-slice and slice match 8, card in
 contexts 16), and `ContrastiveDojo` fits as many decks as `max_batch_cost`
-allows, up to 16 and never fewer than 2.
+allows, never fewer than 2. The budget is the only batch-size setting: a
+split's last batch holds whatever decks are left (so a deck box smaller
+than one batch still yields one), and a lone leftover deck is dropped.
 
 Files:
 
@@ -366,7 +368,9 @@ Files:
   odd one out: ln(item size)).
 - `dojo.py` - `ContrastiveDojo`: wires dealer + pair constructor + card
   lookup into `Dojo`. An example is one source deck, so the budget
-  becomes a deck count per batch. A batch whose loss is undefined (the
+  becomes a deck count per batch, and `max_examples` keeps a pass to the
+  split's first N decks, trimming its last batch (the `Dojo.batches`
+  contract, as in the generic dojos). A batch whose loss is undefined (the
   loss raises `DegenerateBatchError`, e.g. one surviving deck) is skipped
   and logged, so training and evaluation never see one; a malformed batch
   (any other error from the loss) still raises. It has no trainable
