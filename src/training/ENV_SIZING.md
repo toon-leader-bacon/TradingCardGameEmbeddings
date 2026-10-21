@@ -108,14 +108,16 @@ step is bound by building batches on the CPU, about 0.27 ms per card
 Bigger batches no longer cost more per card, so batch size is free to
 follow what training wants. Caveats:
 
-- Contrastive batches are capped at 16 decks (32 cards) whatever
-  `max_batch_cost` says; the larger batches above lifted the cap in a
-  scratch script (`TODO.md`, "`max_batch_cost` cannot enlarge
-  contrastive batches").
-- Uncapped, a small deck box can't fill a batch: Pokemon (159 TRAIN
-  decks) fails dojo checks at 512 cards and up, and every dojo's TEST
-  pass yields nothing once a batch needs more decks than
-  `eval_examples_per_dojo` (64).
+- These runs lifted a 16-deck cap on contrastive batches in a scratch
+  script. The cap is gone since (2026-10-21): `max_batch_cost` alone sets
+  the decks per batch.
+- In these runs, a small deck box could not fill a batch (Pokemon, 159
+  TRAIN decks, failed at 512 cards and up), and every dojo's TEST pass
+  yielded nothing once a batch needed more decks than
+  `eval_examples_per_dojo` (64). Both are fixed: a split's last batch
+  holds whatever decks are left, and a capped pass trims its last batch.
+  A huge budget against a small deck box still means every batch is the
+  whole box (Pokemon at 512 cards: one 159-deck batch per step).
 - With the default mods of 2026-10-21 (field mask and key mask; key
   shuffle no longer a default), 40% of cards were encoded live at 512
   cards: 642 ms per step, nearly all of it the live ModernBERT forward

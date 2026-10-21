@@ -158,21 +158,28 @@ class DeckBoxDealer:
         return self._deck_box.card_binder_version_for(self._source_game)
 
     def decks_for(
-        self, split: Split, decks_per_sample: int, shuffle: bool = True
+        self,
+        split: Split,
+        decks_per_sample: int,
+        shuffle: bool = True,
+        keep_remainder: bool = False,
     ) -> Iterator[list[GenericDeck]]:
         """Yield any split's decks, grouped into samples.
 
         Inputs:
             split: which split to deal from.
-            decks_per_sample: how many decks per yielded group. Any
-                remainder that doesn't fill a full group is dropped.
+            decks_per_sample: how many decks per yielded group.
             shuffle: whether to issue a fresh, freshly-ordered read of
                 this split before grouping (e.g. once per epoch for
                 TRAIN). NOT reproducible given a seed - see this
                 module's docstring's accepted trade-off. True by
                 default.
+            keep_remainder: whether the split's last decks, too few to
+                fill a group, are yielded as one shorter final group
+                (True) or dropped (False, the default).
         Output: a generator of lists of GenericDeck, each of length
-            decks_per_sample.
+            decks_per_sample, except a shorter last one when
+            keep_remainder is True.
         Side effects: none beyond reading from self._deck_box and this
             dealer's own index.
         Exceptions: ValueError if decks_per_sample <= 0.
@@ -192,8 +199,8 @@ class DeckBoxDealer:
             if len(group) == decks_per_sample:
                 yield self._decks_by_uuids(group)
                 group = []
-        # A trailing partial group is intentionally dropped - every
-        # yielded group must have exactly decks_per_sample decks.
+        if group and keep_remainder:
+            yield self._decks_by_uuids(group)
 
     def training_decks(
         self, decks_per_sample: int, shuffle: bool = True
