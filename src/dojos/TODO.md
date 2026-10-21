@@ -45,3 +45,32 @@
   - **Parallelize building:** worker processes or a prefetch thread, so
     the CPU builds the next batches while the GPU runs the current ones.
     This applies to training too, where throughput is a stated priority.
+- **Vectorize the contrastive loss.** `mean_anchor_loss`
+  (`contrastive/contrastive_loss.py`) calls `anchor_loss` once per anchor
+  in Python, and every InfoNCE style (single_card, cross_slice_card,
+  missing_card) ends there. With a warm feature cache this loop is nearly
+  the whole step, and it grows worse than linearly. Measured 2026-10-21
+  (single-card contrastive, all cache hits, decks cap lifted; see
+  `src/training/ENV_SIZING.md`): 32 cards 118 ms, 128 cards 1.33 s, 512
+  cards 19.5 s per step. Build one masked (N, N) logit matrix and one
+  `logsumexp` for all anchors and positives (the positive and exclusion
+  sets become boolean masks), so a step is a few GPU kernels whatever
+  its size. Keep the old loop as a test oracle: the two must agree to
+  float tolerance on random batches, including multi-positive anchors and
+  excluded siblings. Then rerun the batch-size sweep.
+- **A bounded, cacheable key shuffle.** `ShuffleKeysMod` makes a new key
+  order on every draw, so each shuffled card is a text never seen before.
+  It is stamped do-not-cache and is encoded live every step; with it on,
+  about 78% of training cards missed the feature cache (2026-10-21). It
+  was taken out of the default augmentations
+  (`augmentation_defaults.py`) for that reason. Build a shuffle that
+  picks one of N fixed orders per card instead, e.g. seed a
+  `random.Random` with (card text digest, k) for k drawn uniformly from
+  0..N-1. Each card then has at most N shuffled texts, all cacheable
+  (`deterministic_cards = True`), and the cache holds N + 1 copies of each
+  card rather than an unbounded number. Make N a spec field
+  (`{kind: shuffle_keys, orders: 4}`), then put it back in the defaults.
+  `WeightedFieldMaskMod` is bounded the same way (one text per drop-table
+  row), so it could become cacheable too. It changes about 75% of cards
+  and still stamps them, so cached runs with default mods still encode
+  most cards live until it does.

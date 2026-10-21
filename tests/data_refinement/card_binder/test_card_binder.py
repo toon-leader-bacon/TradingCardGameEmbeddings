@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 
+from src.data_refinement.card_binder import card_binder as card_binder_module
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
@@ -192,6 +193,35 @@ class TestGetByUuid:
         binder = CardBinder()
 
         assert binder.get_by_uuid(uuid4()) is None
+
+
+class TestSourceGamesOf:
+    def test_held_uuids_map_to_their_game_and_unknown_ones_are_absent(
+        self,
+    ) -> None:
+        binder = CardBinder()
+        bolt = binder.create(_card("Bolt", "src-1", {"a": 1}))
+        ember = binder.create(_card("Ember", "src-2", {}, GameId.GWENT))
+        unknown = uuid4()
+
+        found = binder.source_games_of(
+            [bolt.nocab_uuid, unknown, ember.nocab_uuid, bolt.nocab_uuid]
+        )
+
+        assert found == {bolt.nocab_uuid: GameId.MTG, ember.nocab_uuid: GameId.GWENT}
+        assert unknown not in found
+
+    def test_copies_no_card(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        binder = CardBinder()
+        bolt = binder.create(_card("Bolt", "src-1", {"a": 1}))
+
+        def no_copy(_: object) -> None:
+            raise AssertionError("source_games_of must not copy a card")
+
+        monkeypatch.setattr(card_binder_module.copy, "deepcopy", no_copy)
+        assert binder.source_games_of([bolt.nocab_uuid]) == {
+            bolt.nocab_uuid: GameId.MTG
+        }
 
 
 class TestGetByName:

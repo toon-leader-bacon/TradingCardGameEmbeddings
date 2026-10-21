@@ -256,6 +256,31 @@ class CardBinder:
         card = self._cards_by_uuid.get(nocab_uuid)
         return copy.deepcopy(card) if card is not None else None
 
+    def source_games_of(self, nocab_uuids: Iterable[UUID]) -> dict[UUID, GameId]:
+        """Which of nocab_uuids this binder holds, each with its card's
+        game: an existence check over a batch that copies no card, unlike
+        get_by_uuid (about 50 us per deep copy).
+
+        Inputs:
+            nocab_uuids: identities to check, any number; duplicates and
+                unknown uuids allowed.
+        Output: dict from each held uuid to its card's source_game, in
+            first-seen order; an unknown uuid is absent, so
+            `uuid in result` is the existence test.
+        Side effects: none.
+        Exceptions: none.
+
+        Example:
+            >>> binder.source_games_of([known_uuid, uuid4()])
+            {UUID('...'): <GameId.MTG: 'mtg'>}
+        """
+        result: dict[UUID, GameId] = {}
+        for nocab_uuid in nocab_uuids:
+            card = self._cards_by_uuid.get(nocab_uuid)
+            if card is not None:
+                result[nocab_uuid] = card.source_game
+        return result
+
     def get_by_name(self, source_game: GameId, name: str) -> list[GenericCard]:
         """Look up every card with a given name.
 

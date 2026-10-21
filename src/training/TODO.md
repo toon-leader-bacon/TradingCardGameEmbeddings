@@ -137,6 +137,19 @@ install) is in `Notes.md`.
 - [ ] **Set `max_batch_cost` sensibly.** It counts cards, not tokens, and a
   40-card deck counts as 40. Start small (~32) and raise it while watching
   VRAM.
+- [ ] **`max_batch_cost` cannot enlarge contrastive batches.**
+  `ContrastiveDojoRecipe.decks_per_sample` defaults to 16
+  (`dojo_recipes/contrastive_dojo_recipe.py`), and
+  `ContrastiveDojo._decks_within` takes `min(decks_per_sample, budget //
+  cards_per_deck)`. So every single-card contrastive batch is at most 16
+  decks x 2 = 32 cards, whatever the budget, and no config key reaches the
+  cap. Found 2026-10-21 while sizing the feature cache: `max_batch_cost`
+  32 -> 2048 gave the same ~117 ms step and the same cards per step. Fix:
+  let the budget alone set the deck count (keep the cap only as an
+  optional per-dojo override), or expose `decks_per_sample` in the run
+  config. Mind tiny deck boxes (Pokemon: 159 TRAIN decks) and
+  `eval_examples_per_dojo` (a TEST pass yields nothing when it is smaller
+  than one batch's deck count).
 - [ ] **Decide about resume.** Not supported (tracker and RNG state are not
   saved); accept that for the first run or scope it.
 - [ ] **Learn pre-norm vs post-norm** (`group_attention.norm_first`).

@@ -100,9 +100,18 @@ class TestCardTextKey:
         )
 
     def test_the_digest_is_sixteen_bytes(self) -> None:
-        assert len(CardTextKey.of_text("x").digest) == 16
+        assert len(CardTextKey.of_text("x")) == 16
         with pytest.raises(ValueError, match="16 bytes"):
             CardTextKey(b"short")
+
+    def test_a_key_matches_its_plain_bytes(self) -> None:
+        # SQLite hands keys back as plain bytes; they must find the key
+        key = CardTextKey.of_text("x")
+        plain = bytes(key)
+        assert type(plain) is bytes
+        assert key == plain and hash(key) == hash(plain)
+        assert {plain: 1}[key] == 1
+        assert isinstance(CardTextKey(plain), CardTextKey)
 
 
 class TestFeatureStorageDtype:

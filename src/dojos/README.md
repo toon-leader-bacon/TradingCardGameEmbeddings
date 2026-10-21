@@ -382,8 +382,10 @@ Files:
 
 Augmentation defaults: `augmentation_defaults.py` (at the top of
 `dojos/`) holds each game's default train-only augmentations as
-`ModSpec`s (`mods/mod_specs.py`): a key shuffle, a `DropTable` of
-`FieldMask`s, and a small random-key mask. The tables name each game's
+`ModSpec`s (`mods/mod_specs.py`): a `DropTable` of `FieldMask`s and a
+small random-key mask. The key shuffle is no longer a default: each
+shuffle is a new, uncacheable text, which defeated the feature cache
+(2026-10-21); a run config can still add `{kind: shuffle_keys}`. The tables name each game's
 `raw_content` keys, so they follow the game's card-binder ingestion stage;
 each mainly masks the field that nearly identifies a card's deck (Gwent
 `faction`, STS2 `color`), so same-deck positives cannot be matched on that

@@ -45,10 +45,12 @@ def known_card_uuids(deck: GenericDeck, card_lookup: CardLookup) -> list[UUID]:
     Exceptions: none.
     """
     unknown_uuid = CardBinder.unknown_card_uuid(deck.source_game)
+    # One batch existence check: get_by_uuid would deep-copy every card
+    known = card_lookup.source_games_of(deck.card_nocab_uuids)
     return [
         card_uuid
         for card_uuid in deck.card_nocab_uuids
-        if card_uuid != unknown_uuid and card_lookup.get_by_uuid(card_uuid) is not None
+        if card_uuid != unknown_uuid and card_uuid in known
     ]
 
 
