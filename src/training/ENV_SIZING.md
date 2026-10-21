@@ -86,25 +86,39 @@ encoding.
 
 ## Batch size (single-card contrastive, warm cache)
 
-Gwent, FaB, StS2 and Dominion contrastive dojos, residual-MLP head,
-fp16, prefetch depth 2, mods off, every card a cache hit. Prefetch hid
-batch building entirely (`next_batch` about 0.1 ms).
+Gwent, FaB, StS2 and Dominion contrastive dojos (plus Pokemon at 32 and
+128 cards), residual-MLP head, fp16, prefetch depth 2, mods off, every
+card a cache hit, vectorized loss (2026-10-21). "Forward + loss" is the
+model's forward pass and the loss; "waiting for the batch" is the
+step's wait in `next_batch`, i.e. batch building that prefetch did not
+hide.
 
-| Cards per batch | Step | Cards/s |
-|---|---|---|
-| 32 | 118 ms | ~270 |
-| 128 | 1.33 s | ~96 |
-| 512 | 19.5 s | ~26 |
+| Cards per batch | Step | Cards/s | Forward + loss | Waiting for the batch |
+|---|---|---|---|---|
+| 32 | 11.7 ms | ~2,700 | 3.6 ms | 0.0 ms |
+| 128 | 49 ms | ~2,600 | 6.7 ms | 32 ms |
+| 512 | 182 ms | ~2,800 | 10.4 ms | 162 ms |
+| 2,048 | 617 ms | ~3,300 | 31.6 ms | 556 ms |
 
-Nearly the whole step is the contrastive loss's per-anchor Python loop,
-which grows worse than linearly (`../dojos/TODO.md`, "Vectorize the
-contrastive loss"). Until it is vectorized, 32 cards per batch is the
-fastest. Two caveats:
+Before the loss was vectorized, the same runs took 118 ms (32 cards),
+1.33 s (128) and 19.5 s (512) per step: the per-anchor Python loop was
+nearly the whole step. Now the GPU side is a few milliseconds and the
+step is bound by building batches on the CPU, about 0.27 ms per card
+(dealing decks, sampling, the deep copy per card, the cache lookup).
+Bigger batches no longer cost more per card, so batch size is free to
+follow what training wants. Caveats:
 
 - Contrastive batches are capped at 16 decks (32 cards) whatever
   `max_batch_cost` says; the larger batches above lifted the cap in a
   scratch script (`TODO.md`, "`max_batch_cost` cannot enlarge
   contrastive batches").
-- With the default mods of the time (key shuffle included), about 78% of
-  training cards were stamped do-not-cache and encoded live: 199 ms per
-  32-card step against 119 ms with mods off.
+- Uncapped, a small deck box can't fill a batch: Pokemon (159 TRAIN
+  decks) fails dojo checks at 512 cards and up, and every dojo's TEST
+  pass yields nothing once a batch needs more decks than
+  `eval_examples_per_dojo` (64).
+- With the default mods of 2026-10-21 (field mask and key mask; key
+  shuffle no longer a default), 40% of cards were encoded live at 512
+  cards: 642 ms per step, nearly all of it the live ModernBERT forward
+  pass (peak 1.6 GiB allocated). Before the shuffle was dropped, at 32
+  cards, about 78% were live: 199 ms per step against 119 ms with mods
+  off.

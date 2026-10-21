@@ -9,7 +9,11 @@ from uuid import uuid4
 
 import torch
 
-from src.dojos.contrastive.contrastive_loss import identity_negative_mask
+from src.dojos.contrastive.contrastive_loss import (
+    clique_keys,
+    same_key_mask,
+    unit_keys,
+)
 from src.dojos.loss.bce_loss import BceLoss
 from src.dojos.loss.fixed_classification_loss import FixedClassificationLoss
 from src.dojos.loss.masked_vector_regression_loss import MaskedVectorRegressionLoss
@@ -61,11 +65,14 @@ def test_pick_prediction_loss_follows_each_logits_device() -> None:
     assert loss.device == META
 
 
-def test_contrastive_negative_mask_is_built_on_the_similarity_device() -> None:
-    # The full loss reads mask entries back as Python bools, which meta
-    # tensors cannot do; the mask was its only CPU-built tensor
-    mask = identity_negative_mask([uuid4(), uuid4()], META)
-    assert mask.device == META
+def test_contrastive_mask_keys_are_built_on_the_similarity_device() -> None:
+    # AnchorMasks itself reads one value back per batch (its invariant
+    # check), which meta tensors cannot do; its inputs, the keys, are
+    # built on whatever device they are given
+    identity_keys = unit_keys([uuid4(), uuid4()], META)
+    assert identity_keys.device == META
+    assert clique_keys([[0, 1]], 2, META).device == META
+    assert same_key_mask(identity_keys).device == META
 
 
 def test_device_of_reads_a_tensor_or_a_list_and_defaults_to_cpu() -> None:

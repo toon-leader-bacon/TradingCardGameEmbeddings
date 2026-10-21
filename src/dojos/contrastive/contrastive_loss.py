@@ -8,23 +8,29 @@ need every item's embedding in the batch jointly. Out of scope: a
 SupCon-style multi-positive variant.
 
 This module holds the Protocol, DegenerateBatchError, and the shared
-single-positive InfoNCE math (`check_item_embeddings`,
-`pairwise_cosine_similarity`, `identity_negative_mask`, `anchor_loss`,
-`mean_anchor_loss`, `mean_item_embeddings`, `mean_constant_logit_loss`)
-that every InfoNCE style in styles/ reduces to - identical logic
-(PRINCIPLES.md section 2), not classes that happen to look alike. What
-differs between those styles is only how each derives, from its own
-item-level input shape, the flat embedding/identity pool and the anchor
--> positives/exclusions mapping these functions expect; that derivation
-stays private to each loss. Odd one out's loss is not InfoNCE (its
-candidates are positions within one item) and uses only
-`check_item_embeddings` and DegenerateBatchError.
+single-positive InfoNCE math every InfoNCE style in styles/ reduces to
+(identical logic, PRINCIPLES.md section 2):
+
+- `pairwise_cosine_similarity`, `mean_item_embeddings` and
+  `check_item_embeddings` turn a batch into an (N, N) similarity over
+  its comparison units;
+- `same_key_mask`, `unit_keys`, `clique_keys` and `AnchorMasks` state
+  who is each anchor's positive and negative, as (N, N) boolean masks;
+- `masked_info_nce_loss` and `constant_logit_baseline` reduce the masks
+  (and the similarity) to the loss and its baseline, all anchors at
+  once, in a few tensor kernels whatever N is.
+
+What differs between those styles is only how each derives, from its
+own item-level input shape, the flat unit pool and its AnchorMasks;
+that derivation stays private to each loss (its _anchor_masks). Odd one
+out's loss is not InfoNCE (its candidates are positions within one
+item) and uses only `check_item_embeddings` and DegenerateBatchError.
 """
 
 import math
+from dataclasses import dataclass
 from typing import (
     Hashable,
-    Mapping,
     Protocol,
     Sequence,
 )
@@ -80,105 +86,6 @@ def mean_item_embeddings(item_embeddings: BatchedMultiCardEmbedding) -> list[Emb
     return [torch.stack(item).mean(dim=0) for item in item_embeddings]
 
 
-def identity_negative_mask(
-    identities: Sequence[Hashable], device: torch.device
-) -> torch.Tensor:
-    """Which (i, j) pairs may ever serve as anchor/negative.
-
-    Shared by every InfoNCE style's loss (styles/). Excludes
-    i == j and any pair sharing an identical identity (the structural
-    false-negative case - see this module's docstring). `identities`
-    is whatever hashable key identifies "the same real-world thing" for
-    one comparison unit - a whole ContrastiveBatch.identities tuple for
-    a single-card item or a missing-card style item, or one bare card
-    uuid for a flattened card.
-
-    Inputs:
-        identities: one hashable identity per comparison unit, same
-            order as the embeddings pairwise_cosine_similarity() was
-            given.
-        device: where the similarity matrix lives; the mask is moved there.
-    Output: an (N, N) boolean tensor on device, N = len(identities); True where
-        unit j is a legitimate negative candidate for anchor i (a
-        positive pair, or an anchor's own excluded group, may still
-        separately override this at use-site - this mask governs
-        exact-identity duplicate exclusion only).
-    Side effects: none.
-    Exceptions: none.
-    """
-    unit_count = len(identities)
-    mask = torch.ones((unit_count, unit_count), dtype=torch.bool)
-    for i in range(unit_count):
-        mask[i, i] = False
-        for j in range(i + 1, unit_count):
-            if identities[i] == identities[j]:
-                mask[i, j] = False
-                mask[j, i] = False
-    # Filled on the CPU (one element write each), then moved once
-    return mask.to(device)
-
-
-def anchor_loss(
-    anchor_index: int,
-    anchor_positives: list[int],
-    excluded_indices: set[int],
-    similarity: torch.Tensor,
-    valid_negative_mask: torch.Tensor,
-    temperature: float,
-) -> torch.Tensor:
-    """One anchor's own single-positive InfoNCE loss, averaged over its
-    positives if it has more than one.
-
-    Shared by every InfoNCE style's loss (styles/), called once
-    per anchor unit that has at least one positive.
-
-    Inputs:
-        anchor_index: index of the anchor unit.
-        anchor_positives: indices of anchor_index's positives (at least
-            one).
-        excluded_indices: indices that are neither a positive nor a
-            valid negative for this anchor, beyond what
-            valid_negative_mask already excludes - e.g. a multi-card
-            anchor's own-item sibling cards. Empty for a ContrastiveLoss
-            with no such notion (e.g. SingleCardInfoNCELoss).
-        similarity: the full (N, N) pairwise cosine similarity matrix
-            from pairwise_cosine_similarity().
-        valid_negative_mask: the full (N, N) mask from
-            identity_negative_mask().
-        temperature: InfoNCE's softmax temperature.
-    Output: a scalar loss tensor for this anchor: for each of its
-        positives, -log(softmax(similarity[anchor] / temperature)
-        restricted to {that positive} union anchor's valid negatives),
-        averaged over its positives.
-    Side effects: none.
-    Exceptions: none expected (anchor_positives is non-empty by
-        construction - see each class's calculate()).
-    """
-    excluded_from_negatives = set(anchor_positives) | excluded_indices
-    unit_count = similarity.shape[0]
-    valid_negative_indices = [
-        j
-        for j in range(unit_count)
-        if bool(valid_negative_mask[anchor_index, j])
-        and j not in excluded_from_negatives
-    ]
-
-    per_positive_losses: list[torch.Tensor] = []
-    for positive_index in anchor_positives:
-        # log_softmax over [this positive, every valid negative] is the
-        # numerically stable form of -log(exp(pos)/(exp(pos) +
-        # sum(exp(negatives)))) - the positive is always logit 0 in this
-        # concatenation, so its log-probability is what we want.
-        candidate_indices = [positive_index] + valid_negative_indices
-        candidate_similarities = (
-            similarity[anchor_index, candidate_indices] / temperature
-        )
-        log_probabilities = torch.log_softmax(candidate_similarities, dim=0)
-        per_positive_losses.append(-log_probabilities[0])
-
-    return torch.stack(per_positive_losses).mean()
-
-
 class DegenerateBatchError(ValueError):
     """A well-formed batch whose loss is undefined: no unit has a positive,
     or no anchor has a negative (e.g. one surviving deck). Distinct from a
@@ -218,95 +125,342 @@ def check_item_embeddings(
         )
 
 
-def mean_anchor_loss(
-    positives_by_anchor: Mapping[int, list[int]],
-    excluded_by_anchor: Mapping[int, set[int]],
-    similarity: torch.Tensor,
-    valid_negative_mask: torch.Tensor,
-    temperature: float,
-) -> torch.Tensor:
-    """anchor_loss for every anchor, averaged: the reduction every
-    concrete ContrastiveLoss.calculate() ends with.
+def same_key_mask(keys: torch.Tensor) -> torch.Tensor:
+    """Which pairs of units share a key: one broadcast comparison.
 
-    Shared by every InfoNCE style's loss (styles/).
+    Shared by every InfoNCE style's _anchor_masks (styles/), which turn
+    each O(N) key vector (clique, item, role, identity) into an (N, N)
+    relation with it.
 
-    Inputs: positives_by_anchor (non-empty lists), excluded_by_anchor (a
-        missing key means no extra exclusions), similarity and
-        valid_negative_mask (see anchor_loss), temperature.
-    Output: a scalar loss tensor.
+    Inputs: keys, an (N,) int64 tensor on any device.
+    Output: an (N, N) bool tensor on keys' device; [i, j] is
+        keys[i] == keys[j], so the diagonal is True.
     Side effects: none.
-    Exceptions: DegenerateBatchError (a ValueError) if positives_by_anchor
-        is empty (no anchor, loss undefined).
+    Exceptions: ValueError if keys is not 1-D int64.
+
+    Example:
+        >>> same_key_mask(torch.tensor([0, 0, 1]))
+        tensor([[ True,  True, False],
+                [ True,  True, False],
+                [False, False,  True]])
     """
-    if not positives_by_anchor:
-        raise DegenerateBatchError("no unit in this batch has a positive pair")
-    per_anchor_losses = [
-        anchor_loss(
-            anchor_index,
-            anchor_positives,
-            excluded_by_anchor.get(anchor_index, set()),
-            similarity,
-            valid_negative_mask,
-            temperature,
+    if keys.dim() != 1 or keys.dtype != torch.int64:
+        raise ValueError(
+            f"keys must be 1-D int64, got shape {tuple(keys.shape)} {keys.dtype}"
         )
-        for anchor_index, anchor_positives in positives_by_anchor.items()
-    ]
-    return torch.stack(per_anchor_losses).mean()
+    return keys.unsqueeze(1) == keys.unsqueeze(0)
 
 
-def mean_constant_logit_loss(
-    identities: Sequence[Hashable],
-    positives_by_anchor: Mapping[int, list[int]],
-    excluded_by_anchor: Mapping[int, set[int]],
-) -> float:
-    """The batch loss anchor_loss would give if every similarity were
-    equal: the InfoNCE baseline for this batch shape (encoder-free).
+def unit_keys(units: Sequence[Hashable], device: torch.device) -> torch.Tensor:
+    """One dense int64 key per unit, equal for equal units (keys are
+    numbered in first-seen order).
 
-    Shared by every InfoNCE style's loss (styles/), exactly as
-    anchor_loss is. With constant logits, each of an anchor's per-positive
-    terms is -log(1 / (1 + |N(a)|)) whatever the temperature, so
+    Shared by every InfoNCE style's _anchor_masks: identities become
+    identity keys, a missing card's identity its missing-card key.
 
-        baseline = mean over anchors a with P(a) non-empty of ln(1 + |N(a)|)
-        N(a) = units - {a} - P(a) - E(a) - D(a)
+    Inputs: units, any hashable values; device, where the keys go.
+    Output: an (N,) int64 tensor on device, N = len(units).
+    Side effects: none.
+    Exceptions: none.
 
-    where P(a) = a's positives, E(a) = its extra exclusions (a multi-card
-    anchor's own-item siblings; for a missing-card anchor, the other
-    same-role units and decks missing the same card), D(a) = exact-identity duplicates of a
-    (identity_negative_mask). Closed forms for duplicate-free batches with
-    clique sizes k_c (items), N items in all:
-        single-card: sum_c k_c ln(N - k_c + 1) / sum_c k_c
-        multi-card, m cards per item: sum_c k_c ln(m (N - k_c) + 1) / sum_c k_c
-    (sums over cliques with k_c >= 2). Counting from the batch directly
-    (no closed form) keeps duplicates and short decks exact.
+    Example:
+        >>> unit_keys(["a", "b", "a"], torch.device("cpu"))
+        tensor([0, 1, 0])
+    """
+    key_of_unit: dict[Hashable, int] = {}
+    result = [key_of_unit.setdefault(unit, len(key_of_unit)) for unit in units]
+    return torch.tensor(result, dtype=torch.int64, device=device)
+
+
+def clique_keys(
+    positive_cliques: Sequence[Sequence[int]], unit_count: int, device: torch.device
+) -> torch.Tensor:
+    """Each unit's clique as a key; a unit in no clique gets a key of its
+    own, so it has no positive.
+
+    Shared by every InfoNCE style's _anchor_masks. Parses the cliques:
+    they must be disjoint, since a unit's positives are exactly the
+    other members of its one clique.
 
     Inputs:
-        identities: one identity per comparison unit, as for
-            identity_negative_mask.
-        positives_by_anchor: anchor unit -> its positives (non-empty
-            lists only), as each class's calculate() derives it.
-        excluded_by_anchor: anchor unit -> extra exclusions; a missing
-            key means none.
-    Output: float > 0 when some anchor has a negative.
+        positive_cliques: index groups into the units (see
+            ContrastiveBatch.positive_cliques).
+        unit_count: N, the number of units the indices point into.
+        device: where the keys go.
+    Output: an (N,) int64 tensor on device. Clique c's members get key
+        c; a unit in no clique gets a key >= len(positive_cliques) that no
+        other unit has.
     Side effects: none.
-    Exceptions: ValueError if positives_by_anchor is empty (no anchor,
-        loss undefined) or every anchor has zero negatives (baseline 0,
-        normalized loss undefined).
+    Exceptions: ValueError if an index is outside 0..N-1 or a unit is in
+        two cliques.
+
+    Example:
+        >>> clique_keys([[0, 2], [1]], 4, torch.device("cpu"))
+        tensor([0, 1, 0, 5])
     """
-    if not positives_by_anchor:
-        raise DegenerateBatchError("no unit in this batch has a positive pair")
-    unit_count = len(identities)
-    per_anchor_losses: list[float] = []
-    for anchor, positives in positives_by_anchor.items():
-        not_negative = set(positives) | excluded_by_anchor.get(anchor, set())
-        negative_count = sum(
-            1
-            for j in range(unit_count)
-            if j != anchor
-            and j not in not_negative
-            and identities[j] != identities[anchor]
+    # Every unit starts with a key of its own, above every clique index
+    result = list(range(len(positive_cliques), len(positive_cliques) + unit_count))
+    seen: set[int] = set()
+
+    # Each clique stamps its index on its members
+    for clique_index, clique in enumerate(positive_cliques):
+        for unit in clique:
+            # Negative indices would wrap around silently
+            if not 0 <= unit < unit_count:
+                raise ValueError(f"clique index {unit} is outside 0..{unit_count - 1}")
+            if unit in seen:
+                raise ValueError(f"unit {unit} is in more than one clique")
+            seen.add(unit)
+            result[unit] = clique_index
+    return torch.tensor(result, dtype=torch.int64, device=device)
+
+
+@dataclass(frozen=True)
+class AnchorMasks:
+    """One batch's anchor relations over N comparison units: row =
+    anchor, column = the unit it is compared with. What every InfoNCE
+    style reduces its batch to, so calculate() and constant_logit_loss()
+    read the same relation (AnchorMasks.of derives the negatives).
+
+    positives: (N, N) bool; [a, p] is True when p is one of a's
+        positives. An anchor is a row with any True (see anchors).
+    negatives: (N, N) bool; [a, j] is True when j is one of a's
+        negatives.
+
+    Invariants, checked in __post_init__: both (N, N) bool on one
+    device, both diagonals False, positives and negatives disjoint. The
+    value checks read one value back to the host per batch (the old loop
+    read N^2), so masks can't be built on the META device. The fields
+    are frozen but the tensors are not copied: don't edit them in place.
+    """
+
+    positives: torch.Tensor
+    negatives: torch.Tensor
+
+    def __post_init__(self) -> None:
+        """Check the invariants above.
+
+        Inputs: none (the fields).
+        Output: none.
+        Side effects: one host sync (the value checks).
+        Exceptions: ValueError if an invariant does not hold.
+        """
+        # Validate metadata first: shape, dtype, device (no sync)
+        _check_mask_layout(self.positives, self.negatives)
+
+        # Then the values: no self pair, no unit both positive and negative
+        has_self_pair = (
+            self.positives.diagonal().any() | self.negatives.diagonal().any()
         )
-        per_anchor_losses.append(math.log(1 + negative_count))
-    result = math.fsum(per_anchor_losses) / len(per_anchor_losses)
+        has_overlap = (self.positives & self.negatives).any()
+        if bool(has_self_pair | has_overlap):
+            raise ValueError(
+                "AnchorMasks needs False diagonals and disjoint positives and negatives"
+            )
+
+    @property
+    def anchors(self) -> torch.Tensor:
+        """(N,) bool: the units with at least one positive."""
+        return self.positives.any(dim=1)
+
+    @classmethod
+    def of(
+        cls,
+        positives: torch.Tensor,
+        ignored: torch.Tensor | None,
+        identity_keys: torch.Tensor,
+    ) -> "AnchorMasks":
+        """Build the masks from what a style knows: who is positive and
+        who is ignored. Every other unit is a negative, except the anchor
+        itself and its exact-identity duplicates (structural false
+        negatives):
+
+            negatives = not (self or positives or ignored or same identity)
+
+        Identity only ever removes negatives: a positive that shares its
+        anchor's identity (e.g. two copies of one card drawn from the
+        same deck) stays a positive.
+
+        Inputs:
+            positives: (N, N) bool; its diagonal is cleared here.
+            ignored: (N, N) bool, units neither positive nor negative for
+                the row's anchor (e.g. a multi-card anchor's own-item
+                siblings); may overlap positives, and positives win.
+                None means no unit is ignored.
+            identity_keys: (N,) int64 on the same device, as unit_keys
+                gives for the units' identities.
+        Output: AnchorMasks on positives' device.
+        Side effects: one host sync (__post_init__).
+        Exceptions: ValueError on a shape, dtype or device mismatch.
+
+        Example:
+            >>> cpu = torch.device("cpu")
+            >>> keys = clique_keys([[0, 1], [2, 3]], 4, cpu)
+            >>> masks = AnchorMasks.of(same_key_mask(keys), None, unit_keys("abcd", cpu))
+            >>> masks.negatives[0].tolist()
+            [False, False, True, True]
+        """
+        # Validate inputs: one layout for all three relations
+        same_identity = same_key_mask(identity_keys)
+        _check_mask_layout(positives, same_identity)
+        _check_mask_layout(positives, ignored)
+        own = torch.eye(positives.shape[0], dtype=torch.bool, device=positives.device)
+        positives = positives & ~own
+
+        # Every unit not positive, ignored, self or a duplicate is a negative
+        not_negative = own | positives | same_identity
+        if ignored is not None:
+            not_negative = not_negative | ignored
+        return cls(positives=positives, negatives=~not_negative)
+
+
+def _check_mask_layout(mask: torch.Tensor, other: torch.Tensor | None) -> None:
+    """Raise ValueError unless mask is square bool and other (if any)
+    matches it in shape, dtype and device.
+
+    Private helper - callers are AnchorMasks.__post_init__ and
+    AnchorMasks.of.
+    Inputs: mask, other (None skips the comparison).
+    Output: none.
+    Side effects: none (metadata only, no host sync).
+    Exceptions: ValueError on a mismatch.
+    """
+    if mask.dim() != 2 or mask.shape[0] != mask.shape[1] or mask.dtype != torch.bool:
+        raise ValueError(
+            f"a mask must be square bool, got shape {tuple(mask.shape)} {mask.dtype}"
+        )
+    if other is None:
+        return
+    if (other.shape, other.dtype, other.device) != (
+        mask.shape,
+        mask.dtype,
+        mask.device,
+    ):
+        raise ValueError(
+            f"masks disagree: {tuple(mask.shape)} {mask.dtype} on {mask.device} "
+            f"vs {tuple(other.shape)} {other.dtype} on {other.device}"
+        )
+
+
+def masked_info_nce_loss(
+    similarity: torch.Tensor, masks: AnchorMasks, temperature: float
+) -> torch.Tensor:
+    """Single-positive InfoNCE for every anchor and positive at once: the
+    reduction every InfoNCE style's calculate() ends with. With logits
+    L = similarity / temperature (float32):
+
+        loss(a, p) = logaddexp(L[a, p], LSE_{j in Neg(a)} L[a, j]) - L[a, p]
+                   = softplus(LSE_{j in Neg(a)} L[a, j] - L[a, p])
+        loss       = mean over anchors of (mean over a's positives)
+
+    i.e. -log softmax of the positive against itself and a's negatives.
+    The softplus form is computed: it has no cancellation when the loss
+    is tiny (the logaddexp form loses it to float32 rounding). An anchor
+    with no negative scores 0.
+
+    Inputs:
+        similarity: (N, N) pairwise cosine similarity
+            (pairwise_cosine_similarity), any float dtype.
+        masks: AnchorMasks on similarity's device.
+        temperature: the softmax temperature, > 0 (callers check it).
+    Output: a scalar float32 tensor, differentiable in similarity.
+    Side effects: one host sync (the degenerate check); the reduction
+        itself reads nothing back.
+    Exceptions: DegenerateBatchError if no unit has a positive;
+        ValueError if similarity's shape or device differ from the masks'.
+
+    Example:
+        >>> # Two decks of two orthogonal cards: each anchor's positive
+        >>> # ties its 2 negatives at similarity 0, so the loss is ln 3
+        >>> keys = clique_keys([[0, 1], [2, 3]], 4, cpu)
+        >>> masks = AnchorMasks.of(same_key_mask(keys), None, unit_keys("abcd", cpu))
+        >>> masked_info_nce_loss(torch.eye(4), masks, 1.0)
+        tensor(1.0986)
+    """
+    # Validate inputs
+    _check_similarity_layout(similarity, masks)
+    anchors = masks.anchors
+    if not bool(anchors.any()):
+        raise DegenerateBatchError("no unit in this batch has a positive pair")
+
+    # Every anchor's negative log-sum-exp, then each positive against it
+    logits = similarity.float() / temperature
+    negative_lse = _masked_row_logsumexp(logits, masks.negatives)
+    per_pair = torch.nn.functional.softplus(negative_lse.unsqueeze(1) - logits)
+
+    # Mean over each anchor's positives, then over anchors (sums, not
+    # boolean indexing, which would sync for its data-dependent shape)
+    per_pair = torch.where(masks.positives, per_pair, 0.0)
+    positive_counts = masks.positives.sum(dim=1).clamp(min=1)
+    per_anchor = per_pair.sum(dim=1) / positive_counts
+    return (per_anchor * anchors).sum() / anchors.sum()
+
+
+def _check_similarity_layout(similarity: torch.Tensor, masks: AnchorMasks) -> None:
+    """Raise ValueError unless similarity has the masks' shape and device.
+
+    Private helper - single caller is masked_info_nce_loss.
+    Inputs: similarity, masks. Output: none.
+    Side effects: none. Exceptions: ValueError on a mismatch.
+    """
+    expected = (masks.positives.shape, masks.positives.device)
+    if (similarity.shape, similarity.device) != expected:
+        raise ValueError(
+            f"similarity is {tuple(similarity.shape)} on {similarity.device}, "
+            f"masks are {tuple(expected[0])} on {expected[1]}"
+        )
+
+
+def _masked_row_logsumexp(logits: torch.Tensor, keep: torch.Tensor) -> torch.Tensor:
+    """Per row, the log-sum-exp of logits where keep is True. Masked
+    entries are the float32 minimum, not -inf, so a row with nothing kept
+    gives a finite value near that minimum: the later softplus of it is
+    0, and so is its gradient (not NaN).
+
+    Private helper - single caller is masked_info_nce_loss.
+    Inputs: logits, (N, N) float32; keep, (N, N) bool, same device.
+    Output: (N,) float32.
+    Side effects: none. Exceptions: none.
+    """
+    floor = torch.finfo(logits.dtype).min
+    return torch.logsumexp(logits.masked_fill(~keep, floor), dim=1)
+
+
+def constant_logit_baseline(masks: AnchorMasks) -> float:
+    """The loss masked_info_nce_loss would give if every similarity were
+    equal: the InfoNCE baseline for this batch shape (encoder-free).
+    Each of an anchor's per-positive terms is then ln(1 + |Neg(a)|),
+    whatever the temperature, so
+
+        baseline = mean over anchors a of ln(1 + |Neg(a)|)
+
+    Shared by every InfoNCE style's constant_logit_loss(). Closed forms
+    for duplicate-free batches with clique sizes k_c, N items:
+        single-card: sum_c k_c ln(N - k_c + 1) / sum_c k_c
+        multi-card, m cards per item: sum_c k_c ln(m (N - k_c) + 1) / sum_c k_c
+    Counting from the masks keeps duplicates and short decks exact.
+
+    Inputs: masks (any device; CPU in practice).
+    Output: float > 0. Negatives are counted per anchor as int64; the
+        logs and the mean are taken in Python (math.log, math.fsum).
+    Side effects: none.
+    Exceptions: DegenerateBatchError if no unit has a positive, or no
+        anchor has a negative (baseline 0, normalized loss undefined).
+
+    Example:
+        >>> constant_logit_baseline(masks)  # 3 decks x 2 cards: ln 5
+        1.609...
+    """
+    # Count each anchor's negatives
+    anchors = masks.anchors
+    if not bool(anchors.any()):
+        raise DegenerateBatchError("no unit in this batch has a positive pair")
+    negative_counts: list[int] = masks.negatives[anchors].sum(dim=1).tolist()
+
+    # Average ln(1 + count) in float64
+    result = math.fsum(math.log(1 + count) for count in negative_counts) / len(
+        negative_counts
+    )
     if result <= 0.0:
         raise DegenerateBatchError(
             "no anchor in this batch has a negative; baseline is 0"
@@ -358,6 +512,6 @@ class ContrastiveLoss(Protocol):
         Output: float > 0.
         Side effects: none.
         Exceptions: ValueError if no unit has a positive, or no anchor
-            has a negative (see mean_constant_logit_loss).
+            has a negative (see constant_logit_baseline).
         """
         ...

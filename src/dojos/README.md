@@ -354,12 +354,28 @@ Files:
 - `contrastive_loss.py` - the `ContrastiveLoss` Protocol (Strategy,
   batch-level, unlike `NocabLoss`), `DegenerateBatchError` (a well-formed
   batch whose loss is undefined: no positive, or no negative), and the
-  shared InfoNCE math every InfoNCE style reduces to:
-  `pairwise_cosine_similarity`, `identity_negative_mask`, `anchor_loss`,
-  `mean_anchor_loss`, `mean_item_embeddings`, `check_item_embeddings` and
-  `mean_constant_logit_loss`. Each loss's
+  shared InfoNCE math every InfoNCE style reduces to. Each style turns
+  its batch into an (N, N) similarity over its comparison units
+  (`pairwise_cosine_similarity`, `mean_item_embeddings`) and an
+  `AnchorMasks`: two (N, N) boolean masks, each anchor's positives and
+  negatives. A style's private `_anchor_masks` says only what is
+  positive and what is ignored, from O(N) key vectors (`unit_keys`,
+  `clique_keys`, compared all-pairs by `same_key_mask`).
+  `AnchorMasks.of` makes every other unit a negative except the anchor
+  itself and its exact-identity duplicates (identity never removes a
+  positive). It checks its invariants: false diagonals, disjoint masks.
+  `masked_info_nce_loss` then scores every anchor and positive at once,
+  in float32, whatever autocast gave:
+  `softplus(logsumexp of L[a, negatives] - L[a,p])`, averaged over
+  each anchor's positives, then over anchors. An anchor with no negative
+  scores 0. Each step's loss is a few GPU kernels and one host sync,
+  whatever its size: 3.5 ms forward at 512 units on the RX 6800, against
+  19.6 s for the per-anchor loop it replaced. That loop is kept as a test
+  oracle (`tests/dojos/contrastive/info_nce_oracle.py`); the two agree on
+  loss, gradient and baseline on random batches. Each loss's
   `constant_logit_loss(identities, positive_cliques)` is its loss with
-  every similarity equal, computed from the batch shape alone: each
+  every similarity equal, computed from the same masks on the CPU
+  (`constant_logit_baseline`): each
   anchor with a positive scores ln(1 + its valid negatives), averaged over
   anchors (single card, no duplicates, N items in cliques of k_c:
   sum k_c ln(N - k_c + 1) / sum k_c; missing card with P pairs: ln P;

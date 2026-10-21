@@ -11,12 +11,15 @@ import torch
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.dojos.contrastive.contrastive_batch import ContrastiveBatch
 from src.dojos.contrastive.contrastive_loss import (
+    AnchorMasks,
     ContrastiveLoss,
     check_item_embeddings,
-    mean_anchor_loss,
-    mean_constant_logit_loss,
+    clique_keys,
+    constant_logit_baseline,
+    masked_info_nce_loss,
     pairwise_cosine_similarity,
-    identity_negative_mask,
+    same_key_mask,
+    unit_keys,
 )
 from src.dojos.contrastive.pair_constructor import (
     ContrastivePairConstructor,
@@ -189,16 +192,11 @@ class SingleCardInfoNCELoss:
         single_card_embeddings = cast(BatchedSingleCardEmbedding, item_embeddings)
 
         similarity = pairwise_cosine_similarity(single_card_embeddings)
-        valid_negative_mask = identity_negative_mask(identities, similarity.device)
-        positives_by_anchor = self._positives_by_anchor(positive_cliques)
+        masks = self._anchor_masks(identities, positive_cliques, similarity.device)
 
         # Average each anchor's own InfoNCE loss - an anchor with no
-        # positive in this batch contributes nothing. No item has an
-        # "excluded" group of its own in the single-card shape (unlike
-        # CrossSliceCardInfoNCELoss's own-item siblings), so none is passed.
-        return mean_anchor_loss(
-            positives_by_anchor, {}, similarity, valid_negative_mask, self._temperature
-        )
+        # positive in this batch contributes nothing
+        return masked_info_nce_loss(similarity, masks, self._temperature)
 
     def constant_logit_loss(
         self,
@@ -215,39 +213,36 @@ class SingleCardInfoNCELoss:
             1.609...
         """
         result: float
-        # Same anchor -> positives expansion calculate() uses
-        positives_by_anchor = self._positives_by_anchor(positive_cliques)
-        result = mean_constant_logit_loss(identities, positives_by_anchor, {})
+        # The same masks calculate() uses, built on the CPU
+        masks = self._anchor_masks(identities, positive_cliques, torch.device("cpu"))
+        result = constant_logit_baseline(masks)
         return result
 
-    def _positives_by_anchor(
-        self, positive_cliques: list[list[int]]
-    ) -> dict[int, list[int]]:
-        """Expand positive_cliques into a per-anchor positives mapping.
+    def _anchor_masks(
+        self,
+        identities: list[tuple[UUID, ...]],
+        positive_cliques: list[list[int]],
+        device: torch.device,
+    ) -> AnchorMasks:
+        """Every item's positives (the other members of its clique) and
+        negatives (every other item but exact-identity duplicates); no
+        item is ignored, unlike CrossSliceCardInfoNCELoss's own-item
+        siblings.
 
         Private helper - callers are calculate() and
-        constant_logit_loss(). Every index in a
-        clique is a positive for every other index in that same clique -
-        each clique is a mutually-positive group, not a directed
-        relation, so this is a pure expansion, not a derivation from
-        any pairwise data.
-
-        Inputs:
-            positive_cliques: see calculate().
-        Output: a mapping from anchor index to the list of item indices
-            that are positives for that anchor. An index whose clique
-            has no other member (size-1 clique) is simply absent as a
-            key.
-        Side effects: none.
-        Exceptions: none.
+        constant_logit_loss().
+        Inputs: identities, positive_cliques (see calculate()), device
+            (where the masks go).
+        Output: AnchorMasks over the items, on device.
+        Side effects: one host sync (AnchorMasks' checks).
+        Exceptions: ValueError if a clique index is out of range or an
+            item is in two cliques.
         """
-        result: dict[int, list[int]] = {}
-        for group in positive_cliques:
-            for index in group:
-                other_indices = [other for other in group if other != index]
-                if other_indices:
-                    result[index] = other_indices
-        return result
+        same_clique = same_key_mask(
+            clique_keys(positive_cliques, len(identities), device)
+        )
+        # A same-clique duplicate stays a positive (AnchorMasks.of)
+        return AnchorMasks.of(same_clique, None, unit_keys(identities, device))
 
 
 @dataclass(frozen=True)

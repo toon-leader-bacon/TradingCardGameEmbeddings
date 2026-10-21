@@ -5,9 +5,10 @@ import pytest
 import torch
 
 from src.dojos.contrastive.contrastive_loss import (
-    anchor_loss,
+    AnchorMasks,
+    masked_info_nce_loss,
     pairwise_cosine_similarity,
-    identity_negative_mask,
+    unit_keys,
 )
 from src.dojos.contrastive.styles.cross_slice_card import CrossSliceCardInfoNCELoss
 from src.dojos.contrastive.styles.single_card import SingleCardInfoNCELoss
@@ -43,10 +44,17 @@ class TestPairwiseCosineSimilarity:
 
 
 class TestValidNegativeMask:
+    def _negatives(self, identities: list[tuple]) -> torch.Tensor:
+        # No positives, nothing ignored: only self and duplicates are out
+        cpu = torch.device("cpu")
+        unit_count = len(identities)
+        no_positives = torch.zeros((unit_count, unit_count), dtype=torch.bool)
+        return AnchorMasks.of(no_positives, None, unit_keys(identities, cpu)).negatives
+
     def test_excludes_the_diagonal(self) -> None:
         identities = [(uuid4(),), (uuid4(),), (uuid4(),)]
 
-        mask = identity_negative_mask(identities, torch.device("cpu"))
+        mask = self._negatives(identities)
 
         assert not mask.diagonal().any()
 
@@ -54,7 +62,7 @@ class TestValidNegativeMask:
         duplicate_uuid = uuid4()
         identities = [(duplicate_uuid,), (uuid4(),), (duplicate_uuid,)]
 
-        mask = identity_negative_mask(identities, torch.device("cpu"))
+        mask = self._negatives(identities)
 
         assert not mask[0, 2]
         assert not mask[2, 0]
@@ -62,27 +70,42 @@ class TestValidNegativeMask:
     def test_allows_a_non_duplicate_pair(self) -> None:
         identities = [(uuid4(),), (uuid4(),)]
 
-        mask = identity_negative_mask(identities, torch.device("cpu"))
+        mask = self._negatives(identities)
 
         assert mask[0, 1]
         assert mask[1, 0]
 
 
 class TestPositivesByAnchor:
+    def _positives(self, cliques: list[list[int]], unit_count: int) -> torch.Tensor:
+        identities = [(uuid4(),) for _ in range(unit_count)]
+        masks = SingleCardInfoNCELoss()._anchor_masks(
+            identities, cliques, torch.device("cpu")
+        )
+        return masks.positives
+
     def test_expands_each_group_into_mutual_positives(self) -> None:
-        loss_fn = SingleCardInfoNCELoss()
+        positives = self._positives([[0, 1, 2]], 3)
 
-        positives_by_anchor = loss_fn._positives_by_anchor([[0, 1, 2]])
+        assert positives.tolist() == [
+            [False, True, True],
+            [True, False, True],
+            [True, True, False],
+        ]
 
-        assert positives_by_anchor == {0: [1, 2], 1: [0, 2], 2: [0, 1]}
+    def test_a_singleton_group_has_no_positive(self) -> None:
+        positives = self._positives([[0], [1, 2]], 3)
 
-    def test_omits_a_singleton_group_from_the_mapping(self) -> None:
-        loss_fn = SingleCardInfoNCELoss()
+        assert not positives[0].any()
+        assert positives[1, 2] and positives[2, 1]
 
-        positives_by_anchor = loss_fn._positives_by_anchor([[0], [1, 2]])
+    def test_a_duplicate_in_the_same_clique_stays_a_positive(self) -> None:
+        shared = uuid4()
+        masks = SingleCardInfoNCELoss()._anchor_masks(
+            [(shared,), (shared,), (uuid4(),)], [[0, 1], [2]], torch.device("cpu")
+        )
 
-        assert 0 not in positives_by_anchor
-        assert positives_by_anchor == {1: [2], 2: [1]}
+        assert masks.positives[0, 1] and masks.positives[1, 0]
 
 
 class TestCalculate:
@@ -157,7 +180,7 @@ class TestCalculate:
         # A 3-item positive group means every member has 2 positives
         # (the other two). This just confirms calculate() runs that
         # shape end to end and produces a finite, non-negative loss -
-        # see TestAnchorLoss below for a case that actually
+        # see TestMaskedInfoNCELoss below for a case that actually
         # distinguishes the per-positive averaging math from a bug that
         # only used one of an anchor's positives.
         loss_fn = SingleCardInfoNCELoss(temperature=1.0)
@@ -171,7 +194,7 @@ class TestCalculate:
         assert math.isfinite(result.item())
 
 
-class TestAnchorLoss:
+class TestMaskedInfoNCELoss:
     def test_averages_over_differing_per_positive_losses(self) -> None:
         # Anchor 0 has two positives (1 and 2) with deliberately
         # different similarities to it, against one shared valid
@@ -186,16 +209,14 @@ class TestAnchorLoss:
                 [0.0, 0.0, 0.0, 1.0],
             ]
         )
-        valid_negative_mask = torch.tensor(
-            [
-                [False, True, True, True],
-                [True, False, True, True],
-                [True, True, False, True],
-                [True, True, True, False],
-            ]
-        )
+        positives = torch.zeros((4, 4), dtype=torch.bool)
+        positives[0, 1] = positives[0, 2] = True
+        negatives = torch.zeros((4, 4), dtype=torch.bool)
+        negatives[0, 3] = True
 
-        result = anchor_loss(0, [1, 2], set(), similarity, valid_negative_mask, 1.0)
+        result = masked_info_nce_loss(
+            similarity, AnchorMasks(positives, negatives), 1.0
+        )
 
         # positive=1: candidates' similarities [2.0, 0.0] (vs. negative 3)
         loss_for_positive_1 = math.log(math.exp(2.0) + math.exp(0.0)) - 2.0
