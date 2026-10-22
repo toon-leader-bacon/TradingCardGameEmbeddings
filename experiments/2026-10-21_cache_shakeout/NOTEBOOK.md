@@ -321,3 +321,18 @@ guess. `profile/cached_nomods/builds.csv` confirms it.
   per pass).
 - **Losses:** the median absolute difference in normalized TEST loss
   between `cached` and `uncached` was 0.032.
+
+### 2026-10-22 02:50 · PI: one free-form run added, `cached_seed1`
+The `cached` vs `uncached` TEST losses differ by a median of 0.032.
+H4's rule compares that with the `cached` vs `cached_nocopy` gap.
+- **Why that pair may not suffice:** if training is deterministic,
+  `cached_nocopy` could match `cached` almost exactly, and then the
+  pre-registered 0.02 fallback decides. That says nothing about how
+  much two ordinary runs differ.
+- **The added run:** `cached_seed1` is `cached` with training seed 1.
+  The holdout seed stays 0, so the splits are the same. The config
+  comes from `analysis/make_configs.py cached_seed1`. The run is queued
+  after `cached_nocopy`, takes about 75 min, and should end about 05:00.
+- **How it is used:** the `cached` vs `cached_seed1` gap is reported as
+  context, a seed-noise floor. **H4's verdict rule is not changed.**
+  Both readings will be shown side by side.

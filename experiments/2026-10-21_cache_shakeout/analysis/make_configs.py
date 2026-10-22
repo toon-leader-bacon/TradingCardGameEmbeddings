@@ -7,6 +7,7 @@ Usage (from the project root):
 """
 
 import copy
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -57,12 +58,28 @@ def write(name: str, config: dict[str, Any]) -> None:
     print(path)
 
 
+def with_seed(config: dict[str, Any], seed: int) -> dict[str, Any]:
+    """Training seed only; the holdout seed (and so the splits) stays."""
+    config = copy.deepcopy(config)
+    config["seed"] = seed
+    return config
+
+
+CONFIGS = {
+    "pilot": lambda: cached(base("pilot", 100, 2)),
+    "cached": lambda: cached(base("cached", 1000, 2)),
+    "cached_nocopy": lambda: cached(base("cached_nocopy", 1000, 2)),
+    "cached_nomods": lambda: without_mods(cached(base("cached_nomods", 1000, 2))),
+    "uncached": lambda: base("uncached", 1000, 2),
+    # Added 2026-10-22 (free-form, after the planned queue): seed-noise floor for H4
+    "cached_seed1": lambda: with_seed(cached(base("cached_seed1", 1000, 2)), 1),
+}
+
+
 def main() -> None:
-    write("pilot", cached(base("pilot", 100, 2)))
-    write("cached", cached(base("cached", 1000, 2)))
-    write("cached_nocopy", cached(base("cached_nocopy", 1000, 2)))
-    write("cached_nomods", without_mods(cached(base("cached_nomods", 1000, 2))))
-    write("uncached", base("uncached", 1000, 2))
+    """Writes the named configs (all when none are named)."""
+    for name in sys.argv[1:] or CONFIGS:
+        write(name, CONFIGS[name]())
 
 
 if __name__ == "__main__":
