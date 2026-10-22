@@ -48,8 +48,8 @@ def pooled_or_stand_in(
     Inputs: pooled (examples, d), the pool of group; group (the batch
         pooled came from); stand_in (d,), a learned parameter.
     Output: (examples, d); torch.where on has_cards() (built from host
-        lengths, so no device sync), and the stand-in gets the gradient of
-        exactly the rows it fills.
+        lengths, copied without a device sync), and the stand-in gets the
+        gradient of exactly the rows it fills.
     Side effects: none beyond autograd. Exceptions: none.
 
     Example:

@@ -33,11 +33,12 @@ from src.schema.type_hints import (
     BatchedSingleCardEmbedding,
     InputShape,
 )
+from src.utils.device_copy import host_tensor, to_device
 
 _PADDED_SHAPES = (InputShape.SINGLE_CARD, InputShape.MULTI_CARD)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)  # tensors have no truth value to compare
 class PaddedEmbeddings:
     """One batch's card embeddings, padded to the longest example.
 
@@ -63,7 +64,7 @@ class PaddedEmbeddings:
             if cards is not 3-D, if mask's size is not cards' first two
             dims, if len(lengths) differs from the example count, if a
             length is negative or over max_cards, or if a SINGLE_CARD
-            batch has max_cards != 1.
+            batch has max_cards != 1 or an example that is not one card.
         """
         # Validate the shape and the tensors' ranks
         _require_padded_shape(self.shape)
@@ -81,8 +82,13 @@ class PaddedEmbeddings:
             raise ValueError(f"{len(self.lengths)} lengths for {examples} examples")
         if any(length < 0 or length > max_cards for length in self.lengths):
             raise ValueError(f"lengths {self.lengths} out of range 0..{max_cards}")
-        if self.shape is InputShape.SINGLE_CARD and examples and max_cards != 1:
-            raise ValueError(f"a SINGLE_CARD batch has max_cards 1, got {max_cards}")
+        if self.shape is InputShape.SINGLE_CARD:
+            if examples and max_cards != 1:
+                raise ValueError(
+                    f"a SINGLE_CARD batch has max_cards 1, got {max_cards}"
+                )
+            if any(length != 1 for length in self.lengths):
+                raise ValueError("every SINGLE_CARD example holds exactly one card")
 
     @property
     def width(self) -> int:
@@ -122,18 +128,16 @@ class PaddedEmbeddings:
         """Which examples hold at least one real card.
 
         Inputs: none.
-        Output: (examples,) bool on cards' device, built from host lengths
-            (no device sync).
-        Side effects: one host-to-device copy. Exceptions: none.
+        Output: (examples,) bool on cards' device, built from host lengths.
+        Side effects: one non-blocking host-to-device copy (no device
+            sync). Exceptions: none.
 
         Example:
             >>> PaddedEmbeddings.from_nested([[a], []], InputShape.MULTI_CARD, 8).has_cards()
             tensor([ True, False])
         """
-        return torch.tensor(
-            [length > 0 for length in self.lengths],
-            dtype=torch.bool,
-            device=self.cards.device,
+        return host_tensor(
+            [length > 0 for length in self.lengths], torch.bool, self.cards.device
         )
 
     def mean_per_example(self) -> torch.Tensor:
@@ -143,7 +147,8 @@ class PaddedEmbeddings:
         Output: (examples, d): cards summed over max_cards (padding is 0)
             and divided by max(length, 1). An empty example gives zeros;
             a head that must treat "empty" specially checks lengths.
-        Side effects: none beyond autograd.
+        Side effects: none beyond autograd; one non-blocking host-to-device
+            copy of the divisors.
         Exceptions: none.
 
         Example:
@@ -153,24 +158,28 @@ class PaddedEmbeddings:
             tensor([[0.5000, 0.5000]])
         """
         # Divisors come from host lengths, clamped so an empty row gives 0
-        divisors = torch.tensor(
+        divisors = host_tensor(
             [max(length, 1) for length in self.lengths],
-            dtype=self.cards.dtype,
-            device=self.cards.device,
+            self.cards.dtype,
+            self.cards.device,
         )
         return self.cards.sum(dim=1) / divisors.unsqueeze(1)
 
     def flat_cards(self) -> torch.Tensor:
         """Every real card, in input order (row-major).
 
-        Inputs: none. Output: (sum(lengths), d), cards[mask].
-        Side effects: none beyond autograd. Exceptions: none.
+        Inputs: none. Output: (sum(lengths), d), the same rows as
+            cards[mask], gathered by slot indices built from host lengths
+            (boolean-mask indexing would cost a device sync).
+        Side effects: none beyond autograd; one non-blocking host-to-device
+            copy. Exceptions: none.
 
         Example:
             >>> embeddings.flat_cards().shape
             torch.Size([5, 256])
         """
-        return self.cards[self.mask]
+        slots = flat_slot_index(self.lengths, self.cards.shape[1], self.cards.device)
+        return self.cards.reshape(-1, self.width).index_select(0, slots)
 
     def example_of_card(self) -> torch.Tensor:
         """Which example each flat card belongs to, built from host lengths.
@@ -178,15 +187,18 @@ class PaddedEmbeddings:
         Inputs: none.
         Output: (sum(lengths),) long on cards' device, parallel to
             flat_cards().
-        Side effects: none. Exceptions: none.
+        Side effects: one non-blocking host-to-device copy. Exceptions: none.
 
         Example:
             >>> embeddings.lengths, embeddings.example_of_card()
             ((2, 0, 1), tensor([0, 0, 2]))
         """
-        counts = torch.tensor(self.lengths, dtype=torch.long)
-        examples = torch.arange(len(self.lengths), dtype=torch.long)
-        return torch.repeat_interleave(examples, counts).to(self.cards.device)
+        example_per_card = [
+            example
+            for example, length in enumerate(self.lengths)
+            for _ in range(length)
+        ]
+        return host_tensor(example_per_card, torch.long, self.cards.device)
 
     @staticmethod
     def from_single_cards(units: torch.Tensor) -> "PaddedEmbeddings":
@@ -232,7 +244,9 @@ class PaddedEmbeddings:
             device: where to build an all-empty batch; ignored otherwise
                 (the cards' own device is used). None means the CPU.
         Output: PaddedEmbeddings meeting the module's invariants.
-        Side effects: none beyond autograd (one stack, one scatter).
+        Side effects: none beyond autograd (one stack, one index_copy); one
+            non-blocking host-to-device copy each of the mask and the slot
+            index.
         Exceptions: ValueError if shape is not SINGLE_CARD or MULTI_CARD,
             or a tensor's width is not width.
 
@@ -255,7 +269,7 @@ class PaddedEmbeddings:
         mask = mask_from_lengths(lengths, target)
         cards = _zeros_like_mask(mask, width, flat)
         if flat:
-            cards[mask] = torch.stack(flat)
+            cards = scatter_to_slots(torch.stack(flat), cards, lengths)
         return PaddedEmbeddings(cards, mask, shape, lengths)
 
     def to_nested(self) -> Union[BatchedSingleCardEmbedding, BatchedMultiCardEmbedding]:
@@ -296,7 +310,8 @@ def mask_from_lengths(lengths: Sequence[int], device: torch.device) -> torch.Ten
     Output: (len(lengths), max(lengths, default 0)) bool on device; row b
         is True at positions 0 .. lengths[b] - 1. Built on the CPU and
         moved once.
-    Side effects: one host-to-device copy. Exceptions: none.
+    Side effects: one non-blocking host-to-device copy (no device sync).
+    Exceptions: none.
 
     Example:
         >>> mask_from_lengths([2, 0, 1], torch.device("cpu"))
@@ -305,7 +320,54 @@ def mask_from_lengths(lengths: Sequence[int], device: torch.device) -> torch.Ten
     max_cards = max(lengths, default=0)
     positions = torch.arange(max_cards).unsqueeze(0)
     counts = torch.tensor(list(lengths), dtype=torch.long).unsqueeze(1)
-    return (positions < counts).to(device)
+    return to_device(positions < counts, device)
+
+
+def flat_slot_index(
+    lengths: Sequence[int], max_cards: int, device: torch.device
+) -> torch.Tensor:
+    """Each real card's slot in the (examples * max_cards) flattened layout,
+    in row-major order: example b's card k is at b * max_cards + k.
+
+    The sync-free stand-in for indexing with the boolean mask (which runs
+    nonzero and waits for the device).
+    Inputs: lengths (host ints), max_cards (>= every length), device.
+    Output: (sum(lengths),) long on device.
+    Side effects: one non-blocking host-to-device copy. Exceptions: none.
+
+    Example:
+        >>> flat_slot_index([2, 0, 1], 2, torch.device("cpu"))
+        tensor([0, 1, 4])
+    """
+    slots = [
+        example * max_cards + position
+        for example, length in enumerate(lengths)
+        for position in range(length)
+    ]
+    return host_tensor(slots, torch.long, device)
+
+
+def scatter_to_slots(
+    flat: torch.Tensor, padded: torch.Tensor, lengths: Sequence[int]
+) -> torch.Tensor:
+    """padded with its real slots replaced by flat's rows, in row-major
+    order: the inverse of PaddedEmbeddings.flat_cards.
+
+    Shared by PaddedEmbeddings.from_nested and CardEncoderModel.forward.
+    Out of place (index_copy), so gradients flow to flat; no device sync.
+    Inputs: flat (sum(lengths), d); padded (examples, max_cards, d), its
+        padding slots already what the result should hold; lengths.
+    Output: (examples, max_cards, d), a new tensor.
+    Side effects: one non-blocking host-to-device copy. Exceptions: none.
+
+    Example:
+        >>> scatter_to_slots(torch.ones(3, 2), torch.zeros(2, 2, 2), [2, 1])[1]
+        tensor([[1., 1.], [0., 0.]])
+    """
+    examples, max_cards, width = padded.shape
+    slots = flat_slot_index(lengths, max_cards, padded.device)
+    flat_layout = padded.reshape(examples * max_cards, width)
+    return flat_layout.index_copy(0, slots, flat).reshape(examples, max_cards, width)
 
 
 def _require_padded_shape(shape: InputShape) -> None:

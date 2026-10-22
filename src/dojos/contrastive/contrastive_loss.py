@@ -28,6 +28,7 @@ import torch
 
 from src.schema.padded_embeddings import PaddedEmbeddings
 from src.schema.type_hints import InputShape
+from src.utils.device_copy import to_device
 
 
 class DegenerateBatchError(ValueError):
@@ -37,7 +38,7 @@ class DegenerateBatchError(ValueError):
     pair-constructor bug; ContrastiveDojo skips only this one."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)  # tensors have no truth value to compare
 class ComparisonMasks:
     """Which pairs of comparison units are positives and which are valid
     negatives, for one batch. Both on the CPU; info_nce_loss moves them
@@ -202,7 +203,8 @@ def info_nce_loss(
     over an all -inf row (its NaN gradient would poison the batch).
     Inputs: units (N, d) on the device; masks (N units); temperature > 0.
     Output: scalar tensor.
-    Side effects: one host-to-device copy of the masks; no device sync.
+    Side effects: non-blocking host-to-device copies of the masks; no
+        device sync.
     Exceptions: DegenerateBatchError if no anchor has a positive (read
         from the CPU masks); ValueError if units has a row count other
         than masks.unit_count.
@@ -214,8 +216,8 @@ def info_nce_loss(
     # Validate inputs on the host
     masks.require_some_anchor()
     _require_unit_count(units, masks)
-    positive = masks.positive.to(units.device, non_blocking=True)
-    negative = masks.negative.to(units.device, non_blocking=True)
+    positive = to_device(masks.positive, units.device)
+    negative = to_device(masks.negative, units.device)
 
     # Scaled cosine logits, and each anchor's log-sum-exp over its negatives
     logits = _cosine_logits(units, temperature)
@@ -276,12 +278,11 @@ def check_item_embeddings(
     """The input checks every concrete ContrastiveLoss.calculate() starts
     with: the expected shape and one identity per item.
 
-    An identity is a key for the whole item; its length is not checked
-    against the item's card count. A deck-thinning mod may drop cards from
-    an item while its identity is kept, and a composite loss passes a
-    pooled item's whole sorted identity as one single-card key. A loss
-    that reads identities[i][k] as card k (cross-slice) checks that
-    alignment itself.
+    An identity's length is not checked against the item's card count
+    here: a composite loss legitimately passes a pooled item's whole sorted
+    identity as one single-card key. A loss that reads positions (card k
+    is identities[i][k]: cross-slice, odd one out, card in contexts) also
+    calls require_card_aligned_identities.
 
     Shared by every style's loss (styles/), odd one out included.
     Inputs: item_embeddings, identities (see ContrastiveLoss.calculate()),
@@ -302,6 +303,35 @@ def check_item_embeddings(
         raise ValueError(
             f"item_embeddings ({len(item_embeddings)}) and identities "
             f"({len(identities)}) must be the same length"
+        )
+
+
+def require_card_aligned_identities(
+    item_embeddings: PaddedEmbeddings,
+    identities: Sequence[tuple[UUID, ...]],
+    loss_name: str,
+) -> None:
+    """Each item's card count equals its identity's length, so card k of
+    item i is identities[i][k] (ContrastiveBatch's positional contract).
+
+    Shared by the losses that read positions: cross-slice (flat card k is
+    flat identity k), odd one out (the intruder is the last card) and card
+    in contexts (the anchor is the first). A mod that drops cards from an
+    item but keeps its identity would silently misalign them.
+    Inputs: item_embeddings, identities (already the same item count, see
+        check_item_embeddings), loss_name (for the message).
+    Output: none.
+    Side effects: none (host lengths only).
+    Exceptions: ValueError on any per-item mismatch.
+
+    Example:
+        >>> require_card_aligned_identities(item_embeddings, identities, "OddOneOutLoss")
+    """
+    identity_lengths = tuple(len(identity) for identity in identities)
+    if item_embeddings.lengths != identity_lengths:
+        raise ValueError(
+            f"{loss_name} needs one identity per card: item lengths "
+            f"{item_embeddings.lengths} != identity lengths {identity_lengths}"
         )
 
 

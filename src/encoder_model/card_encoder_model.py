@@ -25,6 +25,7 @@ from src.schema.padded_embeddings import (
     ModelEmbeddings,
     PaddedEmbeddings,
     mask_from_lengths,
+    scatter_to_slots,
 )
 from src.schema.type_hints import (
     BatchedMultiCardEmbedding,
@@ -268,8 +269,8 @@ class CardEncoderModel(nn.Module, ABC):
         # One embed call for the whole batch, then scatter row-major
         base = self.card_pipeline.embed(flat_cards)  # (num_cards, d)
         mask = mask_from_lengths(lengths, base.device)
-        padded = base.new_zeros((len(lengths), mask.shape[1], base.shape[1]))
-        padded[mask] = base
+        empty = base.new_zeros((len(lengths), mask.shape[1], base.shape[1]))
+        padded = scatter_to_slots(base, empty, lengths)
 
         # One contextualize call; then restore the zero-padding invariant
         contextualized = self.contextualize(padded, mask)

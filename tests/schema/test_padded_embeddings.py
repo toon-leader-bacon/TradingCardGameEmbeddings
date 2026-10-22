@@ -1,7 +1,12 @@
 import pytest
 import torch
 
-from src.schema.padded_embeddings import PaddedEmbeddings, mask_from_lengths
+from src.schema.padded_embeddings import (
+    PaddedEmbeddings,
+    flat_slot_index,
+    mask_from_lengths,
+    scatter_to_slots,
+)
 from src.schema.type_hints import InputShape
 
 _MULTI = InputShape.MULTI_CARD
@@ -143,8 +148,33 @@ class TestValidation:
                 torch.zeros(1, 2, 3), torch.ones(1, 2, dtype=torch.bool), _SINGLE, (2,)
             )
 
+    def test_rejects_an_empty_single_card_example(self) -> None:
+        with pytest.raises(ValueError, match="exactly one card"):
+            PaddedEmbeddings(
+                torch.zeros(2, 1, 3),
+                torch.tensor([[True], [False]]),
+                _SINGLE,
+                (1, 0),
+            )
+
     def test_require_shape_names_the_reader(self) -> None:
         padded, _ = _ragged()
         padded.require_shape(_MULTI, "Head")
         with pytest.raises(ValueError, match="Head expects SINGLE_CARD"):
             padded.require_shape(_SINGLE, "Head")
+
+
+class TestSlots:
+    def test_flat_slot_index_is_row_major(self) -> None:
+        assert flat_slot_index([2, 0, 1], 2, torch.device("cpu")).tolist() == [0, 1, 4]
+
+    def test_scatter_to_slots_inverts_flat_cards(self) -> None:
+        flat = torch.randn(3, 4, requires_grad=True)
+
+        padded = scatter_to_slots(flat, torch.zeros(3, 2, 4), [2, 0, 1])
+        padded.sum().backward()
+
+        assert torch.equal(padded[0], flat[:2].detach())
+        assert torch.equal(padded[2, 0], flat[2].detach())
+        assert torch.equal(padded[1], torch.zeros(2, 4))
+        assert flat.grad is not None and torch.equal(flat.grad, torch.ones(3, 4))

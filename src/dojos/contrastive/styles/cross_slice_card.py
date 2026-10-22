@@ -21,6 +21,7 @@ from src.dojos.contrastive.contrastive_loss import (
     constant_logit_baseline,
     info_nce_loss,
     info_nce_masks,
+    require_card_aligned_identities,
     same_key_mask,
 )
 from src.dojos.contrastive.pair_constructor import ContrastivePairConstructor
@@ -85,7 +86,9 @@ class CrossSliceCardInfoNCELoss:
             InputShape.MULTI_CARD,
             "CrossSliceCardInfoNCELoss",
         )
-        _require_card_aligned_identities(item_embeddings, identities)
+        require_card_aligned_identities(
+            item_embeddings, identities, "CrossSliceCardInfoNCELoss"
+        )
         # One unit per real card, in row-major order
         masks = self._masks(identities, positive_cliques)
         return info_nce_loss(item_embeddings.flat_cards(), masks, self._temperature)
@@ -126,27 +129,6 @@ class CrossSliceCardInfoNCELoss:
         positive = _expanded_to_cards(item_positive, item_of_card)
         own_item = same_key_mask(item_of_card)
         return info_nce_masks(positive, flat_identities, own_item)
-
-
-def _require_card_aligned_identities(
-    item_embeddings: PaddedEmbeddings, identities: list[tuple[UUID, ...]]
-) -> None:
-    """Each item's card count equals its identity's length, so flat card k
-    is flat identity k.
-
-    Private helper - single caller is CrossSliceCardInfoNCELoss.calculate.
-    A deck-thinning mod that drops cards from an item keeps its identity,
-    which would misalign the two; this loss cannot score such a batch.
-    Inputs: item_embeddings, identities. Output: none.
-    Side effects: none (host lengths). Exceptions: ValueError on any
-        per-item mismatch.
-    """
-    identity_lengths = tuple(len(identity) for identity in identities)
-    if item_embeddings.lengths != identity_lengths:
-        raise ValueError(
-            "CrossSliceCardInfoNCELoss needs one identity per card: item "
-            f"lengths {item_embeddings.lengths} != identity lengths {identity_lengths}"
-        )
 
 
 def _flat_card_identities(

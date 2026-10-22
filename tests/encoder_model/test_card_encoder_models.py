@@ -150,14 +150,19 @@ def test_forward_rejects_nesting_deeper_than_batched_multi_group(
 # --- equivalence with the unbatched computation ------------------------------
 
 
+@pytest.mark.parametrize("grad_enabled", [False, True])
 @pytest.mark.parametrize("make_model", MODELS)
-def test_padded_decks_equal_each_deck_embedded_alone(make_model: Any) -> None:
+def test_padded_decks_equal_each_deck_embedded_alone(
+    make_model: Any, grad_enabled: bool
+) -> None:
     """Mixed lengths, an empty example and a 600-card outlier in one batch:
-    every real card equals its deck embedded alone, without padding."""
+    every real card equals its deck embedded alone, without padding. Under
+    no_grad the Transformer takes its fused fast path; with grad enabled
+    (as in training) it takes the regular one."""
     model = make_model()
     outlier = [A, B, C, D] * 150
     decks = [[A, B, C], [], [D], outlier, [B, A]]
-    with torch.no_grad():
+    with torch.set_grad_enabled(grad_enabled):
         output = _padded(model(decks))
         for index, deck in enumerate(decks):
             got = output.cards[index, : len(deck)]

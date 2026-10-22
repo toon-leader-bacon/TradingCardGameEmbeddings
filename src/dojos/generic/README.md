@@ -41,11 +41,15 @@ so one cell serves every metric family with the same shape.
   `MaskedFieldMultiLabelMetricDojo`, and `HeldOutDeckCardMetricDojo`
   (passes its deck box on, so the metric version check verifies it)
   (see "Per-metric wrappers" below).
-- `pooling.py` - `EmbeddingPooler` Strategy (variable-length list of
-  card embeddings -> one vector); `MeanEmbeddingPooler` is the only
-  implementation.
-- `option_scoring.py` - `OptionScoringHead` Strategy (one logit per
-  option in a ragged pack, optionally conditioned on a context vector);
+- `pooling.py` - `EmbeddingPooler` Strategy (a padded batch of decks ->
+  one `(examples, d)` vector per deck); `MeanEmbeddingPooler` is the
+  only implementation.
+- `option_scoring.py` - `OptionScoringHead` Strategy:
+  `score(options, mask, context, context_mask)` gives a padded batch of
+  packs `(examples, max_options)` logits, `-inf` at padding, each
+  example optionally conditioned on a context vector (`context_mask`
+  False scores that example unconditioned). `PickPredictionCrossEntropyLoss`
+  takes those padded logits in one `cross_entropy` call.
   `BilinearOptionScoringHead` is the only implementation. Deliberately
   low-capacity: a high-capacity scorer could solve the task in its own
   weights and leave the card embeddings under-constrained.
@@ -67,12 +71,18 @@ so one cell serves every metric family with the same shape.
 `multi_group_option_selection/` takes `can_skip=True` for a pick that may be
 "none of them" (StS2 card rewards): its decoder head learns one extra
 embedding, scored as a last option after the real ones, so the logits run
-one longer and a skip's label is `len(options)`. The data constructor and
-the dojo flag must agree.
+one longer and a skip's label is `len(options)` (the skip sits right
+after each example's real options, before its padding). The data
+constructor and the dojo flag must agree.
 
-Multi-card cells pool the deck with an injected `EmbeddingPooler` before
-their MLP. The option-selection cells never pool the options: they
-score each one. Group order is load-bearing for every multi-group cell:
+Single-card and multi-card heads take the encoder's `PaddedEmbeddings`
+whole and check its shape first (`require_shape`): single-card heads
+read `cards[:, 0]`, multi-card cells pool every deck at once with an
+injected `EmbeddingPooler` before their MLP. The option-selection cells
+never pool the options: they score each one. Multi-group heads still
+receive nested lists; `group_batching.py` packs one group across the
+batch into `PaddedEmbeddings`, so they use the same batched pooler and
+scorer. Group order is load-bearing for every multi-group cell:
 `input_shape_of()` (`src/schema/type_hints.py`) classifies an input by
 peeking group 0, so group 0 must never be empty. `multi_group_regression`
 pools both groups with one shared pooler, concatenates them in fixed

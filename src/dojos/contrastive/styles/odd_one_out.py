@@ -25,6 +25,7 @@ from src.dojos.contrastive.contrastive_loss import (
     ContrastiveLoss,
     DegenerateBatchError,
     check_item_embeddings,
+    require_card_aligned_identities,
 )
 from src.dojos.contrastive.pair_constructor import (
     ContrastivePairConstructor,
@@ -36,6 +37,7 @@ from src.dojos.contrastive.staple_subsampling import StapleSubsampling
 from src.schema.card import GenericDeck
 from src.schema.padded_embeddings import PaddedEmbeddings
 from src.schema.type_hints import InputShape
+from src.utils.device_copy import host_tensor
 
 _logger = logging.getLogger(__name__)
 
@@ -235,8 +237,9 @@ class OddOneOutLoss:
         Side effects: none.
         Exceptions: DegenerateBatchError when there are no items;
             ValueError on a shape or length mismatch, a clique that isn't
-            a singleton, cliques that don't cover every item once, or an
-            item under 3 cards.
+            a singleton, cliques that don't cover every item once, an
+            item under 3 cards, or an item whose card count differs from
+            its identity's (the intruder would not be last).
 
         Example:
             >>> OddOneOutLoss().calculate(item_embeddings, identities, [[0], [1]])
@@ -245,6 +248,7 @@ class OddOneOutLoss:
         check_item_embeddings(
             item_embeddings, identities, InputShape.MULTI_CARD, "OddOneOutLoss"
         )
+        require_card_aligned_identities(item_embeddings, identities, "OddOneOutLoss")
         _check_singleton_items(identities, positive_cliques)
 
         # Each item's fit logits over its real positions, all items at once
@@ -282,14 +286,14 @@ class OddOneOutLoss:
         host lengths, fit is the cosine of a card with that mean.
         Inputs: item_embeddings (MULTI_CARD, every item >= 3 cards).
         Output: (items, max_cards) logits, -inf at padding.
-        Side effects: none beyond autograd. Exceptions: none expected.
+        Side effects: none beyond autograd; one non-blocking host-to-device
+            copy of the lengths. Exceptions: none expected.
         """
         cards = torch.nn.functional.normalize(
             item_embeddings.cards, dim=2
         )  # padding stays 0
-        lengths = torch.tensor(
-            item_embeddings.lengths, dtype=cards.dtype, device=cards.device
-        ).view(-1, 1, 1)
+        lengths = host_tensor(item_embeddings.lengths, cards.dtype, cards.device)
+        lengths = lengths.view(-1, 1, 1)
         # Mean of every OTHER real card, per card: (sum - own) / (n - 1)
         others_mean = (cards.sum(dim=1, keepdim=True) - cards) / (lengths - 1)
         fit = torch.nn.functional.cosine_similarity(cards, others_mean, dim=2)
@@ -301,15 +305,14 @@ class OddOneOutLoss:
 
 def _intruder_positions(lengths: tuple[int, ...], device: torch.device) -> torch.Tensor:
     """Each item's intruder position, lengths[i] - 1, built from host
-    lengths (no device sync).
+    lengths.
 
     Private helper - single caller is OddOneOutLoss.calculate().
     Inputs: lengths, device. Output: (items,) long on device.
-    Side effects: one host-to-device copy. Exceptions: none.
+    Side effects: one non-blocking host-to-device copy (no device sync).
+    Exceptions: none.
     """
-    return torch.tensor(
-        [length - 1 for length in lengths], dtype=torch.long, device=device
-    )
+    return host_tensor([length - 1 for length in lengths], torch.long, device)
 
 
 def _check_singleton_items(

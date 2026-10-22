@@ -28,6 +28,7 @@ from src.dojos.generic.pooling import EmbeddingPooler, MeanEmbeddingPooler
 from src.dojos.generic.group_batching import padded_group
 from src.schema.padded_embeddings import PaddedEmbeddings, mask_from_lengths
 from src.schema.type_hints import BatchedMultiGroupEmbedding
+from src.utils.device_copy import host_tensor
 
 # Fixed group positions; see the module docstring
 _OPTIONS_GROUP = 0
@@ -125,22 +126,22 @@ class MultiGroupOptionSelectionDecoderHead(nn.Module):
         Private helper - single caller is forward.
         Inputs: options, a MULTI_CARD batch; skip_embedding is not None.
         Output: (cards (examples, max_options + 1, d), mask), still
-            left-aligned. Positions come from host lengths, so no device
-            sync; the write is out of place, so skip_embedding gets every
-            row's gradient.
-        Side effects: none beyond autograd. Exceptions: none.
+            left-aligned. Positions come from host lengths; the write is
+            out of place, so skip_embedding gets every row's gradient.
+        Side effects: none beyond autograd; non-blocking host-to-device
+            copies of the positions and mask (no device sync).
+        Exceptions: none.
         """
         skip = cast(nn.Parameter, self.skip_embedding)
         examples, max_options, width = options.cards.shape
 
         # One column wider; the skip goes right after each example's real options
-        positions = torch.tensor(
-            options.lengths, dtype=torch.long, device=options.cards.device
-        )
+        positions = host_tensor(options.lengths, torch.long, options.cards.device)
         widened = torch.cat(
             [options.cards, options.cards.new_zeros((examples, 1, width))], dim=1
         )
-        at_skip = torch.nn.functional.one_hot(positions, max_options + 1).bool()
+        columns = torch.arange(max_options + 1, device=options.cards.device)
+        at_skip = columns.unsqueeze(0) == positions.unsqueeze(1)
 
         # Out-of-place write, so skip_embedding gets every row's gradient
         cards = torch.where(at_skip.unsqueeze(2), skip.to(widened.dtype), widened)

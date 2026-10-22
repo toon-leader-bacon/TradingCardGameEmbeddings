@@ -45,19 +45,6 @@
   - **Parallelize building:** worker processes or a prefetch thread, so
     the CPU builds the next batches while the GPU runs the current ones.
     This applies to training too, where throughput is a stated priority.
-- **Vectorize the contrastive loss.** `mean_anchor_loss`
-  (`contrastive/contrastive_loss.py`) calls `anchor_loss` once per anchor
-  in Python, and every InfoNCE style (single_card, cross_slice_card,
-  missing_card) ends there. With a warm feature cache this loop is nearly
-  the whole step, and it grows worse than linearly. Measured 2026-10-21
-  (single-card contrastive, all cache hits, decks cap lifted; see
-  `src/training/ENV_SIZING.md`): 32 cards 118 ms, 128 cards 1.33 s, 512
-  cards 19.5 s per step. Build one masked (N, N) logit matrix and one
-  `logsumexp` for all anchors and positives (the positive and exclusion
-  sets become boolean masks), so a step is a few GPU kernels whatever
-  its size. Keep the old loop as a test oracle: the two must agree to
-  float tolerance on random batches, including multi-positive anchors and
-  excluded siblings. Then rerun the batch-size sweep.
 - **A bounded, cacheable key shuffle.** `ShuffleKeysMod` makes a new key
   order on every draw, so each shuffled card is a text never seen before.
   It is stamped do-not-cache and is encoded live every step; with it on,

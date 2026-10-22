@@ -4,6 +4,7 @@ import torch
 import torch.nn.functional as F
 
 from src.dojos.loss.nocab_loss import NocabLoss
+from src.utils.device_copy import host_tensor
 
 
 class PickPredictionCrossEntropyLoss(NocabLoss[torch.Tensor, List[int]]):
@@ -29,7 +30,7 @@ class PickPredictionCrossEntropyLoss(NocabLoss[torch.Tensor, List[int]]):
             padding; labels, one option index per example, each pointing
             at a real (finite) logit.
         Output: scalar tensor, the per-example mean.
-        Side effects: one host-to-device copy of labels.
+        Side effects: one non-blocking host-to-device copy of labels.
         Exceptions: ValueError if len(labels) != decoder_output's row
             count, or a label is outside [0, max_options).
 
@@ -41,7 +42,7 @@ class PickPredictionCrossEntropyLoss(NocabLoss[torch.Tensor, List[int]]):
         _check_labels(decoder_output, labels)
 
         # One call for the whole batch
-        targets = torch.tensor(labels, device=decoder_output.device)
+        targets = host_tensor(labels, torch.long, decoder_output.device)
         return F.cross_entropy(decoder_output, targets)
 
 

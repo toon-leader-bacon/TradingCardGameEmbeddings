@@ -29,6 +29,7 @@ from src.dojos.contrastive.contrastive_batch import ContrastiveBatch
 from src.dojos.contrastive.contrastive_loss import (
     ContrastiveLoss,
     check_item_embeddings,
+    require_card_aligned_identities,
 )
 from src.dojos.contrastive.pair_constructor import (
     ContrastivePairConstructor,
@@ -185,8 +186,9 @@ class AnchorCardLoss:
             left-aligned layout keeps input order, so position 0).
         Output: the inner loss's scalar tensor.
         Side effects: none.
-        Exceptions: ValueError on a shape or length mismatch; whatever the
-            inner loss raises.
+        Exceptions: ValueError on a shape or length mismatch, or an item
+            whose card count differs from its identity's (the anchor might
+            not be first); whatever the inner loss raises.
 
         Example:
             >>> AnchorCardLoss(SingleCardInfoNCELoss()).calculate(
@@ -196,6 +198,7 @@ class AnchorCardLoss:
         check_item_embeddings(
             item_embeddings, identities, InputShape.MULTI_CARD, "AnchorCardLoss"
         )
+        require_card_aligned_identities(item_embeddings, identities, "AnchorCardLoss")
         anchors = PaddedEmbeddings.from_single_cards(
             item_embeddings.cards[:, _ANCHOR_POSITION]
         )

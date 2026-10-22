@@ -418,6 +418,37 @@ class TestOddOneOutLoss:
 
         assert all(card.grad is not None for card in cards)
 
+    def test_mixed_item_lengths_match_each_item_scored_alone(self) -> None:
+        # Items of 3, 5 and 4 cards: the shorter ones are padded, so the
+        # intruder is each item's last real card, not position -1
+        torch.manual_seed(0)
+        sizes = [3, 5, 4]
+        identities = [tuple(uuid4() for _ in range(size)) for size in sizes]
+        items = [[torch.randn(4, requires_grad=True) for _ in range(n)] for n in sizes]
+        cliques = [[0], [1], [2]]
+
+        loss = OddOneOutLoss(temperature=0.3).calculate(
+            padded(items), identities, cliques
+        )
+        loss.backward()
+
+        expected = torch.stack([_odd_one_out_reference(item, 0.3) for item in items])
+        assert loss.item() == pytest.approx(expected.mean().item(), rel=1e-5)
+        # Reference gradients, item by item, from fresh leaves
+        for item in items:
+            fresh = [card.detach().clone().requires_grad_(True) for card in item]
+            (_odd_one_out_reference(fresh, 0.3) / len(items)).backward()
+            for card, reference in zip(item, fresh):
+                assert card.grad is not None and reference.grad is not None
+                assert torch.allclose(card.grad, reference.grad, atol=1e-6)
+
+    def test_rejects_an_item_that_lost_cards(self) -> None:
+        # The identity still lists 4 cards, the item holds 3: the last card
+        # may no longer be the intruder
+        identities = [tuple(uuid4() for _ in range(4))]
+        with pytest.raises(ValueError, match="one identity per card"):
+            OddOneOutLoss().calculate(padded([[torch.randn(4)] * 3]), identities, [[0]])
+
     def test_an_empty_batch_is_degenerate(self) -> None:
         with pytest.raises(DegenerateBatchError):
             OddOneOutLoss().constant_logit_loss([], [])
@@ -453,3 +484,14 @@ class TestOddOneOutLoss:
 
         assert torch.isfinite(loss)
         assert style.pair_constructor(0, None).cards_per_deck == 8
+
+
+def _odd_one_out_reference(
+    cards: list[torch.Tensor], temperature: float
+) -> torch.Tensor:
+    """One item's odd-one-out loss with no padding: the per-item formula
+    the batched loss must reproduce."""
+    stacked = torch.nn.functional.normalize(torch.stack(cards), dim=1)
+    others_mean = (stacked.sum(dim=0, keepdim=True) - stacked) / (len(cards) - 1)
+    fit = torch.nn.functional.cosine_similarity(stacked, others_mean, dim=1)
+    return -torch.log_softmax(-fit / temperature, dim=0)[-1]

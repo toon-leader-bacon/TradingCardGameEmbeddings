@@ -50,7 +50,7 @@ def group_by_budget(
         [3, 1, 1]  # 3 x 2 = 6; then 5 alone (2 x 5 > 6); then 1
     """
     group: List[TrainingDatum[LabelT]] = []
-    group_costs: List[int] = []
+    group_max_cost = 0
     for datum in data:
         # Validate: one example alone must fit
         cost = sum(budget.cost_of(card) for card in iter_cards(datum[0]))
@@ -59,11 +59,12 @@ def group_by_budget(
                 f"One example costs {cost}, more than the batch budget "
                 f"{budget.max_cost}"
             )
-        # Close the group before the padded cost would go over
-        if group and padded_cost(group_costs + [cost]) > budget.max_cost:
+        # Close the group before its padded cost would go over: the group
+        # plus this example, every one charged the largest cost
+        if group and (len(group) + 1) * max(group_max_cost, cost) > budget.max_cost:
             yield group
-            group, group_costs = [], []
+            group, group_max_cost = [], 0
         group.append(datum)
-        group_costs.append(cost)
+        group_max_cost = max(group_max_cost, cost)
     if group:
         yield group

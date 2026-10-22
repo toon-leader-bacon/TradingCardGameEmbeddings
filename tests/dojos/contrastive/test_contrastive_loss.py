@@ -15,6 +15,7 @@ from src.dojos.contrastive.contrastive_loss import (
     same_key_mask,
 )
 from src.dojos.contrastive.styles.cross_slice_card import CrossSliceCardInfoNCELoss
+from src.dojos.contrastive.styles.missing_card import MissingCardInfoNCELoss
 from src.dojos.contrastive.styles.single_card import SingleCardInfoNCELoss
 from src.schema.padded_embeddings import PaddedEmbeddings
 from src.schema.type_hints import InputShape
@@ -176,6 +177,24 @@ class TestInfoNceLoss:
 
         expected = _reference_info_nce(units, masks, 0.3)
         assert result.item() == pytest.approx(expected.item(), rel=1e-5)
+
+    @pytest.mark.parametrize("style", ["single", "missing", "cross"])
+    def test_value_and_gradient_equal_the_reference_on_each_style_masks(
+        self, style: str
+    ) -> None:
+        torch.manual_seed(1)
+        masks = _style_masks(style)
+        units = torch.randn(masks.unit_count, 5, requires_grad=True)
+
+        (got_grad,) = torch.autograd.grad(info_nce_loss(units, masks, 0.2), units)
+        (want_grad,) = torch.autograd.grad(
+            _reference_info_nce(units, masks, 0.2), units
+        )
+
+        assert torch.allclose(got_grad, want_grad, atol=1e-6)
+        assert info_nce_loss(units, masks, 0.2).item() == pytest.approx(
+            _reference_info_nce(units, masks, 0.2).item(), rel=1e-5
+        )
 
     def test_an_anchor_without_negatives_contributes_zero_with_finite_gradient(
         self,
@@ -381,7 +400,15 @@ class TestCrossSliceCardInfoNCELoss:
         loss = CrossSliceCardInfoNCELoss(temperature=1.0).calculate(
             embeddings, identities, cliques
         )
-        assert torch.isfinite(loss)
+        # Cards c0=a, c1=b (item 0); c2=a, c3=a (item 1); c4=b, c5=b
+        # (item 2, no positive). Negatives are item 2's cards only: never
+        # the anchor's own sibling. Cosines are 1 (same axis) or 0.
+        e = math.e
+        a_anchor = math.log(e + 2) - 1  # positives at 1, negatives at 0
+        b_anchor = math.log(1 + 2 * e)  # positives at 0, negatives at 1
+        item_1_card = (a_anchor + math.log(3)) / 2  # positives c0 (1), c1 (0)
+        expected = (a_anchor + b_anchor + 2 * item_1_card) / 4
+        assert loss.item() == pytest.approx(expected, rel=1e-5)
 
     def test_raises_on_a_single_card_shaped_input(self) -> None:
         with pytest.raises(ValueError, match="multi-card"):
@@ -398,3 +425,27 @@ class TestCrossSliceCardInfoNCELoss:
             CrossSliceCardInfoNCELoss().calculate(
                 embeddings, _multi_identities(2, 3), [[0, 1]]
             )
+
+
+def _style_masks(style: str) -> ComparisonMasks:
+    """A style's own masks on a small batch with duplicates and exclusions."""
+    shared = uuid4()
+    if style == "single":
+        identities = [(uuid4(),) for _ in range(6)] + [(shared,), (shared,)]
+        return SingleCardInfoNCELoss()._masks(
+            identities, [[0, 1, 2], [3, 4], [5, 6], [7]]
+        )
+    if style == "missing":
+        twin = uuid4()
+        missing = [twin, uuid4(), twin]
+        identities: list[tuple] = []
+        for card in missing:
+            identities += [(uuid4(), uuid4()), (card,)]
+        return MissingCardInfoNCELoss()._masks([[0, 1], [2, 3], [4, 5]], identities)
+    identities = [
+        (shared, uuid4()),
+        (uuid4(), uuid4()),
+        (shared, uuid4()),
+        (uuid4(), uuid4()),
+    ]
+    return CrossSliceCardInfoNCELoss()._masks(identities, [[0, 1], [2, 3]])
