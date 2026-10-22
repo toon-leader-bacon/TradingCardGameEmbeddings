@@ -124,7 +124,7 @@ class Profiler:
             "t", "round", "step", "dojo", "cards", "ran", "total_s", "wait_s",
             "forward_loss_s", "backward_opt_s", *_COUNTERS])
         self.builds = CsvLog(out / "builds.csv", [
-            "t", "thread", "dojo", "cards", "build_s", "reserve_s",
+            "t", "thread", "dojo", "examples", "cards", "pass_id", "build_s", "reserve_s",
             "reserve_live_texts", "reserve_live_s", *_COUNTERS])
         self.test = CsvLog(out / "test.csv", [
             "t", "round", "dojo", "examples", "cards", "total_s", *_COUNTERS])
@@ -249,7 +249,8 @@ def install(profiler: Profiler) -> None:
         elapsed = time.perf_counter() - start
         profiler.builds.write({
             "t": profiler.now(), "thread": threading.current_thread().name,
-            "dojo": self._dojo.name, "cards": card_count(batch.inputs),
+            "dojo": self._dojo.name, "examples": len(batch),
+            "cards": card_count(batch.inputs), "pass_id": id(self._batches),
             "build_s": elapsed, "reserve_s": "", "reserve_live_texts": "",
             "reserve_live_s": "", **deltas(before)})
         return batch
@@ -266,7 +267,7 @@ def install(profiler: Profiler) -> None:
         moved = deltas(before)
         profiler.builds.write({
             "t": profiler.now(), "thread": threading.current_thread().name,
-            "dojo": name, "cards": "", "build_s": "",
+            "dojo": name, "examples": "", "cards": "", "pass_id": "", "build_s": "",
             "reserve_s": time.perf_counter() - start,
             "reserve_live_texts": moved["live_texts"],
             "reserve_live_s": moved["live_s"],
