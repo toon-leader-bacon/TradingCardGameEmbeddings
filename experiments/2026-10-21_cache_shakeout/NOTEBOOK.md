@@ -231,3 +231,38 @@ and the responses:
 6. `cached_nomods` changes the data: H1's speed ratio is per card.
 7. Queue order puts H4 at risk: decided after the pilot calibrates.
 8. `backward_opt_s` is a remainder: named so under confounds.
+
+### 2026-10-21 22:35 · Startup: dojo building now takes 53 min (an inline probe)
+
+What: `pilot`'s `build_dojos` ran from 21:34:41 to 22:27:25, 53 min
+(`profile/pilot/phases.csv`). r2's `single_mixed` startup was 30 min in
+all. The metric dojos' calibration lines sum to 1,621 s (27 min, 137
+dojos), about what r2 spent. The other ~25 min passed with no log line
+before the first metric dojo, i.e. while the 25 contrastive dojos were
+built. Calibration's slowest dojos are the deck-level ones (about
+45-77 s each on 13-20k examples: 17lands game and replay data,
+isotropic deck pairs, `final_decks.held_out_card_*`).
+Probe: [`analysis/profile_dojo_build.py`](analysis/profile_dojo_build.py)
+cProfiled the building of `contrastive.mtg` and
+`contrastive_cross_slice.mtg` (CPU only, while the pilot warmed its
+cache, so the pilot's warm-up times are slightly inflated). Output:
+[`results/startup_profile_contrastive_mtg.txt`](results/startup_profile_contrastive_mtg.txt),
+and Dominion's for scale
+([`results/startup_profile_contrastive_dominion.txt`](results/startup_profile_contrastive_dominion.txt)).
+Seen:
+- `contrastive.mtg`: 84 s. 45 s of it is
+  `DeckBoxDealer._box_deck_set_digest`, which streams every MTG deck
+  uuid (6.9M calls to `all_uuids`, 25 s of them constructing `UUID`s).
+  The dealer computes it again for each contrastive style, so a run
+  pays it 5 times per game.
+- 30 s is loading the MTG CardBinder, 26 s of which is
+  `get_by_uuid`'s deep copy (once per run, shared through the
+  CardShelf). Another 9 s is `ContrastiveDojo._check_deck_box_version`
+  via `CardBinder.version_for` -> `all_cards`, which deep-copies every
+  card again, per dojo.
+- `contrastive_cross_slice.mtg` (binder already loaded): 45 s, nearly
+  all of it the digest again.
+- Dominion: under 4 s per dojo.
+Reading: the deck-set digest, computed once per (deck box, game) per
+run, would remove about 4/5 of the contrastive build time. CardBinder's
+deep copies also cost startup time, not only batch-building time (H3).
