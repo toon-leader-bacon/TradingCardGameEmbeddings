@@ -1,7 +1,7 @@
 # Shake-out of the frozen feature cache on a full mixed diet
 
-**Status:** running
-**Dates:** 2026-10-21 -
+**Status:** awaiting review
+**Dates:** 2026-10-21 - 2026-10-22
 **Parent:** [2026-10-11_model_by_diet_r2](../2026-10-11_model_by_diet_r2/NOTEBOOK.md) (its `single_mixed` recipe) · **Branch:** `experiment/2026-10-21_cache_shakeout`
 
 > With the frozen feature cache, prefetch and the vectorized contrastive
@@ -371,3 +371,12 @@ step and batch wait 13%.
     per-card work.
 - **What it can't answer:** it says nothing about training quality,
   since a different batch size changes the optimization.
+
+### 2026-10-22 05:10 · wrap-up (queue empty)
+[bench note](bench_notes/2026-10-22_0510_wrap_up.md): 7 runs, all
+exit 0, no incidents.
+- **Probe:** `probe_nomods_b512` reached 1,051 cards/s, against 965.
+  The step is per-card bound, not bound by fixed overhead.
+- **Timestamps:** the 04:45 and 04:50 headings were wrong; the wrap-up
+  gives the true times.
+- **Status:** awaiting review.
