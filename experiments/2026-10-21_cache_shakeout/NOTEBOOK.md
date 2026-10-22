@@ -311,3 +311,13 @@ guess. `profile/cached_nomods/builds.csv` confirms it.
   rows), so with mods off the miss fades once each set has been seen.
 - **Candidate fix:** warm the target-masked texts at startup.
   Engineering, not an experiment.
+
+### 2026-10-22 02:40 · uncached done
+[bench note](bench_notes/2026-10-22_0240_uncached_done.md): exit 0,
+110 min.
+- **Steps:** `cached` was only 1.21× faster per step than `uncached`,
+  because default mods leave most training texts uncacheable.
+- **TEST:** the cache made TEST 10–12× faster (about 850 s vs 70–87 s
+  per pass).
+- **Losses:** the median absolute difference in normalized TEST loss
+  between `cached` and `uncached` was 0.032.
