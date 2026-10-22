@@ -287,3 +287,9 @@ steps, so H2 looks likely to be refuted.
 Live encoding was 82% of step time, and the batch wait was 0.6%. One
 replay dojo (`attacker_blocker_combat_outcome`) costs about 4.5 s per
 step. Small card and deck sets cycle their TRAIN set within an hour.
+
+### 2026-10-22 00:50 · cached_nomods done
+[bench note](bench_notes/2026-10-22_0050_cached_nomods_done.md): exit 0, 44 min.
+Steps were 4.8× faster than `cached` (0.255 vs 1.22 s), but the GPU was
+only 21% busy. Batch wait was 13% of the step, mostly in card-field
+metric dojos. Startup is 32 of the run's 44 min.

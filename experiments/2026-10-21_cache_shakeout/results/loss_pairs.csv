@@ -1,0 +1,4 @@
+run_a,run_b,dojos,n,median_abs_diff,p90_abs_diff,max_abs_diff,mean_signed_diff_a_minus_b,median_a,median_b
+cached,cached_nomods,all,162,0.1022,0.7236,2.9546,-0.0553,1.0464,1.0534
+cached,cached_nomods,contrastive,25,0.2476,0.5329,0.6543,0.2708,0.9923,0.7316
+cached,cached_nomods,metric,137,0.0847,0.9025,2.9546,-0.1148,1.0890,1.0806
