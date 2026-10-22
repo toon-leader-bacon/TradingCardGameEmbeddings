@@ -346,3 +346,10 @@ H4's rule compares that with the `cached` vs `cached_nocopy` gap.
 - **Steps:** no change.
 - **Loss gap vs `cached`:** the median is 0.035, so runs are not
   deterministic.
+
+### 2026-10-22 04:45 · cached_seed1 done
+[bench note](bench_notes/2026-10-22_0445_cached_seed1_done.md): exit 0, 75 min.
+- **Timing:** reproduces `cached` within 2%.
+- **Seed-only loss gap:** median 0.056 (contrastive 0.004, metric 0.079).
+  For comparison, `cached` vs `uncached` is 0.032 and `cached` vs
+  `cached_nocopy` is 0.035.
