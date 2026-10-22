@@ -65,6 +65,12 @@ def with_seed(config: dict[str, Any], seed: int) -> dict[str, Any]:
     return config
 
 
+def with_batch_cost(config: dict[str, Any], cost: int) -> dict[str, Any]:
+    config = copy.deepcopy(config)
+    config["hardware"]["max_batch_cost"] = cost
+    return config
+
+
 CONFIGS = {
     "pilot": lambda: cached(base("pilot", 100, 2)),
     "cached": lambda: cached(base("cached", 1000, 2)),
@@ -73,6 +79,10 @@ CONFIGS = {
     "uncached": lambda: base("uncached", 1000, 2),
     # Added 2026-10-22 (free-form, after the planned queue): seed-noise floor for H4
     "cached_seed1": lambda: with_seed(cached(base("cached_seed1", 1000, 2)), 1),
+    # Added 2026-10-22 (free-form): does a bigger batch use the idle GPU once nothing is live?
+    # Run with --no-binder-copy for a short startup; 500 steps of 512 = the cards of 1,000 of 256.
+    "probe_nomods_b512": lambda: with_batch_cost(
+        without_mods(cached(base("probe_nomods_b512", 500, 1))), 512),
 }
 
 

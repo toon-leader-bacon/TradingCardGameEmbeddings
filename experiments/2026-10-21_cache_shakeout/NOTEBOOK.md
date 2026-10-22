@@ -353,3 +353,21 @@ H4's rule compares that with the `cached` vs `cached_nocopy` gap.
 - **Seed-only loss gap:** median 0.056 (contrastive 0.004, metric 0.079).
   For comparison, `cached` vs `uncached` is 0.032 and `cached` vs
   `cached_nocopy` is 0.035.
+
+### 2026-10-22 04:50 · PI: free-form probe `probe_nomods_b512`
+`cached_nomods` was the only run with no live encoding, and in it the
+GPU was busy only 21% of the time. Backward + optimizer took 34% of the
+step and batch wait 13%.
+- **Question:** is the step dominated by a fixed per-step overhead? If
+  so, a bigger batch should raise cards/s almost in proportion.
+- **The probe:** `cached_nomods` with `max_batch_cost` 512, 1 round of
+  500 steps (the same number of cards as 1,000 steps of 256), run with
+  `--no-binder-copy` to cut startup. Removing the copies did not change
+  step time in `cached_nocopy`.
+- **Comparison and prediction:**
+  - The control is `cached_nomods`, at 965 cards/s.
+  - Prediction, written now: above about 1,500 cards/s means fixed
+    per-step overhead dominates. About 1,000 means the step is bound by
+    per-card work.
+- **What it can't answer:** it says nothing about training quality,
+  since a different batch size changes the optimization.
