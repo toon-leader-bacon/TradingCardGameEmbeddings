@@ -281,3 +281,9 @@ before each run).
 Seen so far (pilot, one short run, not a result): live encoding is 79%
 of a cached step, and one TEST pass costs about as much as 60 cached
 steps, so H2 looks likely to be refuted.
+
+### 2026-10-22 00:05 · cached done
+[bench note](bench_notes/2026-10-22_0005_cached_done.md): exit 0, 75 min.
+Live encoding was 82% of step time, and the batch wait was 0.6%. One
+replay dojo (`attacker_blocker_combat_outcome`) costs about 4.5 s per
+step. Small card and deck sets cycle their TRAIN set within an hour.
