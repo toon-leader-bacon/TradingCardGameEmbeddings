@@ -336,3 +336,13 @@ H4's rule compares that with the `cached` vs `cached_nocopy` gap.
 - **How it is used:** the `cached` vs `cached_seed1` gap is reported as
   context, a seed-noise floor. **H4's verdict rule is not changed.**
   Both readings will be shown side by side.
+
+### 2026-10-22 03:30 · cached_nocopy done
+[bench note](bench_notes/2026-10-22_0330_cached_nocopy_done.md): exit 0, 52 min.
+- **Binders:** all 7 were unchanged.
+- **Startup:** `build_dojos` took 514 s, against about 1,820 s in the
+  other runs.
+- **TEST:** passes were about 30% faster.
+- **Steps:** no change.
+- **Loss gap vs `cached`:** the median is 0.035, so runs are not
+  deterministic.
