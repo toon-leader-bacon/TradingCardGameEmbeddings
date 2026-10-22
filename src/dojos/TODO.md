@@ -45,6 +45,22 @@
   - **Parallelize building:** worker processes or a prefetch thread, so
     the CPU builds the next batches while the GPU runs the current ones.
     This applies to training too, where throughput is a stated priority.
+    Measured 2026-10-22 (`../training/ENV_SIZING.md`, "Training step"):
+    with the GPU work down to ~20-50 ms a step, 78% of a training step
+    waits on the next batch, and single-card metric dojos over whole
+    games wait 0.9-2.3 s per step. The prefetch depth of 2 no longer
+    hides building; profile those dojos' builders first.
+- **Padded heads for multi-group dojos.** Multi-group dojos still receive
+  nested lists (`ModelEmbeddings`' second arm); their heads pack each group
+  with `generic/group_batching.py`. Two follow-ups:
+  - A padded multi-group type (`(examples, groups, max_cards, d)` or
+    groups flattened with an example index), so the heads skip the
+    per-card `from_nested` pack.
+  - Budget: `group_by_budget` charges examples x the costliest example's
+    total cards, but the encoder pads every group to the longest group in
+    the batch. A deck-pair batch can then hold up to (groups per example)
+    times more attention slots than the budget assumes. Charge
+    (examples x groups) x longest group for multi-group inputs.
 - **A bounded, cacheable key shuffle.** `ShuffleKeysMod` makes a new key
   order on every draw, so each shuffled card is a text never seen before.
   It is stamped do-not-cache and is encoded live every step; with it on,

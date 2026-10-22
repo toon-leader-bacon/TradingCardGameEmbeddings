@@ -84,36 +84,37 @@ bound by per-text work on the CPU (hashing, folding duplicates, the slot
 policy), not by bandwidth. A disk hit is still about 50x faster than
 encoding.
 
-## Batch size (single-card contrastive, warm cache)
+## Training step (512-card budget, warm cache)
 
-Gwent, FaB, StS2 and Dominion contrastive dojos, residual-MLP head,
-fp16, prefetch depth 2, mods off, every card a cache hit. Prefetch hid
-batch building entirely (`next_batch` about 0.1 ms).
+Measured on 2026-10-22: the r2-like mixed diet (162 dojos, `single_mixed`),
+`max_batch_cost` 512, fp16, mods off, every card a cache hit, 500 steps.
 
-| Cards per batch | Step | Cards/s |
-|---|---|---|
-| 32 | 118 ms | ~270 |
-| 128 | 1.33 s | ~96 |
-| 512 | 19.5 s | ~26 |
+| | |
+|---|---|
+| Cards/s | ~2,100 |
+| Step, mean / median / p90 | 193 / 52 / 268 ms |
+| Waiting for the next batch | 78% of step time |
+| Forward and loss / backward and optimizer | 14% / 8% |
+| TEST pass (162 dojos) | 33 s |
+| Peak allocated / reserved | 4.5 / 6.5 GiB |
 
-Nearly the whole step is the contrastive loss's per-anchor Python loop,
-which grows worse than linearly (`../dojos/TODO.md`, "Vectorize the
-contrastive loss"). Until it is vectorized, 32 cards per batch is the
-fastest. Two caveats:
+The GPU work is small: a contrastive step's forward and loss take about
+20-30 ms at ~490 cards. Most of the step waits on batch building, which
+prefetch does not hide at this pace. The slowest are the single-card
+metric dojos over whole games (Scryfall, Pokemon, Hearthstone, Card
+Vault: 0.9-2.3 s per step, nearly all of it waiting).
 
-- These runs lifted a 16-deck cap on contrastive batches in a scratch
-  script. The cap is gone since (2026-10-21): `max_batch_cost` alone sets
-  the decks per batch.
-- In these runs, a small deck box could not fill a batch (Pokemon, 159
-  TRAIN decks, failed at 512 cards and up), and every dojo's TEST pass
-  yielded nothing once a batch needed more decks than
-  `eval_examples_per_dojo` (64). Both are fixed: a split's last batch
-  holds whatever decks are left, and a capped pass trims its last batch.
+The budget counts padded slots (examples × longest example), so
+multi-card dojos with mixed lengths carry fewer real cards per batch
+than the budget: 250-440 at 512 for the deck, draft and run dojos.
+Contrastive batches still count real cards. Notes:
+
+- Commander and limited decks share `final_decks.held_out_card_mtg`
+  batches; the padded budget keeps them within the same peak memory.
+- A small deck box cannot fill a large batch: a split's last batch holds
+  whatever decks are left, and a capped TEST pass trims its last batch.
   A huge budget against a small deck box still means every batch is the
   whole box (Pokemon at 512 cards: one 159-deck batch per step).
-- With the default mods of 2026-10-21 (field mask and key mask; key
-  shuffle no longer a default), 40% of cards were encoded live at 512
-  cards: 642 ms per step, nearly all of it the live ModernBERT forward
-  pass (peak 1.6 GiB allocated). Before the shuffle was dropped, at 32
-  cards, about 78% were live: 199 ms per step against 119 ms with mods
-  off.
+- With the default mods of 2026-10-21 (field mask and key mask), 40% of
+  cards were encoded live at 512 cards: 642 ms per step, nearly all of
+  it the live ModernBERT forward pass (peak 1.6 GiB allocated).
