@@ -293,3 +293,21 @@ step. Small card and deck sets cycle their TRAIN set within an hour.
 Steps were 4.8× faster than `cached` (0.255 vs 1.22 s), but the GPU was
 only 21% busy. Batch wait was 13% of the step, mostly in card-field
 metric dojos. Startup is 32 of the run's 44 min.
+
+### 2026-10-22 00:58 · PI: the source of nomods' batch wait
+The `cached_nomods` bench note left the cause of the batch wait as a
+guess. `profile/cached_nomods/builds.csv` confirms it.
+- **Where the reserve time goes:** the worker's reserve step spent its
+  live-encoding time entirely on card-field metric dojos:
+  - scryfall: 4,350 texts in 19.9 s
+  - pokemon_tcg: 3,840 texts in 16.7 s
+  - hearthstonejson: 5,376 texts in 12.9 s
+  - cardvault_fabtcg: 2,560 texts in 6.6 s
+  - spire_codex and dominiontabs: about 900 texts each, about 2 s each
+- **Why those texts miss the cache:** they are target-masked texts. The
+  warm-up never encoded them, so their first encoding falls on the
+  critical path. Every other family had no live texts in its reserve.
+- **This is a first-pass cost.** These sets are small (400 to 112k
+  rows), so with mods off the miss fades once each set has been seen.
+- **Candidate fix:** warm the target-masked texts at startup.
+  Engineering, not an experiment.
