@@ -266,3 +266,18 @@ Seen:
 Reading: the deck-set digest, computed once per (deck box, game) per
 run, would remove about 4/5 of the contrastive build time. CardBinder's
 deep copies also cost startup time, not only batch-building time (H3).
+- 2026-10-21 22:45 · run pilot done (exit 0, 67 min; startup 60 min) → [bench note](bench_notes/2026-10-21_2245_pilot_done.md)
+
+### 2026-10-21 22:46 · Queue order after the pilot
+
+What: from the pilot's 1.4 s per cached step and 86 s per TEST pass, the
+queue is projected at about 7 h. The order is now `cached`,
+`cached_nomods`, `uncached`, `cached_nocopy` (design review point 7):
+the last is the most dispensable, since the deep copy's cost is measured
+in every run and its safety can also be checked by a CPU-only probe.
+The steps per run stay 2 × 1,000. The queue runs unattended through
+`data/runs/2026-10-21_cache_shakeout/run_queue.sh` (RAM pre-flight
+before each run).
+Seen so far (pilot, one short run, not a result): live encoding is 79%
+of a cached step, and one TEST pass costs about as much as 60 cached
+steps, so H2 looks likely to be refuted.
