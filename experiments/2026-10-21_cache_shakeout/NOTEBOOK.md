@@ -44,20 +44,29 @@ work and which data to prioritise.
   do-not-cache cards is the largest single cost of a cached training
   step. *Refuted if* the training thread's live-encode time is under
   30% of its step time in `cached`, or `cached_nomods` is less than
-  1.3x faster per step than `cached`.
+  1.3x faster per card than `cached` (per card, since removing mods can
+  change batch contents). Do-not-cache texts are encoded only on the
+  training thread: the worker's reserve skips them
+  (`PooledFeatureCache.reserve`), so encodes during reserve are cold
+  misses of cacheable texts, reported apart.
 - **H2 (TEST).** At r2's `eval_examples_per_dojo: 128` over 162 dojos,
   one TEST pass now costs more wall-clock time than 1,000 cached
   training steps. *Refuted if* a round's TEST pass takes less than its
   1,000 training steps.
 - **H3 (deep copy).** CardBinder's deep copies are 10% or more of TRAIN
-  batch building time, and skipping them changes no binder card and no
-  loss beyond run-to-run noise. *Refuted* on the cost if under 5%; *on
-  safety* if any binder card serializes differently after training.
+  batch building time, and skipping them changes no binder card.
+  *Refuted* on the cost if under 5%; *on safety* if any binder card
+  serializes differently after training (`binder_check.txt`). Losses are
+  not used for H3: `cached_nocopy` is also H4's noise yardstick, so it
+  can't be judged against itself.
 - **H4 (cache equivalence).** The cached run's TEST losses after 2,000
   steps match the uncached run's within run-to-run noise (median
   absolute difference of normalized TEST loss across dojos no larger
-  than between `cached` and `cached_nocopy`), and the cached run is at
-  least 3x faster per training step.
+  than between `cached` and `cached_nocopy`, or than 0.02 if that pair
+  is closer, since it may be bit-identical), and the cached run is at
+  least 3x faster per training step. The cache stores fp16 rows while
+  `uncached` uses the live fp16-autocast output, so a small difference
+  is expected even with no bug.
 
 ## Background
 
@@ -147,6 +156,12 @@ work and which data to prioritise.
   - Two rounds of 1,000 steps cannot show training quality; losses are
     compared only between these runs, never to r2's 20,000 steps.
   - The desktop is otherwise idle overnight, but not isolated.
+  - `backward_opt_s` in `steps.csv` is the step's remainder (total minus
+    wait minus forward + loss): backward, clipping, the optimizer, the
+    end-of-step sync and bookkeeping. Results call it "remainder".
+  - Cached rows are stored as fp16 (see H4).
+  - The whitening stats path differs from r2's recorded one, but the
+    files are byte-identical (checked with `cmp`).
 - **Cost:** startup about 30 min per run (r2). Step time unknown; the
   pilot calibrates it. Guess: cached about 0.3-0.6 s per step, uncached
   1-2 s, TEST 10-20 min per pass. So about 1-1.5 h per run, 5-6 h for
@@ -198,3 +213,21 @@ Decisions:
 `pilot` (2 × 100 steps), commit a8d7063. After launch the profiler gained
 two columns in `builds.csv` (`examples`, `pass_id`, to count passes over
 each dojo's TRAIN data); the pilot ran the version without them.
+
+### 2026-10-21 22:00 · Design review (experiment-critic, design mode)
+
+What: one design-mode pass, before `cached` launched. Its eight points
+and the responses:
+1. H4's noise pair may be bit-identical, and fp16 row storage was not
+   named: added a 0.02 absolute fallback and the confound.
+2. H3's loss half was circular (`cached_nocopy` is also H4's noise
+   yardstick): dropped; H3's safety is the binder check alone.
+3. Which thread encodes modded texts: only the training thread (the
+   worker's reserve skips stamped texts). Stated under H1.
+4. The profiler change after the pilot launched was uncommitted:
+   committed as d099a95 (with `analysis/profile_report.py`). `pilot` ran
+   a8d7063's profiler; every later run runs d099a95's or later.
+5. The whitening path differs from r2's: byte-identical; noted.
+6. `cached_nomods` changes the data: H1's speed ratio is per card.
+7. Queue order puts H4 at risk: decided after the pilot calibrates.
+8. `backward_opt_s` is a remainder: named so under confounds.
