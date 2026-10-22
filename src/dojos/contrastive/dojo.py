@@ -31,7 +31,8 @@ from src.dojos.mods.mod import ModTally
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
-from src.schema.type_hints import BatchedModelOutput, BatchedTrainingInput, iter_cards
+from src.schema.padded_embeddings import ModelEmbeddings, PaddedEmbeddings
+from src.schema.type_hints import BatchedTrainingInput, iter_cards
 
 _logger = logging.getLogger(__name__)
 
@@ -160,20 +161,22 @@ class ContrastiveDojo:
         return self._dealer.deck_count(split)
 
     def compute_loss(
-        self, item_embeddings: BatchedModelOutput, batch: DojoBatch
+        self, item_embeddings: ModelEmbeddings, batch: DojoBatch
     ) -> torch.Tensor:
         """Compute batch's contrastive loss from its items' raw embeddings.
 
         Inputs:
-            item_embeddings: one embedding per batch.inputs entry, same
-                order, as returned by the shared encoder's forward()
-                call on batch.inputs - shape (single-card vs. multi-card
-                item) must match this dojo's contrastive_loss.
+            item_embeddings: the shared encoder's forward() output for
+                batch.inputs: PaddedEmbeddings, one row per item, whose
+                shape (single-card vs. multi-card item) must match this
+                dojo's contrastive_loss.
             batch: the ContrastiveBatch item_embeddings was computed
                 for - supplies identities/positive_cliques to the loss.
         Output: a scalar loss tensor.
         Side effects: none.
-        Exceptions: TypeError if batch isn't a ContrastiveBatch; whatever
+        Exceptions: TypeError if batch isn't a ContrastiveBatch, or
+            item_embeddings isn't PaddedEmbeddings (a multi-group batch);
+            whatever
             self._contrastive_loss.calculate() raises (e.g. ValueError on
             a length or shape mismatch against batch.inputs).
 
@@ -183,6 +186,8 @@ class ContrastiveDojo:
         """
         if not isinstance(batch, ContrastiveBatch):
             raise TypeError(f"{self.name} needs a ContrastiveBatch")
+        if not isinstance(item_embeddings, PaddedEmbeddings):
+            raise TypeError(f"{self.name} needs PaddedEmbeddings")
         return self._contrastive_loss.calculate(
             item_embeddings=item_embeddings,
             identities=batch.identities,
@@ -267,7 +272,12 @@ class ContrastiveDojo:
         return True
 
     def _decks_within(self, budget: BatchBudget) -> int:
-        """Decks per sample so a batch fits budget, assuming unit card cost."""
+        """Decks per sample so a batch fits budget, assuming unit card cost.
+
+        Sized by real cards, not padded slots, so batch composition (and
+        the number of negatives) does not depend on padding. The padding
+        overhead is bounded by the style's item layout: under 2x for
+        missing card, 1x for every other style."""
         fit = budget.max_cost // self._pair_constructor.cards_per_deck
         decks = min(self._decks_per_sample, fit)
         if decks < _MIN_DECKS_PER_SAMPLE:

@@ -12,8 +12,6 @@ architecture. See multi_group_option_selection/decoder_head.py for the
 sibling that also pools in a second (conditioning) card group.
 """
 
-from typing import List
-
 import torch
 import torch.nn as nn
 
@@ -21,12 +19,13 @@ from src.dojos.generic.option_scoring import (
     BilinearOptionScoringHead,
     OptionScoringHead,
 )
-from src.schema.type_hints import BatchedMultiCardEmbedding, MultiCardEmbedding
+from src.schema.padded_embeddings import PaddedEmbeddings
+from src.schema.type_hints import InputShape
 
 
 class MultiCardOptionSelectionDecoderHead(nn.Module):
-    """Scores each example's ragged pack options independently via an
-    injected OptionScoringHead, with no conditioning context."""
+    """Scores every example's pack options in one call to an injected
+    OptionScoringHead, with no conditioning context."""
 
     def __init__(
         self, card_embedding_size: int, scoring_head: OptionScoringHead | None = None
@@ -49,40 +48,25 @@ class MultiCardOptionSelectionDecoderHead(nn.Module):
             card_embedding_size
         )
 
-    def forward(self, embeddings: BatchedMultiCardEmbedding) -> List[torch.Tensor]:
-        """One ragged logits tensor per example in the batch.
+    def forward(self, embeddings: PaddedEmbeddings) -> torch.Tensor:
+        """Every example's option logits, padded.
 
         Inputs:
-            embeddings: one example's pack-option embeddings per
-                training example in the batch - each example's own
-                list may be a different length (pack size shrinks over
-                the course of a draft).
-        Output: a List[torch.Tensor], one 1-D logits tensor per
-            example, same order as embeddings and same per-example
-            length as that example's own option count - directly the
-            shape PickPredictionCrossEntropyLoss.calculate() expects as
-            decoder_output (no further stacking; the ragged lengths
-            mean this can never collapse to one rectangular tensor).
+            embeddings: a MULTI_CARD batch of pack options (pack size
+                shrinks over the course of a draft, so lengths vary).
+        Output: (examples, max_options) logits, -inf at padding: directly
+            what PickPredictionCrossEntropyLoss.calculate() expects.
         Side effects: none.
         Exceptions: none expected.
 
         Example:
             >>> head = MultiCardOptionSelectionDecoderHead(card_embedding_size=4)
-            >>> len(head.forward([[torch.randn(4), torch.randn(4)]]))
-            1
+            >>> head.forward(padded_packs).shape
+            torch.Size([2, 15])
         """
-        return [
-            self.scoring_head.score(option_embeddings, context=None)
-            for option_embeddings in embeddings
-        ]
-
-    def forward_single(self, embeddings: MultiCardEmbedding) -> torch.Tensor:
-        """Decode one example's pack options to their logits, unbatched.
-
-        Inputs:
-            embeddings: one example's pack-option embeddings.
-        Output: a (len(embeddings),) tensor of logits.
-        Side effects: none.
-        Exceptions: none expected.
-        """
-        return self.scoring_head.score(embeddings, context=None)
+        embeddings.require_shape(
+            InputShape.MULTI_CARD, "MultiCardOptionSelectionDecoderHead"
+        )
+        return self.scoring_head.score(
+            embeddings.cards, embeddings.mask, context=None, context_mask=None
+        )

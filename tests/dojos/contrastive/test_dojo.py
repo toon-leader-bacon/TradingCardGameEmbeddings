@@ -24,6 +24,7 @@ from src.schema.splits import Split
 from src.schema.card import GenericCard, GenericDeck, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
+from tests.dojos.padding import padded
 
 
 def _card(name: str = "card") -> GenericCard:
@@ -178,7 +179,7 @@ class TestComputeLoss:
         )
 
         with pytest.raises(ValueError):
-            dojo.compute_loss([torch.randn(4)], batch)
+            dojo.compute_loss(padded([torch.randn(4)]), batch)
 
     def test_delegates_to_the_injected_loss(self) -> None:
         recording_loss = _RecordingLoss()
@@ -195,14 +196,14 @@ class TestComputeLoss:
             identities=[(uuid4(),), (uuid4(),)],
             positive_cliques=[[0, 1]],
         )
-        embeddings = [torch.randn(4), torch.randn(4)]
+        embeddings = padded([torch.randn(4), torch.randn(4)])
 
         dojo.compute_loss(embeddings, batch)
 
         called_embeddings, called_identities, called_positive_cliques = (
             recording_loss.calls[0]
         )
-        assert called_embeddings == embeddings
+        assert called_embeddings is embeddings
         assert called_identities == batch.identities
         assert called_positive_cliques == batch.positive_cliques
 

@@ -498,5 +498,5 @@ class TestModelWarmer:
         assert stats is not None
         assert stats.tiers[0].rows_used == 2
         # The training thread now reads those rows on the default stream
-        assert model([_card("a")])[0].device.type == "cuda"
+        assert model([_card("a")]).cards.device.type == "cuda"  # type: ignore[union-attr]
         warmer.release(reservations[0])

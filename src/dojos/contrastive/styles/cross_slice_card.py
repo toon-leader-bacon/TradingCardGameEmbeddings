@@ -9,28 +9,25 @@ own slice's cards are ignored, and other decks' cards are negatives:
 """
 
 from dataclasses import dataclass
-from typing import cast
 from uuid import UUID
 
 import torch
 
 from src.dojos.contrastive.contrastive_loss import (
+    ComparisonMasks,
     ContrastiveLoss,
     check_item_embeddings,
-    identity_negative_mask,
-    mean_anchor_loss,
-    mean_constant_logit_loss,
-    pairwise_cosine_similarity,
+    clique_positive_mask,
+    constant_logit_baseline,
+    info_nce_loss,
+    info_nce_masks,
+    same_key_mask,
 )
 from src.dojos.contrastive.pair_constructor import ContrastivePairConstructor
 from src.dojos.contrastive.staple_subsampling import StapleSubsampling
 from src.dojos.contrastive.styles.deck_slices import DeckSlicesPairConstructor
-from src.schema.type_hints import (
-    BatchedModelOutput,
-    BatchedMultiCardEmbedding,
-    Embedding,
-    InputShape,
-)
+from src.schema.padded_embeddings import PaddedEmbeddings
+from src.schema.type_hints import InputShape
 
 
 class CrossSliceCardInfoNCELoss:
@@ -42,8 +39,8 @@ class CrossSliceCardInfoNCELoss:
     item are excluded entirely (neither positive nor negative), per the
     plan's explicit "an anchor is not a valid pair with other cards in
     its own set grouping" requirement - this is the one behavior
-    genuinely new relative to SingleCardInfoNCELoss, expressed via
-    anchor_loss's excluded_indices argument."""
+    genuinely new relative to SingleCardInfoNCELoss, expressed as the
+    excluded mask passed to info_nce_masks."""
 
     def __init__(self, temperature: float = 0.07) -> None:
         """
@@ -60,56 +57,38 @@ class CrossSliceCardInfoNCELoss:
 
     def calculate(
         self,
-        item_embeddings: BatchedModelOutput,
+        item_embeddings: PaddedEmbeddings,
         identities: list[tuple[UUID, ...]],
         positive_cliques: list[list[int]],
     ) -> torch.Tensor:
         """Mean per-card single-positive InfoNCE loss over the batch.
 
         Inputs: see ContrastiveLoss.calculate(). item_embeddings must be
-            multi-card-shaped (one MultiCardEmbedding - a list of
-            per-card Embedding - per item).
+            MULTI_CARD; identities[i][k] is the card at row i, position k.
         Output: a scalar loss tensor - the mean, over every card that
             has at least one cross-item positive, of that card's own
             InfoNCE loss.
         Side effects: none.
-        Exceptions: ValueError if len(item_embeddings) != len(identities),
-            if item_embeddings isn't multi-card-shaped, or if no card in
-            the batch has a positive pair (loss is undefined).
+        Exceptions: ValueError if item_embeddings and identities disagree
+            (count, shape or per-item length); DegenerateBatchError if no
+            card in the batch has a positive pair (loss is undefined).
 
         Example:
             >>> loss_fn = CrossSliceCardInfoNCELoss()
             >>> loss_fn.calculate(item_embeddings, identities, positive_cliques)
         """
+        # Validate inputs: per-item lengths must match, so flat card k
+        # lines up with flat identity k
         check_item_embeddings(
             item_embeddings,
             identities,
             InputShape.MULTI_CARD,
             "CrossSliceCardInfoNCELoss",
         )
-        # Runtime shape already validated above - narrow the wide
-        # ContrastiveLoss.calculate() parameter type back to the
-        # concrete shape this class actually handles.
-        multi_card_embeddings = cast(BatchedMultiCardEmbedding, item_embeddings)
-
-        flat_embeddings, flat_identities, item_of_card = self._flatten_items(
-            multi_card_embeddings, identities
-        )
-        similarity = pairwise_cosine_similarity(flat_embeddings)
-        valid_negative_mask = identity_negative_mask(flat_identities, similarity.device)
-        positives_by_anchor, excluded_by_anchor = (
-            self._positives_and_exclusions_by_anchor(item_of_card, positive_cliques)
-        )
-
-        # Average each anchor card's own InfoNCE loss - a card with no
-        # cross-item positive in this batch contributes nothing.
-        return mean_anchor_loss(
-            positives_by_anchor,
-            excluded_by_anchor,
-            similarity,
-            valid_negative_mask,
-            self._temperature,
-        )
+        _require_card_aligned_identities(item_embeddings, identities)
+        # One unit per real card, in row-major order
+        masks = self._masks(identities, positive_cliques)
+        return info_nce_loss(item_embeddings.flat_cards(), masks, self._temperature)
 
     def constant_logit_loss(
         self,
@@ -126,118 +105,82 @@ class CrossSliceCardInfoNCELoss:
             ...     identities, [[0, 1], [2, 3], [4, 5]])
             3.044...
         """
-        result: float
-        # Flatten identities to cards, then the same expansion calculate() uses
-        flat_identities, item_of_card = self._flat_card_identities(identities)
-        positives_by_anchor, excluded_by_anchor = (
-            self._positives_and_exclusions_by_anchor(item_of_card, positive_cliques)
+        return constant_logit_baseline(self._masks(identities, positive_cliques))
+
+    def _masks(
+        self, identities: list[tuple[UUID, ...]], positive_cliques: list[list[int]]
+    ) -> ComparisonMasks:
+        """Card-level masks from item-level cliques.
+
+        Private helper - callers are calculate() and constant_logit_loss().
+        A card's positives are every card of a *different* item in its
+        item's clique; its own item's other cards are excluded. Built by
+        indexing the item-level clique mask with item_of_card (rows and
+        columns), not by a per-card loop.
+        Inputs: identities, positive_cliques - see calculate().
+        Output: ComparisonMasks over the flat cards, in row-major order.
+        Side effects: none. Exceptions: as clique_positive_mask.
+        """
+        flat_identities, item_of_card = _flat_card_identities(identities)
+        item_positive = clique_positive_mask(positive_cliques, len(identities))
+        positive = _expanded_to_cards(item_positive, item_of_card)
+        own_item = same_key_mask(item_of_card)
+        return info_nce_masks(positive, flat_identities, own_item)
+
+
+def _require_card_aligned_identities(
+    item_embeddings: PaddedEmbeddings, identities: list[tuple[UUID, ...]]
+) -> None:
+    """Each item's card count equals its identity's length, so flat card k
+    is flat identity k.
+
+    Private helper - single caller is CrossSliceCardInfoNCELoss.calculate.
+    A deck-thinning mod that drops cards from an item keeps its identity,
+    which would misalign the two; this loss cannot score such a batch.
+    Inputs: item_embeddings, identities. Output: none.
+    Side effects: none (host lengths). Exceptions: ValueError on any
+        per-item mismatch.
+    """
+    identity_lengths = tuple(len(identity) for identity in identities)
+    if item_embeddings.lengths != identity_lengths:
+        raise ValueError(
+            "CrossSliceCardInfoNCELoss needs one identity per card: item "
+            f"lengths {item_embeddings.lengths} != identity lengths {identity_lengths}"
         )
-        result = mean_constant_logit_loss(
-            flat_identities, positives_by_anchor, excluded_by_anchor
-        )
-        return result
 
-    def _flat_card_identities(
-        self, identities: list[tuple[UUID, ...]]
-    ) -> tuple[list[UUID], list[int]]:
-        """Flatten per-item identity tuples to one uuid per card, tracking
-        each card's item index - _flatten_items without the embeddings.
 
-        Private helper - callers are constant_logit_loss() and
-        _flatten_items().
-        Inputs: identities - see calculate().
-        Output: (flat_identities, item_of_card), both one entry per card,
-            in item-then-position order.
-        Side effects: none. Exceptions: none.
-        """
-        flat_identities: list[UUID] = []
-        item_of_card: list[int] = []
-        for item_index, item_identities in enumerate(identities):
-            for card_identity in item_identities:
-                flat_identities.append(card_identity)
-                item_of_card.append(item_index)
-        return flat_identities, item_of_card
+def _flat_card_identities(
+    identities: list[tuple[UUID, ...]],
+) -> tuple[list[UUID], list[int]]:
+    """Flatten per-item identity tuples to one uuid per card, tracking
+    each card's item index.
 
-    def _flatten_items(
-        self,
-        item_embeddings: BatchedMultiCardEmbedding,
-        identities: list[tuple[UUID, ...]],
-    ) -> tuple[list[Embedding], list[UUID], list[int]]:
-        """Flatten every item's per-card embeddings/uuids into one flat
-        card-level pool, tracking which item index each card came from.
+    Private helper - single caller is CrossSliceCardInfoNCELoss._masks.
+    Inputs: identities.
+    Output: (flat_identities, item_of_card), both one entry per card, in
+        item-then-position order (the row-major order of flat_cards()).
+    Side effects: none. Exceptions: none.
+    """
+    flat_identities: list[UUID] = []
+    item_of_card: list[int] = []
+    for item_index, item_identities in enumerate(identities):
+        flat_identities.extend(item_identities)
+        item_of_card.extend([item_index] * len(item_identities))
+    return flat_identities, item_of_card
 
-        Private helper - single caller is calculate(). Builds its identity
-        half with _flat_card_identities() (shared with
-        constant_logit_loss()), adding only the embeddings.
 
-        Inputs:
-            item_embeddings: see calculate() - one MultiCardEmbedding
-                per item.
-            identities: see calculate() - identities[i] is positionally
-                parallel to item_embeddings[i] (ContrastiveBatch's own
-                contract), so identities[i][k] is the uuid of the card
-                at item_embeddings[i][k].
-        Output: (flat_embeddings, flat_identities, item_of_card), all
-            the same length (total card count across every item):
-            flat_embeddings[k] and flat_identities[k] are one card's
-            embedding/uuid, and item_of_card[k] is the item index (into
-            item_embeddings/identities) that card came from.
-        Side effects: none.
-        Exceptions: none expected (identities[i] is assumed the same
-            length as item_embeddings[i] - a ContrastiveBatch/
-            DeckSlicesPairConstructor invariant, not re-validated here).
-        """
-        flat_identities, item_of_card = self._flat_card_identities(identities)
-        flat_embeddings = [embedding for item in item_embeddings for embedding in item]
-        return flat_embeddings, flat_identities, item_of_card
+def _expanded_to_cards(
+    item_mask: torch.Tensor, item_of_card: list[int]
+) -> torch.Tensor:
+    """An item-level (items, items) mask read at card level.
 
-    def _positives_and_exclusions_by_anchor(
-        self, item_of_card: list[int], positive_cliques: list[list[int]]
-    ) -> tuple[dict[int, list[int]], dict[int, set[int]]]:
-        """Expand item-level positive_cliques down to card-level
-        positive/excluded index sets for every flattened card.
-
-        Private helper - callers are calculate() and
-        constant_logit_loss(). For a card at
-        flat index k belonging to item i: its positives are every card
-        belonging to a *different* item j in i's positive clique; its
-        exclusions are every other card belonging to item i itself (see
-        this class's own docstring).
-
-        Inputs:
-            item_of_card: item_of_card[k] is the item index flat card k
-                came from - see _flatten_items().
-            positive_cliques: see calculate().
-        Output: (positives_by_anchor, excluded_by_anchor), both keyed by
-            flat card index. A card with no cross-item positive in its
-            clique is simply absent from positives_by_anchor (and
-            anchor_loss is never called for it, so excluded_by_anchor
-            need not have an entry for it either).
-        Side effects: none.
-        Exceptions: none.
-        """
-        cards_of_item: dict[int, list[int]] = {}
-        for card_index, item_index in enumerate(item_of_card):
-            cards_of_item.setdefault(item_index, []).append(card_index)
-        positives_by_anchor: dict[int, list[int]] = {}
-        excluded_by_anchor: dict[int, set[int]] = {}
-        for clique in positive_cliques:
-            for item_index in clique:
-                own_cards = cards_of_item.get(item_index, [])
-                other_cards = [
-                    card
-                    for other_item in clique
-                    if other_item != item_index
-                    for card in cards_of_item.get(other_item, [])
-                ]
-                if not other_cards:
-                    continue
-                for card in own_cards:
-                    positives_by_anchor[card] = other_cards
-                    excluded_by_anchor[card] = {
-                        other for other in own_cards if other != card
-                    }
-        return positives_by_anchor, excluded_by_anchor
+    Private helper - single caller is CrossSliceCardInfoNCELoss._masks.
+    Inputs: item_mask (items, items) bool CPU; item_of_card.
+    Output: (cards, cards) bool CPU: item_mask[item_of_card][:, item_of_card].
+    Side effects: none. Exceptions: none.
+    """
+    cards = torch.tensor(item_of_card, dtype=torch.long)
+    return item_mask[cards][:, cards]
 
 
 @dataclass(frozen=True)

@@ -9,7 +9,11 @@ from uuid import uuid4
 
 import torch
 
-from src.dojos.contrastive.contrastive_loss import identity_negative_mask
+from src.dojos.contrastive.contrastive_loss import (
+    clique_positive_mask,
+    info_nce_loss,
+    info_nce_masks,
+)
 from src.dojos.loss.bce_loss import BceLoss
 from src.dojos.loss.fixed_classification_loss import FixedClassificationLoss
 from src.dojos.loss.masked_vector_regression_loss import MaskedVectorRegressionLoss
@@ -54,18 +58,20 @@ def test_masked_vector_regression_loss_follows_the_decoder_output_device() -> No
     assert loss.device == META
 
 
-def test_pick_prediction_loss_follows_each_logits_device() -> None:
+def test_pick_prediction_loss_follows_the_logits_device() -> None:
     loss = PickPredictionCrossEntropyLoss().calculate(
-        [torch.zeros(3, device=META), torch.zeros(2, device=META)], [0, 1]
+        torch.zeros(2, 3, device=META), [0, 1]
     )
     assert loss.device == META
 
 
-def test_contrastive_negative_mask_is_built_on_the_similarity_device() -> None:
-    # The full loss reads mask entries back as Python bools, which meta
-    # tensors cannot do; the mask was its only CPU-built tensor
-    mask = identity_negative_mask([uuid4(), uuid4()], META)
-    assert mask.device == META
+def test_info_nce_loss_follows_the_units_device() -> None:
+    # The masks are built on the CPU and moved once; nothing is read back
+    # from the device, which meta tensors could not do
+    identities = [(uuid4(),) for _ in range(4)]
+    masks = info_nce_masks(clique_positive_mask([[0, 1], [2, 3]], 4), identities, None)
+    loss = info_nce_loss(torch.zeros(4, 3, device=META), masks, 0.07)
+    assert loss.device == META
 
 
 def test_device_of_reads_a_tensor_or_a_list_and_defaults_to_cpu() -> None:

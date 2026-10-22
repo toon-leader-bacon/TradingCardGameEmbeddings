@@ -141,7 +141,7 @@ class TestUniformOptionCalibration:
 
     def test_matches_the_loss_of_constant_logits(self) -> None:
         sample = [(["a", "b"], 0), (["a", "b", "c"], 2)]
-        logits = [torch.zeros(2), torch.zeros(3)]
+        logits = torch.tensor([[0.0, 0.0, float("-inf")], [0.0, 0.0, 0.0]])
         loss = PickPredictionCrossEntropyLoss().calculate(logits, [0, 2])
         baseline = UniformOptionCalibration(len).baseline_of(sample)
         assert math.isclose(loss.item(), baseline, rel_tol=1e-5)

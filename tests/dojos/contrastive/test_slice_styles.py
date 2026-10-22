@@ -43,6 +43,7 @@ from src.dojos.contrastive.styles.slice_match import PooledItemsLoss, SliceMatch
 from src.schema.card import GenericCard, GenericDeck, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
+from tests.dojos.padding import padded
 
 
 def _card(binder: CardBinder, name: str) -> GenericCard:
@@ -180,7 +181,7 @@ class TestCrossSliceAndSliceMatchStyles:
         loss_fn = style.contrastive_loss()
 
         loss = loss_fn.calculate(
-            _constant_embeddings(batch.identities),
+            padded(_constant_embeddings(batch.identities)),
             batch.identities,
             batch.positive_cliques,
         )
@@ -216,7 +217,9 @@ class TestPooledItemsLoss:
     def test_raises_on_a_single_card_shaped_input(self) -> None:
         with pytest.raises(ValueError, match="multi-card"):
             PooledItemsLoss(SingleCardInfoNCELoss()).calculate(
-                [torch.randn(4), torch.randn(4)], [(uuid4(),), (uuid4(),)], [[0, 1]]
+                padded([torch.randn(4), torch.randn(4)]),
+                [(uuid4(),), (uuid4(),)],
+                [[0, 1]],
             )
 
 
@@ -251,9 +254,11 @@ class TestCardInContexts:
         cliques = [[0, 1], [2, 3]]
         loss_fn = AnchorCardLoss(SingleCardInfoNCELoss(temperature=0.1))
 
-        quiet = loss_fn.calculate([[x, x], [x, x], [y, y], [y, y]], identities, cliques)
+        quiet = loss_fn.calculate(
+            padded([[x, x], [x, x], [y, y], [y, y]]), identities, cliques
+        )
         noisy = loss_fn.calculate(
-            [[x, y], [x, -x], [y, x], [y, -y]], identities, cliques
+            padded([[x, y], [x, -x], [y, x], [y, -y]]), identities, cliques
         )
 
         assert quiet.item() == pytest.approx(noisy.item())
@@ -280,7 +285,7 @@ class TestCardInContexts:
         loss_fn = style.contrastive_loss()
 
         loss = loss_fn.calculate(
-            _constant_embeddings(batch.identities),
+            padded(_constant_embeddings(batch.identities)),
             batch.identities,
             batch.positive_cliques,
         )
@@ -390,7 +395,7 @@ class TestOddOneOutLoss:
         loss_fn = OddOneOutLoss()
 
         loss = loss_fn.calculate(
-            _constant_embeddings(identities), identities, [[0], [1]]
+            padded(_constant_embeddings(identities)), identities, [[0], [1]]
         )
 
         assert loss.item() == pytest.approx(math.log(5), rel=1e-5)
@@ -400,7 +405,7 @@ class TestOddOneOutLoss:
         x, y = torch.tensor([1.0, 0.0]), torch.tensor([0.0, 1.0])
 
         loss = OddOneOutLoss(temperature=0.1).calculate(
-            [[x, x, x, y]], identities, [[0]]
+            padded([[x, x, x, y]]), identities, [[0]]
         )
 
         assert loss.item() < 0.01
@@ -409,7 +414,7 @@ class TestOddOneOutLoss:
         identities = [tuple(uuid4() for _ in range(4))]
         cards = [torch.randn(4, requires_grad=True) for _ in range(4)]
 
-        OddOneOutLoss().calculate([cards], identities, [[0]]).backward()
+        OddOneOutLoss().calculate(padded([cards]), identities, [[0]]).backward()
 
         assert all(card.grad is not None for card in cards)
 
@@ -441,7 +446,7 @@ class TestOddOneOutLoss:
         batch = style.pair_constructor(0, None).build(decks, binder)
 
         loss = style.contrastive_loss().calculate(
-            _random_embeddings(batch.identities),
+            padded(_random_embeddings(batch.identities)),
             batch.identities,
             batch.positive_cliques,
         )

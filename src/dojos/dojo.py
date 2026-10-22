@@ -18,7 +18,8 @@ from src.dojos.mods.mod import ModTally
 from src.schema.card import GenericCard
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
-from src.schema.type_hints import BatchedModelOutput, BatchedTrainingInput
+from src.schema.padded_embeddings import ModelEmbeddings
+from src.schema.type_hints import BatchedTrainingInput
 
 
 @dataclass(frozen=True)
@@ -79,10 +80,15 @@ class Dojo(Protocol):
     ) -> Iterator[DojoBatch]:
         """Yield batches of one split.
 
-        Every batch's summed budget.cost_of over its cards is at most
-        budget.max_cost. max_examples truncates to the first N examples of
-        the split in its fixed file order, so a capped TEST pass is
-        deterministic.
+        What a batch's cost is bounded by depends on the dojo. Generic
+        dojos bound the padded cost: example count times the costliest
+        example's summed budget.cost_of (see budgeted_batching). Contrastive
+        dojos bound the summed budget.cost_of over real cards; their
+        padding overhead is fixed by each style's item layout (under 2x for
+        missing card, 1x for the others), not by the data.
+
+        max_examples truncates to the first N examples of the split in its
+        fixed file order, so a capped TEST pass is deterministic.
         """
         ...
 
@@ -91,9 +97,13 @@ class Dojo(Protocol):
         ...
 
     def compute_loss(
-        self, embeddings: BatchedModelOutput, batch: DojoBatch
+        self, embeddings: ModelEmbeddings, batch: DojoBatch
     ) -> torch.Tensor:
-        """Scalar per-example MEAN loss for the batch's embeddings."""
+        """Scalar per-example MEAN loss for the batch's embeddings.
+
+        embeddings is what the encoder returned for batch.inputs:
+        PaddedEmbeddings for single-card and multi-card dojos, nested
+        BatchedMultiGroupEmbedding for multi-group dojos."""
         ...
 
     def baseline_loss(self, batch: DojoBatch) -> float:

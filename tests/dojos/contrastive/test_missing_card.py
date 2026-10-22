@@ -25,6 +25,7 @@ from src.dojos.contrastive.styles.single_card import (
 from src.schema.card import GenericCard, GenericDeck, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
+from tests.dojos.padding import padded
 
 
 def _card(binder: CardBinder, name: str) -> GenericCard:
@@ -252,7 +253,7 @@ class TestMissingCardInfoNCELoss:
         embeddings = [[same] * len(identity) for identity in identities]
         loss_fn = MissingCardInfoNCELoss()
 
-        loss = loss_fn.calculate(embeddings, identities, _cliques(3))
+        loss = loss_fn.calculate(padded(embeddings), identities, _cliques(3))
 
         assert loss.item() == pytest.approx(
             loss_fn.constant_logit_loss(identities, _cliques(3)), rel=1e-5
@@ -274,7 +275,7 @@ class TestMissingCardInfoNCELoss:
         ]
         loss_fn = MissingCardInfoNCELoss(temperature=0.1)
 
-        loss = loss_fn.calculate(embeddings, identities, _cliques(3))
+        loss = loss_fn.calculate(padded(embeddings), identities, _cliques(3))
 
         assert loss.item() < loss_fn.constant_logit_loss(identities, _cliques(3))
 
@@ -287,7 +288,7 @@ class TestMissingCardInfoNCELoss:
         embeddings = [[x, x], [x], [x, x], [y]]
 
         loss = MissingCardInfoNCELoss(temperature=0.1).calculate(
-            embeddings, identities, _cliques(2)
+            padded(embeddings), identities, _cliques(2)
         )
 
         # Logits are similarity / 0.1. Context 0: positive 10 vs negative
@@ -309,7 +310,7 @@ class TestMissingCardInfoNCELoss:
         ]
 
         MissingCardInfoNCELoss().calculate(
-            embeddings, identities, _cliques(2)
+            padded(embeddings), identities, _cliques(2)
         ).backward()
 
         assert all(card.grad is not None for item in embeddings for card in item)
@@ -317,7 +318,9 @@ class TestMissingCardInfoNCELoss:
     def test_raises_on_a_single_card_shaped_input(self) -> None:
         with pytest.raises(ValueError, match="multi-card"):
             MissingCardInfoNCELoss().calculate(
-                [torch.randn(4), torch.randn(4)], [(uuid4(),), (uuid4(),)], [[0, 1]]
+                padded([torch.randn(4), torch.randn(4)]),
+                [(uuid4(),), (uuid4(),)],
+                [[0, 1]],
             )
 
     @pytest.mark.parametrize(
@@ -339,7 +342,9 @@ class TestEndToEnd:
         embeddings = [[torch.randn(8) for _ in item] for item in batch.inputs]
         loss_fn = style.contrastive_loss()
 
-        loss = loss_fn.calculate(embeddings, batch.identities, batch.positive_cliques)
+        loss = loss_fn.calculate(
+            padded(embeddings), batch.identities, batch.positive_cliques
+        )
 
         assert torch.isfinite(loss)
         assert loss_fn.constant_logit_loss(
