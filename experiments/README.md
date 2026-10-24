@@ -41,6 +41,7 @@ session, without `lab_technician`.
 | [2026-10-10_pooling_pilot](2026-10-10_pooling_pilot/NOTEBOOK.md) | 10-10 - 10-11 | Problem + hypothesis: contrastive at chance; the shared offset causes it; whitening and/or trainable pooling fixes it | halted | problem largely met by whitening (0.81-0.86); offset as the cause not established; trainable pooling adds little; 2 of 8 variants open | pooling_probe |
 | [2026-10-11_model_by_diet_r2](2026-10-11_model_by_diet_r2/NOTEBOOK.md) | 10-11 - 10-14 | Problem + hypotheses: which model × diet trains the best embedding, now that it is stable (whitening, mean pooling, `encoder_lr` 1e-4)? | concluded | bar not met (every cell loses >0.03 linear-cls; contrastive gives +0.14-0.20 deck AUC); H1 model-dependent (refuted for single-card, narrowly not for multi-card), and metric-only collapses; H2 unresolved; one seed | model_by_diet |
 | [2026-10-21_cache_shakeout](2026-10-21_cache_shakeout/NOTEBOOK.md) | 10-21 - 10-22 | Problem + hypotheses: where does a full-diet run spend its time with the frozen feature cache (mods, TEST, deep copies, cached vs uncached)? | awaiting review | - | model_by_diet_r2 |
+| [2026-10-24_scale_profile](2026-10-24_scale_profile/NOTEBOOK.md) | 10-24 - | Problem + hypotheses: where a multi-card mixed-diet run spends its time at scale, with augmentation off vs bounded (N=4), and how long a full MTG anchor pass takes | running | - | cache_shakeout |
 
 ### Migrated experiments
 
