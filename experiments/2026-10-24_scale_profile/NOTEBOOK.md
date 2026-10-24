@@ -312,6 +312,7 @@ MTG probes 6,000 steps each. `mtg_n0.yaml` passed `--check`
 Seen in the pilot (one short run, not a result): the step waits on the
 worker 81% of the time, and in 600 steps that wait is mostly live
 encoding of first-seen texts during reservation, not batch building.
+- 2026-10-24 11:48 · run mixed_n0 done (exit 0, 68 min) → [bench note](bench_notes/2026-10-24_1148_mixed_n0_done.md)
 
 ## Results
 
