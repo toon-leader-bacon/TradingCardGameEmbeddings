@@ -1,6 +1,6 @@
 # Training at scale: where a multi-card mixed-diet run spends its time, with and without bounded mods
 
-**Status:** proposed
+**Status:** running
 **Dates:** 2026-10-24 -
 **Parent:** [2026-10-21_cache_shakeout](../2026-10-21_cache_shakeout/NOTEBOOK.md) · **Branch:** `experiment/2026-10-24_scale_profile`
 
@@ -297,6 +297,21 @@ in the run code. The points and responses:
    from sample-to-sample differences.
 These edits were made before any main-arm result existed; the pilot
 had produced no steps yet.
+- 2026-10-24 10:37 · run pilot done (exit 0, 23 min) → [bench note](bench_notes/2026-10-24_1037_pilot_done.md)
+
+### 2026-10-24 10:40 · Arms sized from the pilot; queue launched
+
+What: from the pilot's 0.37 s per step on the wall clock (TEST
+included) and a 19-min startup, the mixed arms run 6 rounds × 5,500
+steps (about 3.4 h of training plus startup, about 3.9 h each) and the
+MTG probes 6,000 steps each. `mtg_n0.yaml` passed `--check`
+(contrastive.mtg: 5,529,170 TRAIN decks). Pre-flight: 22.4 GB RAM free,
+1,058 GB free on G:, 0.4 GB VRAM in use, no other Python process. Queue
+(`queue.csv`): mixed_n0, mixed_n4, mtg_n0, mtg_n4, about 9.5 h; launched
+10:42 at commit 49e0053.
+Seen in the pilot (one short run, not a result): the step waits on the
+worker 81% of the time, and in 600 steps that wait is mostly live
+encoding of first-seen texts during reservation, not batch building.
 
 ## Results
 
