@@ -564,7 +564,7 @@ class TestAugmentationPipeline:
             "contrastive.gwent", GameId.GWENT, self._context()
         )
         names = [type(mod).__name__ for mod in pipeline.mods]
-        assert names == ["ShuffleKeysMod", "WeightedFieldMaskMod", "RandomKeyMaskMod"]
+        assert names == ["WeightedFieldMaskMod", "RandomKeyMaskMod"]
 
     def test_an_override_replaces_the_defaults(self) -> None:
         context = self._context({"contrastive.gwent": (ShuffleKeysSpec(),)})
@@ -686,7 +686,6 @@ class TestMetricDojoAugmentations:
         mods = dojo.data_mod_pipeline.mods
         assert mods[0] is task_mod and not mods[0].train_only
         assert [type(mod).__name__ for mod in mods[1:]] == [
-            "ShuffleKeysMod",
             "WeightedFieldMaskMod",
             "RandomKeyMaskMod",
         ]

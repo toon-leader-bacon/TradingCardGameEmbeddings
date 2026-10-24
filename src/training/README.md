@@ -162,6 +162,8 @@ Top level:
 - [TODO.md](TODO.md): the checklist to a first real training run.
   [Notes.md](Notes.md): the dated findings behind it (hardware, GPU
   measurements, serialization analysis).
+  [ENV_SIZING.md](ENV_SIZING.md): this machine's VRAM, RAM and feature
+  cache numbers, the suggested cache budgets, and step time by batch size.
 
 Subdirectories:
 

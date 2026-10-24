@@ -31,7 +31,8 @@ from src.dojos.mods.mod import ModTally
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
-from src.schema.type_hints import BatchedModelOutput, BatchedTrainingInput, iter_cards
+from src.schema.padded_embeddings import ModelEmbeddings, PaddedEmbeddings
+from src.schema.type_hints import BatchedTrainingInput, iter_cards
 
 _logger = logging.getLogger(__name__)
 
@@ -51,7 +52,6 @@ class ContrastiveDojo:
         pair_constructor: ContrastivePairConstructor,
         card_lookup: CardLookup,
         holdout: HoldoutSpec,
-        decks_per_sample: int = 3,
         contrastive_loss: ContrastiveLoss | None = None,
         name: str = "contrastive",
         strict_version_check: bool = True,
@@ -71,8 +71,6 @@ class ContrastiveDojo:
             holdout: which cards each split may see (must equal the
                 training plan's spec), and which split each deck is in
                 (must be the spec dealer was built from).
-            decks_per_sample: upper bound on decks per batch; a smaller
-                BatchBudget lowers it (see batches()).
             contrastive_loss: the batch-level loss compute_loss
                 delegates to. Defaults to SingleCardInfoNCELoss().
             name: this dojo's name in a training plan.
@@ -101,7 +99,6 @@ class ContrastiveDojo:
         self.holdout = holdout
         self._dealer = dealer
         self._pair_constructor = pair_constructor
-        self._decks_per_sample = decks_per_sample
         self._contrastive_loss = contrastive_loss or SingleCardInfoNCELoss()
         self._mod_pipeline = mod_pipeline or ModPipeline([])
         self._require_dealer_split_matches(dealer, holdout)
@@ -116,8 +113,14 @@ class ContrastiveDojo:
         """Yield one split's ContrastiveBatches within `budget`.
 
         Inputs: split (Split), budget (BatchBudget), max_examples (int |
-            None): stop after this many source decks have been dealt.
-        Output: iterator of ContrastiveBatch. A degenerate batch (no
+            None): use only the split's first max_examples decks (the
+            Dojo.batches contract); the last batch is trimmed to fit.
+        Output: iterator of ContrastiveBatch. The budget alone sets the
+            decks per batch (as many as fit, see _decks_within); the
+            split's last batch holds whatever decks are left, so a split
+            smaller than one batch still yields one. A deck group under
+            _MIN_DECKS_PER_SAMPLE (a lone trailing deck) can't form a
+            batch and is dropped. A degenerate batch (no
             anchor with both a positive and a negative, so no defined
             loss or baseline: e.g. the pair constructor skipped every
             deck but one for having too few visible cards) is logged and
@@ -134,14 +137,18 @@ class ContrastiveDojo:
         Example:
             >>> next(dojo.batches(Split.TRAIN, BatchBudget(64, lambda c: 1)))
         """
-        decks_per_sample = self._decks_within(budget)
+        decks_per_batch = self._decks_within(budget)
+        remaining = max_examples
         for deck_sample in self._dealer.decks_for(
-            split, decks_per_sample, shuffle=split == Split.TRAIN
+            split, decks_per_batch, shuffle=split == Split.TRAIN, keep_remainder=True
         ):
-            if max_examples is not None:
-                if max_examples < len(deck_sample):
-                    return
-                max_examples -= len(deck_sample)
+            # Trim to the first max_examples decks, then drop what can't
+            # be a batch; either only happens at the end of the pass
+            if remaining is not None:
+                deck_sample = deck_sample[:remaining]
+                remaining -= len(deck_sample)
+            if len(deck_sample) < _MIN_DECKS_PER_SAMPLE:
+                return
             batch = self._pair_constructor.build(deck_sample, self._lookups[split])
             if not self._has_usable_baseline(batch):
                 _logger.warning(
@@ -160,20 +167,22 @@ class ContrastiveDojo:
         return self._dealer.deck_count(split)
 
     def compute_loss(
-        self, item_embeddings: BatchedModelOutput, batch: DojoBatch
+        self, item_embeddings: ModelEmbeddings, batch: DojoBatch
     ) -> torch.Tensor:
         """Compute batch's contrastive loss from its items' raw embeddings.
 
         Inputs:
-            item_embeddings: one embedding per batch.inputs entry, same
-                order, as returned by the shared encoder's forward()
-                call on batch.inputs - shape (single-card vs. multi-card
-                item) must match this dojo's contrastive_loss.
+            item_embeddings: the shared encoder's forward() output for
+                batch.inputs: PaddedEmbeddings, one row per item, whose
+                shape (single-card vs. multi-card item) must match this
+                dojo's contrastive_loss.
             batch: the ContrastiveBatch item_embeddings was computed
                 for - supplies identities/positive_cliques to the loss.
         Output: a scalar loss tensor.
         Side effects: none.
-        Exceptions: TypeError if batch isn't a ContrastiveBatch; whatever
+        Exceptions: TypeError if batch isn't a ContrastiveBatch, or
+            item_embeddings isn't PaddedEmbeddings (a multi-group batch);
+            whatever
             self._contrastive_loss.calculate() raises (e.g. ValueError on
             a length or shape mismatch against batch.inputs).
 
@@ -183,6 +192,8 @@ class ContrastiveDojo:
         """
         if not isinstance(batch, ContrastiveBatch):
             raise TypeError(f"{self.name} needs a ContrastiveBatch")
+        if not isinstance(item_embeddings, PaddedEmbeddings):
+            raise TypeError(f"{self.name} needs PaddedEmbeddings")
         return self._contrastive_loss.calculate(
             item_embeddings=item_embeddings,
             identities=batch.identities,
@@ -267,16 +278,26 @@ class ContrastiveDojo:
         return True
 
     def _decks_within(self, budget: BatchBudget) -> int:
-        """Decks per sample so a batch fits budget, assuming unit card cost."""
-        fit = budget.max_cost // self._pair_constructor.cards_per_deck
-        decks = min(self._decks_per_sample, fit)
-        if decks < _MIN_DECKS_PER_SAMPLE:
+        """Decks per batch: as many as fit budget, assuming unit card cost.
+        The budget is the only batch-size setting.
+
+        Sized by real cards, not padded slots, so batch composition (and
+        the number of negatives) does not depend on padding. The padding
+        overhead is bounded by the style's item layout: under 2x for
+        missing card, 1x for every other style.
+
+        Inputs: budget. Output: int >= _MIN_DECKS_PER_SAMPLE.
+        Side effects: none.
+        Exceptions: ValueError if fewer than _MIN_DECKS_PER_SAMPLE fit.
+        """
+        result = budget.max_cost // self._pair_constructor.cards_per_deck
+        if result < _MIN_DECKS_PER_SAMPLE:
             raise ValueError(
-                f"Budget {budget.max_cost} fits only {fit} deck(s) of "
+                f"Budget {budget.max_cost} fits only {result} deck(s) of "
                 f"{self._pair_constructor.cards_per_deck} cards; contrastive "
                 f"batches need at least {_MIN_DECKS_PER_SAMPLE}"
             )
-        return decks
+        return result
 
     def _check_within(self, batch: ContrastiveBatch, budget: BatchBudget) -> None:
         """Raise ValueError if the batch's true card cost exceeds budget."""

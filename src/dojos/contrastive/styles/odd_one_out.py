@@ -15,7 +15,6 @@ import logging
 import math
 import random
 from dataclasses import dataclass
-from typing import cast
 from uuid import UUID
 
 import torch
@@ -26,6 +25,7 @@ from src.dojos.contrastive.contrastive_loss import (
     ContrastiveLoss,
     DegenerateBatchError,
     check_item_embeddings,
+    require_card_aligned_identities,
 )
 from src.dojos.contrastive.pair_constructor import (
     ContrastivePairConstructor,
@@ -35,12 +35,9 @@ from src.dojos.contrastive.pair_constructor import (
 )
 from src.dojos.contrastive.staple_subsampling import StapleSubsampling
 from src.schema.card import GenericDeck
-from src.schema.type_hints import (
-    BatchedModelOutput,
-    BatchedMultiCardEmbedding,
-    Embedding,
-    InputShape,
-)
+from src.schema.padded_embeddings import PaddedEmbeddings
+from src.schema.type_hints import InputShape
+from src.utils.device_copy import host_tensor
 
 _logger = logging.getLogger(__name__)
 
@@ -70,9 +67,10 @@ class OddOneOutPairConstructor:
         inputs           = [[a1 a2 a3 b3], [b1 b2 b4 a5]]
         positive_cliques = [[0], [1]]
 
-    The intruder sits at _INTRUDER_POSITION (last), and OddOneOutLoss
-    reads it there. Why a fixed position leaks nothing to the model: see
-    ContrastiveBatch's docstring.
+    The intruder sits at _INTRUDER_POSITION (last) of each item, and
+    OddOneOutLoss reads it at that item's last real position,
+    lengths[i] - 1 (in a padded batch, -1 would be padding). Why a fixed
+    position leaks nothing to the model: see ContrastiveBatch's docstring.
     """
 
     def __init__(
@@ -201,8 +199,8 @@ class OddOneOutLoss:
     """Concrete ContrastiveLoss for the odd-one-out style. Per item of n
     cards (contextual embeddings e_1 ... e_n): each card's fit is the
     cosine of e_k with the mean of the item's other cards; the logits are
-    -fit / temperature, and the loss is the cross-entropy with
-    _INTRUDER_POSITION (see OddOneOutPairConstructor) as the target,
+    -fit / temperature, and the loss is the cross-entropy with the last
+    real card (see OddOneOutPairConstructor) as the target,
     averaged over items. Not InfoNCE: the candidates are positions within
     one item, not other items in the batch, so the module's shared
     InfoNCE helpers don't apply.
@@ -225,21 +223,23 @@ class OddOneOutLoss:
 
     def calculate(
         self,
-        item_embeddings: BatchedModelOutput,
+        item_embeddings: PaddedEmbeddings,
         identities: list[tuple[UUID, ...]],
         positive_cliques: list[list[int]],
     ) -> torch.Tensor:
         """Mean per-item cross-entropy of finding the intruder.
 
         Inputs: see ContrastiveLoss.calculate(); item_embeddings must be
-            multi-card-shaped, each item at least 3 cards with the
-            intruder last; positive_cliques one singleton per item.
+            MULTI_CARD, each item at least 3 cards with the intruder last
+            (position lengths[i] - 1: padding follows it, so not -1);
+            positive_cliques one singleton per item.
         Output: a scalar loss tensor.
         Side effects: none.
         Exceptions: DegenerateBatchError when there are no items;
             ValueError on a shape or length mismatch, a clique that isn't
-            a singleton, cliques that don't cover every item once, or an
-            item under 3 cards.
+            a singleton, cliques that don't cover every item once, an
+            item under 3 cards, or an item whose card count differs from
+            its identity's (the intruder would not be last).
 
         Example:
             >>> OddOneOutLoss().calculate(item_embeddings, identities, [[0], [1]])
@@ -248,13 +248,17 @@ class OddOneOutLoss:
         check_item_embeddings(
             item_embeddings, identities, InputShape.MULTI_CARD, "OddOneOutLoss"
         )
+        require_card_aligned_identities(item_embeddings, identities, "OddOneOutLoss")
         _check_singleton_items(identities, positive_cliques)
 
-        multi_card_embeddings = cast(BatchedMultiCardEmbedding, item_embeddings)
+        # Each item's fit logits over its real positions, all items at once
+        logits = self._fit_logits(
+            item_embeddings
+        )  # (items, max_cards), -inf at padding
 
-        # Each item: find the last card among all of them
-        per_item_losses = [self._item_loss(item) for item in multi_card_embeddings]
-        return torch.stack(per_item_losses).mean()
+        # Cross-entropy of the intruder: the last real card of each item
+        intruders = _intruder_positions(item_embeddings.lengths, logits.device)
+        return torch.nn.functional.cross_entropy(logits, intruders)
 
     def constant_logit_loss(
         self,
@@ -273,23 +277,42 @@ class OddOneOutLoss:
             identities
         )
 
-    def _item_loss(self, card_embeddings: list[Embedding]) -> torch.Tensor:
-        """One item's cross-entropy of the last card having the lowest fit.
+    def _fit_logits(self, item_embeddings: PaddedEmbeddings) -> torch.Tensor:
+        """Every card's -fit / temperature, for every item at once.
 
         Private helper - single caller is calculate().
-        Inputs: card_embeddings, at least 3, intruder last.
-        Output: a scalar tensor.
-        Side effects: none beyond autograd.
-        Exceptions: none expected.
+        Per item: normalize each card (padding stays 0), the mean of the
+        other real cards is (sum - own) / (length - 1) with length from
+        host lengths, fit is the cosine of a card with that mean.
+        Inputs: item_embeddings (MULTI_CARD, every item >= 3 cards).
+        Output: (items, max_cards) logits, -inf at padding.
+        Side effects: none beyond autograd; one non-blocking host-to-device
+            copy of the lengths. Exceptions: none expected.
         """
-        stacked = torch.nn.functional.normalize(torch.stack(card_embeddings), dim=1)
-        card_count = stacked.shape[0]
-        # Mean of every OTHER card, per card: (sum - own) / (n - 1)
-        others_mean = (stacked.sum(dim=0, keepdim=True) - stacked) / (card_count - 1)
-        fit = torch.nn.functional.cosine_similarity(stacked, others_mean, dim=1)
-        # The worst fit should win: negate, then softmax over positions
-        log_probabilities = torch.log_softmax(-fit / self._temperature, dim=0)
-        return -log_probabilities[_INTRUDER_POSITION]
+        cards = torch.nn.functional.normalize(
+            item_embeddings.cards, dim=2
+        )  # padding stays 0
+        lengths = host_tensor(item_embeddings.lengths, cards.dtype, cards.device)
+        lengths = lengths.view(-1, 1, 1)
+        # Mean of every OTHER real card, per card: (sum - own) / (n - 1)
+        others_mean = (cards.sum(dim=1, keepdim=True) - cards) / (lengths - 1)
+        fit = torch.nn.functional.cosine_similarity(cards, others_mean, dim=2)
+        # The worst fit should win: negate; padding can never be picked
+        return (-fit / self._temperature).masked_fill(
+            ~item_embeddings.mask, float("-inf")
+        )
+
+
+def _intruder_positions(lengths: tuple[int, ...], device: torch.device) -> torch.Tensor:
+    """Each item's intruder position, lengths[i] - 1, built from host
+    lengths.
+
+    Private helper - single caller is OddOneOutLoss.calculate().
+    Inputs: lengths, device. Output: (items,) long on device.
+    Side effects: one non-blocking host-to-device copy (no device sync).
+    Exceptions: none.
+    """
+    return host_tensor([length - 1 for length in lengths], torch.long, device)
 
 
 def _check_singleton_items(

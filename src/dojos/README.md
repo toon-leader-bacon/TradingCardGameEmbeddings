@@ -5,6 +5,9 @@ dojo presents one interface to the trainer, the `Dojo` Protocol
 (`dojo.py`): `batches(split, budget, max_examples)` yields `DojoBatch`es
 (`inputs` for the encoder, `__len__` = example count) whose card cost
 fits the trainer's `BatchBudget`; `compute_loss(embeddings, batch)`
+takes the encoder's output for `batch.inputs` (`ModelEmbeddings`:
+`PaddedEmbeddings` for single-card and multi-card dojos, nested lists
+for multi-group dojos; see `src/schema/padded_embeddings.py`) and
 returns a scalar per-example mean loss; `baseline_loss(batch)` returns
 the loss an input-ignoring predictor gets on that batch, never depending
 on the encoder or head; `example_count(split)`, `trainable_parameters()`
@@ -44,7 +47,11 @@ rows never straddle TRAIN and TEST.
 - `batch.py` - `Batch`, the (inputs, labels) container generic dojos
   yield.
 - `budgeted_batching.py` - `group_by_budget`, packs examples into
-  batches within a `BatchBudget`.
+  batches within a `BatchBudget`, charging each batch its
+  `padded_cost`: example count times the costliest example, since every
+  example is padded to the longest. An outlier deck therefore keeps its
+  batch small instead of padding a crowd of small decks. Generic dojos
+  batch through it.
 
 ## Subdirectories
 
@@ -297,7 +304,14 @@ outcome-labelled deck dojos.
 Batch budget: a deck costs its style's cards per deck (single card 2,
 missing card 9, odd one out 8, cross-slice and slice match 8, card in
 contexts 16), and `ContrastiveDojo` fits as many decks as `max_batch_cost`
-allows, up to 16 and never fewer than 2.
+allows, never fewer than 2. The budget is the only batch-size setting: a
+split's last batch holds whatever decks are left (so a deck box smaller
+than one batch still yields one), and a lone leftover deck is dropped.
+Contrastive batches are sized by real cards, not padded slots, so their
+composition (and the number of negatives) does not depend on padding.
+Their padding is fixed by each style's item layout: missing card pads
+its one-card item to the slice size (under 2x the real cards), and every
+other style's items are equal-length (no padding).
 
 Files:
 
@@ -354,10 +368,18 @@ Files:
 - `contrastive_loss.py` - the `ContrastiveLoss` Protocol (Strategy,
   batch-level, unlike `NocabLoss`), `DegenerateBatchError` (a well-formed
   batch whose loss is undefined: no positive, or no negative), and the
-  shared InfoNCE math every InfoNCE style reduces to:
-  `pairwise_cosine_similarity`, `identity_negative_mask`, `anchor_loss`,
-  `mean_anchor_loss`, `mean_item_embeddings`, `check_item_embeddings` and
-  `mean_constant_logit_loss`. Each loss's
+  shared InfoNCE math every InfoNCE style reduces to. A style picks its
+  comparison units from the `PaddedEmbeddings` it is given (single card
+  and card in contexts: `cards[:, 0]`; slice match and missing card:
+  `mean_per_example()`; cross-slice: `flat_cards()`) and builds one
+  `ComparisonMasks` (which pairs are positives, which are valid
+  negatives) on the CPU from identities and cliques, with
+  `same_key_mask`, `clique_positive_mask` and `info_nce_masks`.
+  `info_nce_loss(units, masks, temperature)` scores every anchor and
+  positive in a few kernels with no device sync (an anchor without
+  negatives contributes 0 with a finite gradient), and
+  `constant_logit_baseline(masks)` reads the same masks. Odd one out
+  scores positions within each padded item instead. Each loss's
   `constant_logit_loss(identities, positive_cliques)` is its loss with
   every similarity equal, computed from the batch shape alone: each
   anchor with a positive scores ln(1 + its valid negatives), averaged over
@@ -366,7 +388,9 @@ Files:
   odd one out: ln(item size)).
 - `dojo.py` - `ContrastiveDojo`: wires dealer + pair constructor + card
   lookup into `Dojo`. An example is one source deck, so the budget
-  becomes a deck count per batch. A batch whose loss is undefined (the
+  becomes a deck count per batch, and `max_examples` keeps a pass to the
+  split's first N decks, trimming its last batch (the `Dojo.batches`
+  contract, as in the generic dojos). A batch whose loss is undefined (the
   loss raises `DegenerateBatchError`, e.g. one surviving deck) is skipped
   and logged, so training and evaluation never see one; a malformed batch
   (any other error from the loss) still raises. It has no trainable
@@ -382,8 +406,10 @@ Files:
 
 Augmentation defaults: `augmentation_defaults.py` (at the top of
 `dojos/`) holds each game's default train-only augmentations as
-`ModSpec`s (`mods/mod_specs.py`): a key shuffle, a `DropTable` of
-`FieldMask`s, and a small random-key mask. The tables name each game's
+`ModSpec`s (`mods/mod_specs.py`): a `DropTable` of `FieldMask`s and a
+small random-key mask. The key shuffle is no longer a default: each
+shuffle is a new, uncacheable text, which defeated the feature cache
+(2026-10-21); a run config can still add `{kind: shuffle_keys}`. The tables name each game's
 `raw_content` keys, so they follow the game's card-binder ingestion stage;
 each mainly masks the field that nearly identifies a card's deck (Gwent
 `faction`, STS2 `color`), so same-deck positives cannot be matched on that

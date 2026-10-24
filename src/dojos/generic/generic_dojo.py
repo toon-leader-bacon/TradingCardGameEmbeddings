@@ -38,7 +38,8 @@ from src.dojos.mods.mod import Mod, ModTally
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
-from src.schema.type_hints import BatchedModelOutput, LabelT, TrainingDatum
+from src.schema.padded_embeddings import ModelEmbeddings
+from src.schema.type_hints import LabelT, TrainingDatum
 
 _logger = logging.getLogger(__name__)
 
@@ -195,11 +196,13 @@ class GenericDojo(Generic[LabelT]):
         return self.file_manager.row_count(split)
 
     def compute_loss(
-        self, embeddings: BatchedModelOutput, batch: DojoBatch
+        self, embeddings: ModelEmbeddings, batch: DojoBatch
     ) -> torch.Tensor:
         """Scalar per-example mean loss for one batch's embeddings.
 
-        Inputs: embeddings (one per example, in batch order), batch (a Batch
+        Inputs: embeddings (PaddedEmbeddings for a single-card or
+            multi-card cell, nested lists for a multi-group cell; one
+            example per row, in batch order), batch (a Batch
             yielded by this dojo).
         Output: scalar tensor.
         Side effects: none.

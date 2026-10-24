@@ -86,7 +86,8 @@ Cross-source:
 ## Mods (`src/dojos/mods/`, `src/dojos/augmentation_defaults.py`)
 
 - **Card-field augmentations:** `ShuffleKeysMod`, `RandomKeyMaskMod` and
-  `WeightedFieldMaskMod`, with per-game defaults for all 7 games. They
+  `WeightedFieldMaskMod`; the per-game defaults for all 7 games use the
+  last two (the shuffle is opt-in, since it defeats the feature cache). They
   are applied to every catalog dojo, TRAIN only, after its own task
   mods. `mods:` in a run config replaces them.
 - **Task mods:** `MaskTargetKeyMod`, `ShuffleDeckMod`, and

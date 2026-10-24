@@ -11,7 +11,6 @@ A deck-embedding objective: single cards matter only through the average.
 """
 
 from dataclasses import dataclass
-from typing import cast
 from uuid import UUID
 
 import torch
@@ -19,17 +18,13 @@ import torch
 from src.dojos.contrastive.contrastive_loss import (
     ContrastiveLoss,
     check_item_embeddings,
-    mean_item_embeddings,
 )
 from src.dojos.contrastive.pair_constructor import ContrastivePairConstructor
 from src.dojos.contrastive.staple_subsampling import StapleSubsampling
 from src.dojos.contrastive.styles.deck_slices import DeckSlicesPairConstructor
 from src.dojos.contrastive.styles.single_card import SingleCardInfoNCELoss
-from src.schema.type_hints import (
-    BatchedModelOutput,
-    BatchedMultiCardEmbedding,
-    InputShape,
-)
+from src.schema.padded_embeddings import PaddedEmbeddings
+from src.schema.type_hints import InputShape
 
 
 class PooledItemsLoss:
@@ -55,14 +50,14 @@ class PooledItemsLoss:
 
     def calculate(
         self,
-        item_embeddings: BatchedModelOutput,
+        item_embeddings: PaddedEmbeddings,
         identities: list[tuple[UUID, ...]],
         positive_cliques: list[list[int]],
     ) -> torch.Tensor:
         """The inner loss over the items' mean embeddings.
 
         Inputs: see ContrastiveLoss.calculate(); item_embeddings must be
-            multi-card-shaped, every item non-empty.
+            MULTI_CARD, every item non-empty.
         Output: the inner loss's scalar tensor.
         Side effects: none.
         Exceptions: ValueError on a shape or length mismatch; whatever the
@@ -76,7 +71,7 @@ class PooledItemsLoss:
         check_item_embeddings(
             item_embeddings, identities, InputShape.MULTI_CARD, "PooledItemsLoss"
         )
-        pooled = mean_item_embeddings(cast(BatchedMultiCardEmbedding, item_embeddings))
+        pooled = PaddedEmbeddings.from_single_cards(item_embeddings.mean_per_example())
         return self._inner.calculate(
             pooled, _order_free_identities(identities), positive_cliques
         )

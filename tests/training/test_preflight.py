@@ -5,6 +5,7 @@ from typing import Any, Iterable, Iterator, List, Mapping
 from uuid import UUID, uuid4
 
 import pandas as pd
+import pytest
 import torch
 from torch import nn
 
@@ -20,6 +21,8 @@ from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
 from src.schema.type_hints import TrainingDatum
+from src.schema.padded_embeddings import PaddedEmbeddings
+from src.schema.type_hints import InputShape
 from src.training.preflight import random_embeddings_like, preflight_dojo
 
 _BUDGET = BatchBudget(max_cost=8, cost_of=lambda card: 1)
@@ -38,7 +41,7 @@ def _card(name: str) -> GenericCard:
 @dataclass
 class _CardBatch:
     """A batch shaped like a real Dojo's: inputs is a List[GenericCard],
-    so preflight's embeddings mirror that with a List[Tensor]."""
+    so preflight's embeddings are a SINGLE_CARD PaddedEmbeddings."""
 
     inputs: Any
 
@@ -90,7 +93,7 @@ class _ListCardFakeDojo:
         return self._train_count
 
     def compute_loss(self, embeddings: Any, batch: Any) -> torch.Tensor:
-        loss = torch.stack([self._head(embedding) for embedding in embeddings]).mean()
+        loss = self._head(embeddings.cards[:, 0]).mean()
         return loss * float("nan") if self._nan_loss else loss
 
     def trainable_parameters(self) -> Iterable[nn.Parameter]:
@@ -175,25 +178,35 @@ class TestPreflightAgainstAFakeDojo:
         assert result.sample_loss is None
 
 
-class TestRandomEmbeddingsMirrorInputNesting:
-    def test_a_single_card_becomes_one_tensor(self) -> None:
-        embeddings = random_embeddings_like(_card("A"), card_embedding_size=5)
-        assert isinstance(embeddings, torch.Tensor)
-        assert embeddings.shape == (5,)
+class TestRandomEmbeddingsMatchTheModelOutput:
+    def test_a_bare_card_is_not_a_batch(self) -> None:
+        with pytest.raises(TypeError):
+            random_embeddings_like(_card("A"), card_embedding_size=5)
 
-    def test_a_list_of_cards_becomes_a_list_of_tensors(self) -> None:
+    def test_a_batch_of_cards_is_single_card_padded(self) -> None:
         cards = [_card("A"), _card("B"), _card("C")]
         embeddings = random_embeddings_like(cards, card_embedding_size=3)
-        assert isinstance(embeddings, list)
-        assert len(embeddings) == 3
-        assert all(tensor.shape == (3,) for tensor in embeddings)
+        assert isinstance(embeddings, PaddedEmbeddings)
+        assert embeddings.shape is InputShape.SINGLE_CARD
+        assert embeddings.cards.shape == (3, 1, 3)
 
-    def test_a_list_of_decks_becomes_a_matching_nested_list(self) -> None:
+    def test_a_batch_of_decks_is_multi_card_padded(self) -> None:
         decks = [[_card("A"), _card("B")], [_card("C")]]
         embeddings = random_embeddings_like(decks, card_embedding_size=4)
-        assert [len(group) for group in embeddings] == [2, 1]
-        assert embeddings[0][0].shape == (4,)
-        assert embeddings[1][0].shape == (4,)
+        assert isinstance(embeddings, PaddedEmbeddings)
+        assert embeddings.shape is InputShape.MULTI_CARD
+        assert embeddings.lengths == (2, 1)
+        assert torch.equal(embeddings.cards[1, 1], torch.zeros(4))
+
+    def test_a_batch_of_groups_stays_nested(self) -> None:
+        examples = [[[_card("A"), _card("B")], []], [[_card("C")], [_card("D")]]]
+        embeddings = random_embeddings_like(examples, card_embedding_size=4)
+        assert isinstance(embeddings, list)
+        assert [[len(group) for group in example] for example in embeddings] == [
+            [2, 0],
+            [1, 1],
+        ]
+        assert embeddings[1][1][0].shape == (4,)
 
 
 class _CardPerRowConstructor:

@@ -1,42 +1,70 @@
-"""Group training examples into batches that respect a BatchBudget."""
+"""Group training examples into batches that respect a BatchBudget.
 
-from typing import Iterable, Iterator, List
+A padded batch holds examples x max_cards slots, and every slot costs
+memory in the attention stack, real or padding. So a group is charged its
+padded cost, not its summed cost: an outlier deck cannot pull a crowd of
+small decks into one huge padded batch.
+"""
+
+from typing import Iterable, Iterator, List, Sequence
 
 from src.dojos.dojo import BatchBudget
 from src.schema.type_hints import LabelT, TrainingDatum, iter_cards
 
 
+def padded_cost(example_costs: Sequence[int]) -> int:
+    """What a batch of these examples costs once padded to the longest.
+
+    Inputs: example_costs, one cost per example (each the summed
+        budget.cost_of over its cards).
+    Output: len(example_costs) * max(example_costs); 0 for no examples.
+    Side effects: none. Exceptions: none.
+
+    Example:
+        >>> padded_cost([60, 600, 60])
+        1800
+    """
+    return len(example_costs) * max(example_costs, default=0)
+
+
 def group_by_budget(
     data: Iterable[TrainingDatum[LabelT]], budget: BatchBudget
 ) -> Iterator[List[TrainingDatum[LabelT]]]:
-    """Greedily pack consecutive examples into groups within a budget.
+    """Greedily pack consecutive examples into groups within a padded budget.
 
+    The grouping depends on the order of the examples; the bound holds in
+    every order. An outlier first makes its group small; an outlier that
+    would push a group over closes it and starts the next one.
     Inputs:
         data: examples in the order they should be batched.
-        budget: max summed budget.cost_of over every card of a group.
+        budget: bounds each group's padded_cost of its examples' costs.
     Output: iterator of non-empty example lists, order preserved; each
-        group's cost is at most budget.max_cost.
+        group's padded_cost is at most budget.max_cost.
     Side effects: none.
     Exceptions: ValueError if a single example alone costs more than
         budget.max_cost (the budget cannot be honored at all).
 
     Example:
-        >>> [len(g) for g in group_by_budget(data, BatchBudget(4, lambda c: 1))]
-        [2, 2, 1]  # for 2-card examples... 4 cost holds two of them
+        >>> # unit card cost; examples of 2, 2, 1, 5 and 1 cards, budget 6
+        >>> [len(g) for g in group_by_budget(data, BatchBudget(6, lambda c: 1))]
+        [3, 1, 1]  # 3 x 2 = 6; then 5 alone (2 x 5 > 6); then 1
     """
     group: List[TrainingDatum[LabelT]] = []
-    group_cost = 0
+    group_max_cost = 0
     for datum in data:
+        # Validate: one example alone must fit
         cost = sum(budget.cost_of(card) for card in iter_cards(datum[0]))
         if cost > budget.max_cost:
             raise ValueError(
                 f"One example costs {cost}, more than the batch budget "
                 f"{budget.max_cost}"
             )
-        if group and group_cost + cost > budget.max_cost:
+        # Close the group before its padded cost would go over: the group
+        # plus this example, every one charged the largest cost
+        if group and (len(group) + 1) * max(group_max_cost, cost) > budget.max_cost:
             yield group
-            group, group_cost = [], 0
+            group, group_max_cost = [], 0
         group.append(datum)
-        group_cost += cost
+        group_max_cost = max(group_max_cost, cost)
     if group:
         yield group

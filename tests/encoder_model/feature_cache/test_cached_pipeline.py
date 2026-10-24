@@ -18,6 +18,7 @@ from src.encoder_model.pooling.attention_pooling import AttentionPooling
 from src.encoder_model.pooling.mean_pooling import MeanPooling
 from src.encoder_model.single_card_model import SingleCardModel
 from src.encoder_model.text_encoder import TokenEncoding
+from src.schema.padded_embeddings import PaddedEmbeddings
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
@@ -176,9 +177,10 @@ def test_a_multi_card_batch_with_a_cache_equals_one_without() -> None:
     cached_model = MultiCardModel(cached, num_heads=2, ffn_dim=8).eval()
     cached_model.load_state_dict(live_model.state_dict())
     decks = [[CARDS[0], CARDS[1]], [CARDS[1], CARDS[2], CARDS[0]]]
-    for got_deck, want_deck in zip(cached_model(decks), live_model(decks)):
-        for got, want in zip(got_deck, want_deck):
-            assert torch.allclose(got, want)
+    got, want = cached_model(decks), live_model(decks)
+    assert isinstance(got, PaddedEmbeddings) and isinstance(want, PaddedEmbeddings)
+    assert got.lengths == want.lengths
+    assert torch.allclose(got.cards, want.cards)
 
 
 def test_warm_runs_the_frozen_stages_under_the_requested_autocast() -> None:

@@ -36,13 +36,13 @@ class ContrastiveDojoRecipe:
     game: whose binder and deck box. deck_box_path: the game's
     data/final/decks/<game>.db. style: builds the matched pair
     constructor and loss (default: single cards, every same-deck card a
-    positive). decks_per_sample: see ContrastiveDojo.
+    positive). The run's batch budget alone sets decks per batch (see
+    ContrastiveDojo.batches).
     """
 
     game: GameId
     deck_box_path: Path
     style: ContrastiveStyle = SingleCardStyle()
-    decks_per_sample: int = 16
 
     def build(self, name: str, context: DojoBuildContext) -> Dojo:
         """See DojoRecipe.build. The dealer keeps its split index at
@@ -71,7 +71,6 @@ class ContrastiveDojoRecipe:
             pair_constructor,
             binder,
             context.holdout,
-            decks_per_sample=self.decks_per_sample,
             contrastive_loss=self.style.contrastive_loss(),
             name=name,
             mod_pipeline=build_augmentation_pipeline(name, self.game, context),

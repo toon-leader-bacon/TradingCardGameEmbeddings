@@ -85,7 +85,6 @@ class TestDefaults:
             type(spec).__name__ for spec in default_augmentations_for(GameId.GWENT)
         ]
         assert names == [
-            "ShuffleKeysSpec",
             "WeightedFieldMaskSpec",
             "RandomKeyMaskSpec",
         ]

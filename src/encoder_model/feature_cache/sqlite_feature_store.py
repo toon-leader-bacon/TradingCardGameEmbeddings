@@ -100,14 +100,12 @@ class SqliteFeatureStore:
             connection = self._open()
             # Read every stored row, then split by position
             found = _select_rows(connection, self._digest, keys)
-            hit_positions = [i for i, key in enumerate(keys) if key.digest in found]
-            miss_positions = [
-                i for i, key in enumerate(keys) if key.digest not in found
-            ]
+            hit_positions = [i for i, key in enumerate(keys) if key in found]
+            miss_positions = [i for i, key in enumerate(keys) if key not in found]
             self._hits += len(hit_positions)
         if not hit_positions:
             return StoreLookup([], None, miss_positions)
-        rows = [found[keys[i].digest] for i in hit_positions]
+        rows = [found[keys[i]] for i in hit_positions]
         result = StoreLookup(
             hit_positions, self._decode(rows).to(device), miss_positions
         )
@@ -139,11 +137,11 @@ class SqliteFeatureStore:
                 return 0
             payload = self._encode(features)
             # Skip held keys, then take only what the row set has room for
-            held = _select_held_digests(connection, self._digest, keys)
-            fresh = [i for i, key in enumerate(keys) if key.digest not in held]
+            held = _select_held_keys(connection, self._digest, keys)
+            fresh = [i for i, key in enumerate(keys) if key not in held]
             fresh = fresh[: max(0, self._capacity_rows - self._rows_used)]
             written = _insert_rows(
-                connection, self._digest, [(keys[i].digest, payload[i]) for i in fresh]
+                connection, self._digest, [(keys[i], payload[i]) for i in fresh]
             )
             self._rows_used += written
         return written
@@ -235,26 +233,26 @@ class SqliteFeatureStore:
 def _select_rows(
     connection: sqlite3.Connection, digest: str, keys: Sequence[CardTextKey]
 ) -> dict[bytes, bytes]:
-    """The stored rows of keys, by key digest.
+    """The stored rows of keys, by key.
 
     Private helper - single consumer is SqliteFeatureStore.lookup.
     Inputs: connection, digest (the row set), keys.
-    Output: dict key digest -> row bytes, for the keys stored.
+    Output: dict key bytes -> row bytes, for the keys stored.
     Side effects: none. Exceptions: sqlite3.Error.
     """
     query = "SELECT key, row FROM features WHERE digest = ? AND key IN ({marks})"
     return dict(_query_in_batches(connection, query, digest, keys))
 
 
-def _select_held_digests(
+def _select_held_keys(
     connection: sqlite3.Connection, digest: str, keys: Sequence[CardTextKey]
 ) -> set[bytes]:
-    """The key digests of keys this row set already holds, without reading
+    """The keys this row set already holds, without reading
     their rows.
 
     Private helper - single consumer is SqliteFeatureStore.put_many.
     Inputs: connection, digest (the row set), keys.
-    Output: set of key digests. Side effects: none.
+    Output: set of key bytes. Side effects: none.
     Exceptions: sqlite3.Error.
     """
     query = "SELECT key FROM features WHERE digest = ? AND key IN ({marks})"
@@ -270,14 +268,14 @@ def _query_in_batches(
     """Run query (with a `{marks}` slot for an IN list) over keys,
     _LOOKUP_BATCH keys at a time, and gather every result row.
 
-    Private helper - consumers are _select_rows and _select_held_digests.
+    Private helper - consumers are _select_rows and _select_held_keys.
     Inputs: connection, query, digest (the first parameter), keys.
     Output: list of result tuples. Side effects: none.
     Exceptions: sqlite3.Error.
     """
     result: list[tuple] = []
     for start in range(0, len(keys), _LOOKUP_BATCH):
-        batch = [key.digest for key in keys[start : start + _LOOKUP_BATCH]]
+        batch = keys[start : start + _LOOKUP_BATCH]
         marks = ",".join("?" * len(batch))
         result.extend(connection.execute(query.format(marks=marks), (digest, *batch)))
     return result
@@ -286,7 +284,7 @@ def _query_in_batches(
 def _insert_rows(
     connection: sqlite3.Connection, digest: str, rows: list[tuple[bytes, bytes]]
 ) -> int:
-    """Insert (key digest, row bytes) pairs in one transaction, with
+    """Insert (key, row bytes) pairs in one transaction, with
     INSERT OR IGNORE: another process may have written the same key since
     put_many checked. Counts only rows actually inserted (the
     total_changes delta), so a row set's fill stays honest.

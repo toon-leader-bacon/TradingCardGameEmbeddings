@@ -20,6 +20,7 @@ from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
 from src.schema.type_hints import MultiCardInput, TrainingDatum
+from tests.dojos.padding import padded
 
 _LABEL_VALUES = ["IRONCLAD", "SILENT", "OTHER"]
 _OTHER_LABEL = "SILENT"
@@ -177,7 +178,7 @@ class TestMultiCardFixedClassificationDojoComputeLoss:
         )
         # Two decks of different sizes - compute_loss must handle the
         # ragged BatchedMultiCardEmbedding shape correctly.
-        embeddings = [[torch.randn(4), torch.randn(4)], [torch.randn(4)]]
+        embeddings = padded([[torch.randn(4), torch.randn(4)], [torch.randn(4)]])
         labels = ["IRONCLAD", "SILENT"]
 
         loss = dojo.compute_loss(embeddings, Batch([deck] * len(labels), labels))
@@ -204,7 +205,7 @@ class TestMultiCardFixedClassificationDojoComputeLoss:
 
         try:
             dojo.compute_loss(
-                [[torch.randn(4)]],
+                padded([[torch.randn(4)]]),
                 Batch([deck] * len(["IRONCLAD", "SILENT"]), ["IRONCLAD", "SILENT"]),
             )
             assert False, "expected ValueError"
@@ -231,7 +232,7 @@ class TestMultiCardFixedClassificationDojoComputeLoss:
 
         try:
             dojo.compute_loss(
-                [[torch.randn(4)]],
+                padded([[torch.randn(4)]]),
                 Batch(
                     [deck] * len(["NOT_A_KNOWN_CHARACTER"]), ["NOT_A_KNOWN_CHARACTER"]
                 ),

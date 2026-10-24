@@ -5,6 +5,7 @@ from typing import List
 import torch
 
 from src.dojos.loss.nocab_loss import device_of
+from src.utils.device_copy import host_tensor
 
 
 def stacked_predictions(decoder_output: List[torch.Tensor]) -> torch.Tensor:
@@ -64,4 +65,4 @@ def regression_target_for(
         )
 
     # Build the target beside the predictions
-    return torch.tensor(labels, dtype=torch.float32, device=device_of(decoder_output))
+    return host_tensor(labels, torch.float32, device_of(decoder_output))

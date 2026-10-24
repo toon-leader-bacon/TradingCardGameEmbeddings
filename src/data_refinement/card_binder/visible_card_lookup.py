@@ -43,6 +43,16 @@ class VisibleCardLookup:
         """See CardLookup.get_by_uuid(); None if the card is hidden."""
         return self._visible_or_none(self._inner.get_by_uuid(nocab_uuid))
 
+    def source_games_of(self, nocab_uuids: Iterable[UUID]) -> dict[UUID, GameId]:
+        """See CardLookup.source_games_of(); hidden cards are absent."""
+        return {
+            nocab_uuid: source_game
+            for nocab_uuid, source_game in self._inner.source_games_of(
+                nocab_uuids
+            ).items()
+            if self._is_visible_uuid(nocab_uuid, source_game)
+        }
+
     def get_by_name(self, source_game: GameId, name: str) -> list[GenericCard]:
         """See CardLookup.get_by_name(); hidden cards are omitted."""
         return self._only_visible(self._inner.get_by_name(source_game, name))
@@ -69,10 +79,8 @@ class VisibleCardLookup:
 
     def all_uuids(self, source_game: GameId | None = None) -> Iterable[UUID]:
         """See CardLookup.all_uuids(); hidden cards are omitted."""
-        for nocab_uuid in self._inner.all_uuids(source_game):
-            card = self.get_by_uuid(nocab_uuid)
-            if card is not None:
-                yield nocab_uuid
+        # One batch existence check, so no card is copied
+        return list(self.source_games_of(self._inner.all_uuids(source_game)))
 
     def all_cards(self, source_game: GameId) -> Iterable[GenericCard]:
         """See CardLookup.all_cards(); hidden cards are omitted."""
@@ -85,8 +93,10 @@ class VisibleCardLookup:
         return self._inner.version_for(source_game)
 
     def _is_visible(self, card: GenericCard) -> bool:
-        tier = self._spec.tier_of(card.nocab_uuid, card.source_game)
-        return tier in self._visible
+        return self._is_visible_uuid(card.nocab_uuid, card.source_game)
+
+    def _is_visible_uuid(self, nocab_uuid: UUID, source_game: GameId) -> bool:
+        return self._spec.tier_of(nocab_uuid, source_game) in self._visible
 
     def _visible_or_none(self, card: GenericCard | None) -> GenericCard | None:
         if card is not None and self._is_visible(card):

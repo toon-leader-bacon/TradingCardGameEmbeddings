@@ -317,6 +317,14 @@ class TestDecksForSplit:
         assert len(groups) == 3
         assert all(len(group) == 3 for group in groups)
 
+    def test_keep_remainder_yields_a_shorter_last_group(self, tmp_path: Path) -> None:
+        box, _ = _box_with_decks(10)
+        dealer = _dealer(box, tmp_path, _holdout(deck_split_ratios=(1, 0, 0)))
+
+        groups = list(dealer.decks_for(Split.TRAIN, 3, keep_remainder=True))
+
+        assert [len(group) for group in groups] == [3, 3, 3, 1]
+
     def test_the_fixed_order_is_by_deck_uuid(self, tmp_path: Path) -> None:
         box, uuids = _box_with_decks(12)
         dealer = _dealer(box, tmp_path, _holdout(deck_split_ratios=(1, 0, 0)))

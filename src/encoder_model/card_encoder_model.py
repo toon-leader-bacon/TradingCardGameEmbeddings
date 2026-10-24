@@ -1,19 +1,15 @@
 """CardEncoderModel: the shape handling shared by every card encoder.
 
-Template Method. A subclass supplies two building blocks:
-
-- embed_together(cards): cards that belong to one example (a deck, a
-  group). Each card's embedding may depend on the others.
-- embed_apart(cards): unrelated cards embedded in one batched pass. Each
-  card's embedding depends only on that card.
-
-The base class maps every input shape in src/schema/type_hints.py onto
-those two methods. It offers one explicit method per shape, plus the
-canonical forward(), which always treats its input as a batch.
+Template Method. forward() owns the one batched path every input shape
+takes: flatten the batch's cards, one card_pipeline.embed call, scatter
+into a padded (sequences, max_cards, d) tensor, then the subclass's
+contextualize(cards, mask), then zero the padding. A subclass supplies
+only contextualize. See src/schema/padded_embeddings.py for the output
+layout.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Mapping, Sequence, cast
+from typing import Mapping, Sequence, cast
 
 import torch
 import torch.nn as nn
@@ -25,34 +21,31 @@ from src.encoder_model.feature_cache.pooled_feature_cache import (
 )
 from src.encoder_model.precision import Precision, inference_context
 from src.schema.card import GenericCard
+from src.schema.padded_embeddings import (
+    ModelEmbeddings,
+    PaddedEmbeddings,
+    mask_from_lengths,
+    scatter_to_slots,
+)
 from src.schema.type_hints import (
-    BatchedModelOutput,
     BatchedMultiCardEmbedding,
     BatchedMultiCardInput,
     BatchedMultiGroupEmbedding,
     BatchedMultiGroupInput,
-    BatchedSingleCardEmbedding,
     BatchedSingleCardInput,
     BatchedTrainingInput,
     InputShape,
-    MultiCardEmbedding,
-    MultiCardInput,
-    MultiGroupEmbedding,
-    MultiGroupInput,
-    SingleCardEmbedding,
-    SingleCardInput,
     batched_input_shape_of,
 )
 
 
 class CardEncoderModel(nn.Module, ABC):
-    """A card encoder. Every input shape maps onto embed_together and embed_apart.
+    """A card encoder. Every input shape maps onto one contextualize call.
 
     forward(x) is what Trainer and dojos call, via TrainableEncoder. It
     always reads x as a batch (BatchedTrainingInput): a flat list of
-    cards is a batch of single cards, never one multi-card input.
-    Callers that hold one unbatched example use the explicit forward_*
-    method for its shape.
+    cards is a batch of single cards, never one multi-card input. A
+    caller holding one unbatched example wraps it in a one-example batch.
 
     Every model owns one CardEmbeddingPipeline (card_pipeline), set here so
     the cache entry points (warm, feature_cache_stats, close_feature_cache)
@@ -146,28 +139,19 @@ class CardEncoderModel(nn.Module, ABC):
             cache.close()
 
     @abstractmethod
-    def embed_together(self, cards: List[GenericCard]) -> List[torch.Tensor]:
-        """One embedding per card, contextualized within `cards` as one group.
+    def contextualize(self, cards: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        """Contextualize each sequence's cards within that sequence.
 
-        Inputs: cards (List[GenericCard]), one example's cards, non-empty
-            (the base class never passes an empty group).
-        Output: List[Tensor], same length and order as cards.
+        The one step a subclass supplies (Template Method); forward owns
+        every other step.
+        Inputs: cards, (sequences, max_cards, d) base embeddings,
+            left-aligned, padding slots zero; mask, (sequences, max_cards)
+            bool, True = real card. A sequence may be empty (all False).
+        Output: (sequences, max_cards, d). A real card's row may depend
+            only on the real cards of its own sequence. Padding slots may
+            hold anything; forward zeroes them.
         Side effects: none beyond autograd.
-        Exceptions: whatever the model's text encoder or head raises.
-        """
-
-    @abstractmethod
-    def embed_apart(self, cards: List[GenericCard]) -> List[torch.Tensor]:
-        """One embedding per card; each depends only on its own card.
-
-        Inputs: cards (List[GenericCard]), unrelated cards, non-empty
-            (the base class never passes an empty list).
-        Output: List[Tensor], same length and order as cards. No card's
-            embedding depends on the other cards, in train or eval mode.
-            In eval mode (no dropout), embedding i also equals
-            embed_apart([cards[i]])[0], up to float rounding.
-        Side effects: none beyond autograd.
-        Exceptions: whatever the model's text encoder or head raises.
+        Exceptions: whatever the subclass's layers raise.
         """
 
     @property
@@ -183,10 +167,10 @@ class CardEncoderModel(nn.Module, ABC):
     ) -> torch.Tensor:
         """Every card embedded on its own, for storage and analysis.
 
-        Context-free by construction: goes through
-        forward_batched_single_card, so row i depends only on cards[i] (for
-        MultiCardModel this is its no-context encoding: self-attention over
-        a length-one sequence). Deterministic: eval mode, so no dropout.
+        Context-free by construction: a batch of single cards, so each
+        card is its own length-one sequence and row i depends only on
+        cards[i] (for MultiCardModel this is its no-context encoding).
+        Deterministic: eval mode, so no dropout.
 
         Inputs: cards (Sequence[GenericCard]), from any onboarded game, may
             be empty; precision (Precision) for the forward pass.
@@ -207,9 +191,11 @@ class CardEncoderModel(nn.Module, ABC):
             return torch.empty((0, self.embedding_dim), dtype=torch.float32)
         # Embed each card apart, without training, at `precision`
         with inference_context(self, precision):
-            embeddings = self.forward_batched_single_card(list(cards))
-        # Stack into one float32 CPU table (autocast may have produced fp16)
-        return torch.stack(embeddings).float().cpu()
+            padded = self._padded_sequences(
+                [[card] for card in cards], InputShape.SINGLE_CARD
+            )
+        # One float32 CPU table (autocast may have produced fp16)
+        return padded.cards[:, 0].float().cpu()
 
     def encoder_only_state_dict(self) -> Mapping[str, torch.Tensor]:
         """Every weight of this model. Dojo decoder heads live in their
@@ -220,134 +206,95 @@ class CardEncoderModel(nn.Module, ABC):
         """
         return self.state_dict()
 
-    def forward(self, x: BatchedTrainingInput) -> BatchedModelOutput:
-        """Embed a batch, returning embeddings nested like x.
+    def forward(self, x: BatchedTrainingInput) -> ModelEmbeddings:
+        """Embed a batch: one card_pipeline.embed call and one
+        contextualize call, whatever the shape.
 
         Inputs: x (BatchedTrainingInput): a non-empty batch of single
             cards, multi-card inputs, or multi-group inputs.
-        Output: BatchedModelOutput, one embedding per card, nested like x.
+        Output: ModelEmbeddings.
+            - single cards -> PaddedEmbeddings, SINGLE_CARD, max_cards 1:
+              each card is its own sequence, so no card sees another;
+            - multi-card -> PaddedEmbeddings, MULTI_CARD: one sequence per
+              example;
+            - multi-group -> BatchedMultiGroupEmbedding: one sequence per
+              group across all examples, regrouped; an empty group is [].
         Side effects: none beyond autograd.
         Exceptions: TypeError if x is a bare GenericCard (not a batch).
-            ValueError if x is empty, malformed, or nested deeper than a
-            BatchedMultiGroupInput. Also ValueError if the first example
-            or its first group is empty: the shape is read from the first
-            entry at each level, like Batch does. An empty group anywhere
-            else becomes []. For other layouts, call the explicit method.
+            ValueError if x is empty, nested deeper than a
+            BatchedMultiGroupInput, or its first example (or that
+            example's first group) is empty: the shape is read from the
+            first entry at each level, like Batch does.
 
         Example:
-            >>> embeddings = model([card_a, card_b])   # batch of 2 single cards
-            >>> len(embeddings)
-            2
+            >>> model([card_a, card_b]).cards.shape   # batch of 2 single cards
+            torch.Size([2, 1, 256])
         """
         # Classify one example; the batch's depth alone is ambiguous
         shape = batched_input_shape_of(x)
 
-        # Dispatch to the batched method for that example shape
+        # Single cards and multi-card examples: rows are the sequences
         if shape is InputShape.SINGLE_CARD:
-            return self.forward_batched_single_card(cast(BatchedSingleCardInput, x))
+            single_cards = cast(BatchedSingleCardInput, x)
+            return self._padded_sequences([[card] for card in single_cards], shape)
         if shape is InputShape.MULTI_CARD:
-            return self.forward_batched_multi_card(cast(BatchedMultiCardInput, x))
+            return self._padded_sequences(cast(BatchedMultiCardInput, x), shape)
+
+        # Multi-group: every group is a sequence, then regroup per example
         if shape is InputShape.MULTI_GROUP:
-            return self.forward_batched_multi_group(cast(BatchedMultiGroupInput, x))
+            examples = cast(BatchedMultiGroupInput, x)
+            groups = [group for example in examples for group in example]
+            padded = self._padded_sequences(groups, InputShape.MULTI_CARD)
+            return _regrouped(padded, [len(example) for example in examples])
         raise ValueError("Input is nested deeper than a BatchedMultiGroupInput")
 
-    # region Explicit forward methods, one per input shape
-    #
-    # Contract shared by all six:
-    # Output: embeddings nested exactly like x, one Tensor per card, in
-    #   input order. An empty group or example becomes []. Subclasses are
-    #   never called with zero cards; empty groups are common in real data
-    #   (first-pick pools, rows with no blockers).
-    # Side effects: none beyond autograd.
-    # Exceptions: whatever the subclass's text encoder, head or attention
-    #   raises. There are no shape checks: each method trusts x to have
-    #   its own shape.
+    def _padded_sequences(
+        self, sequences: Sequence[Sequence[GenericCard]], shape: InputShape
+    ) -> PaddedEmbeddings:
+        """The batched path every shape takes: embed every card at once,
+        scatter into the padded layout, contextualize, zero the padding.
 
-    def forward_single_card(self, x: SingleCardInput) -> SingleCardEmbedding:
-        """One card -> its embedding (depth 0).
-
-        Inputs: x (GenericCard). Output: Tensor.
-
-        Example:
-            >>> model.forward_single_card(card).shape
-            torch.Size([256])
-        """
-        return self.embed_apart([x])[0]
-
-    def forward_multi_card(self, x: MultiCardInput) -> MultiCardEmbedding:
-        """One multi-card example -> one embedding per card, contextualized
-        across the whole list (depth 1, unbatched).
-
-        Inputs: x (List[GenericCard]), may be empty. Output: List[Tensor].
-
-        Example:
-            >>> deck = model.forward_multi_card([card_a, card_b])   # 2 tensors
-        """
-        return self._embed_group(x)
-
-    def forward_multi_group(self, x: MultiGroupInput) -> MultiGroupEmbedding:
-        """One multi-group example -> each group contextualized on its own
-        (depth 2, unbatched).
-
-        Inputs: x (List[List[GenericCard]]); groups may be empty.
-        Output: List[List[Tensor]].
-
-        Example:
-            >>> model.forward_multi_group([[card_a, card_b], []])   # [[t, t], []]
-        """
-        return [self._embed_group(group) for group in x]
-
-    def forward_batched_single_card(
-        self, x: BatchedSingleCardInput
-    ) -> BatchedSingleCardEmbedding:
-        """A batch of unrelated single cards -> one embedding each, and no
-        card sees another (depth 1, batched).
-
-        Inputs: x (List[GenericCard]), may be empty. Output: List[Tensor].
-
-        Example:
-            >>> model.forward_batched_single_card([card_a, card_b])   # 2 tensors
-        """
-        return self.embed_apart(x) if x else []
-
-    def forward_batched_multi_card(
-        self, x: BatchedMultiCardInput
-    ) -> BatchedMultiCardEmbedding:
-        """A batch of multi-card examples -> each example contextualized on
-        its own (depth 2, batched). This is the same computation as
-        forward_multi_group, because groups never see each other either.
-
-        Inputs: x (List[List[GenericCard]]); examples may be empty.
-        Output: List[List[Tensor]].
-
-        Example:
-            >>> model.forward_batched_multi_card([[card_a, card_b], [card_c]])
-        """
-        return [self._embed_group(example) for example in x]
-
-    def forward_batched_multi_group(
-        self, x: BatchedMultiGroupInput
-    ) -> BatchedMultiGroupEmbedding:
-        """A batch of multi-group examples -> forward_multi_group on each
-        (depth 3, batched).
-
-        Inputs: x (List[List[List[GenericCard]]]).
-        Output: List[List[List[Tensor]]].
-
-        Example:
-            >>> model.forward_batched_multi_group([[[card_a], []], [[card_b]]])
-        """
-        return [self.forward_multi_group(example) for example in x]
-
-    # endregion
-
-    def _embed_group(self, cards: List[GenericCard]) -> List[torch.Tensor]:
-        """embed_together, except an empty group becomes [], so subclasses
-        never see one.
-
-        Inputs: cards (List[GenericCard]), possibly empty.
-        Output: List[Tensor], same length and order.
+        Private helper - callers are forward and isolated_embeddings.
+        Inputs: sequences (each may be empty, but at least one card in
+            all), shape (SINGLE_CARD for one-card sequences, MULTI_CARD
+            otherwise).
+        Output: PaddedEmbeddings over sequences, rows in input order.
         Side effects: none beyond autograd.
-        Exceptions: as embed_together.
+        Exceptions: as card_pipeline.embed and contextualize.
         """
-        return self.embed_together(cards) if cards else []
+        # Flatten every card in input order, keeping lengths on the host
+        lengths = tuple(len(sequence) for sequence in sequences)
+        flat_cards = [card for sequence in sequences for card in sequence]
+
+        # One embed call for the whole batch, then scatter row-major
+        base = self.card_pipeline.embed(flat_cards)  # (num_cards, d)
+        mask = mask_from_lengths(lengths, base.device)
+        empty = base.new_zeros((len(lengths), mask.shape[1], base.shape[1]))
+        padded = scatter_to_slots(base, empty, lengths)
+
+        # One contextualize call; then restore the zero-padding invariant
+        contextualized = self.contextualize(padded, mask)
+        cards = contextualized.masked_fill(~mask.unsqueeze(-1), 0.0)
+        return PaddedEmbeddings(cards, mask, shape, lengths)
+
+
+def _regrouped(
+    groups: PaddedEmbeddings, group_counts: Sequence[int]
+) -> BatchedMultiGroupEmbedding:
+    """Split a padded batch of groups back into multi-group examples.
+
+    Private helper - single caller is CardEncoderModel.forward.
+    Inputs: groups (one row per group, all examples' groups in order),
+        group_counts (groups per example; sums to len(groups)).
+    Output: BatchedMultiGroupEmbedding, via groups.to_nested(); an empty
+        group becomes [].
+    Side effects: none beyond autograd. Exceptions: none.
+    """
+    result: BatchedMultiGroupEmbedding = []
+    nested = cast(BatchedMultiCardEmbedding, groups.to_nested())
+    # Hand each example its next group_count groups, in order
+    start = 0
+    for group_count in group_counts:
+        result.append(nested[start : start + group_count])
+        start += group_count
+    return result

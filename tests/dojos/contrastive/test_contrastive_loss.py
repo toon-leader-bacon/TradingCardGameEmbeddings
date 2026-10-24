@@ -1,16 +1,56 @@
 import math
+from typing import List, Sequence
 from uuid import uuid4
 
 import pytest
 import torch
 
 from src.dojos.contrastive.contrastive_loss import (
-    anchor_loss,
-    pairwise_cosine_similarity,
-    identity_negative_mask,
+    ComparisonMasks,
+    DegenerateBatchError,
+    clique_positive_mask,
+    constant_logit_baseline,
+    info_nce_loss,
+    info_nce_masks,
+    same_key_mask,
 )
 from src.dojos.contrastive.styles.cross_slice_card import CrossSliceCardInfoNCELoss
+from src.dojos.contrastive.styles.missing_card import MissingCardInfoNCELoss
 from src.dojos.contrastive.styles.single_card import SingleCardInfoNCELoss
+from src.schema.padded_embeddings import PaddedEmbeddings
+from src.schema.type_hints import InputShape
+
+
+def _singles(embeddings: Sequence[torch.Tensor]) -> PaddedEmbeddings:
+    return PaddedEmbeddings.from_single_cards(torch.stack(list(embeddings)))
+
+
+def _multis(items: List[List[torch.Tensor]]) -> PaddedEmbeddings:
+    return PaddedEmbeddings.from_nested(
+        items, InputShape.MULTI_CARD, items[0][0].shape[0]
+    )
+
+
+def _reference_info_nce(
+    units: torch.Tensor, masks: ComparisonMasks, temperature: float
+) -> torch.Tensor:
+    """The per-anchor loop the vectorized loss replaced (an oracle): for
+    each anchor with a positive, -log_softmax over [positive, negatives],
+    averaged over its positives, then over anchors."""
+    normalized = torch.nn.functional.normalize(units, dim=1)
+    logits = normalized @ normalized.T / temperature
+    per_anchor = []
+    for anchor in range(units.shape[0]):
+        positives = masks.positive[anchor].nonzero().flatten().tolist()
+        if not positives:
+            continue
+        negatives = masks.negative[anchor].nonzero().flatten().tolist()
+        per_positive = [
+            -torch.log_softmax(logits[anchor, [positive] + negatives], dim=0)[0]
+            for positive in positives
+        ]
+        per_anchor.append(torch.stack(per_positive).mean())
+    return torch.stack(per_anchor).mean()
 
 
 class TestInit:
@@ -19,70 +59,193 @@ class TestInit:
             SingleCardInfoNCELoss(temperature=0.0)
 
 
-class TestPairwiseCosineSimilarity:
-    def test_identical_vectors_have_similarity_one(self) -> None:
-        embeddings = [torch.tensor([1.0, 0.0]), torch.tensor([2.0, 0.0])]
+class TestSameKeyMask:
+    def test_marks_equal_keys_including_the_diagonal(self) -> None:
+        mask = same_key_mask(["a", "b", "a"])
 
-        similarity = pairwise_cosine_similarity(embeddings)
+        assert mask.tolist() == [
+            [True, False, True],
+            [False, True, False],
+            [True, False, True],
+        ]
 
-        assert similarity[0, 1].item() == pytest.approx(1.0)
+    def test_compares_uuid_tuples_by_value(self) -> None:
+        shared = uuid4()
 
-    def test_orthogonal_vectors_have_similarity_zero(self) -> None:
-        embeddings = [torch.tensor([1.0, 0.0]), torch.tensor([0.0, 1.0])]
+        mask = same_key_mask([(shared,), (uuid4(),), (shared,)])
 
-        similarity = pairwise_cosine_similarity(embeddings)
+        assert mask[0, 2] and mask[2, 0] and not mask[0, 1]
 
-        assert similarity[0, 1].item() == pytest.approx(0.0)
-
-    def test_diagonal_is_self_similarity_of_one(self) -> None:
-        embeddings = [torch.randn(4) for _ in range(3)]
-
-        similarity = pairwise_cosine_similarity(embeddings)
-
-        assert torch.allclose(torch.diagonal(similarity), torch.ones(3))
+    def test_is_empty_for_no_keys(self) -> None:
+        assert same_key_mask([]).shape == (0, 0)
 
 
-class TestValidNegativeMask:
-    def test_excludes_the_diagonal(self) -> None:
-        identities = [(uuid4(),), (uuid4(),), (uuid4(),)]
+class TestCliquePositiveMask:
+    def test_expands_each_clique_into_mutual_positives(self) -> None:
+        mask = clique_positive_mask([[0, 1, 2]], 3)
 
-        mask = identity_negative_mask(identities, torch.device("cpu"))
+        assert mask.tolist() == [
+            [False, True, True],
+            [True, False, True],
+            [True, True, False],
+        ]
 
-        assert not mask.diagonal().any()
+    def test_a_singleton_or_missing_index_has_no_positive(self) -> None:
+        mask = clique_positive_mask([[0], [1, 2]], 4)
 
-    def test_excludes_an_exact_identity_duplicate(self) -> None:
-        duplicate_uuid = uuid4()
-        identities = [(duplicate_uuid,), (uuid4(),), (duplicate_uuid,)]
+        assert not mask[0].any() and not mask[3].any()
+        assert mask[1, 2] and mask[2, 1]
 
-        mask = identity_negative_mask(identities, torch.device("cpu"))
+    def test_raises_on_an_out_of_range_index(self) -> None:
+        with pytest.raises(ValueError, match="range"):
+            clique_positive_mask([[0, 3]], 3)
 
-        assert not mask[0, 2]
-        assert not mask[2, 0]
-
-    def test_allows_a_non_duplicate_pair(self) -> None:
-        identities = [(uuid4(),), (uuid4(),)]
-
-        mask = identity_negative_mask(identities, torch.device("cpu"))
-
-        assert mask[0, 1]
-        assert mask[1, 0]
+    def test_raises_on_an_index_in_two_cliques(self) -> None:
+        with pytest.raises(ValueError, match="more than one"):
+            clique_positive_mask([[0, 1], [1, 2]], 3)
 
 
-class TestPositivesByAnchor:
-    def test_expands_each_group_into_mutual_positives(self) -> None:
-        loss_fn = SingleCardInfoNCELoss()
+class TestComparisonMasks:
+    def test_info_nce_masks_excludes_self_positives_duplicates_and_exclusions(
+        self,
+    ) -> None:
+        shared = uuid4()
+        identities = [(shared,), (uuid4(),), (shared,), (uuid4(),)]
+        excluded = torch.zeros(4, 4, dtype=torch.bool)
+        excluded[1, 3] = True
 
-        positives_by_anchor = loss_fn._positives_by_anchor([[0, 1, 2]])
+        masks = info_nce_masks(clique_positive_mask([[0, 1]], 4), identities, excluded)
 
-        assert positives_by_anchor == {0: [1, 2], 1: [0, 2], 2: [0, 1]}
+        assert masks.negative.tolist() == [
+            [False, False, False, True],  # 1 positive, 2 duplicate
+            [False, False, True, False],  # 0 positive, 3 excluded
+            [False, True, False, True],  # 0 duplicate
+            [True, True, True, False],
+        ]
 
-    def test_omits_a_singleton_group_from_the_mapping(self) -> None:
-        loss_fn = SingleCardInfoNCELoss()
+    def test_rejects_overlapping_masks(self) -> None:
+        positive = clique_positive_mask([[0, 1]], 2)
+        with pytest.raises(ValueError, match="both"):
+            ComparisonMasks(positive, positive.clone())
 
-        positives_by_anchor = loss_fn._positives_by_anchor([[0], [1, 2]])
+    def test_rejects_a_device_mask(self) -> None:
+        mask = torch.zeros(2, 2, dtype=torch.bool)
+        with pytest.raises(ValueError, match="CPU"):
+            ComparisonMasks(mask, mask.to("meta"))
 
-        assert 0 not in positives_by_anchor
-        assert positives_by_anchor == {1: [2], 2: [1]}
+    def test_require_some_anchor_raises_without_a_positive(self) -> None:
+        empty = torch.zeros(2, 2, dtype=torch.bool)
+        with pytest.raises(DegenerateBatchError):
+            ComparisonMasks(
+                empty, ~torch.eye(2, dtype=torch.bool)
+            ).require_some_anchor()
+
+
+class TestInfoNceLoss:
+    def test_averages_over_differing_per_positive_losses(self) -> None:
+        # Anchor 0 has two positives (1 and 2) at different similarities,
+        # against one shared negative (3): a bug that used only one
+        # positive would not match this hand-computed mean
+        units = torch.tensor(
+            [[1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+        )
+        positive = torch.zeros(4, 4, dtype=torch.bool)
+        positive[0, 1] = positive[0, 2] = True
+        negative = torch.zeros(4, 4, dtype=torch.bool)
+        negative[0, 3] = True
+
+        result = info_nce_loss(units, ComparisonMasks(positive, negative), 1.0)
+
+        loss_for_positive_1 = math.log(math.exp(1.0) + math.exp(0.0)) - 1.0
+        loss_for_positive_2 = math.log(2.0)
+        expected = (loss_for_positive_1 + loss_for_positive_2) / 2
+        assert result.item() == pytest.approx(expected, rel=1e-5)
+
+    @pytest.mark.parametrize("seed", range(5))
+    def test_equals_the_per_anchor_reference_on_random_masks(self, seed: int) -> None:
+        generator = torch.Generator().manual_seed(seed)
+        count = 9
+        units = torch.randn(count, 6, generator=generator)
+        cliques = [[0, 1, 2], [3, 4], [5, 6], [7]]
+        identities = [(i % 7,) for i in range(count)]  # 7, 8 duplicate 0, 1
+        excluded = torch.rand(count, count, generator=generator) < 0.2
+        masks = info_nce_masks(
+            clique_positive_mask(cliques, count), identities, excluded
+        )
+
+        result = info_nce_loss(units, masks, 0.3)
+
+        expected = _reference_info_nce(units, masks, 0.3)
+        assert result.item() == pytest.approx(expected.item(), rel=1e-5)
+
+    @pytest.mark.parametrize("style", ["single", "missing", "cross"])
+    def test_value_and_gradient_equal_the_reference_on_each_style_masks(
+        self, style: str
+    ) -> None:
+        torch.manual_seed(1)
+        masks = _style_masks(style)
+        units = torch.randn(masks.unit_count, 5, requires_grad=True)
+
+        (got_grad,) = torch.autograd.grad(info_nce_loss(units, masks, 0.2), units)
+        (want_grad,) = torch.autograd.grad(
+            _reference_info_nce(units, masks, 0.2), units
+        )
+
+        assert torch.allclose(got_grad, want_grad, atol=1e-6)
+        assert info_nce_loss(units, masks, 0.2).item() == pytest.approx(
+            _reference_info_nce(units, masks, 0.2).item(), rel=1e-5
+        )
+
+    def test_an_anchor_without_negatives_contributes_zero_with_finite_gradient(
+        self,
+    ) -> None:
+        # Anchor 0's only other unit is its positive: no negative at all.
+        # Anchor 2 has one negative. Mean over the two anchors with
+        # positives counts anchor 0 as 0
+        torch.manual_seed(0)
+        units = torch.randn(3, 4, requires_grad=True)
+        positive = torch.zeros(3, 3, dtype=torch.bool)
+        positive[0, 1] = positive[2, 1] = True
+        negative = torch.zeros(3, 3, dtype=torch.bool)
+        negative[2, 0] = True
+        masks = ComparisonMasks(positive, negative)
+
+        loss = info_nce_loss(units, masks, 0.07)
+        loss.backward()
+
+        assert units.grad is not None
+        assert bool(torch.isfinite(units.grad).all())
+        # Absolute tolerance too: at temperature 0.07 the loss can be ~0
+        assert loss.item() == pytest.approx(
+            _reference_info_nce(units.detach(), masks, 0.07).item(), rel=1e-5, abs=1e-6
+        )
+
+    def test_raises_when_no_anchor_has_a_positive(self) -> None:
+        empty = torch.zeros(2, 2, dtype=torch.bool)
+        masks = ComparisonMasks(empty, ~torch.eye(2, dtype=torch.bool))
+        with pytest.raises(DegenerateBatchError):
+            info_nce_loss(torch.randn(2, 4), masks, 0.07)
+
+    def test_raises_on_a_unit_count_mismatch(self) -> None:
+        masks = info_nce_masks(
+            clique_positive_mask([[0, 1]], 3), [(1,), (2,), (3,)], None
+        )
+        with pytest.raises(ValueError, match="units"):
+            info_nce_loss(torch.randn(2, 4), masks, 0.07)
+
+
+class TestConstantLogitBaseline:
+    def test_is_the_mean_log_of_one_plus_each_anchors_negatives(self) -> None:
+        masks = info_nce_masks(
+            clique_positive_mask([[0, 1], [2, 3]], 4), [(i,) for i in range(4)], None
+        )
+        # Every anchor: 1 positive, 2 negatives
+        assert constant_logit_baseline(masks) == pytest.approx(math.log(3))
+
+    def test_raises_when_no_anchor_has_a_negative(self) -> None:
+        masks = info_nce_masks(clique_positive_mask([[0, 1]], 2), [(0,), (1,)], None)
+        with pytest.raises(DegenerateBatchError, match="negative"):
+            constant_logit_baseline(masks)
 
 
 class TestCalculate:
@@ -91,7 +254,7 @@ class TestCalculate:
 
         with pytest.raises(ValueError):
             loss_fn.calculate(
-                item_embeddings=[[torch.randn(4), torch.randn(4)]],
+                item_embeddings=_multis([[torch.randn(4), torch.randn(4)]]),
                 identities=[(uuid4(),)],
                 positive_cliques=[],
             )
@@ -101,7 +264,7 @@ class TestCalculate:
 
         with pytest.raises(ValueError):
             loss_fn.calculate(
-                item_embeddings=[torch.randn(4)],
+                item_embeddings=_singles([torch.randn(4)]),
                 identities=[(uuid4(),), (uuid4(),)],
                 positive_cliques=[],
             )
@@ -111,7 +274,7 @@ class TestCalculate:
 
         with pytest.raises(ValueError):
             loss_fn.calculate(
-                item_embeddings=[torch.randn(4), torch.randn(4)],
+                item_embeddings=_singles([torch.randn(4), torch.randn(4)]),
                 identities=[(uuid4(),), (uuid4(),)],
                 positive_cliques=[],
             )
@@ -123,11 +286,10 @@ class TestCalculate:
         # all at similarity 0, so softmax is uniform over 3 candidates
         # and every anchor's own loss is -log(1/3) = log(3).
         loss_fn = SingleCardInfoNCELoss(temperature=1.0)
-        item_embeddings = list(torch.eye(4))
         identities = [(uuid4(),) for _ in range(4)]
         positive_cliques = [[0, 1], [2, 3]]
 
-        result = loss_fn.calculate(item_embeddings, identities, positive_cliques)
+        result = loss_fn.calculate(_singles(torch.eye(4)), identities, positive_cliques)
 
         assert result.item() == pytest.approx(math.log(3), rel=1e-5)
 
@@ -135,74 +297,29 @@ class TestCalculate:
         # Item 2 is an exact-identity duplicate of item 0 (e.g. the same
         # card drawn from a different deck) but shares no positive group
         # with it. Anchor 0's only valid negative is then item 3, not
-        # item 2 - if the duplicate exclusion were broken, this would
-        # instead average over both item 2 and item 3 as negatives and
-        # no longer match the hand-computed value below.
+        # item 2.
         loss_fn = SingleCardInfoNCELoss(temperature=1.0)
         shared_uuid = uuid4()
-        item_embeddings = list(torch.eye(4))
         identities = [(shared_uuid,), (uuid4(),), (shared_uuid,), (uuid4(),)]
         positive_cliques = [[0, 1]]
 
-        result = loss_fn.calculate(item_embeddings, identities, positive_cliques)
+        result = loss_fn.calculate(_singles(torch.eye(4)), identities, positive_cliques)
 
-        # Anchor 0: positive=1, valid negatives={3} (2 excluded as a
-        # duplicate identity) -> 2-way softmax over similarities [0, 0].
-        # Anchor 1: positive=0, valid negatives={2, 3} (no duplicate of
-        # item 1) -> 3-way softmax over similarities [0, 0, 0].
+        # Anchor 0: positive=1, valid negatives={3} -> 2-way softmax.
+        # Anchor 1: positive=0, valid negatives={2, 3} -> 3-way softmax.
         expected = (math.log(2) + math.log(3)) / 2
         assert result.item() == pytest.approx(expected, rel=1e-5)
 
-    def test_calculate_handles_a_group_larger_than_two(self) -> None:
-        # A 3-item positive group means every member has 2 positives
-        # (the other two). This just confirms calculate() runs that
-        # shape end to end and produces a finite, non-negative loss -
-        # see TestAnchorLoss below for a case that actually
-        # distinguishes the per-positive averaging math from a bug that
-        # only used one of an anchor's positives.
-        loss_fn = SingleCardInfoNCELoss(temperature=1.0)
-        item_embeddings = list(torch.eye(4))
-        identities = [(uuid4(),) for _ in range(4)]
-        positive_cliques = [[0, 1, 2]]
+    def test_accepts_a_composite_key_identity(self) -> None:
+        # A composite loss (slice match) passes a pooled item's whole
+        # sorted identity as one single-card key
+        identities = [(uuid4(), uuid4()) for _ in range(4)]
 
-        result = loss_fn.calculate(item_embeddings, identities, positive_cliques)
+        result = SingleCardInfoNCELoss().calculate(
+            _singles(torch.randn(4, 3)), identities, [[0, 1], [2, 3]]
+        )
 
-        assert result.item() >= 0
         assert math.isfinite(result.item())
-
-
-class TestAnchorLoss:
-    def test_averages_over_differing_per_positive_losses(self) -> None:
-        # Anchor 0 has two positives (1 and 2) with deliberately
-        # different similarities to it, against one shared valid
-        # negative (3) - so the two per-positive InfoNCE losses differ,
-        # and a bug that used only one positive (instead of averaging
-        # both) would not match this hand-computed mean.
-        similarity = torch.tensor(
-            [
-                [1.0, 2.0, 0.0, 0.0],
-                [2.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.0],
-                [0.0, 0.0, 0.0, 1.0],
-            ]
-        )
-        valid_negative_mask = torch.tensor(
-            [
-                [False, True, True, True],
-                [True, False, True, True],
-                [True, True, False, True],
-                [True, True, True, False],
-            ]
-        )
-
-        result = anchor_loss(0, [1, 2], set(), similarity, valid_negative_mask, 1.0)
-
-        # positive=1: candidates' similarities [2.0, 0.0] (vs. negative 3)
-        loss_for_positive_1 = math.log(math.exp(2.0) + math.exp(0.0)) - 2.0
-        # positive=2: candidates' similarities [0.0, 0.0] (vs. negative 3)
-        loss_for_positive_2 = math.log(2.0)
-        expected = (loss_for_positive_1 + loss_for_positive_2) / 2
-        assert result.item() == pytest.approx(expected, rel=1e-5)
 
 
 def _single_identities(count: int) -> list[tuple]:
@@ -225,7 +342,9 @@ class TestSingleCardConstantLogitLoss:
         identities = _single_identities(7)
         cliques = [[0, 1, 2], [3, 4], [5], [6]]
         same = torch.ones(4)
-        loss = SingleCardInfoNCELoss().calculate([same] * 7, identities, cliques)
+        loss = SingleCardInfoNCELoss().calculate(
+            _singles([same] * 7), identities, cliques
+        )
         baseline = SingleCardInfoNCELoss().constant_logit_loss(identities, cliques)
         assert loss.item() == pytest.approx(baseline)
 
@@ -234,7 +353,9 @@ class TestSingleCardConstantLogitLoss:
         identities[3] = identities[0]  # item 3 is the same card as anchor 0
         cliques = [[0, 1], [2, 3]]
         same = torch.ones(4)
-        loss = SingleCardInfoNCELoss().calculate([same] * 4, identities, cliques)
+        loss = SingleCardInfoNCELoss().calculate(
+            _singles([same] * 4), identities, cliques
+        )
         baseline = SingleCardInfoNCELoss().constant_logit_loss(identities, cliques)
         assert loss.item() == pytest.approx(baseline)
         # Anchors 0 and 3 lose a negative each: (2 ln 2 + 2 ln 3) / 4
@@ -264,7 +385,7 @@ class TestCrossSliceCardInfoNCELoss:
         cliques = [[0, 1, 2], [3, 4]]
         same = torch.ones(4)
         loss = CrossSliceCardInfoNCELoss().calculate(
-            [[same, same] for _ in range(5)], identities, cliques
+            _multis([[same, same] for _ in range(5)]), identities, cliques
         )
         baseline = CrossSliceCardInfoNCELoss().constant_logit_loss(identities, cliques)
         assert loss.item() == pytest.approx(baseline)
@@ -275,14 +396,56 @@ class TestCrossSliceCardInfoNCELoss:
         # Card 0 (item 0) is aligned with item 1's cards and orthogonal to
         # its own sibling, which must not count as a negative
         a, b = torch.tensor([1.0, 0.0]), torch.tensor([0.0, 1.0])
-        embeddings = [[a, b], [a, a], [b, b]]
+        embeddings = _multis([[a, b], [a, a], [b, b]])
         loss = CrossSliceCardInfoNCELoss(temperature=1.0).calculate(
             embeddings, identities, cliques
         )
-        assert torch.isfinite(loss)
+        # Cards c0=a, c1=b (item 0); c2=a, c3=a (item 1); c4=b, c5=b
+        # (item 2, no positive). Negatives are item 2's cards only: never
+        # the anchor's own sibling. Cosines are 1 (same axis) or 0.
+        e = math.e
+        a_anchor = math.log(e + 2) - 1  # positives at 1, negatives at 0
+        b_anchor = math.log(1 + 2 * e)  # positives at 0, negatives at 1
+        item_1_card = (a_anchor + math.log(3)) / 2  # positives c0 (1), c1 (0)
+        expected = (a_anchor + b_anchor + 2 * item_1_card) / 4
+        assert loss.item() == pytest.approx(expected, rel=1e-5)
 
     def test_raises_on_a_single_card_shaped_input(self) -> None:
         with pytest.raises(ValueError, match="multi-card"):
             CrossSliceCardInfoNCELoss().calculate(
-                [torch.randn(4), torch.randn(4)], _multi_identities(2, 1), [[0, 1]]
+                _singles([torch.randn(4), torch.randn(4)]),
+                _multi_identities(2, 1),
+                [[0, 1]],
             )
+
+    def test_raises_when_a_mod_dropped_cards_from_an_item(self) -> None:
+        # Item 0 kept its 3-card identity but holds only 2 cards
+        embeddings = _multis([[torch.randn(4)] * 2, [torch.randn(4)] * 3])
+        with pytest.raises(ValueError, match="one identity per card"):
+            CrossSliceCardInfoNCELoss().calculate(
+                embeddings, _multi_identities(2, 3), [[0, 1]]
+            )
+
+
+def _style_masks(style: str) -> ComparisonMasks:
+    """A style's own masks on a small batch with duplicates and exclusions."""
+    shared = uuid4()
+    if style == "single":
+        identities = [(uuid4(),) for _ in range(6)] + [(shared,), (shared,)]
+        return SingleCardInfoNCELoss()._masks(
+            identities, [[0, 1, 2], [3, 4], [5, 6], [7]]
+        )
+    if style == "missing":
+        twin = uuid4()
+        missing = [twin, uuid4(), twin]
+        identities: list[tuple] = []
+        for card in missing:
+            identities += [(uuid4(), uuid4()), (card,)]
+        return MissingCardInfoNCELoss()._masks([[0, 1], [2, 3], [4, 5]], identities)
+    identities = [
+        (shared, uuid4()),
+        (uuid4(), uuid4()),
+        (shared, uuid4()),
+        (uuid4(), uuid4()),
+    ]
+    return CrossSliceCardInfoNCELoss()._masks(identities, [[0, 1], [2, 3]])
