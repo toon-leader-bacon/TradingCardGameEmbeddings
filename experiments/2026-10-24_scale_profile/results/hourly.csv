@@ -1,0 +1,2 @@
+hour,run,steps,cards,step_s,wait_s,forward_s,live_encoding_s,cards_per_s,wait_share,live_share,hit_rate,vram_reserved_gib
+0,pilot,600,245602,181.3,147.6,23.44,0,1354,0.814,0,0.956,9.156

@@ -1,0 +1,69 @@
+run_directory: data/runs/2026-10-24_scale_profile/mtg_n4
+device: cuda
+seed: 0
+model:
+  embedding_head: residual_mlp
+  checkpoint: answerdotai/ModernBERT-base
+  card_embedding_size: 256
+  mlp_hidden_dim: 512
+  mlp_num_blocks: 3
+  group_attention:
+    num_layers: 2
+    num_heads: 4
+    ffn_dim: 1024
+    dropout: 0.1
+    norm_first: true
+  pooling:
+    kind: mean
+  enrichment:
+    kind: whitening
+    stats_path: data/whitening/modernbert_tokens_holdout_seed0.pt
+  feature_cache:
+    storage_dtype: fp16
+    vram:
+      capacity_mib: 3072
+      policy: lfu
+    ram:
+      capacity_mib: 4096
+      policy: lru
+      admission: first_offer
+    disk:
+      path: data/feature_cache/scale_profile_mtg_n4.sqlite
+      capacity_mib: 20480
+      write: warm_only
+dojos:
+- contrastive.mtg
+held_out_dojos: []
+holdout:
+  seed: 0
+  tier_ratios:
+  - 8
+  - 1
+  - 1
+  held_out_games:
+  - gwent
+regression_loss: huber
+hardware:
+  max_batch_cost: 512
+  precision: fp16
+  prefetch_depth: 4
+eval_examples_per_dojo: 128
+phases:
+- name: train
+  diet:
+    rule: uniform
+  encoder_trainable: true
+  encoder_lr: 0.0001
+  head_lr: 0.001
+  steps_per_round: 6000
+  max_rounds: 1
+  saturation:
+    epsilon: 0.001
+    patience_rounds: 1000
+    reactivation_delta: 0.05
+    target_saturated_fraction: 1.0
+default_augmentation:
+  probability: 0.1
+  variants: 4
+warm_feature_cache:
+- mtg

@@ -70,10 +70,10 @@ def mtg_contrastive(name: str, variants: int, steps: int) -> dict[str, Any]:
 
 CONFIGS: dict[str, Callable[[], dict[str, Any]]] = {
     "pilot": lambda: mixed("pilot", 4, 300, 2),
-    "mixed_n0": lambda: mixed("mixed_n0", 0, 5000, 6),
-    "mixed_n4": lambda: mixed("mixed_n4", 4, 5000, 6),
-    "mtg_n0": lambda: mtg_contrastive("mtg_n0", 0, 3000),
-    "mtg_n4": lambda: mtg_contrastive("mtg_n4", 4, 3000),
+    "mixed_n0": lambda: mixed("mixed_n0", 0, 5500, 6),
+    "mixed_n4": lambda: mixed("mixed_n4", 4, 5500, 6),
+    "mtg_n0": lambda: mtg_contrastive("mtg_n0", 0, 6000),
+    "mtg_n4": lambda: mtg_contrastive("mtg_n4", 4, 6000),
 }
 
 
