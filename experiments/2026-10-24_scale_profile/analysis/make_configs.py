@@ -68,12 +68,20 @@ def mtg_contrastive(name: str, variants: int, steps: int) -> dict[str, Any]:
     return config
 
 
+def with_batch_cost(config: dict[str, Any], cost: int) -> dict[str, Any]:
+    config["hardware"]["max_batch_cost"] = cost
+    return config
+
+
 CONFIGS: dict[str, Callable[[], dict[str, Any]]] = {
     "pilot": lambda: mixed("pilot", 4, 300, 2),
     "mixed_n0": lambda: mixed("mixed_n0", 0, 5500, 6),
     "mixed_n4": lambda: mixed("mixed_n4", 4, 5500, 6),
     "mtg_n0": lambda: mtg_contrastive("mtg_n0", 0, 6000),
     "mtg_n4": lambda: mtg_contrastive("mtg_n4", 4, 6000),
+    # Added 2026-10-24 (free-form, after mixed_n0): does a 4x batch use the
+    # idle GPU? About the same cards as mixed_n0 (a quarter of the steps)
+    "probe_b2048": lambda: with_batch_cost(mixed("probe_b2048", 0, 1375, 6), 2048),
 }
 
 

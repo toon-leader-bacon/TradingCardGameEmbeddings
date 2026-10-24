@@ -314,6 +314,28 @@ worker 81% of the time, and in 600 steps that wait is mostly live
 encoding of first-seen texts during reservation, not batch building.
 - 2026-10-24 11:48 · run mixed_n0 done (exit 0, 68 min) → [bench note](bench_notes/2026-10-24_1148_mixed_n0_done.md)
 
+### 2026-10-24 11:55 · PI: free-form probe `probe_b2048` queued; the budget
+
+What: the queue will take about 3.5 h, not 9.5: the pilot's first-pass
+rate was 3.7x slower than the warm steady state. The spare budget goes
+to one probe the human asked about ("good batch sizes to try to
+maximize usage"): `probe_b2048` is `mixed_n0` with `max_batch_cost`
+2048 and a quarter of the steps (6 × 1,375), so about the same cards.
+Queued after `mtg_n4`.
+Why: in `mixed_n0`'s steady state the GPU is busy a median 8% while
+Python uses about 10 cores, and forward + loss is 54% of step time.
+If a per-step fixed cost (kernel launches, Python per step) dominates,
+a 4x batch should raise cards/s a lot; if the cost is per card (CPU
+work per card: serialization, cache lookups, collation), it will not.
+Prediction, written now: steady cards/s in steps above 1.5x
+`mixed_n0`'s (5,673) means per-step overhead dominates; under 1.15x
+means per-card CPU work dominates. The parent saw only +9% going from
+256 to 512, but with most cards then encoded live.
+Risk: peak VRAM grows with the batch; Windows spills to RAM rather than
+failing, so a slow probe may mean memory, not compute (the counters
+show it).
+What it can't answer: training quality at a 4x batch.
+
 ## Results
 
 ## Conclusions
