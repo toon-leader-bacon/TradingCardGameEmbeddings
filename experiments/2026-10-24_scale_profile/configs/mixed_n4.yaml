@@ -17,7 +17,7 @@ model:
     kind: mean
   enrichment:
     kind: whitening
-    stats_path: data/whitening/modernbert_tokens_holdout_seed0.pt
+    stats_path: data/runs/2026-10-24_scale_profile/mixed_n4/whitening_stats.pt
   feature_cache:
     storage_dtype: fp16
     vram:
