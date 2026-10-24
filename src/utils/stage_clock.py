@@ -3,8 +3,9 @@
 Process-wide, like src/run_logging.py: the stages it times sit deep in
 dojos/ and encoder_model/ (mods, serialization, cache lookups, live
 encoding), where passing a profiler down every call would touch dozens
-of signatures for a diagnostic. Off by default, so a stage costs one
-attribute check; scripts/run_training.py --profile turns it on.
+of signatures for a diagnostic. Off by default, so a stage costs a
+context manager and one flag check; scripts/run_training.py --profile
+turns it on.
 
 A reader takes totals() before and after some work on the same thread
 and subtracts (StageTotals.minus): the difference is what that thread
@@ -208,12 +209,16 @@ class StageClock:
         if synchronize:
             torch.cuda.current_stream().synchronize()
         start = time.perf_counter()
+        completed = False
         try:
             yield
+            completed = True
         finally:
             threads.depth[stage] -= 1
             if outermost:
-                if synchronize:
+                # After a failed body (an OOM, a CUDA error) a sync could
+                # raise and hide the original error
+                if synchronize and completed:
                     torch.cuda.current_stream().synchronize()
                 threads.seconds[stage] += time.perf_counter() - start
 

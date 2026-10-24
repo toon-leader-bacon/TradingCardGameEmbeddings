@@ -6,7 +6,6 @@ VALIDATION after training finishes. It never calls evaluation/.
 """
 
 import logging
-import time
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
@@ -20,10 +19,10 @@ from src.training.recording.run_profile import (
     NO_RUN_PROFILE,
     EvaluationTiming,
     RunProfile,
+    WorkSpan,
     card_count,
 )
 from src.training.trainable_encoder import TrainableEncoder
-from src.utils.stage_clock import STAGE_CLOCK
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +36,7 @@ def evaluate_split_losses(
     max_examples: int,
     precision: Precision,
     profile: RunProfile = NO_RUN_PROFILE,
+    phase_name: str = "",
     round_index: int = 0,
 ) -> Mapping[str, SplitLoss]:
     """Mean loss and baseline of every dojo on a capped, deterministic subsample of `split`.
@@ -44,8 +44,8 @@ def evaluate_split_losses(
     Inputs: model, dojos (every dojo to score), split (the rows to score),
         budget, max_examples (per-dojo cap passed to Dojo.batches), and
         precision (forward passes run under inference_context(model,
-        precision): eval mode, no_grad, autocast), profile and round_index
-        (each dojo's EvaluationTiming, when the stage clock is on).
+        precision): eval mode, no_grad, autocast), profile, phase_name and
+        round_index (each dojo's EvaluationTiming, when profile records).
     Output: dojo.name -> SplitLoss: per-example mean loss and mean
         baseline_loss, weighting each batch by len(batch) (so .normalized
         compares the dojo with its own "learned nothing" loss). A dojo
@@ -66,10 +66,10 @@ def evaluate_split_losses(
     # Score each dojo in eval mode, without autograd graphs, at `precision`
     with inference_context(model, precision):
         for dojo in dojos:
-            before = STAGE_CLOCK.totals() if STAGE_CLOCK.enabled else None
-            tally = None if before is None else _PassTally()
-            start = time.perf_counter()
+            span = WorkSpan() if profile.records else None
+            tally = _PassTally()
             try:
+                tally.counts_cards = span is not None
                 result[dojo.name] = _split_loss(
                     model, dojo, split, budget, max_examples, tally
                 )
@@ -77,16 +77,17 @@ def evaluate_split_losses(
                 logger.warning(
                     "%s pass failed for %s", split.value, dojo.name, exc_info=True
                 )
-            if before is not None and tally is not None:
+            if span is not None:
                 profile.record_evaluation(
                     EvaluationTiming(
+                        phase=phase_name,
                         round_index=round_index,
                         dojo=dojo.name,
                         examples=tally.examples,
-                        cards=tally.cards,
-                        seconds=time.perf_counter() - start,
+                        cards=tally.cards if tally.counts_cards else 0,
+                        seconds=span.seconds(),
                         completed=dojo.name in result,
-                        stages=STAGE_CLOCK.totals().minus(before),
+                        stages=span.stages(),
                     )
                 )
     return result
@@ -94,10 +95,12 @@ def evaluate_split_losses(
 
 @dataclass
 class _PassTally:
-    """Examples and cards one dojo's pass scored so far (for the profile)."""
+    """Examples and cards one dojo's pass scored so far (for the profile);
+    cards are counted only when counts_cards (profiling)."""
 
     examples: int = 0
     cards: int = 0
+    counts_cards: bool = False
 
 
 def _split_loss(
@@ -106,7 +109,7 @@ def _split_loss(
     split: Split,
     budget: BatchBudget,
     max_examples: int,
-    tally: "_PassTally | None",
+    tally: _PassTally,
 ) -> SplitLoss:
     """Example-weighted mean loss and baseline over one dojo's capped pass
     of `split`.
@@ -117,11 +120,10 @@ def _split_loss(
     baseline is one constant, exactly mean loss / baseline).
 
     Inputs: model, dojo, split, budget, max_examples (see
-        evaluate_split_losses), tally (counts what was scored, when
-        profiling; None: nothing counted).
+        evaluate_split_losses), tally (counts what was scored).
     Output: SplitLoss(total_loss / n, total_baseline / n).
     Side effects: forward passes (the caller holds eval mode / no_grad);
-        grows tally per batch (when given).
+        grows tally per batch.
     Exceptions: ValueError if the dojo yields no batches of `split`, a loss
         is non-finite, or a baseline is not finite and > 0 (caught per dojo
         by evaluate_split_losses); TypeError from baseline_loss for a
@@ -140,8 +142,8 @@ def _split_loss(
         total_loss += loss.item() * len(batch)
         total_baseline += baseline * len(batch)
         total_examples += len(batch)
-        if tally is not None:
-            tally.examples += len(batch)
+        tally.examples += len(batch)
+        if tally.counts_cards:
             tally.cards += card_count(batch.inputs)
     if total_examples == 0:
         raise ValueError(f"dojo {dojo.name!r} yielded no {split.value} examples")

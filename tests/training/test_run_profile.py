@@ -12,6 +12,7 @@ from src.training.recording.run_profile import (
     EvaluationTiming,
     ReserveTiming,
     StepTiming,
+    WorkSpan,
     card_count,
     stage_field_names,
 )
@@ -54,16 +55,19 @@ class TestCsvTable:
 class TestCsvRunProfile:
     def test_writes_one_row_per_record(self, tmp_path: Path) -> None:
         profile = CsvRunProfile(tmp_path / "profile")
-        profile.record_step(StepTiming(0, 3, "a", 12, True, 0.1, 0.2, 0.5, _stages()))
+        profile.record_step(
+            StepTiming("train", 0, 3, "a", 12, True, 0.1, 0.2, 0.5, _stages())
+        )
         profile.record_build(BuildTiming("a", 4, 12, 1, 0.3, "worker", _stages()))
         profile.record_reserve(ReserveTiming("a", 12, 0.05, _stages()))
         profile.record_evaluation(
-            EvaluationTiming(0, "a", 4, 12, 1.5, False, _stages())
+            EvaluationTiming("train", 0, "a", 4, 12, 1.5, False, _stages())
         )
         profile.close()
 
         (step,) = _rows(tmp_path / "profile" / "steps.csv")
         assert step["dojo"] == "a" and step["cards"] == "12"
+        assert step["phase"] == "train"
         assert float(step["remainder_s"]) == pytest.approx(0.2)
         assert float(step["mods_s"]) == 0.5 and step["live_texts"] == "7"
         assert _rows(tmp_path / "profile" / "builds.csv")[0]["thread"] == "worker"
@@ -105,3 +109,13 @@ def test_stage_columns_end_with_live_texts() -> None:
     names = stage_field_names()
     assert names[-1] == "live_texts"
     assert len(names) == len(ProfileStage) + 1
+
+
+def test_card_count_survives_inputs_it_cannot_walk() -> None:
+    assert card_count("a string recurses forever") == 0  # type: ignore[arg-type]
+
+
+def test_a_work_span_measures_time_and_stages() -> None:
+    span = WorkSpan()
+    assert span.seconds() >= 0
+    assert span.stages().live_texts == 0

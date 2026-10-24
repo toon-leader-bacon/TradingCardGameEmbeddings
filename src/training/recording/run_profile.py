@@ -26,11 +26,11 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Protocol, cast
+from typing import Mapping, Protocol
 
 from src.schema.type_hints import BatchedTrainingInput, iter_cards
 from src.training.recording.csv_table import CsvTable
-from src.utils.stage_clock import ProfileStage, StageTotals
+from src.utils.stage_clock import STAGE_CLOCK, ProfileStage, StageTotals
 
 _logger = logging.getLogger(__name__)
 
@@ -45,8 +45,9 @@ _MARKS_CSV = "marks.csv"
 class StepTiming:
     """One training step attempt, on the training thread.
 
-    round_index, step_index: where it fell (step_index counts every
-        attempt since the run started). dojo: its dojo. cards: cards in
+    phase, round_index, step_index: where it fell (round_index restarts
+        in each phase; step_index counts every attempt since the run
+        started). dojo: its dojo. cards: cards in
         its batch (0 if it failed before the batch arrived). completed:
         whether it ran to the end (an fp16 overflow skip counts, as in
         Trainer._take_step); False for a skipped or failed step.
@@ -57,6 +58,7 @@ class StepTiming:
     stages: the training thread's StageClock deltas over the step.
     """
 
+    phase: str
     round_index: int
     step_index: int
     dojo: str
@@ -101,10 +103,11 @@ class ReserveTiming:
 
 @dataclass(frozen=True)
 class EvaluationTiming:
-    """One dojo's TEST pass in one round: round_index, dojo, examples,
-    cards, seconds, completed (False: the pass failed and the dojo was
-    omitted), stages (the evaluating thread's deltas)."""
+    """One dojo's TEST pass in one round: phase, round_index, dojo,
+    examples, cards, seconds, completed (False: the pass failed and the
+    dojo was omitted), stages (the evaluating thread's deltas)."""
 
+    phase: str
     round_index: int
     dojo: str
     examples: int
@@ -118,7 +121,17 @@ class RunProfile(Protocol):
     """Sink for a run's timing records. Implementations must be
     thread-safe (steps arrive from the training thread, builds and
     reservations from the prefetch worker) and must never raise: a
-    failing write must not stop training."""
+    failing write must not stop training.
+
+    records: whether anything is kept. Reporters measure (WorkSpan) only
+    when it is True, so an unprofiled run does no timing work at all.
+    """
+
+    @property
+    def records(self) -> bool:
+        """Inputs: none. Output: bool. Side effects: none.
+        Exceptions: none."""
+        ...
 
     def record_step(self, timing: StepTiming) -> None:
         """Inputs: timing. Output: none. Side effects: see implementations.
@@ -150,6 +163,11 @@ class RunProfile(Protocol):
 
 class _NoRunProfile:
     """RunProfile that drops every record (Null Object)."""
+
+    @property
+    def records(self) -> bool:
+        """False: nothing is kept, so nothing need be measured."""
+        return False
 
     def record_step(self, timing: StepTiming) -> None:
         """Drops it."""
@@ -203,7 +221,7 @@ class CsvRunProfile:
         stages = stage_field_names()
         self._steps = CsvTable(
             directory / _STEPS_CSV,
-            ["t", "round", "step", "dojo", "cards", "completed", "wait_s",
+            ["t", "phase", "round", "step", "dojo", "cards", "completed", "wait_s",
              "forward_s", "remainder_s", "total_s", *stages],
         )  # fmt: skip
         self._builds = CsvTable(
@@ -215,11 +233,16 @@ class CsvRunProfile:
         )
         self._evaluation = CsvTable(
             directory / _EVALUATION_CSV,
-            ["t", "round", "dojo", "examples", "cards", "total_s", "completed",
+            ["t", "phase", "round", "dojo", "examples", "cards", "total_s", "completed",
              *stages],
         )  # fmt: skip
         self._marks = CsvTable(directory / _MARKS_CSV, ["t", "wall", "mark"])
         self.mark("profile opened")
+
+    @property
+    def records(self) -> bool:
+        """True: see RunProfile.records."""
+        return True
 
     def seconds_since_open(self) -> float:
         """Seconds since opened_at (the profile's opening by default): the
@@ -242,6 +265,7 @@ class CsvRunProfile:
         self._write(
             self._steps,
             {
+                "phase": timing.phase,
                 "round": timing.round_index,
                 "step": timing.step_index,
                 "dojo": timing.dojo,
@@ -299,6 +323,7 @@ class CsvRunProfile:
         self._write(
             self._evaluation,
             {
+                "phase": timing.phase,
                 "round": timing.round_index,
                 "dojo": timing.dojo,
                 "examples": timing.examples,
@@ -351,10 +376,49 @@ class CsvRunProfile:
             log("run profile dropped a row", exc_info=True)
 
 
-def card_count(inputs: object) -> int:
+class WorkSpan:
+    """One unit of work being measured on the calling thread: wall-clock
+    seconds and the thread's StageClock deltas since it was started
+    (zeros for stages while the clock is off).
+
+    Example:
+        >>> span = WorkSpan()
+        >>> batch = stream.next_batch()
+        >>> span.seconds(), span.stages()
+    """
+
+    def __init__(self) -> None:
+        """Starts now. Inputs: none. Output: none.
+        Side effects: reads the clocks. Exceptions: none."""
+        self.started = time.perf_counter()
+        self._stages_before = STAGE_CLOCK.totals()
+
+    def seconds(self) -> float:
+        """Seconds since start. Inputs: none. Output: float.
+        Side effects: none. Exceptions: none.
+
+        Example:
+            >>> span.seconds()
+            0.12
+        """
+        return time.perf_counter() - self.started
+
+    def stages(self) -> StageTotals:
+        """This thread's stage deltas since start (call it on the thread
+        that started the span). Inputs: none. Output: StageTotals.
+        Side effects: none. Exceptions: none.
+
+        Example:
+            >>> span.stages().seconds_in(ProfileStage.MODS)
+            0.004
+        """
+        return STAGE_CLOCK.totals().minus(self._stages_before)
+
+
+def card_count(inputs: BatchedTrainingInput) -> int:
     """How many cards a batch's inputs hold (type_hints.iter_cards), for a
-    timing record; 0 for inputs that are not cards, so profiling never
-    fails a step.
+    timing record; 0 when they cannot be walked (a test's tensor input, or
+    anything else odd), so profiling never fails a step.
 
     Inputs: inputs (a DojoBatch's inputs). Output: int.
     Side effects: none. Exceptions: none.
@@ -364,8 +428,8 @@ def card_count(inputs: object) -> int:
         512
     """
     try:
-        return sum(1 for _ in iter_cards(cast(BatchedTrainingInput, inputs)))
-    except TypeError:
+        return sum(1 for _ in iter_cards(inputs))
+    except Exception:  # best effort: a count must never fail training
         return 0
 
 

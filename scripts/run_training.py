@@ -827,7 +827,10 @@ def train(
             steps_attempted=lambda: trainer.steps_attempted,
         ),
     )
-    sampler.start()
+    try:
+        sampler.start()
+    except Exception:  # profiling must never stop a run
+        _logger.warning("run sampler did not start; training without it", exc_info=True)
     try:
         return trainer.run()
     finally:

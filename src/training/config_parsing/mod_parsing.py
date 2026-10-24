@@ -201,7 +201,7 @@ def parse_default_augmentation(section: ConfigSection) -> AugmentationRates:
     Both keys are optional; an absent key keeps each spec's own value.
 
     Inputs: section ("default_augmentation", possibly empty).
-    Output: AugmentationRates. Side effects: none.
+    Output: AugmentationRates. Side effects: records the keys as read.
     Exceptions: ValueError for an unknown key, a wrongly typed value, or a
         rate no card-field mod accepts.
 
@@ -211,9 +211,9 @@ def parse_default_augmentation(section: ConfigSection) -> AugmentationRates:
     """
     probability: float | None = None
     variants: int | None = None
-    if "probability" in section.keys():
+    if section.has("probability"):
         probability = section.required("probability", float)
-    if "variants" in section.keys():
+    if section.has("variants"):
         variants = section.required("variants", int)
     section.reject_unread_keys()
     return construct_at(section.where, lambda: AugmentationRates(probability, variants))

@@ -949,7 +949,8 @@ class TestPrefetch:
 
 
 class _RecordingProfile:
-    def __init__(self) -> None:
+    def __init__(self, records: bool = True) -> None:
+        self.records = records
         self.steps: list[StepTiming] = []
         self.builds: list[BuildTiming] = []
         self.evaluations: list[EvaluationTiming] = []
@@ -1012,9 +1013,10 @@ class TestProfile:
         assert len(profile.builds) == len(profile.steps)
         assert {timing.dojo for timing in profile.evaluations} == {"a", "b"}
         assert any("TEST start" in mark for mark in profile.marks)
+        assert {step.phase for step in profile.steps} == {plan.phases[0].name}
 
-    def test_an_unprofiled_run_reports_nothing(self, tmp_path: Path) -> None:
-        profile = _RecordingProfile()
+    def test_a_profile_that_keeps_nothing_is_sent_nothing(self, tmp_path: Path) -> None:
+        profile = _RecordingProfile(records=False)
         plan = make_plan((make_phase(("a",)),))
         Trainer(
             FakeModel(),  # type: ignore[arg-type]

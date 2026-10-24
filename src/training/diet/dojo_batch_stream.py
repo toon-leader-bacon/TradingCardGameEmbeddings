@@ -1,7 +1,6 @@
 """An endless TRAIN batch source for one dojo."""
 
 import threading
-import time
 from typing import Iterator
 
 from src.dojos.dojo import BatchBudget, Dojo, DojoBatch
@@ -10,9 +9,9 @@ from src.training.recording.run_profile import (
     NO_RUN_PROFILE,
     BuildTiming,
     RunProfile,
+    WorkSpan,
     card_count,
 )
-from src.utils.stage_clock import STAGE_CLOCK
 
 
 class DojoBatchStream:
@@ -35,12 +34,12 @@ class DojoBatchStream:
 
     def next_batch(self) -> DojoBatch:
         """Return the next TRAIN batch, and report how long it took to the
-        profile (only when the stage clock is on).
+        profile (only when it records).
 
         Inputs: none.
         Output: DojoBatch.
         Side effects: advances (or restarts) the dojo's TRAIN iterator;
-            records a BuildTiming when profiling.
+            records a BuildTiming when the profile records.
         Exceptions: RuntimeError if the dojo yields no batches at all; any
             error the dojo raises mid-pass (the next call starts a fresh
             pass, so the fault ledger's total-failure limit is what stops a
@@ -49,11 +48,10 @@ class DojoBatchStream:
         Example:
             >>> DojoBatchStream(dojo, budget).next_batch()
         """
-        if not STAGE_CLOCK.enabled:
+        if not self._profile.records:
             return self._built_batch()
         # Time the build, with this thread's stage totals around it
-        before = STAGE_CLOCK.totals()
-        start = time.perf_counter()
+        span = WorkSpan()
         result = self._built_batch()
         self._profile.record_build(
             BuildTiming(
@@ -61,9 +59,9 @@ class DojoBatchStream:
                 examples=len(result),
                 cards=card_count(result.inputs),
                 pass_index=self._passes,
-                seconds=time.perf_counter() - start,
+                seconds=span.seconds(),
                 thread=threading.current_thread().name,
-                stages=STAGE_CLOCK.totals().minus(before),
+                stages=span.stages(),
             )
         )
         return result

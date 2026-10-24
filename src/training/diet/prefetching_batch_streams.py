@@ -44,7 +44,6 @@ import bisect
 import enum
 import logging
 import threading
-import time
 from collections import deque
 from dataclasses import dataclass, replace
 from types import TracebackType
@@ -68,8 +67,8 @@ from src.training.recording.run_profile import (
     NO_RUN_PROFILE,
     ReserveTiming,
     RunProfile,
+    WorkSpan,
 )
-from src.utils.stage_clock import STAGE_CLOCK
 
 _logger = logging.getLogger(__name__)
 
@@ -180,7 +179,7 @@ class PrefetchingBatchStreams:
             call them from now on), warmer (reserves each built batch's
             cards on the worker thread), depth (>= 1, scheduled steps built
             ahead of the trainer), profile (where each reservation's
-            ReserveTiming goes when the stage clock is on).
+            ReserveTiming goes, when it records).
         Output: none (constructor). Side effects: none; call start().
         Exceptions: ValueError if depth < 1 or streams is empty.
 
@@ -525,24 +524,13 @@ class PrefetchingBatchStreams:
         Inputs: name (for the log and the profile), batch.
         Output: FeatureReservation.
         Side effects: warmer.reserve; counts and logs failures; records a
-            ReserveTiming when the stage clock is on.
+            ReserveTiming when the profile records.
         Exceptions: none.
         """
-        before = STAGE_CLOCK.totals() if STAGE_CLOCK.enabled else None
-        start = time.perf_counter()
+        span = WorkSpan() if self._profile.records else None
         try:
             cards = list(iter_cards(batch.inputs))
             result = self._warmer.reserve(cards)
-            if before is not None:
-                self._profile.record_reserve(
-                    ReserveTiming(
-                        dojo=name,
-                        cards=len(cards),
-                        seconds=time.perf_counter() - start,
-                        stages=STAGE_CLOCK.totals().minus(before),
-                    )
-                )
-            return result
         except Exception as error:
             with self._condition:
                 self._warm_failures += 1
@@ -555,6 +543,17 @@ class PrefetchingBatchStreams:
                     error,
                 )
             return _NO_RESERVATION
+        # Record after the try: the reservation is kept whatever recording does
+        if span is not None:
+            self._profile.record_reserve(
+                ReserveTiming(
+                    dojo=name,
+                    cards=len(cards),
+                    seconds=span.seconds(),
+                    stages=span.stages(),
+                )
+            )
+        return result
 
     def _land(self, step: _BuiltStep) -> None:
         """Queue the in-flight step for the trainer if it is still wanted;

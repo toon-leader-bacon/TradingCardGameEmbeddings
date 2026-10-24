@@ -49,11 +49,11 @@ from src.training.recording.run_profile import (
     NO_RUN_PROFILE,
     RunProfile,
     StepTiming,
+    WorkSpan,
     card_count,
 )
 from src.training.round_evaluation import evaluate_split_losses
 from src.training.trainable_encoder import TrainableEncoder
-from src.utils.stage_clock import STAGE_CLOCK, StageTotals
 
 logger = logging.getLogger(__name__)
 
@@ -112,12 +112,12 @@ class _StepWatch:
     """Clock readings of one step attempt, filled in by _take_step as it
     goes (time.perf_counter() values; None until reached).
 
-    started: the attempt began. batch_ready: its batch arrived.
-    forward_done: the loss was computed (GPU work synchronized).
-    cards: cards in its batch.
+    span: the whole attempt (started when it began). batch_ready: its
+    batch arrived. forward_done: the loss was computed (GPU work
+    synchronized). cards: cards in its batch.
     """
 
-    started: float
+    span: WorkSpan
     batch_ready: float | None = None
     forward_done: float | None = None
     cards: int = 0
@@ -216,6 +216,7 @@ class Trainer:
         self._steps_taken = 0
         # Every step attempt of the run, and the round being trained (profile)
         self._steps_attempted = 0
+        self._phase_name = ""
         self._round_index = 0
         # Steps skipped since the last round's report
         self._skips = _RoundSkips()
@@ -304,6 +305,7 @@ class Trainer:
         best: CheckpointRecord | None = None
         for round_index in range(phase.max_rounds):
             # Steps: the worker builds ahead while the GPU trains
+            self._phase_name = phase.name
             self._round_index = round_index
             self._profile.mark(f"[{phase.name}] round {round_index} training start")
             try:
@@ -537,17 +539,15 @@ class Trainer:
         _apply_learning_rate_schedule(phase_run)
         phase_run.step_attempts += 1
         self._steps_attempted += 1
-        profiling = STAGE_CLOCK.enabled
-        stages_before = STAGE_CLOCK.totals() if profiling else None
-        watch = _StepWatch(started=time.perf_counter()) if profiling else None
+        watch = _StepWatch(WorkSpan()) if self._profile.records else None
         try:
             ran = self._take_step(phase_run, dojo, watch)
         except BatchFeedError:
             raise  # not a step failure: _run_phase ends the run
         except Exception as error:
             failure = error
-        if watch is not None and stages_before is not None:
-            self._record_step(dojo, ran, watch, stages_before)
+        if watch is not None:
+            self._record_step(dojo, ran, watch)
         # Recover outside the except block: inside it the traceback still
         # pins the failed step's tensors, so an out-of-memory would not free
         if failure is not None:
@@ -671,16 +671,13 @@ class Trainer:
             f"{_MIN_LOSS_SCALE:g}"
         )
 
-    def _record_step(
-        self, dojo: Dojo, ran: bool, watch: _StepWatch, stages_before: StageTotals
-    ) -> None:
+    def _record_step(self, dojo: Dojo, ran: bool, watch: _StepWatch) -> None:
         """Report one step attempt's StepTiming to the profile. A step that
         failed before its batch arrived counts all its time as waiting; one
         that failed before its forward ended counts no forward time.
 
         Private helper - single consumer is _attempt_step.
-        Inputs: dojo, ran (_take_step's result; False on failure), watch,
-            stages_before (the training thread's totals at the start).
+        Inputs: dojo, ran (_take_step's result; False on failure), watch.
         Output: none. Side effects: profile.record_step. Exceptions: none.
         """
         ended = time.perf_counter()
@@ -690,15 +687,16 @@ class Trainer:
             forward_seconds = watch.forward_done - batch_ready
         self._profile.record_step(
             StepTiming(
+                phase=self._phase_name,
                 round_index=self._round_index,
                 step_index=self._steps_attempted - 1,
                 dojo=dojo.name,
                 cards=watch.cards,
                 completed=ran,
-                wait_seconds=batch_ready - watch.started,
+                wait_seconds=batch_ready - watch.span.started,
                 forward_seconds=forward_seconds,
-                total_seconds=ended - watch.started,
-                stages=STAGE_CLOCK.totals().minus(stages_before),
+                total_seconds=ended - watch.span.started,
+                stages=watch.span.stages(),
             )
         )
 
@@ -763,6 +761,7 @@ class Trainer:
             max_examples=self._plan.eval_examples_per_dojo,
             precision=self._precision,
             profile=self._profile,
+            phase_name=phase_run.phase.name,
             round_index=round_index,
         )
         self._profile.mark(f"[{phase_run.phase.name}] round {round_index} TEST end")
