@@ -131,6 +131,26 @@ _CASES = (
         _ALL_SHAPES,
     ),
     ModCase(
+        "shuffle_keys_bounded",
+        ShuffleKeysMod,
+        lambda seed: ShuffleKeysMod(rng_seed=seed, variants=4),
+        _ALL_SHAPES,
+    ),
+    ModCase(
+        "random_key_mask_bounded",
+        RandomKeyMaskMod,
+        lambda seed: RandomKeyMaskMod(probability=1.0, rng_seed=seed, variants=4),
+        _ALL_SHAPES,
+    ),
+    ModCase(
+        "weighted_field_mask_bounded",
+        WeightedFieldMaskMod,
+        lambda seed: WeightedFieldMaskMod(
+            _nested_mask_table(), rng_seed=seed, variants=4
+        ),
+        _ALL_SHAPES,
+    ),
+    ModCase(
         "mask_target_top_level",
         MaskTargetKeyMod,
         lambda seed: MaskTargetKeyMod("name"),
