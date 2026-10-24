@@ -485,3 +485,4 @@ isotropic.average_copies_bought,mixed_n4,6,0.007758,17,0
 isotropic.opening_buy_rate,mixed_n4,6,0.007498,16,0
 isotropic.turn_count_association,mixed_n4,6,0.007153,14,0
 isotropic.pile_exhaustion_rate,mixed_n4,6,0.007034,16,0
+contrastive.mtg,mtg_n0,1,1.323,256,0
