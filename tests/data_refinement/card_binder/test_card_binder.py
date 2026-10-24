@@ -5,7 +5,6 @@ from uuid import uuid4
 
 import pytest
 
-from src.data_refinement.card_binder import card_binder as card_binder_module
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
@@ -211,17 +210,24 @@ class TestSourceGamesOf:
         assert found == {bolt.nocab_uuid: GameId.MTG, ember.nocab_uuid: GameId.GWENT}
         assert unknown not in found
 
-    def test_copies_no_card(self, monkeypatch: pytest.MonkeyPatch) -> None:
+
+class TestReadsShareTheStoredCard:
+    def test_every_getter_returns_the_stored_object(self) -> None:
+        # No copies: callers share the binder's card and must not mutate it
         binder = CardBinder()
-        bolt = binder.create(_card("Bolt", "src-1", {"a": 1}))
+        bolt = binder.create(_card("Bolt", "src-1", {"a": {"b": [1]}}))
 
-        def no_copy(_: object) -> None:
-            raise AssertionError("source_games_of must not copy a card")
+        assert binder.get_by_uuid(bolt.nocab_uuid) is bolt
+        assert binder.get_by_name(GameId.MTG, "Bolt")[0] is bolt
+        assert binder.get_by_name_single(GameId.MTG, "Bolt") is bolt
+        assert binder.get_by_name_regex(GameId.MTG, "^Bo")[0] is bolt
+        assert list(binder.all_cards(GameId.MTG))[0] is bolt
 
-        monkeypatch.setattr(card_binder_module.copy, "deepcopy", no_copy)
-        assert binder.source_games_of([bolt.nocab_uuid]) == {
-            bolt.nocab_uuid: GameId.MTG
-        }
+    def test_unknown_card_is_the_stored_object(self) -> None:
+        binder = CardBinder()
+        unknown = binder.ensure_unknown_card(GameId.GWENT)
+
+        assert binder.ensure_unknown_card(GameId.GWENT) is unknown
 
 
 class TestGetByName:
