@@ -96,6 +96,15 @@ rows never straddle TRAIN and TEST.
   (empty, or at least one of its paths present; a partly present mask
   masks the paths that exist), so weight meant for fields a card lacks
   moves to masks that do something.
+  Each takes `variants` (spec and config field too): negative, the
+  default, draws fresh every time and stamps each changed card
+  do-not-cache; 0 turns the mod off; N > 0 (at most 100) lets the mod's
+  own random state pick a variant v in [0, N) per card and modifies the
+  card with a fixed random state seeded from `VARIANT_SEEDS[v]`, the
+  card's `nocab_uuid` and the mod class (`variant_seeds.py`). A card then
+  has at most N texts per mod, the same in every dojo and run, so they
+  are not stamped and the feature cache keeps them. `Mod.deterministic_cards`
+  is True for such a mod.
   Best effort: while applying, a card the mod cannot edit passes through
   unchanged and training continues; constructor arguments are validated.
   Each such mod keeps a `ModTally` (cards seen, changed, failed, and the
@@ -407,9 +416,10 @@ Files:
 Augmentation defaults: `augmentation_defaults.py` (at the top of
 `dojos/`) holds each game's default train-only augmentations as
 `ModSpec`s (`mods/mod_specs.py`): a `DropTable` of `FieldMask`s and a
-small random-key mask. The key shuffle is no longer a default: each
-shuffle is a new, uncacheable text, which defeated the feature cache
-(2026-10-21); a run config can still add `{kind: shuffle_keys}`. The tables name each game's
+small random-key mask, all unbounded (`variants` -1). The key shuffle is
+no longer a default: each shuffle is a new, uncacheable text, which
+defeated the feature cache (2026-10-21); a run config can still add
+`{kind: shuffle_keys}`, bounded with `variants: N` to keep it cacheable. The tables name each game's
 `raw_content` keys, so they follow the game's card-binder ingestion stage;
 each mainly masks the field that nearly identifies a card's deck (Gwent
 `faction`, STS2 `color`), so same-deck positives cannot be matched on that
