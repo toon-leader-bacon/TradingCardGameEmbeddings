@@ -336,9 +336,10 @@ failing, so a slow probe may mean memory, not compute (the counters
 show it).
 What it can't answer: training quality at a 4x batch.
 
+- 2026-10-24 13:16 · run mixed_n4 done, exit 0, 84 min; steady 4,340 cards/s (0.77× mixed_n0), hit rate 99.1% steady, 0 evictions → [bench note](bench_notes/2026-10-24_1316_mixed_n4_done.md)
+
 ## Results
 
 ## Conclusions
 
 ## Open questions
-- 2026-10-24 13:16 · run mixed_n4 done, exit 0, 84 min; steady 4,340 cards/s (0.77× mixed_n0), hit rate 99.1% steady, 0 evictions → [bench note](bench_notes/2026-10-24_1316_mixed_n4_done.md)
