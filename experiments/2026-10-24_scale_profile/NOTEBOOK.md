@@ -1,6 +1,6 @@
 # Training at scale: where a multi-card mixed-diet run spends its time, with and without bounded mods
 
-**Status:** running
+**Status:** awaiting review
 **Dates:** 2026-10-24 -
 **Parent:** [2026-10-21_cache_shakeout](../2026-10-21_cache_shakeout/NOTEBOOK.md) · **Branch:** `experiment/2026-10-24_scale_profile`
 
@@ -340,6 +340,7 @@ What it can't answer: training quality at a 4x batch.
 - 2026-10-24 13:45 · run mtg_n0 done, exit 0, 28 min; 2,227 anchor cards/s steady, build-bound (wait 69%), projection 12.9 h (card factor 0.8) → [bench note](bench_notes/2026-10-24_1345_mtg_n0_done.md)
 - 2026-10-24 14:15 · run mtg_n4 done, exit 0, 32 min; 1,982 anchor cards/s steady (0.89× mtg_n0), projection 14.5 h (card factor 0.8) → [bench note](bench_notes/2026-10-24_1415_mtg_n4_done.md)
 - 2026-10-24 15:25 · run probe_b2048 done, exit 0, 61 min; steady 6,386 cards/s in steps (1.13× mixed_n0), VRAM reserved 15.5 GiB → [bench note](bench_notes/2026-10-24_1525_probe_b2048_done.md)
+- 2026-10-24 15:16 · wrap-up: queue empty, 6/6 runs exit 0, 5.0 h; results/ generated (incl. timeline.png); dated corrections to the 10:42 launch time, the mtg_n4 commit and the probe_b2048 page time are listed there → [bench note](bench_notes/2026-10-24_1516_wrap_up.md)
 
 ## Results
 
