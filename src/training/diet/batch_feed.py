@@ -24,6 +24,7 @@ from src.training.diet.prefetching_batch_streams import (
     PrefetchingBatchStreams,
 )
 from src.training.diet.round_schedule import RoundSchedule, require_next_step
+from src.training.recording.run_profile import NO_RUN_PROFILE, RunProfile
 
 
 class BatchFeed(Protocol):
@@ -139,7 +140,10 @@ class DirectBatchFeed:
 
 
 def open_batch_feed(
-    streams: Mapping[str, DojoBatchStream], warmer: BatchWarmer, depth: int
+    streams: Mapping[str, DojoBatchStream],
+    warmer: BatchWarmer,
+    depth: int,
+    profile: RunProfile = NO_RUN_PROFILE,
 ) -> BatchFeed:
     """The feed for one phase: direct at depth 0, else a started
     PrefetchingBatchStreams building up to depth scheduled steps ahead
@@ -147,7 +151,8 @@ def open_batch_feed(
 
     Inputs: streams (dojo name -> its stream; the feed owns them from now
         on), warmer (reserves each built batch's cards on the worker;
-        ignored at depth 0), depth (>= 0, HardwareLimits.prefetch_depth).
+        ignored at depth 0), depth (>= 0, HardwareLimits.prefetch_depth),
+        profile (the prefetch worker's ReserveTimings; ignored at depth 0).
     Output: BatchFeed, already started; the caller must close it.
     Side effects: at depth >= 1, starts one daemon worker thread.
     Exceptions: ValueError if depth < 0 or streams is empty (from
@@ -163,6 +168,6 @@ def open_batch_feed(
     if depth == 0:
         return DirectBatchFeed(streams)
     # Otherwise build ahead on one worker thread
-    result = PrefetchingBatchStreams(streams, warmer, depth)
+    result = PrefetchingBatchStreams(streams, warmer, depth, profile)
     result.start()
     return result

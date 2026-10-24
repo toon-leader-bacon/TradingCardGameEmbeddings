@@ -26,7 +26,14 @@ from src.training.plan import FaultPolicy, HardwareLimits
 from src.training.recording.checkpointer import DirectoryCheckpointer
 from src.training.recording.reports import CheckpointRecord, RoundReport
 from src.training.diet.saturation_tracker import SaturationTracker
+from src.training.recording.run_profile import (
+    BuildTiming,
+    EvaluationTiming,
+    ReserveTiming,
+    StepTiming,
+)
 from src.training.trainer import Trainer
+from src.utils.stage_clock import STAGE_CLOCK
 from tests.training.fakes import (
     LIMITS,
     FakeBatch,
@@ -939,3 +946,84 @@ class TestPrefetch:
         assert result.final_report is None  # no round finished
         assert "step failed" not in caplog.text
         assert "quarantining" not in caplog.text
+
+
+class _RecordingProfile:
+    def __init__(self) -> None:
+        self.steps: list[StepTiming] = []
+        self.builds: list[BuildTiming] = []
+        self.evaluations: list[EvaluationTiming] = []
+        self.marks: list[str] = []
+
+    def record_step(self, timing: StepTiming) -> None:
+        self.steps.append(timing)
+
+    def record_build(self, timing: BuildTiming) -> None:
+        self.builds.append(timing)
+
+    def record_reserve(self, timing: ReserveTiming) -> None:
+        pass
+
+    def record_evaluation(self, timing: EvaluationTiming) -> None:
+        self.evaluations.append(timing)
+
+    def mark(self, text: str) -> None:
+        self.marks.append(text)
+
+    def close(self) -> None:
+        pass
+
+
+@pytest.fixture
+def stage_clock_on() -> Iterator[None]:
+    STAGE_CLOCK.enable(synchronize_cuda=False)
+    try:
+        yield
+    finally:
+        STAGE_CLOCK.disable()
+
+
+class TestProfile:
+    @pytest.mark.parametrize("prefetch_depth", [0, 2])
+    def test_a_profiled_run_reports_every_step_build_and_test_pass(
+        self, tmp_path: Path, stage_clock_on: None, prefetch_depth: int
+    ) -> None:
+        profile = _RecordingProfile()
+        plan = make_plan((make_phase(("a", "b")),))
+        trainer = Trainer(
+            FakeModel(),  # type: ignore[arg-type]
+            [FakeDojo("a"), FakeDojo("b")],  # type: ignore[list-item]
+            plan,
+            HardwareLimits(LIMITS.max_batch_cost, "fp32", prefetch_depth),
+            None,
+            [],
+            profile=profile,
+        )
+
+        result = trainer.run()
+
+        assert result.final_report is not None
+        assert len(profile.steps) == trainer.steps_attempted > 0
+        assert [step.step_index for step in profile.steps] == list(
+            range(trainer.steps_attempted)
+        )
+        assert all(step.completed for step in profile.steps)
+        assert all(step.wait_seconds <= step.total_seconds for step in profile.steps)
+        assert len(profile.builds) == len(profile.steps)
+        assert {timing.dojo for timing in profile.evaluations} == {"a", "b"}
+        assert any("TEST start" in mark for mark in profile.marks)
+
+    def test_an_unprofiled_run_reports_nothing(self, tmp_path: Path) -> None:
+        profile = _RecordingProfile()
+        plan = make_plan((make_phase(("a",)),))
+        Trainer(
+            FakeModel(),  # type: ignore[arg-type]
+            [FakeDojo("a")],  # type: ignore[list-item]
+            plan,
+            LIMITS,
+            None,
+            [],
+            profile=profile,
+        ).run()
+        assert profile.steps == [] and profile.builds == []
+        assert profile.evaluations == []

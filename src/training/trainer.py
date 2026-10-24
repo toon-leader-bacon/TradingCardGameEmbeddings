@@ -45,8 +45,15 @@ from src.training.recording.reports import (
     mean_normalized_test_loss_over,
 )
 from src.training.recording.run_listener import RunListener
+from src.training.recording.run_profile import (
+    NO_RUN_PROFILE,
+    RunProfile,
+    StepTiming,
+    card_count,
+)
 from src.training.round_evaluation import evaluate_split_losses
 from src.training.trainable_encoder import TrainableEncoder
+from src.utils.stage_clock import STAGE_CLOCK, StageTotals
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +105,22 @@ class _RoundSkips:
             )
         self.fp16_overflow = 0
         self.unusable_baseline = 0
+
+
+@dataclass
+class _StepWatch:
+    """Clock readings of one step attempt, filled in by _take_step as it
+    goes (time.perf_counter() values; None until reached).
+
+    started: the attempt began. batch_ready: its batch arrived.
+    forward_done: the loss was computed (GPU work synchronized).
+    cards: cards in its batch.
+    """
+
+    started: float
+    batch_ready: float | None = None
+    forward_done: float | None = None
+    cards: int = 0
 
 
 @dataclass(frozen=True)
@@ -157,7 +180,9 @@ class Trainer:
         cost_of (per-card batch cost; 1 per card by default, upgradable to
         token count without touching any dojo), batch_warmer (how the
         prefetch worker reserves each built batch's cards; nothing by
-        default; used only when limits.prefetch_depth >= 1).
+        default; used only when limits.prefetch_depth >= 1), profile
+        (where step, build, reservation and TEST timings go when the stage
+        clock is on; dropped by default).
     Exceptions (constructor): ValueError if any dojo.holdout != plan.holdout,
         if a phase names an unregistered dojo, or if a phase's diet
         includes a held-out dojo.
@@ -174,6 +199,7 @@ class Trainer:
         *,
         cost_of: Callable[[GenericCard], int] = lambda card: 1,
         batch_warmer: BatchWarmer = NO_BATCH_WARMING,
+        profile: RunProfile = NO_RUN_PROFILE,
     ) -> None:
         self._model = model
         self._dojos = {dojo.name: dojo for dojo in dojos}
@@ -186,7 +212,11 @@ class Trainer:
         self._precision = limits.precision
         self._prefetch_depth = limits.prefetch_depth
         self._batch_warmer = batch_warmer
+        self._profile = profile
         self._steps_taken = 0
+        # Every step attempt of the run, and the round being trained (profile)
+        self._steps_attempted = 0
+        self._round_index = 0
         # Steps skipped since the last round's report
         self._skips = _RoundSkips()
         # Per-dojo clipped steps since the last round's report
@@ -195,6 +225,17 @@ class Trainer:
         # LM frozen by its own flag stays frozen); phases toggle only these
         self._encoder_params = [p for p in model.parameters() if p.requires_grad]
         self._validate_plan_against_dojos(dojos)
+
+    @property
+    def steps_attempted(self) -> int:
+        """Step attempts so far, over every phase (any thread may read it).
+        Inputs: none. Output: int. Side effects: none. Exceptions: none.
+
+        Example:
+            >>> trainer.steps_attempted
+            1200
+        """
+        return self._steps_attempted
 
     def run(self) -> TrainingResult:
         """Execute every phase of the plan in order, surviving bad steps.
@@ -263,12 +304,15 @@ class Trainer:
         best: CheckpointRecord | None = None
         for round_index in range(phase.max_rounds):
             # Steps: the worker builds ahead while the GPU trains
+            self._round_index = round_index
+            self._profile.mark(f"[{phase.name}] round {round_index} training start")
             try:
                 self._train_round(phase_run)
             except BatchFeedError as error:
                 return self._outcome_after_feed_error(phase_run, report, best, error)
             # Evaluation and checkpoints: the worker idle, dojos see only this thread
             phase_run.feed.end_round()
+            self._profile.mark(f"[{phase.name}] round {round_index} training end")
             self._skips.log_and_reset(phase.name, round_index)
             self._clips.log_and_reset(phase.name, round_index)
             _log_learning_rate(phase_run, round_index)
@@ -342,7 +386,7 @@ class Trainer:
         optimizer = self._build_optimizer(phase)
         self._log_trainable_parameters(phase)
         streams = {
-            name: DojoBatchStream(self._dojos[name], self._budget)
+            name: DojoBatchStream(self._dojos[name], self._budget, self._profile)
             for name in phase.dojo_names
         }
         return PhaseRun(
@@ -350,7 +394,9 @@ class Trainer:
             optimizer=optimizer,
             tracker=SaturationTracker(phase.saturation, phase.dojo_names),
             sampler=diet_sampler_for(phase.diet_rule),
-            feed=open_batch_feed(streams, self._batch_warmer, self._prefetch_depth),
+            feed=open_batch_feed(
+                streams, self._batch_warmer, self._prefetch_depth, self._profile
+            ),
             faults=DojoFaultLedger(self._plan.faults, phase.dojo_names),
             scaler=torch.amp.GradScaler(
                 device_type_of(self._model), enabled=self._precision == "fp16"
@@ -480,7 +526,8 @@ class Trainer:
         Private helper - single consumer is _train_round.
         Inputs: phase_run, dojo (the scheduled one). Output: none.
         Side effects: as _take_step; step_attempts grows; the fault ledger
-            records the outcome (a skipped degenerate batch is neither).
+            records the outcome (a skipped degenerate batch is neither);
+            records a StepTiming when the stage clock is on.
         Exceptions: BatchFeedError propagates; any other failure is
             recovered from.
         """
@@ -489,12 +536,18 @@ class Trainer:
         # Every attempt advances the schedule, so it follows the budget
         _apply_learning_rate_schedule(phase_run)
         phase_run.step_attempts += 1
+        self._steps_attempted += 1
+        profiling = STAGE_CLOCK.enabled
+        stages_before = STAGE_CLOCK.totals() if profiling else None
+        watch = _StepWatch(started=time.perf_counter()) if profiling else None
         try:
-            ran = self._take_step(phase_run, dojo)
+            ran = self._take_step(phase_run, dojo, watch)
         except BatchFeedError:
             raise  # not a step failure: _run_phase ends the run
         except Exception as error:
             failure = error
+        if watch is not None and stages_before is not None:
+            self._record_step(dojo, ran, watch, stages_before)
         # Recover outside the except block: inside it the traceback still
         # pins the failed step's tensors, so an out-of-memory would not free
         if failure is not None:
@@ -528,16 +581,24 @@ class Trainer:
         self._recover_from_failed_step(phase_run, None, failure)
         return None
 
-    def _take_step(self, phase_run: PhaseRun, dojo: Dojo) -> bool:
+    def _take_step(
+        self, phase_run: PhaseRun, dojo: Dojo, watch: _StepWatch | None = None
+    ) -> bool:
         """One optimizer step on the dojo's next batch. Raises on any
         failure (caught only by _train_round).
 
+        watch: when profiling, filled in with the batch's arrival and the
+        forward pass's end (the forward is synchronized for an honest
+        split; the step already synchronizes at its gradient norm).
         Output: True when the step ran to completion (an fp16 overflow skip
         counts: it is normal). False when the batch had no usable baseline
         and the step was skipped before any forward pass: that is counted
         in self._skips and is neither a success nor a fault.
         """
         batch = phase_run.feed.next_batch(dojo.name)
+        if watch is not None:
+            watch.batch_ready = time.perf_counter()
+            watch.cards = card_count(batch.inputs)
 
         # Scale first: a degenerate batch costs no forward pass
         scale = self._loss_scale_for(phase_run, dojo, batch)
@@ -548,6 +609,9 @@ class Trainer:
         # Forward: encoder embeds batch.inputs, the dojo scores them
         with autocast_for(self._model, self._precision):
             loss = self._loss_of(dojo, batch)
+        if watch is not None:
+            _synchronize_device_of(loss)
+            watch.forward_done = time.perf_counter()
         self._require_finite(loss, dojo)
         loss = loss * scale
 
@@ -607,6 +671,37 @@ class Trainer:
             f"{_MIN_LOSS_SCALE:g}"
         )
 
+    def _record_step(
+        self, dojo: Dojo, ran: bool, watch: _StepWatch, stages_before: StageTotals
+    ) -> None:
+        """Report one step attempt's StepTiming to the profile. A step that
+        failed before its batch arrived counts all its time as waiting; one
+        that failed before its forward ended counts no forward time.
+
+        Private helper - single consumer is _attempt_step.
+        Inputs: dojo, ran (_take_step's result; False on failure), watch,
+            stages_before (the training thread's totals at the start).
+        Output: none. Side effects: profile.record_step. Exceptions: none.
+        """
+        ended = time.perf_counter()
+        batch_ready = ended if watch.batch_ready is None else watch.batch_ready
+        forward_seconds = 0.0
+        if watch.forward_done is not None:
+            forward_seconds = watch.forward_done - batch_ready
+        self._profile.record_step(
+            StepTiming(
+                round_index=self._round_index,
+                step_index=self._steps_attempted - 1,
+                dojo=dojo.name,
+                cards=watch.cards,
+                completed=ran,
+                wait_seconds=batch_ready - watch.started,
+                forward_seconds=forward_seconds,
+                total_seconds=ended - watch.started,
+                stages=STAGE_CLOCK.totals().minus(stages_before),
+            )
+        )
+
     def _loss_scale_for(
         self, phase_run: PhaseRun, dojo: Dojo, batch: DojoBatch
     ) -> float | None:
@@ -659,6 +754,7 @@ class Trainer:
         """The TEST pass over ALL dojos, feed the tracker, assemble the
         RoundReport (elapsed_seconds measured from run_started, a
         time.monotonic() reading)."""
+        self._profile.mark(f"[{phase_run.phase.name}] round {round_index} TEST start")
         losses = evaluate_split_losses(
             self._model,
             list(self._dojos.values()),
@@ -666,7 +762,10 @@ class Trainer:
             budget=self._budget,
             max_examples=self._plan.eval_examples_per_dojo,
             precision=self._precision,
+            profile=self._profile,
+            round_index=round_index,
         )
+        self._profile.mark(f"[{phase_run.phase.name}] round {round_index} TEST end")
         # The tracker judges normalized loss, so epsilon/reactivation_delta
         # mean the same thing for every dojo
         statuses = phase_run.tracker.record_round(
@@ -746,3 +845,11 @@ class Trainer:
             except Exception:
                 logger.warning("listener failed in on_checkpoint", exc_info=True)
         return record
+
+
+def _synchronize_device_of(tensor: torch.Tensor) -> None:
+    """Wait for the GPU work queued on the current stream, when tensor is
+    on a CUDA device (profiling only). Inputs: tensor. Output: none.
+    Side effects: blocks until the stream is idle. Exceptions: none."""
+    if tensor.device.type == "cuda":
+        torch.cuda.current_stream(tensor.device).synchronize()

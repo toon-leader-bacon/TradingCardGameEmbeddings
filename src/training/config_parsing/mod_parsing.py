@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 from src.dojos.mods.card_field_mods import UNBOUNDED_VARIANTS, FieldMask
 from src.dojos.mods.mod_specs import (
+    AugmentationRates,
     CardDropoutSpec,
     CardSubsampleSpec,
     DuplicateCollapseSpec,
@@ -55,7 +56,9 @@ def _parse_mod_spec(section: ConfigSection) -> ModSpec:
 
     The first three take an optional `variants:` int (default -1):
     negative draws fresh every time, 0 turns the mod off, N > 0 (at most
-    100) gives each card at most N cacheable texts.
+    100) gives each card at most N cacheable texts. shuffle_keys and
+    weighted_field_mask take an optional `probability:` (default 1.0),
+    the chance the mod acts on a card at all.
         {kind: card_dropout, drop_probability: 0.1, groups: [0]}
         {kind: card_subsample, keep_fraction: 0.8, groups: [1]}
         {kind: duplicate_collapse}
@@ -136,7 +139,10 @@ def _parse_field_mask(raw_paths: list[Any], where: str) -> FieldMask:
 
 # Each mod kind's parser, by its config name
 _MOD_PARSERS: dict[str, Callable[[ConfigSection], ModSpec]] = {
-    "shuffle_keys": lambda section: ShuffleKeysSpec(_parse_variants(section)),
+    "shuffle_keys": lambda section: ShuffleKeysSpec(
+        variants=_parse_variants(section),
+        probability=section.optional("probability", float, 1.0),
+    ),
     "random_key_mask": lambda section: RandomKeyMaskSpec(
         section.required("probability", float), _parse_variants(section)
     ),
@@ -144,7 +150,8 @@ _MOD_PARSERS: dict[str, Callable[[ConfigSection], ModSpec]] = {
         _parse_mask_table(
             section.required_section_list("table"), section.location_of("table")
         ),
-        _parse_variants(section),
+        variants=_parse_variants(section),
+        probability=section.optional("probability", float, 1.0),
     ),
     "card_dropout": lambda section: CardDropoutSpec(
         section.required("drop_probability", float), _parse_groups(section)
@@ -182,3 +189,31 @@ def _parse_groups(section: ConfigSection) -> tuple[int, ...]:
         checked_scalar(item, int, f"{where}.{index}")
         for index, item in enumerate(section.required_list("groups"))
     )
+
+
+def parse_default_augmentation(section: ConfigSection) -> AugmentationRates:
+    """The `default_augmentation:` section -> AugmentationRates, rewriting
+    every game default card-field mod's rates (src/dojos/
+    augmentation_defaults.py); dojos named in `mods:` are not touched:
+
+        default_augmentation: {probability: 0.1, variants: 4}
+
+    Both keys are optional; an absent key keeps each spec's own value.
+
+    Inputs: section ("default_augmentation", possibly empty).
+    Output: AugmentationRates. Side effects: none.
+    Exceptions: ValueError for an unknown key, a wrongly typed value, or a
+        rate no card-field mod accepts.
+
+    Example:
+        >>> parse_default_augmentation(top.optional_section("default_augmentation"))
+        AugmentationRates(probability=0.1, variants=4)
+    """
+    probability: float | None = None
+    variants: int | None = None
+    if "probability" in section.keys():
+        probability = section.required("probability", float)
+    if "variants" in section.keys():
+        variants = section.required("variants", int)
+    section.reject_unread_keys()
+    return construct_at(section.where, lambda: AugmentationRates(probability, variants))

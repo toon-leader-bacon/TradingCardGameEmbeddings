@@ -29,6 +29,11 @@ texts it can make of one card:
   at most N modified texts, the same in every dojo and run, so they are
   not stamped and the feature cache keeps them.
 
+`probability` is the chance the mod acts on a card at all, rolled on the
+mod's own random state before any variant is picked: with variants N > 0
+a card is modified on about that share of its draws, always into one of
+at most N texts. At 1.0 (the default) nothing is rolled.
+
 A card the mod passes through unchanged keeps its own stamp.
 """
 
@@ -49,6 +54,25 @@ _logger = logging.getLogger(__name__)
 
 # variants value for fresh, unbounded draws (any negative number works)
 UNBOUNDED_VARIANTS = -1
+
+
+def check_card_field_rates(probability: float, variants: int) -> None:
+    """Reject rates no card-field mod accepts; the one copy of these rules.
+
+    Inputs: probability (chance a mod acts on a card), variants (texts
+        per card; see the module docstring).
+    Output: none. Side effects: none.
+    Exceptions: ValueError if probability is outside [0, 1] or NaN, or
+        variants > MAX_VARIANTS.
+
+    Example:
+        >>> check_card_field_rates(0.1, 4)
+    """
+    # `not 0 <= p <= 1` also rejects NaN
+    if not 0 <= probability <= 1:
+        raise ValueError(f"probability must be in [0, 1], got {probability}")
+    if variants > MAX_VARIANTS:
+        raise ValueError(f"variants must be at most {MAX_VARIANTS}, got {variants}")
 
 
 @dataclass(frozen=True)
@@ -136,7 +160,7 @@ class CardFieldMod(Mod):
 
     Subclasses implement only modified_card(card, rng), drawing only from
     rng. Always train-only by default: these are augmentations, not part
-    of any task. variants: see the module docstring.
+    of any task. variants and probability: see the module docstring.
     """
 
     def __init__(
@@ -144,16 +168,18 @@ class CardFieldMod(Mod):
         train_only: bool = True,
         rng_seed: int | None = None,
         variants: int = UNBOUNDED_VARIANTS,
+        probability: float = 1.0,
     ) -> None:
         """Inputs: train_only (see Mod), rng_seed (None: nondeterministic),
         variants (negative: unbounded; 0: off; N > 0: at most N texts per
-        card). Output: none. Side effects: none.
-        Exceptions: ValueError if variants > MAX_VARIANTS."""
+        card), probability (chance the mod acts on a card, in [0, 1]).
+        Output: none. Side effects: none.
+        Exceptions: ValueError from check_card_field_rates."""
         super().__init__(train_only=train_only)
-        if variants > MAX_VARIANTS:
-            raise ValueError(f"variants must be at most {MAX_VARIANTS}, got {variants}")
+        check_card_field_rates(probability, variants)
         self.rng = random.Random(rng_seed)
         self.variants = variants
+        self.probability = probability
         self.tally: ModTally = ModTally()
         self._salt = mod_salt(type(self))
 
@@ -207,6 +233,9 @@ class CardFieldMod(Mod):
         self.tally.cards_seen += 1
         if self.variants == 0:
             return card
+        # The probability gate, on the mod's own state, before any variant
+        if self.probability < 1 and self.rng.random() >= self.probability:
+            return card
         try:
             result = self.modified_card(card, self._rng_for(card))
         except Exception as error:  # best effort: odd data must not stop training
@@ -241,7 +270,8 @@ class CardFieldMod(Mod):
 class ShuffleKeysMod(CardFieldMod):
     """Randomly reorder a card's top-level raw_content keys (values and
     nested content untouched), so a model cannot rely on field position.
-    The serializer deliberately keeps insertion order for this mod."""
+    The serializer deliberately keeps insertion order for this mod.
+    Constructor: as CardFieldMod."""
 
     def modified_card(self, card: GenericCard, rng: random.Random) -> GenericCard:
         """A new card with top-level keys in a random order; card itself
@@ -265,8 +295,8 @@ class ShuffleKeysMod(CardFieldMod):
 
 
 class RandomKeyMaskMod(CardFieldMod):
-    """With the given probability, mask one top-level key chosen uniformly
-    from the keys the card has."""
+    """With the given probability (CardFieldMod's gate), mask one
+    top-level key chosen uniformly from the keys the card has."""
 
     def __init__(
         self,
@@ -278,17 +308,17 @@ class RandomKeyMaskMod(CardFieldMod):
         """Inputs: probability (chance a card gets a mask at all, in
         [0, 1]), train_only, rng_seed, variants (see CardFieldMod).
         Output: none. Side effects: none.
-        Exceptions: ValueError if probability is outside [0, 1] or NaN, or
-            as CardFieldMod for variants."""
-        super().__init__(train_only=train_only, rng_seed=rng_seed, variants=variants)
-        # `not 0 <= p <= 1` also rejects NaN
-        if not 0 <= probability <= 1:
-            raise ValueError(f"probability must be in [0, 1], got {probability}")
-        self.probability = probability
+        Exceptions: as CardFieldMod."""
+        super().__init__(
+            train_only=train_only,
+            rng_seed=rng_seed,
+            variants=variants,
+            probability=probability,
+        )
 
     def modified_card(self, card: GenericCard, rng: random.Random) -> GenericCard:
         """card with one random top-level key masked, or card itself (no
-        roll this time, or no keys).
+        keys). The probability roll comes first, in CardFieldMod.
 
         Inputs: card, rng. Output: GenericCard. Side effects: advances rng.
         Exceptions: none expected.
@@ -299,7 +329,7 @@ class RandomKeyMaskMod(CardFieldMod):
             {'name': '[MASK]', 'power': 3}
         """
         keys = list(card.raw_content)
-        if not keys or rng.random() >= self.probability:
+        if not keys:
             return card
         return FieldMask.of_keys(rng.choice(keys)).applied_to(card)
 
@@ -322,15 +352,21 @@ class WeightedFieldMaskMod(CardFieldMod):
         train_only: bool = True,
         rng_seed: int | None = None,
         variants: int = UNBOUNDED_VARIANTS,
+        probability: float = 1.0,
     ) -> None:
         """Inputs: table (DropTable of FieldMask; weights validated by its
-        own construction), train_only, rng_seed, variants (see
-        CardFieldMod). Output: none. Side effects: none.
+        own construction), train_only, rng_seed, variants, probability
+        (see CardFieldMod). Output: none. Side effects: none.
         Exceptions: TypeError if any outcome in table (at any depth) is not
             a FieldMask, so a badly built table fails here, not per card;
-            ValueError as CardFieldMod for variants.
+            ValueError as CardFieldMod.
         """
-        super().__init__(train_only=train_only, rng_seed=rng_seed, variants=variants)
+        super().__init__(
+            train_only=train_only,
+            rng_seed=rng_seed,
+            variants=variants,
+            probability=probability,
+        )
         # Any outcome surviving this filter is one that is not a FieldMask
         if table.filtered(lambda outcome: not isinstance(outcome, FieldMask)):
             raise TypeError(

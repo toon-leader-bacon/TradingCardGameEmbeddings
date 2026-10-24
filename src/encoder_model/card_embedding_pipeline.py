@@ -21,6 +21,7 @@ from src.encoder_model.pooling.token_pooling import TokenPooling
 from src.encoder_model.precision import Precision, autocast_for, parameter_device
 from src.encoder_model.text_encoder import TextEncoder
 from src.schema.card import GenericCard
+from src.utils.stage_clock import STAGE_CLOCK, ProfileStage
 
 # Cards per warm() chunk: large enough to amortize a forward pass, small
 # enough that one chunk's token states (~150 MB at 384 tokens, fp16) fit
@@ -111,16 +112,17 @@ class CardEmbeddingPipeline(nn.Module):
             torch.Size([2, 256])
         """
         # Serialize every card, then pool: through the cache when there is one
-        texts = [serialize_card_to_json(card) for card in cards]
+        texts = _serialized(cards)
         if self._feature_cache is None:
             pooled = self._pool_live(texts)
         else:
-            pooled = self._feature_cache.features(
-                texts,
-                self._pool_live,
-                parameter_device(self),
-                cacheable=_cacheable_of(cards),
-            )
+            with STAGE_CLOCK.timed(ProfileStage.CACHE_LOOKUP):
+                pooled = self._feature_cache.features(
+                    texts,
+                    self._pool_live,
+                    parameter_device(self),
+                    cacheable=_cacheable_of(cards),
+                )
         # Project; the head always runs, cached or not
         return self.embedding_head(pooled)
 
@@ -161,7 +163,7 @@ class CardEmbeddingPipeline(nn.Module):
         with torch.no_grad(), autocast_for(self, precision):
             for start in range(0, len(cards), _WARM_CHUNK_CARDS):
                 chunk = cards[start : start + _WARM_CHUNK_CARDS]
-                texts = [serialize_card_to_json(card) for card in chunk]
+                texts = _serialized(chunk)
                 cache.features(
                     texts,
                     self._pool_live,
@@ -200,14 +202,15 @@ class CardEmbeddingPipeline(nn.Module):
 
         # One cache call, so the whole batch is one reservation
         with torch.no_grad(), autocast_for(self, precision):
-            texts = [serialize_card_to_json(card) for card in cards]
-            result = cache.reserve(
-                texts,
-                self._pool_live,
-                device,
-                durable=durable,
-                cacheable=_cacheable_of(cards),
-            )
+            texts = _serialized(cards)
+            with STAGE_CLOCK.timed(ProfileStage.CACHE_LOOKUP):
+                result = cache.reserve(
+                    texts,
+                    self._pool_live,
+                    device,
+                    durable=durable,
+                    cacheable=_cacheable_of(cards),
+                )
         return result
 
     def release(self, reservation: FeatureReservation) -> None:
@@ -258,11 +261,24 @@ class CardEmbeddingPipeline(nn.Module):
         Side effects: none beyond autograd.
         Exceptions: whatever the stages raise.
         """
-        encoding = self.text_encoder.encode(texts)
-        # Enrich the tokens, when this pipeline has an enrichment
-        if self.enrichment is not None:
-            encoding = self.enrichment(encoding)
-        return self.pooling(encoding)
+        STAGE_CLOCK.count_live_texts(len(texts))
+        with STAGE_CLOCK.timed(ProfileStage.LIVE_ENCODING, queues_gpu_work=True):
+            encoding = self.text_encoder.encode(texts)
+            # Enrich the tokens, when this pipeline has an enrichment
+            if self.enrichment is not None:
+                encoding = self.enrichment(encoding)
+            return self.pooling(encoding)
+
+
+def _serialized(cards: Sequence[GenericCard]) -> list[str]:
+    """Each card's JSON text, in order, timed as SERIALIZATION.
+
+    Private helper - consumers are embed, warm and reserve.
+    Inputs: cards. Output: list[str]. Side effects: none.
+    Exceptions: whatever serialize_card_to_json raises.
+    """
+    with STAGE_CLOCK.timed(ProfileStage.SERIALIZATION):
+        return [serialize_card_to_json(card) for card in cards]
 
 
 def _cacheable_of(cards: Sequence[GenericCard]) -> list[bool]:

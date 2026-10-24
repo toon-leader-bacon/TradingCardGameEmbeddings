@@ -2,6 +2,7 @@ from typing import List
 
 from src.dojos.mods.mod import Mod, ModTally
 from src.schema.type_hints import LabelT, TrainingDatum
+from src.utils.stage_clock import STAGE_CLOCK, ProfileStage
 
 
 class ModPipeline:
@@ -46,17 +47,19 @@ class ModPipeline:
     def apply_single(
         self, data: TrainingDatum[LabelT], is_training: bool = True
     ) -> TrainingDatum[LabelT]:
-        for mod in self.mods:
-            if not is_training and mod.train_only:
-                continue
-            data = mod.apply_single(data)
+        with STAGE_CLOCK.timed(ProfileStage.MODS):
+            for mod in self.mods:
+                if not is_training and mod.train_only:
+                    continue
+                data = mod.apply_single(data)
         return data
 
     def apply(
         self, data: List[TrainingDatum[LabelT]], is_training: bool = True
     ) -> List[TrainingDatum[LabelT]]:
-        for mod in self.mods:
-            if not is_training and mod.train_only:
-                continue
-            data = mod.apply(data)
+        with STAGE_CLOCK.timed(ProfileStage.MODS):
+            for mod in self.mods:
+                if not is_training and mod.train_only:
+                    continue
+                data = mod.apply(data)
         return data

@@ -22,6 +22,7 @@ from src.dojos.mods.common_mods import MaskTargetKeyMod
 from src.dojos.mods.mod import MASK_TOKEN
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.dojos.mods.mod_specs import (
+    AugmentationRates,
     CardDropoutSpec,
     CardSubsampleSpec,
     DeckModSpec,
@@ -191,3 +192,29 @@ class TestDefaultsKeepTheTask:
                 c.nocab_uuid for c in options
             ]
             assert [c.nocab_uuid for c in new_deck] == [c.nocab_uuid for c in deck]
+
+
+class TestAugmentationRates:
+    @pytest.mark.parametrize(
+        ("probability", "variants"), [(1.5, None), (float("nan"), None), (None, 101)]
+    )
+    def test_rejects_a_rate_no_mod_accepts(
+        self, probability: float | None, variants: int | None
+    ) -> None:
+        with pytest.raises(ValueError):
+            AugmentationRates(probability, variants)
+
+    def test_with_rates_replaces_only_what_is_given(self) -> None:
+        spec = RandomKeyMaskSpec(probability=0.5)
+        assert spec.with_rates(AugmentationRates(variants=4)) == RandomKeyMaskSpec(
+            probability=0.5, variants=4
+        )
+        assert spec.with_rates(AugmentationRates()) is spec
+
+    def test_with_rates_reaches_every_card_field_spec(self) -> None:
+        rates = AugmentationRates(probability=0.1, variants=4)
+        for spec in (ShuffleKeysSpec(), WeightedFieldMaskSpec(_TABLE)):
+            rewritten = spec.with_rates(rates)
+            assert (rewritten.probability, rewritten.variants) == (0.1, 4)
+            mod = rewritten.build(rng_seed=0)
+            assert (mod.probability, mod.variants) == (0.1, 4)  # type: ignore[attr-defined]

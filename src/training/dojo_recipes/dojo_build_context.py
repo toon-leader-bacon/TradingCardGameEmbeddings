@@ -6,7 +6,7 @@ from typing import Mapping, Protocol
 
 from src.dojos.dojo import Dojo
 from src.dojos.loss.regression_objective import RegressionObjective
-from src.dojos.mods.mod_specs import ModSpec
+from src.dojos.mods.mod_specs import AugmentationRates, ModSpec
 from src.schema.holdout import HoldoutSpec
 from src.training.dojo_recipes.card_shelf import CardShelf
 
@@ -29,6 +29,8 @@ class DojoBuildContext:
     contrastive dojo being built. regression_objective: the loss and
     baseline every regression dojo trains with (default: plain MSE); only
     the three regression cells take it (see bind_regression_objective).
+    default_augmentation: rates rewriting every card-field mod of a game's
+    default augmentations (not of mod_overrides); none by default.
     """
 
     shelf: CardShelf
@@ -40,6 +42,7 @@ class DojoBuildContext:
     regression_objective: RegressionObjective = field(
         default_factory=RegressionObjective.mse
     )
+    default_augmentation: AugmentationRates = AugmentationRates()
 
 
 class DojoRecipe(Protocol):

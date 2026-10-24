@@ -90,6 +90,7 @@ class TensorFeatureSlab:
         # Pin counts by key, held or not yet held; a key leaves at zero
         self._pins: Counter[CardTextKey] = Counter()
         self._refused_for_pins = 0
+        self._evicted = 0
         # (capacity_rows, width) once the first put fixes device and width
         self._rows: torch.Tensor | None = None
 
@@ -170,6 +171,7 @@ class TensorFeatureSlab:
             )
             self._require_decision_fits(decision, fresh_keys)
             self._refused_for_pins += decision.refused_for_pins
+            self._evicted += len(decision.evicted)
 
             # Make room, then write in one copy
             with _on_default_stream(self._cuda_device(features.device)):
@@ -233,6 +235,7 @@ class TensorFeatureSlab:
                     self._capacity_rows,
                     pinned_rows,
                     self._refused_for_pins,
+                    self._evicted,
                 ),
             )
 

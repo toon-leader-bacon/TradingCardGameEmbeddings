@@ -44,6 +44,7 @@ import bisect
 import enum
 import logging
 import threading
+import time
 from collections import deque
 from dataclasses import dataclass, replace
 from types import TracebackType
@@ -63,6 +64,12 @@ from src.training.diet.batch_feed_errors import (
 )
 from src.training.diet.dojo_batch_stream import DojoBatchStream
 from src.training.diet.round_schedule import RoundSchedule, require_next_step
+from src.training.recording.run_profile import (
+    NO_RUN_PROFILE,
+    ReserveTiming,
+    RunProfile,
+)
+from src.utils.stage_clock import STAGE_CLOCK
 
 _logger = logging.getLogger(__name__)
 
@@ -167,11 +174,13 @@ class PrefetchingBatchStreams:
         streams: Mapping[str, DojoBatchStream],
         warmer: BatchWarmer,
         depth: int,
+        profile: RunProfile = NO_RUN_PROFILE,
     ) -> None:
         """Inputs: streams (dojo name -> its stream; only this object may
             call them from now on), warmer (reserves each built batch's
             cards on the worker thread), depth (>= 1, scheduled steps built
-            ahead of the trainer).
+            ahead of the trainer), profile (where each reservation's
+            ReserveTiming goes when the stage clock is on).
         Output: none (constructor). Side effects: none; call start().
         Exceptions: ValueError if depth < 1 or streams is empty.
 
@@ -185,6 +194,7 @@ class PrefetchingBatchStreams:
         self._streams = dict(streams)
         self._warmer = warmer
         self._depth = depth
+        self._profile = profile
         # One condition guards every field below. Rule: every state change
         # calls notify_all, and every wait sits in a predicate loop
         self._condition = threading.Condition()
@@ -512,12 +522,27 @@ class PrefetchingBatchStreams:
         too; that surfaces there.)
 
         Private helper - single consumer is _produce (lock not held).
-        Inputs: name (for the log), batch. Output: FeatureReservation.
-        Side effects: warmer.reserve; counts and logs failures.
+        Inputs: name (for the log and the profile), batch.
+        Output: FeatureReservation.
+        Side effects: warmer.reserve; counts and logs failures; records a
+            ReserveTiming when the stage clock is on.
         Exceptions: none.
         """
+        before = STAGE_CLOCK.totals() if STAGE_CLOCK.enabled else None
+        start = time.perf_counter()
         try:
-            return self._warmer.reserve(list(iter_cards(batch.inputs)))
+            cards = list(iter_cards(batch.inputs))
+            result = self._warmer.reserve(cards)
+            if before is not None:
+                self._profile.record_reserve(
+                    ReserveTiming(
+                        dojo=name,
+                        cards=len(cards),
+                        seconds=time.perf_counter() - start,
+                        stages=STAGE_CLOCK.totals().minus(before),
+                    )
+                )
+            return result
         except Exception as error:
             with self._condition:
                 self._warm_failures += 1

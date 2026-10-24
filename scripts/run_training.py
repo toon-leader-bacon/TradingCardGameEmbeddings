@@ -14,6 +14,10 @@ run_directory, which must not exist yet:
         <phase>_roundNNNN/  the phase's best checkpoint (state.pt, encoder.pt, ...)
         latest/             the most recent round, rewritten every round
         run.log             the full log, from the script's first line
+        profile/            with --profile only: timing CSVs (steps, builds,
+                            reserves, evaluation, marks; see
+                            src/training/recording/run_profile.py) and
+                            samples.csv (run_sampler.py)
 
 The log also goes to logs/run_training/<timestamp>.log (or --log-file),
 which is the only log for a --check.
@@ -27,11 +31,16 @@ Usage (from the project root, in the ROCm venv for a GPU run):
     # Build and preflight the dojos, build the model (may download it) and
     # validate the plan against both; write nothing, train nothing
     PYTHONPATH=. python scripts/run_training.py configs/training/gpu_smoke.yaml --check
+
+    # Also time every step, batch build, reservation and TEST pass, and
+    # sample VRAM and the feature cache every 10 s, into <run_directory>/profile/
+    PYTHONPATH=. python scripts/run_training.py configs/training/gpu_smoke.yaml --profile
 """
 
 import argparse
 import contextlib
 import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Mapping
@@ -92,6 +101,12 @@ from src.training.dojo_recipes.dojo_build_context import DojoBuildContext
 from src.training.preflight import preflight_dojo
 from src.training.recording.checkpointer import DirectoryCheckpointer
 from src.training.recording.reports import TrainingResult
+from src.training.recording.run_profile import (
+    NO_RUN_PROFILE,
+    CsvRunProfile,
+    RunProfile,
+)
+from src.training.recording.run_sampler import RunSampler, SampledSources
 from src.training.recording.run_listener import (
     CsvRunListener,
     LoggingRunListener,
@@ -116,12 +131,15 @@ from src.training.run_config import (
 )
 from src.training.plan import HardwareLimits
 from src.training.trainer import Trainer
+from src.utils.stage_clock import STAGE_CLOCK
 
 _CONFIG_COPY_NAME = "run_config.yaml"
 _WHITENING_STATS_COPY_NAME = "whitening_stats.pt"
 _ROUNDS_CSV_NAME = "rounds.csv"
 _CHECKPOINTS_CSV_NAME = "checkpoints.csv"
 _DIET_SHARES_CSV_NAME = "diet_shares.csv"
+_PROFILE_DIRECTORY_NAME = "profile"
+_SAMPLES_CSV_NAME = "samples.csv"
 # Added to plan.seed for torch's global RNG, so dojo heads draw a
 # different stream from the model's (seeded with plan.seed itself)
 _DOJO_SEED_OFFSET = 1
@@ -149,13 +167,15 @@ class CommandLine:
     config: the YAML run config. overrides: "dotted.key=value" strings, in
     order. check_only: build and preflight the dojos, build the model and
     validate the plan with a Trainer, then stop without training.
-    logging: where and how verbosely to log.
+    logging: where and how verbosely to log. profile: write timing and
+    resource CSVs into <run_directory>/profile/ (ignored with check_only).
     """
 
     config: Path
     overrides: tuple[str, ...]
     check_only: bool
     logging: LoggingSettings
+    profile: bool = False
 
 
 def parse_command_line() -> CommandLine:
@@ -187,6 +207,12 @@ def parse_command_line() -> CommandLine:
         help="build and preflight the dojos, build the model and validate "
         "the plan, then stop without training",
     )
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="time steps, batch builds, reservations and TEST passes, and "
+        "sample VRAM and the feature cache, into <run_directory>/profile/",
+    )
     add_logging_arguments(parser)
     args = parser.parse_args()
     return CommandLine(
@@ -194,6 +220,7 @@ def parse_command_line() -> CommandLine:
         overrides=tuple(args.overrides),
         check_only=args.check,
         logging=logging_settings_from(args, script_log_path(__file__)),
+        profile=args.profile,
     )
 
 
@@ -205,7 +232,9 @@ def main() -> int:
         validation), 1 if preflight failed.
     Side effects: loads card data, may write split files, creates the run
         directory and everything in it, trains on the configured device,
-        logs progress.
+        logs progress; with --profile, turns on the process-wide stage
+        clock and writes the profile CSVs (the profile directory is created
+        before the dojos are built, so a failed preflight leaves it).
     Exceptions: ValueError for a bad config (including an unknown dojo)
         or an existing run directory; RuntimeError if the configured
         device is unavailable; FileNotFoundError for missing card data,
@@ -214,6 +243,7 @@ def main() -> int:
     Example:
         >>> raise SystemExit(main())
     """
+    started = time.monotonic()
     command_line = parse_command_line()
     configure_logging(command_line.logging)
 
@@ -230,6 +260,75 @@ def main() -> int:
     # initial weights are seeded separately, by build_model with plan.seed.
     # The offset keeps the first dojo head from replaying the model's stream
     torch.manual_seed(config.plan.seed + _DOJO_SEED_OFFSET)
+    profile = open_run_profile(command_line, config, started)
+    try:
+        return _run(command_line, document, config, profile)
+    finally:
+        if profile is not None:
+            profile.close()
+            STAGE_CLOCK.disable()
+
+
+def open_run_profile(
+    command_line: CommandLine, config: RunConfig, started: float
+) -> CsvRunProfile | None:
+    """The run's CsvRunProfile in <run_directory>/profile/, with the stage
+    clock on, when --profile was given for a real run; otherwise None.
+
+    Inputs: command_line, config, started (time.monotonic() at the script's
+        start: every profile row's t counts from it).
+    Output: CsvRunProfile or None.
+    Side effects: with a profile, creates the run directory's profile/
+        folder and its CSVs, and enables STAGE_CLOCK (CUDA syncs around
+        stages that queue GPU work, on a CUDA device).
+    Exceptions: FileExistsError, OSError from creating the CSVs.
+
+    Example:
+        >>> profile = open_run_profile(command_line, config, time.monotonic())
+    """
+    if not command_line.profile or command_line.check_only:
+        return None
+    result = CsvRunProfile(
+        config.run_directory / _PROFILE_DIRECTORY_NAME, opened_at=started
+    )
+    STAGE_CLOCK.enable(synchronize_cuda=config.device.type == "cuda")
+    _logger.info("Profiling into %s", config.run_directory / _PROFILE_DIRECTORY_NAME)
+    return result
+
+
+@contextlib.contextmanager
+def marked_stage(profile: RunProfile, name: str) -> Iterator[None]:
+    """Mark "<name> start" and "<name> end" in profile around the body
+    (the end is marked however the body ends).
+
+    Inputs: profile, name. Output: a context manager.
+    Side effects: two profile marks. Exceptions: whatever the body raises.
+
+    Example:
+        >>> with marked_stage(profile, "build_dojos"):
+        ...     dojos = build_dojos(config.dojo_names, context)
+    """
+    profile.mark(f"{name} start")
+    try:
+        yield
+    finally:
+        profile.mark(f"{name} end")
+
+
+def _run(
+    command_line: CommandLine,
+    document: ConfigDocument,
+    config: RunConfig,
+    csv_profile: CsvRunProfile | None,
+) -> int:
+    """main's body after the config is read: build, preflight, then check
+    or train. Private helper - single consumer is main.
+
+    Inputs: command_line, document (the config as read, overrides applied),
+        config (parsed from it), csv_profile (None: not profiling).
+    Output: main's exit code. Side effects and exceptions: as main.
+    """
+    profile: RunProfile = NO_RUN_PROFILE if csv_profile is None else csv_profile
 
     # Build the dojos and check each one before committing to a run
     context = DojoBuildContext(
@@ -240,17 +339,24 @@ def main() -> int:
         mod_overrides=config.mod_overrides,
         staple_thresholds=config.staple_thresholds,
         regression_objective=RegressionObjective.for_kind(config.regression_loss),
+        default_augmentation=config.default_augmentation,
     )
-    dojos = build_dojos(config.dojo_names, context)
-    if not preflight_passes(dojos, config):
+    with marked_stage(profile, "build_dojos"):
+        dojos = build_dojos(config.dojo_names, context)
+    with marked_stage(profile, "preflight"):
+        passed = preflight_passes(dojos, config)
+    if not passed:
         return 1
     # Each phase's expected diet, checked by eye before any GPU time
     shares = plan_diet_shares(config.plan, dojos)
     for line in format_diet_shares(shares):
         _logger.info("%s", line)
-    model = build_model(
-        config.model, seed=config.plan.seed, compute_precision=config.limits.precision
-    ).to(config.device)
+    with marked_stage(profile, "build_model"):
+        model = build_model(
+            config.model,
+            seed=config.plan.seed,
+            compute_precision=config.limits.precision,
+        ).to(config.device)
     _logger.info(
         "Model: %s trainable parameters", f"{trainable_parameter_count(model):,}"
     )
@@ -273,8 +379,10 @@ def main() -> int:
         _copy_whitening_stats(config)
         write_diet_shares_csv(shares, config.run_directory / _DIET_SHARES_CSV_NAME)
         # Fill the feature cache before any step, once run.log records it
-        warm_feature_cache(model, config, context.shelf)
-        result = train(model, dojos, config)
+        with marked_stage(profile, "warm_feature_cache"):
+            warm_feature_cache(model, config, context.shelf)
+        with marked_stage(profile, "train"):
+            result = train(model, dojos, config, csv_profile)
         log_summary(result, config.run_directory)
         _log_feature_cache_stats(model.feature_cache_stats(), "after training")
     return 0
@@ -667,14 +775,22 @@ def log_mod_tallies(tallies: Mapping[str, ModTally]) -> None:
 
 
 def train(
-    model: CardEncoderModel, dojos: list[Dojo], config: RunConfig
+    model: CardEncoderModel,
+    dojos: list[Dojo],
+    config: RunConfig,
+    profile: CsvRunProfile | None = None,
 ) -> TrainingResult:
     """Construct the Trainer with a checkpointer and the logging and CSV
-    listeners pointed at config.run_directory, and run it.
+    listeners pointed at config.run_directory, and run it. With a profile,
+    the Trainer reports its timings to it, and a RunSampler writes
+    samples.csv beside it for the length of training.
 
-    Inputs: model (already on config.device), dojos, config.
+    Inputs: model (already on config.device), dojos, config, profile
+        (None: not profiling).
     Output: TrainingResult.
-    Side effects: trains model and dojo heads; writes checkpoints and CSVs.
+    Side effects: trains model and dojo heads; writes checkpoints and CSVs;
+        with a profile, runs the sampler thread and stops it however
+        training ends.
     Exceptions: ValueError from the Trainer constructor for a plan/dojo
         mismatch; KeyboardInterrupt propagates.
 
@@ -697,8 +813,25 @@ def train(
         listeners=listeners,
         cost_of=card_cost,
         batch_warmer=batch_warmer_for(model, config.limits),
+        profile=NO_RUN_PROFILE if profile is None else profile,
     )
-    return trainer.run()
+    if profile is None:
+        return trainer.run()
+
+    # Sample VRAM and the cache on the profile's clock while training runs
+    sampler = RunSampler(
+        config.run_directory / _PROFILE_DIRECTORY_NAME / _SAMPLES_CSV_NAME,
+        SampledSources(
+            seconds_since_open=profile.seconds_since_open,
+            cache_stats=model.feature_cache_stats,
+            steps_attempted=lambda: trainer.steps_attempted,
+        ),
+    )
+    sampler.start()
+    try:
+        return trainer.run()
+    finally:
+        sampler.stop()
 
 
 def batch_warmer_for(model: CardEncoderModel, limits: HardwareLimits) -> BatchWarmer:
@@ -791,12 +924,14 @@ def _with_expanded_dojos(document: ConfigDocument, config: RunConfig) -> ConfigD
 
 def _create_run_directory(run_directory: Path, document: ConfigDocument) -> None:
     """Create run_directory and write document into it as run_config.yaml.
+    It may exist already, holding only the profile/ folder --profile made
+    (main checked it was new before that).
 
     Inputs: run_directory, document (the config as run). Output: none.
     Side effects: creates directories and one file.
     Exceptions: OSError from the filesystem.
     """
-    run_directory.mkdir(parents=True)
+    run_directory.mkdir(parents=True, exist_ok=True)
     with (run_directory / _CONFIG_COPY_NAME).open("w", encoding="utf-8") as copy_file:
         yaml.safe_dump(document, copy_file, sort_keys=False)
 

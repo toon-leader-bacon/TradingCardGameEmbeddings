@@ -56,6 +56,8 @@ class TierStats:
     pinned_rows: held rows with at least one pin (0 for the disk).
     refused_for_pins: running total of offered keys the tier's policy
         would have admitted but for pinned rows filling it.
+    evicted: running total of rows dropped to make room (0 for a tier
+        that never evicts).
     """
 
     name: str
@@ -64,6 +66,7 @@ class TierStats:
     capacity_rows: int
     pinned_rows: int
     refused_for_pins: int
+    evicted: int = 0
 
 
 class FeatureStore(Protocol[F]):
