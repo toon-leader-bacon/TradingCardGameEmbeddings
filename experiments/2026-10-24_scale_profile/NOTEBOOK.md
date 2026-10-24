@@ -338,6 +338,7 @@ What it can't answer: training quality at a 4x batch.
 
 - 2026-10-24 13:16 · run mixed_n4 done, exit 0, 84 min; steady 4,340 cards/s (0.77× mixed_n0), hit rate 99.1% steady, 0 evictions → [bench note](bench_notes/2026-10-24_1316_mixed_n4_done.md)
 - 2026-10-24 13:45 · run mtg_n0 done, exit 0, 28 min; 2,227 anchor cards/s steady, build-bound (wait 69%), projection 12.9 h (card factor 0.8) → [bench note](bench_notes/2026-10-24_1345_mtg_n0_done.md)
+- 2026-10-24 14:15 · run mtg_n4 done, exit 0, 32 min; 1,982 anchor cards/s steady (0.89× mtg_n0), projection 14.5 h (card factor 0.8) → [bench note](bench_notes/2026-10-24_1415_mtg_n4_done.md)
 
 ## Results
 
