@@ -63,14 +63,13 @@ class GenericCard:
     (`card.name = ...`) — it does NOT make raw_content itself immutable,
     since raw_content is still a plain, mutable dict. Mutating it in
     place (`card.raw_content[key] = ...`) silently corrupts every other
-    holder of the same GenericCard object (e.g. CardBinder's own
-    canonical copy, if a caller ever gets a reference to it) without
-    frozen catching it. Never mutate raw_content in place — build a new
+    holder of the same GenericCard object without frozen catching it.
+    That includes CardBinder's own stored card: its read accessors
+    (get_by_uuid() etc.) return the stored object, not a copy, so one
+    in-place edit reaches every later reader for the rest of the run.
+    Never mutate raw_content in place — build a new
     GenericCard with GenericCardFactory.with_field() (src/schema/card_factory.py) (or a
     new dict plus dataclasses.replace()) instead.
-    CardBinder's own read accessors (get_by_uuid() etc.) return a deep
-    copy for exactly this reason, so a caller mutating what it got back
-    can't reach the binder's own stored card either way.
 
     One more frozen gotcha: frozen=True + the default eq=True makes
     Python auto-generate a __hash__ for this class, but that __hash__
