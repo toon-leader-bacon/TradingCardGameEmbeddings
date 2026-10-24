@@ -103,8 +103,3 @@
     card, so the feature cache could warm the modded corpus before
     training (about 5 min per unit of `variants`). Do it only if the
     first-draw misses show up in a profile.
-- **`CardBinder` deep-copies every card it returns** (about 45 us a card,
-  2026-10-21, more than twice today's mod cost). Cards are frozen and
-  mods never mutate, so the copy may be removable
-  (`src/data_refinement/card_binder/card_binder.py`). Confirm how much it
-  costs in a real batch-building profile first.
