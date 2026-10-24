@@ -1,5 +1,5 @@
 run,visits,card_factor,anchor_cards_per_s_wall_steady,anchor_cards_per_s_in_steps_steady,decks_per_card,decks_per_s_wall_steady,anchor_visits_needed,hours_one_anchor_pass,days_one_anchor_pass,hours_one_deck_pass
-mtg_n0,estimate,0.8,2227,2228,0.5,1113,1.032e+08,12.88,0.5365,1.379
+mtg_n0,estimate,0.8049,2227,2228,0.5,1113,1.039e+08,12.95,0.5398,1.379
 mtg_n0,upper_bound,1,2227,2228,0.5,1113,1.29e+08,16.09,0.6706,1.379
-mtg_n4,estimate,0.8,1982,1983,0.5,990.8,1.032e+08,14.47,0.6029,1.55
+mtg_n4,estimate,0.8049,1982,1983,0.5,990.8,1.039e+08,14.56,0.6066,1.55
 mtg_n4,upper_bound,1,1982,1983,0.5,990.8,1.29e+08,18.09,0.7537,1.55

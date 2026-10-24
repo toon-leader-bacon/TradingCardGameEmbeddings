@@ -21,7 +21,8 @@ Writes into experiments/2026-10-24_scale_profile/results/:
     mtg_projection.csv  per mtg_* run: steady-state anchor cards/s and the
                         hours one anchor pass over every known card of every
                         TRAIN MTG deck would take
-    step_parts.png, hourly_throughput.png
+    step_parts.png, hourly_throughput.png, timeline.png (5-minute bins:
+    cards/s, wait share and texts encoded, per run)
 
 Steady state is the second half of a run's training time (cache warm,
 first passes over small datasets done). Hit rate is 1 - encoded / texts
@@ -285,6 +286,7 @@ def plot(summary: pd.DataFrame, hours: pd.DataFrame) -> None:
     ax = parts.plot.barh(stacked=True, figsize=(7, 0.6 * len(parts) + 1.5))
     ax.set_xlabel("share of summed training step time")
     ax.set_title("Where a step's time goes")
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=3)
     plt.tight_layout()
     plt.savefig(RESULTS / "step_parts.png", dpi=120)
     plt.close()
@@ -304,6 +306,38 @@ def plot(summary: pd.DataFrame, hours: pd.DataFrame) -> None:
     plt.close()
 
 
+def plot_timeline(runs: list[str], bin_s: float = 300) -> None:
+    """Per run, over minutes of training (5-minute bins): wall-clock
+    cards/s, the wait share of step time, and texts encoded so far (the
+    cache's misses, warm-up excluded)."""
+    fig, axes = plt.subplots(3, 1, figsize=(8, 9), sharex=True)
+    for run in runs:
+        profile = RUNS / run / "profile"
+        steps = read(profile / "steps.csv")
+        if steps.empty:
+            continue
+        start, _ = training_window(steps)
+        bins = steps.assign(minute=((steps["t"] - start) // bin_s) * bin_s / 60).groupby("minute").agg(
+            cards=("cards", "sum"), step_s=("total_s", "sum"), wait_s=("wait_s", "sum"))
+        axes[0].plot(bins.index, bins["cards"] / bin_s, label=run)
+        axes[1].plot(bins.index, bins["wait_s"] / bins["step_s"], label=run)
+        samples = read(profile / "samples.csv")
+        if not samples.empty:
+            samples = samples[samples["t"] >= start]
+            if not samples.empty:
+                axes[2].plot((samples["t"] - start) / 60,
+                             samples["cache_encoded"] - samples["cache_encoded"].iloc[0], label=run)
+    axes[0].set_ylabel("cards/s (wall clock)")
+    axes[1].set_ylabel("wait share of step time")
+    axes[2].set_ylabel("texts encoded since training start")
+    axes[2].set_xlabel("minutes of training (TEST passes included)")
+    axes[0].legend(fontsize=8)
+    axes[0].set_title("Throughput, waiting and cache misses over a run")
+    plt.tight_layout()
+    plt.savefig(RESULTS / "timeline.png", dpi=120)
+    plt.close()
+
+
 def main() -> None:
     runs = sys.argv[1:] or DEFAULT_RUNS
     RESULTS.mkdir(parents=True, exist_ok=True)
@@ -320,6 +354,7 @@ def main() -> None:
     card_factor = float(MTG_CARD_FACTOR_FILE.read_text().split()[0]) if MTG_CARD_FACTOR_FILE.exists() else 0.8
     mtg_projection(summary, card_factor).to_csv(RESULTS / "mtg_projection.csv", index=False, float_format="%.4g")
     plot(summary, hours)
+    plot_timeline(runs)
     print(summary.T.to_string())
 
 
