@@ -88,7 +88,6 @@ for the exact same deck, always.
 """
 
 import hashlib
-import json
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import replace
@@ -477,16 +476,30 @@ class DeckBox:
         """
         yield from self._decks_from_rows(self._tables.deck_rows(source_game))
 
-    def version_for(self, source_game: GameId) -> str:
-        """A content hash over every currently-held source_game deck.
+    def version_for(self, source_game: GameId) -> str | None:
+        """A cheap version of this box's source_game decks: a hash of the
+        CardBinder version they were minted against
+        (card_binder_version_for) and how many decks the game holds.
 
-        Derived, not stored - mirrors CardBinder.version_for()'s
-        reasoning. provenance is excluded for the same reason.
+        Computed on every call (one metadata read and one COUNT), never
+        stored, so it costs about the same on a 6.9M-deck box as on an
+        empty one. A different deck count, or a re-stamp against another
+        binder, gives a new version.
+
+        KNOWN BLIND SPOT: a change that keeps the deck count (a deck's
+        cards edited in place by update()/replace(), or a re-extraction
+        that rewrites contents one for one) keeps the version, so
+        anything keyed on it (e.g. a derived snapshot) is not
+        invalidated. Accepted: this project rebuilds deck boxes rarely
+        and wholesale, and the cost of missing such a change is training
+        on slightly different data than the box now holds.
 
         Inputs:
-            source_game: which game's decks to hash.
-        Output: a sha256 hex digest (64 hex chars). A game with no
-            decks yet still produces a fixed digest, not an error.
+            source_game: which game's decks to version.
+        Output: a sha256 hex digest (64 hex chars), or None when
+            card_binder_version_for(source_game) is None (never stamped,
+            or a mutating run has not finished its save()). Callers treat
+            None as stale, as they do for card_binder_version_for.
         Side effects: none.
         Exceptions: none.
 
@@ -495,14 +508,13 @@ class DeckBox:
             >>> box.version_for(GameId.GWENT)
             '7a91e0...'
         """
-        digest = hashlib.sha256()
-
-        # nocab_uuid order, so the hash reflects content only, never
-        # incidental row order.
-        ordered_rows = self._tables.deck_rows(source_game, ordered_by_uuid=True)
-        for deck in self._decks_from_rows(ordered_rows):
-            digest.update(_hashable_deck_bytes(deck))
-        return digest.hexdigest()
+        card_binder_version = self.card_binder_version_for(source_game)
+        if card_binder_version is None:
+            return None
+        deck_count = self._tables.deck_count(source_game)
+        return hashlib.sha256(
+            f"{card_binder_version}:{deck_count}".encode("utf-8")
+        ).hexdigest()
 
     def card_binder_version_for(self, source_game: GameId) -> str | None:
         """The CardBinder version this box's source_game decks were
@@ -851,27 +863,10 @@ class DeckBox:
     def _decks_from_rows(self, rows: Iterator[sqlite3.Row]) -> Iterator[GenericDeck]:
         """Each decks row joined with its deck_cards, as GenericDecks.
 
-        Private helper - consumers are all_decks()/version_for().
+        Private helper - single consumer is all_decks().
         """
         for row in rows:
             card_nocab_uuids = self._tables.deck_cards(UUID(row["nocab_uuid"]))
             yield deck_from_row(row, card_nocab_uuids)
 
     # endregion Private Helpers
-
-
-def _hashable_deck_bytes(deck: GenericDeck) -> bytes:
-    """deck's content, serialized for digest.update() - nocab_uuid/
-    name/a SORTED card_nocab_uuids (a multiset, so incidental order
-    must not affect the hash), provenance excluded.
-
-    Private helper - single consumer is DeckBox.version_for().
-    """
-    return json.dumps(
-        {
-            "nocab_uuid": str(deck.nocab_uuid),
-            "name": deck.name,
-            "card_nocab_uuids": sorted(str(uuid) for uuid in deck.card_nocab_uuids),
-        },
-        sort_keys=True,
-    ).encode("utf-8")

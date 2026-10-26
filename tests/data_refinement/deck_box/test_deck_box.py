@@ -300,46 +300,70 @@ class TestAllDecks:
 
 
 class TestVersionFor:
-    def test_empty_game_returns_a_fixed_digest(self) -> None:
+    @staticmethod
+    def _saved_box(
+        path: Path, decks: list[GenericDeck], card_binder_version: str = "binder-v1"
+    ) -> DeckBox:
+        """decks saved to path and stamped, then loaded back from it."""
         box = DeckBox()
+        for deck in decks:
+            box.create(deck)
+        box.save(path, GameId.MTG, card_binder_version)
+        return DeckBox.load([path])
 
-        assert box.version_for(GameId.MTG) == box.version_for(GameId.MTG)
-        assert isinstance(box.version_for(GameId.MTG), str)
-
-    def test_stable_across_instances_with_the_same_content(self) -> None:
-        deck = _deck("Mono Red", [uuid4(), uuid4()])
-        first_box = DeckBox()
-        first_box.create(replace(deck))
-        second_box = DeckBox()
-        second_box.create(replace(deck))
-
-        assert first_box.version_for(GameId.MTG) == second_box.version_for(GameId.MTG)
-
-    def test_unaffected_by_card_nocab_uuids_order(self) -> None:
-        # card_nocab_uuids is a multiset (unordered, duplicates
-        # meaningful) - the same deck (same nocab_uuid) with its cards
-        # listed in a different order must hash identically.
-        card_a, card_b = uuid4(), uuid4()
-        deck = _deck("Mono Red", [card_a, card_b])
-        reordered_deck = replace(deck, card_nocab_uuids=[card_b, card_a])
-        first_box = DeckBox()
-        first_box.create(deck)
-        second_box = DeckBox()
-        second_box.create(reordered_deck)
-
-        assert first_box.version_for(GameId.MTG) == second_box.version_for(GameId.MTG)
-
-    def test_changes_when_a_deck_is_added(self) -> None:
+    def test_none_when_never_stamped(self) -> None:
         box = DeckBox()
         box.create(_deck("Mono Red", [uuid4()]))
-        before = box.version_for(GameId.MTG)
+
+        assert box.version_for(GameId.MTG) is None
+
+    def test_a_stamped_box_has_a_sha256_hex_digest(self, tmp_path: Path) -> None:
+        box = self._saved_box(tmp_path / "mtg.db", [_deck("Mono Red", [uuid4()])])
+
+        version = box.version_for(GameId.MTG)
+
+        assert version is not None
+        assert len(version) == 64
+        assert version == box.version_for(GameId.MTG)
+
+    def test_same_stamp_and_deck_count_give_the_same_version(
+        self, tmp_path: Path
+    ) -> None:
+        # Deck contents are not hashed, only how many decks there are
+        first = self._saved_box(tmp_path / "a.db", [_deck("Mono Red", [uuid4()])])
+        second = self._saved_box(tmp_path / "b.db", [_deck("Mono Blue", [uuid4()])])
+
+        assert first.version_for(GameId.MTG) == second.version_for(GameId.MTG)
+
+    def test_changes_with_the_deck_count(self, tmp_path: Path) -> None:
+        one = self._saved_box(tmp_path / "a.db", [_deck("Mono Red", [uuid4()])])
+        two = self._saved_box(
+            tmp_path / "b.db",
+            [_deck("Mono Red", [uuid4()]), _deck("Mono Blue", [uuid4()])],
+        )
+
+        assert one.version_for(GameId.MTG) != two.version_for(GameId.MTG)
+
+    def test_changes_with_the_card_binder_version(self, tmp_path: Path) -> None:
+        deck = _deck("Mono Red", [uuid4()])
+        first = self._saved_box(tmp_path / "a.db", [replace(deck)], "binder-v1")
+        second = self._saved_box(tmp_path / "b.db", [replace(deck)], "binder-v2")
+
+        assert first.version_for(GameId.MTG) != second.version_for(GameId.MTG)
+
+    def test_none_after_a_mutating_call_until_saved(self, tmp_path: Path) -> None:
+        path = tmp_path / "mtg.db"
+        box = self._saved_box(path, [_deck("Mono Red", [uuid4()])])
 
         box.create(_deck("Mono Blue", [uuid4()]))
 
-        assert box.version_for(GameId.MTG) != before
+        assert box.version_for(GameId.MTG) is None
+        box.save(path, GameId.MTG, "binder-v1")
+        assert box.version_for(GameId.MTG) is not None
 
-    def test_unaffected_by_other_games(self) -> None:
-        box = DeckBox()
+    def test_unaffected_by_other_games(self, tmp_path: Path) -> None:
+        path = tmp_path / "mtg.db"
+        box = self._saved_box(path, [_deck("Mono Red", [uuid4()])])
         before = box.version_for(GameId.MTG)
 
         box.create(_deck("Fire Deck", [uuid4()], source_game=GameId.POKEMON))

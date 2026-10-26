@@ -82,10 +82,21 @@ metrics too.
     recur), `update` (overwrites only the fields given), `replace`,
     `delete`, `get_by_uuid`; lazy `all_uuids`/`all_decks` generators,
     so a box larger than memory reads the same as a small one.
-  - `version_for(game)`: a derived content hash, like
-    `CardBinder.version_for()`. `card_binder_version_for(game)`: the
-    stamped version, or `None` when never stamped or cleared by an
-    unfinished run; callers treat `None` as stale.
+  - `card_binder_version_for(game)`: the stamped binder version the
+    decks were minted against, or `None` when never stamped or cleared
+    by an unfinished run; callers treat `None` as stale.
+  - `version_for(game)`: a cheap version, a hash of
+    `card_binder_version_for(game)` and the game's deck count, computed
+    per call (`None` when the stamp is `None`). A new deck count or a
+    re-stamp against another binder changes it.
+    - **Known blind spot:** a change that keeps the deck count (decks
+      edited in place, or a re-extraction that rewrites contents one
+      for one) keeps the version, so nothing keyed on it notices. This
+      is accepted: deck boxes are rebuilt rarely and wholesale here, and
+      missing such a change only means training on slightly different
+      data than the box now holds.
+    - Unlike `CardBinder.version_for()`, it is not a content hash: on
+      MTG's 40 GB box that would scan 161M rows per call.
   - `uuids_ranked_randomly(game, seed)`: a seeded, reproducible ranking
     computed inside SQLite (the held-out-deck-card metric samples decks
     with it). Training's deck splits come from the `HoldoutSpec` instead
