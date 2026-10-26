@@ -289,16 +289,11 @@ class DeckTables:
                 cards.setdefault(deck_uuid, []).extend([UUID(card_uuid)] * count)
         return {UUID(deck_uuid): deck_cards for deck_uuid, deck_cards in cards.items()}
 
-    def deck_rows(
-        self, source_game: GameId | None, *, ordered_by_uuid: bool = False
-    ) -> Iterator[sqlite3.Row]:
+    def deck_rows(self, source_game: GameId | None) -> Iterator[sqlite3.Row]:
         """Every decks row, filtered by source_game if given, lazily.
 
-        Inputs:
-            source_game: filter, or None for every game.
-            ordered_by_uuid: sort by nocab_uuid (for content hashing);
-                otherwise no guaranteed order.
-        Output: Iterator[sqlite3.Row].
+        Inputs: source_game: filter, or None for every game.
+        Output: Iterator[sqlite3.Row], in no guaranteed order.
         Side effects: none. Exceptions: none.
         """
         sql = "SELECT * FROM decks"
@@ -306,9 +301,18 @@ class DeckTables:
         if source_game is not None:
             sql += " WHERE source_game = ?"
             params = (source_game.value,)
-        if ordered_by_uuid:
-            sql += " ORDER BY nocab_uuid"
         yield from self._connection.execute(sql, params)
+
+    def deck_count(self, source_game: GameId) -> int:
+        """How many decks rows source_game has.
+
+        Inputs: source_game. Output: int.
+        Side effects: none. Exceptions: none.
+        """
+        cursor = self._connection.execute(
+            "SELECT COUNT(*) FROM decks WHERE source_game = ?", (source_game.value,)
+        )
+        return cursor.fetchone()[0]
 
     def ranked_deck_rows(
         self, source_game: GameId, seed: int | None

@@ -45,7 +45,7 @@ class DeckLookup(Protocol):
         """See DeckBox.all_decks()."""
         ...
 
-    def version_for(self, source_game: GameId) -> str:
+    def version_for(self, source_game: GameId) -> str | None:
         """See DeckBox.version_for()."""
         ...
 
