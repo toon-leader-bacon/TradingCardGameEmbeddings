@@ -372,12 +372,17 @@ The script builds the model and the config's dojos, preflights every dojo
 logs each augmentation mod's tally over its one batch (cards changed,
 failed) and warns on a mod that changed nothing or failed; that never
 stops the run. A config's optional `mods:` section replaces a dojo's
-default augmentations (see `configs/training/gwent_contrastive.yaml`);
+default augmentations (see `configs/training/gwent_contrastive.yaml`).
+An optional top-level `default_augmentation: {probability, variants}`
+rewrites those rates on every game-default card-field mod, leaving dojos
+named in `mods:` alone (`AugmentationRates`, `mods/mod_specs.py`);
 dojo names contain ".", so `--set` cannot reach them (nor `loss_weights:`). The run
 directory must not already exist; it receives `run_config.yaml` (the
 config with overrides applied and dojo patterns expanded to names;
 defaults it left out are not written),
-`rounds.csv`, `checkpoints.csv`, the checkpoint directories and `run.log`,
+`rounds.csv`, `checkpoints.csv`, `samples.csv` (VRAM and feature cache
+stats every 10 s while training, `recording/run_sampler.py`), the
+checkpoint directories and `run.log`,
 the script's full log from its first line (see `src/run_logging.py`;
 `--log-file` and `--log-level` adjust it). Batch cost
 is one per card, for preflight and training alike (`card_cost`).

@@ -7,6 +7,7 @@ import torch
 
 from src.dojos.mods.card_field_mods import UNBOUNDED_VARIANTS, FieldMask
 from src.dojos.mods.mod_specs import (
+    AugmentationRates,
     CardDropoutSpec,
     CardSubsampleSpec,
     DuplicateCollapseSpec,
@@ -910,3 +911,46 @@ class TestFeatureCache:
         document["warm_feature_cache"] = ["chess"]
         with pytest.raises(ValueError, match="unknown game 'chess'"):
             parse_run_config(document)
+
+
+class TestDefaultAugmentation:
+    def test_absent_means_no_change(self) -> None:
+        assert parse_run_config(_document()).default_augmentation == AugmentationRates()
+
+    def test_parses_both_rates(self) -> None:
+        document = _document()
+        document["default_augmentation"] = {"probability": 0.1, "variants": 4}
+        assert parse_run_config(document).default_augmentation == AugmentationRates(
+            0.1, 4
+        )
+
+    @pytest.mark.parametrize(
+        ("section", "message"),
+        [
+            ({"probability": 1.5}, "probability"),
+            ({"variants": 101}, "at most"),
+            ({"rate": 0.1}, "rate"),
+        ],
+    )
+    def test_rejects_a_bad_section(self, section: dict, message: str) -> None:
+        document = _document()
+        document["default_augmentation"] = section
+        with pytest.raises(ValueError, match=message):
+            parse_run_config(document)
+
+    def test_parses_probability_on_shuffle_and_weighted_masks(self) -> None:
+        document = _document()
+        dojo = document["dojos"][0]
+        document["mods"] = {
+            dojo: [
+                {"kind": "shuffle_keys", "probability": 0.2},
+                {
+                    "kind": "weighted_field_mask",
+                    "table": [{"weight": 1}],
+                    "probability": 0.3,
+                },
+            ]
+        }
+        specs = parse_run_config(document).mod_overrides[dojo]
+        assert specs[0] == ShuffleKeysSpec(probability=0.2)
+        assert cast(WeightedFieldMaskSpec, specs[1]).probability == 0.3

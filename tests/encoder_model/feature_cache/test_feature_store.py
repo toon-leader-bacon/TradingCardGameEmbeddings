@@ -201,6 +201,12 @@ class TestTensorFeatureSlab:
         assert torch.equal(lookup.hits, torch.stack([rows[2], rows[0]]))
         assert slab.tier_stats() == (TierStats("vram", 2, 3, 4, 0, 0),)
 
+    def test_counts_evictions(self) -> None:
+        slab = _slab(2, LeastRecentlyUsed(2))
+        slab.put_many(_keys("a", "b"), torch.zeros(2, 2), durable=False)
+        slab.put_many(_keys("c"), torch.zeros(1, 2), durable=False)
+        assert slab.tier_stats()[0].evicted == 1
+
     def test_held_keys_are_skipped_not_refused(self) -> None:
         slab = _slab(4)
         a, b = _keys("a", "b")

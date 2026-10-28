@@ -128,6 +128,12 @@ class TestRun:
         round_directories = [p for p in tmp_path.iterdir() if "_round" in p.name]
         assert round_directories == [result.best_checkpoint.path.parent]
 
+    def test_counts_every_step_attempt(self, tmp_path: Path) -> None:
+        trainer = _trainer(tmp_path, [FakeDojo("a"), FakeDojo("b")])
+        assert trainer.steps_attempted == 0
+        trainer.run()
+        assert trainer.steps_attempted == 3 * 4
+
     def test_moves_every_dojo_head_to_the_model_device(self, tmp_path: Path) -> None:
         dojos = [FakeDojo("a"), FakeDojo("b")]
 

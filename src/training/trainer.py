@@ -187,6 +187,8 @@ class Trainer:
         self._prefetch_depth = limits.prefetch_depth
         self._batch_warmer = batch_warmer
         self._steps_taken = 0
+        # Every step attempt of the run, over every phase (read by the sampler)
+        self._steps_attempted = 0
         # Steps skipped since the last round's report
         self._skips = _RoundSkips()
         # Per-dojo clipped steps since the last round's report
@@ -195,6 +197,17 @@ class Trainer:
         # LM frozen by its own flag stays frozen); phases toggle only these
         self._encoder_params = [p for p in model.parameters() if p.requires_grad]
         self._validate_plan_against_dojos(dojos)
+
+    @property
+    def steps_attempted(self) -> int:
+        """Step attempts so far, over every phase (any thread may read it).
+        Inputs: none. Output: int. Side effects: none. Exceptions: none.
+
+        Example:
+            >>> trainer.steps_attempted
+            1200
+        """
+        return self._steps_attempted
 
     def run(self) -> TrainingResult:
         """Execute every phase of the plan in order, surviving bad steps.
@@ -489,6 +502,7 @@ class Trainer:
         # Every attempt advances the schedule, so it follows the budget
         _apply_learning_rate_schedule(phase_run)
         phase_run.step_attempts += 1
+        self._steps_attempted += 1
         try:
             ran = self._take_step(phase_run, dojo)
         except BatchFeedError:
