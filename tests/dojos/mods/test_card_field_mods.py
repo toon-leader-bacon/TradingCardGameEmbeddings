@@ -225,7 +225,7 @@ class TestRandomKeyMaskMod:
     def test_probability_zero_never_masks(self) -> None:
         card = _gwent_card()
         mod = RandomKeyMaskMod(probability=0.0, rng_seed=0)
-        assert all(mod.modified_card(card, mod.rng) is card for _ in range(50))
+        assert all(mod.apply_single((card, 0))[0] is card for _ in range(50))
 
     def test_empty_card_is_unchanged(self) -> None:
         empty = _card({})
@@ -449,3 +449,50 @@ class TestVariantSeeds:
     def test_rejects_a_variant_outside_the_table(self, variant: int) -> None:
         with pytest.raises(IndexError):
             card_variant_rng(variant, uuid4(), 0)
+
+
+_GATED_MODS: dict[str, Callable[[float, int], CardFieldMod]] = {
+    "shuffle_keys": lambda p, n: ShuffleKeysMod(rng_seed=0, variants=n, probability=p),
+    "random_key_mask": lambda p, n: RandomKeyMaskMod(
+        probability=p, rng_seed=0, variants=n
+    ),
+    "weighted_field_mask": lambda p, n: WeightedFieldMaskMod(
+        _FOUR_ROWS, rng_seed=0, variants=n, probability=p
+    ),
+}
+
+
+class TestProbabilityGate:
+    @pytest.mark.parametrize("make_mod", _GATED_MODS.values(), ids=_GATED_MODS)
+    @pytest.mark.parametrize("variants", [UNBOUNDED_VARIANTS, 4])
+    def test_acts_on_about_probability_of_the_cards(
+        self, make_mod: Callable[[float, int], CardFieldMod], variants: int
+    ) -> None:
+        card = _wide_card()
+        mod = make_mod(0.1, variants)
+        changed = sum(mod.apply_single((card, 0))[0] is not card for _ in range(2000))
+        assert 120 <= changed <= 280  # about 10% of 2,000
+
+    @pytest.mark.parametrize("make_mod", _GATED_MODS.values(), ids=_GATED_MODS)
+    def test_zero_probability_never_acts(
+        self, make_mod: Callable[[float, int], CardFieldMod]
+    ) -> None:
+        card = _wide_card()
+        mod = make_mod(0.0, 4)
+        assert all(mod.apply_single((card, 0))[0] is card for _ in range(50))
+
+    def test_gated_bounded_draws_stay_within_n_texts(self) -> None:
+        # The gate is on the mod's own state, so a card that fires still
+        # lands on one of its n fixed variants
+        card = _wide_card()
+        mod = ShuffleKeysMod(rng_seed=0, variants=2, probability=0.5)
+        texts = {_text(mod.apply_single((card, 0))[0]) for _ in range(300)}
+        assert len(texts) <= 3  # the unchanged card plus at most 2 variants
+
+    @pytest.mark.parametrize("make_mod", _GATED_MODS.values(), ids=_GATED_MODS)
+    @pytest.mark.parametrize("probability", [-0.1, 1.1, float("nan")])
+    def test_rejects_a_bad_probability(
+        self, make_mod: Callable[[float, int], CardFieldMod], probability: float
+    ) -> None:
+        with pytest.raises(ValueError, match="probability"):
+            make_mod(probability, 4)

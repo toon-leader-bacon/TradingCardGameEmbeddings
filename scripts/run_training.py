@@ -11,6 +11,8 @@ run_directory, which must not exist yet:
         checkpoints.csv     one row per best checkpoint written (only the
                             last best per phase is still on disk)
         diet_shares.csv     each phase's expected share of steps per dojo
+        samples.csv         VRAM and feature cache stats every 10 s while
+                            training (src/training/recording/run_sampler.py)
         <phase>_roundNNNN/  the phase's best checkpoint (state.pt, encoder.pt, ...)
         latest/             the most recent round, rewritten every round
         run.log             the full log, from the script's first line
@@ -32,6 +34,7 @@ Usage (from the project root, in the ROCm venv for a GPU run):
 import argparse
 import contextlib
 import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Mapping
@@ -92,6 +95,7 @@ from src.training.dojo_recipes.dojo_build_context import DojoBuildContext
 from src.training.preflight import preflight_dojo
 from src.training.recording.checkpointer import DirectoryCheckpointer
 from src.training.recording.reports import TrainingResult
+from src.training.recording.run_sampler import RunSampler, SampledSources
 from src.training.recording.run_listener import (
     CsvRunListener,
     LoggingRunListener,
@@ -122,6 +126,7 @@ _WHITENING_STATS_COPY_NAME = "whitening_stats.pt"
 _ROUNDS_CSV_NAME = "rounds.csv"
 _CHECKPOINTS_CSV_NAME = "checkpoints.csv"
 _DIET_SHARES_CSV_NAME = "diet_shares.csv"
+_SAMPLES_CSV_NAME = "samples.csv"
 # Added to plan.seed for torch's global RNG, so dojo heads draw a
 # different stream from the model's (seeded with plan.seed itself)
 _DOJO_SEED_OFFSET = 1
@@ -240,6 +245,7 @@ def main() -> int:
         mod_overrides=config.mod_overrides,
         staple_thresholds=config.staple_thresholds,
         regression_objective=RegressionObjective.for_kind(config.regression_loss),
+        default_augmentation=config.default_augmentation,
     )
     dojos = build_dojos(config.dojo_names, context)
     if not preflight_passes(dojos, config):
@@ -670,11 +676,13 @@ def train(
     model: CardEncoderModel, dojos: list[Dojo], config: RunConfig
 ) -> TrainingResult:
     """Construct the Trainer with a checkpointer and the logging and CSV
-    listeners pointed at config.run_directory, and run it.
+    listeners pointed at config.run_directory, and run it, with a
+    RunSampler writing samples.csv beside them for the length of training.
 
     Inputs: model (already on config.device), dojos, config.
     Output: TrainingResult.
-    Side effects: trains model and dojo heads; writes checkpoints and CSVs.
+    Side effects: trains model and dojo heads; writes checkpoints and CSVs;
+        runs the sampler thread and stops it however training ends.
     Exceptions: ValueError from the Trainer constructor for a plan/dojo
         mismatch; KeyboardInterrupt propagates.
 
@@ -698,7 +706,25 @@ def train(
         cost_of=card_cost,
         batch_warmer=batch_warmer_for(model, config.limits),
     )
-    return trainer.run()
+
+    # Sample VRAM and the cache while training runs; t counts from here
+    started = time.monotonic()
+    sampler = RunSampler(
+        run_directory / _SAMPLES_CSV_NAME,
+        SampledSources(
+            seconds_since_open=lambda: time.monotonic() - started,
+            cache_stats=model.feature_cache_stats,
+            steps_attempted=lambda: trainer.steps_attempted,
+        ),
+    )
+    try:
+        sampler.start()
+    except Exception:  # sampling must never stop a run
+        _logger.warning("run sampler did not start; training without it", exc_info=True)
+    try:
+        return trainer.run()
+    finally:
+        sampler.stop()
 
 
 def batch_warmer_for(model: CardEncoderModel, limits: HardwareLimits) -> BatchWarmer:

@@ -1,3 +1,4 @@
+import dataclasses
 import inspect
 import random
 import sqlite3
@@ -45,6 +46,7 @@ from src.data_refinement.metrics.cross_game.rarity.rarity_tier_metric import (
     RarityTierMetric,
 )
 from src.dojos.mods.mod_specs import (
+    AugmentationRates,
     CardDropoutSpec,
     DuplicateCollapseSpec,
     ShuffleKeysSpec,
@@ -572,6 +574,28 @@ class TestAugmentationPipeline:
             "contrastive.gwent", GameId.GWENT, context
         )
         assert [type(mod).__name__ for mod in pipeline.mods] == ["ShuffleKeysMod"]
+
+    def test_default_rates_rewrite_the_game_defaults(self) -> None:
+        context = dataclasses.replace(
+            self._context(),
+            default_augmentation=AugmentationRates(probability=0.1, variants=4),
+        )
+        pipeline = build_augmentation_pipeline(
+            "contrastive.gwent", GameId.GWENT, context
+        )
+        mods: list = pipeline.mods
+        rates = [(mod.probability, mod.variants) for mod in mods]
+        assert rates == [(0.1, 4), (0.1, 4)]
+
+    def test_default_rates_leave_an_override_alone(self) -> None:
+        context = dataclasses.replace(
+            self._context({"contrastive.gwent": (ShuffleKeysSpec(),)}),
+            default_augmentation=AugmentationRates(probability=0.1, variants=4),
+        )
+        (mod,) = build_augmentation_pipeline(
+            "contrastive.gwent", GameId.GWENT, context
+        ).mods
+        assert (mod.probability, mod.variants) == (1.0, -1)  # type: ignore[attr-defined]
 
     def test_an_empty_override_turns_augmentation_off(self) -> None:
         context = self._context({"contrastive.gwent": ()})

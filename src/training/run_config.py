@@ -28,7 +28,7 @@ import torch
 import yaml
 
 from src.dojos.loss.regression_objective import RegressionLossKind
-from src.dojos.mods.mod_specs import ModSpec
+from src.dojos.mods.mod_specs import AugmentationRates, ModSpec
 from src.schema.game_id import GameId
 from src.schema.holdout import DEFAULT_DECK_SPLIT_RATIOS, HoldoutSpec
 from src.training.config_parsing.config_section import (
@@ -38,7 +38,10 @@ from src.training.config_parsing.config_section import (
     construct_at,
 )
 from src.training.config_parsing.diet_parsing import parse_diet
-from src.training.config_parsing.mod_parsing import parse_mod_overrides
+from src.training.config_parsing.mod_parsing import (
+    parse_default_augmentation,
+    parse_mod_overrides,
+)
 from src.training.config_parsing.model_parsing import parse_model
 from src.training.learning_rate_schedule import LearningRateSchedule
 from src.training.loss_weighting import DEFAULT_BASELINE_FLOOR, LossWeighting
@@ -87,6 +90,9 @@ class RunConfig:
     warm_feature_cache: games whose every card is encoded into the model's
         feature cache before training (top-level `warm_feature_cache:
         [gwent, mtg]`); empty by default. Needs model.feature_cache.
+    default_augmentation: rates rewriting every game default card-field
+        mod (top-level `default_augmentation: {probability, variants}`);
+        dojos named in mod_overrides are not touched. Nothing by default.
     """
 
     run_directory: Path
@@ -99,6 +105,7 @@ class RunConfig:
     staple_thresholds: Mapping[str, float] = field(default_factory=dict)
     regression_loss: RegressionLossKind = RegressionLossKind.MSE
     warm_feature_cache: tuple[GameId, ...] = ()
+    default_augmentation: AugmentationRates = AugmentationRates()
 
     def __post_init__(self) -> None:
         # No duplicate dojos (the Trainer keys dojos by name and would
@@ -191,7 +198,9 @@ def parse_run_config(
     Expected top-level keys: run_directory, device, seed, model, dojos,
     held_out_dojos (optional), holdout, hardware, eval_examples_per_dojo,
     phases, faults (optional), mods (optional: dojo name -> list of mod
-    entries, see config_parsing/mod_parsing.py), staple_subsampling (optional: dojo name
+    entries, see config_parsing/mod_parsing.py), default_augmentation
+    (optional: {probability, variants}, see
+    mod_parsing.parse_default_augmentation), staple_subsampling (optional: dojo name
     -> t, see _parse_staple_thresholds), loss_weights (optional: dojo name
     -> multiplier), baseline_floor and weight_by_baseline (optional; see
     _parse_loss_weighting), and regression_loss (optional: mse or huber;
@@ -257,6 +266,9 @@ def parse_run_config(
     limits = build_flat_dataclass(HardwareLimits, top.required_section("hardware"))
     regression_loss = _parse_regression_loss(top)
     mod_overrides = parse_mod_overrides(top.optional_section("mods"))
+    default_augmentation = parse_default_augmentation(
+        top.optional_section("default_augmentation")
+    )
     staple_thresholds = _parse_staple_thresholds(
         top.optional_section("staple_subsampling")
     )
@@ -278,6 +290,7 @@ def parse_run_config(
             staple_thresholds=staple_thresholds,
             regression_loss=regression_loss,
             warm_feature_cache=warm_feature_cache,
+            default_augmentation=default_augmentation,
         ),
     )
     return result

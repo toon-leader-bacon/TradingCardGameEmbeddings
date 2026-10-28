@@ -105,6 +105,11 @@ rows never straddle TRAIN and TEST.
   has at most N texts per mod, the same in every dojo and run, so they
   are not stamped and the feature cache keeps them. `Mod.deterministic_cards`
   is True for such a mod.
+  Each also takes `probability` (default 1.0; `RandomKeyMaskMod`
+  requires it): the chance the mod acts on a card at all, rolled on the
+  mod's own random state before any variant is picked, so with N > 0 a
+  card is modified on about that share of its draws, always into one of
+  its N texts.
   Best effort: while applying, a card the mod cannot edit passes through
   unchanged and training continues; constructor arguments are validated.
   Each such mod keeps a `ModTally` (cards seen, changed, failed, and the
