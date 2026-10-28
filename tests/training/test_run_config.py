@@ -5,7 +5,7 @@ from typing import Any, cast
 import pytest
 import torch
 
-from src.dojos.mods.card_field_mods import FieldMask
+from src.dojos.mods.card_field_mods import UNBOUNDED_VARIANTS, FieldMask
 from src.dojos.mods.mod_specs import (
     CardDropoutSpec,
     CardSubsampleSpec,
@@ -477,6 +477,26 @@ class TestModOverrides:
         assert isinstance(sub, DropTable)
         assert sub.entries[1].outcome == FieldMask((("card_faces", 0, "name"),))
 
+    def test_parses_variants_on_every_card_field_kind(self) -> None:
+        mods = {
+            "a": [
+                {"kind": "shuffle_keys", "variants": 4},
+                {"kind": "random_key_mask", "probability": 0.1, "variants": 0},
+                {**_weighted([{"weight": 1}]), "variants": 100},
+            ]
+        }
+        specs = parse_run_config(self._with_mods(mods)).mod_overrides["a"]
+
+        assert specs[0] == ShuffleKeysSpec(variants=4)
+        assert specs[1] == RandomKeyMaskSpec(probability=0.1, variants=0)
+        assert cast(WeightedFieldMaskSpec, specs[2]).variants == 100
+
+    def test_variants_default_to_unbounded(self) -> None:
+        mods = {"a": [{"kind": "shuffle_keys"}]}
+        specs = parse_run_config(self._with_mods(mods)).mod_overrides["a"]
+
+        assert specs[0] == ShuffleKeysSpec(variants=UNBOUNDED_VARIANTS)
+
     def test_parses_every_deck_kind(self) -> None:
         mods = {
             "a": [
@@ -609,6 +629,8 @@ class TestModOverrides:
             ({"a": [{"kind": "jitter"}]}, "config.mods.a.0.kind"),
             ({"a": [{"kind": "shuffle_keys", "typo": 1}]}, "config.mods.a.0.typo"),
             ({"a": [{"kind": "random_key_mask", "probability": 2}]}, "config.mods.a.0"),
+            ({"a": [{"kind": "shuffle_keys", "variants": 101}]}, "at most 100"),
+            ({"a": [{"kind": "shuffle_keys", "variants": 1.5}]}, "variants"),
             ({"a": [_weighted([])]}, "config.mods.a.0.table"),
             (
                 {"a": [_weighted([{"weight": 1, "mask": [["x"]], "table": []}])]},

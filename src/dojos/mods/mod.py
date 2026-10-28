@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import ClassVar, List
+from typing import List
 
 from src.schema.card import GenericCard
 from src.schema.card_factory import GenericCardFactory
@@ -71,15 +71,14 @@ class Mod(ABC):
     augmentations), None for mods that do not; ModPipeline.mod_tallies
     reports the non-None ones.
 
-    deterministic_cards: whether every card this mod builds depends on its
-    input card alone (MaskTargetKeyMod: True). Every mod that builds a
-    card passes it through stamped_if_random, which stamps it unless this
-    flag is True; the default, False, is safe for a new mod: at worst a
-    deterministic card is encoded live. A mod that builds no card (it
-    reorders or drops cards) never calls it, so its flag is unused.
+    deterministic_cards: whether every card this mod builds is one of a
+    fixed few per input card (MaskTargetKeyMod: always one; a card-field
+    mod built with variants > 0: at most that many). Every mod that
+    builds a card passes it through stamped_if_random, which stamps it
+    unless this is True; the default, False, is safe for a new mod: at
+    worst a deterministic card is encoded live. A mod that builds no card
+    (it reorders or drops cards) never calls it, so its value is unused.
     """
-
-    deterministic_cards: ClassVar[bool] = False
 
     def __init__(self, train_only: bool = True) -> None:
         self.train_only = train_only
@@ -87,6 +86,12 @@ class Mod(ABC):
 
     @abstractmethod
     def apply_single(self, data: TrainingDatum[LabelT]) -> TrainingDatum[LabelT]: ...
+
+    @property
+    def deterministic_cards(self) -> bool:
+        """See the class docstring. Default False.
+        Inputs: none. Output: bool. Side effects: none. Exceptions: none."""
+        return False
 
     def child_tallies(self) -> dict[str, ModTally]:
         """Tallies of mods this mod holds inside itself (a PerGameMod's

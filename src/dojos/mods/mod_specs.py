@@ -18,6 +18,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from src.dojos.mods.card_field_mods import (
+    UNBOUNDED_VARIANTS,
     CardFieldMod,
     FieldMask,
     RandomKeyMaskMod,
@@ -62,13 +63,18 @@ class ModSpec(ABC):
 class ShuffleKeysSpec(ModSpec):
     """Builds a ShuffleKeysMod.
 
+    variants: texts per card (negative: unbounded; 0: off; N > 0: at most
+        N, cacheable); see src/dojos/mods/card_field_mods.py.
+
     Example:
-        >>> ShuffleKeysSpec().build(rng_seed=0)
+        >>> ShuffleKeysSpec(variants=4).build(rng_seed=0)
     """
+
+    variants: int = UNBOUNDED_VARIANTS
 
     def build(self, rng_seed: int | None) -> CardFieldMod:
         """See ModSpec.build."""
-        return ShuffleKeysMod(rng_seed=rng_seed)
+        return ShuffleKeysMod(rng_seed=rng_seed, variants=self.variants)
 
 
 @dataclass(frozen=True)
@@ -76,16 +82,20 @@ class RandomKeyMaskSpec(ModSpec):
     """Builds a RandomKeyMaskMod.
 
     probability: chance a card gets one key masked, in [0, 1].
+    variants: as ShuffleKeysSpec.
 
     Example:
         >>> RandomKeyMaskSpec(probability=0.1).build(rng_seed=0)
     """
 
     probability: float
+    variants: int = UNBOUNDED_VARIANTS
 
     def build(self, rng_seed: int | None) -> CardFieldMod:
         """See ModSpec.build."""
-        return RandomKeyMaskMod(probability=self.probability, rng_seed=rng_seed)
+        return RandomKeyMaskMod(
+            probability=self.probability, rng_seed=rng_seed, variants=self.variants
+        )
 
 
 @dataclass(frozen=True)
@@ -94,16 +104,20 @@ class WeightedFieldMaskSpec(ModSpec):
 
     table: the DropTable of FieldMasks (immutable, so shared safely
         across every mod built from this spec).
+    variants: as ShuffleKeysSpec.
 
     Example:
         >>> WeightedFieldMaskSpec(DropTable.of([(1, FieldMask.of_keys("name"))]))
     """
 
     table: DropTable[FieldMask]
+    variants: int = UNBOUNDED_VARIANTS
 
     def build(self, rng_seed: int | None) -> CardFieldMod:
         """See ModSpec.build."""
-        return WeightedFieldMaskMod(self.table, rng_seed=rng_seed)
+        return WeightedFieldMaskMod(
+            self.table, rng_seed=rng_seed, variants=self.variants
+        )
 
 
 class DeckModSpec(ModSpec):

@@ -39,7 +39,11 @@ class MaskTargetKeyMod(Mod):
     cacheable.
     """
 
-    deterministic_cards = True
+    @property
+    def deterministic_cards(self) -> bool:
+        """Always True: see the class docstring. Inputs: none. Output: bool.
+        Side effects: none. Exceptions: none."""
+        return True
 
     def __init__(
         self,
