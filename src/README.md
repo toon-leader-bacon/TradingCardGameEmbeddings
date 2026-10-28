@@ -16,6 +16,9 @@ flowchart LR
     CB -->|data/final/cards| DB
     CB --> M
     DB -->|data/final/decks| M
+    CB --> S[snapshots]
+    DB --> S
+    S -->|data/derived| D
     M -->|data/metrics/*.parquet| D[dojos]
     CB --> D
     DB --> D

@@ -5,6 +5,11 @@ literally cannot see TEST or VALIDATION cards: every read method treats
 such a card as a miss, the same way it treats an unknown card. This is a
 read-side filter, not the runtime write-protection wrapper CardLookup's
 own docstring rejects.
+
+Each card's tier is computed once per lookup and memoized (a SHA-256
+per call otherwise, about a fifth of a contrastive batch's build time).
+A card's tier is a pure function of the spec and its uuid, so the memo
+never goes stale.
 """
 
 from typing import Iterable
@@ -14,7 +19,7 @@ from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.schema.card import GenericCard
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
-from src.schema.holdout import HoldoutSpec
+from src.schema.holdout import CardTier, HoldoutSpec
 from src.schema.splits import Split
 
 
@@ -24,7 +29,7 @@ class VisibleCardLookup:
     Inputs (constructor): inner (the full CardLookup), spec (HoldoutSpec
         assigning tiers), view (the Split whose visibility applies).
     Output: n/a.
-    Side effects: none; reads delegate to inner.
+    Side effects: reads delegate to inner; memoizes each card's tier.
     Exceptions: none of its own; inner's exceptions propagate (e.g.
         get_by_name_single(strict=True) on an ambiguous name).
 
@@ -38,6 +43,9 @@ class VisibleCardLookup:
         self._inner = inner
         self._spec = spec
         self._visible = spec.visible_tiers(view)
+        # Grows to at most the cards seen; a dict write is atomic, so a
+        # lookup shared across threads only ever repeats a computation
+        self._tiers: dict[UUID, CardTier] = {}
 
     def get_by_uuid(self, nocab_uuid: UUID) -> GenericCard | None:
         """See CardLookup.get_by_uuid(); None if the card is hidden."""
@@ -96,7 +104,16 @@ class VisibleCardLookup:
         return self._is_visible_uuid(card.nocab_uuid, card.source_game)
 
     def _is_visible_uuid(self, nocab_uuid: UUID, source_game: GameId) -> bool:
-        return self._spec.tier_of(nocab_uuid, source_game) in self._visible
+        """Whether the card's tier is visible from this view, its tier
+        memoized on first sight. Inputs: nocab_uuid, source_game.
+        Output: bool. Side effects: may add one memo entry.
+        Exceptions: none."""
+        # A uuid belongs to exactly one game, so it alone keys the memo
+        tier = self._tiers.get(nocab_uuid)
+        if tier is None:
+            tier = self._spec.tier_of(nocab_uuid, source_game)
+            self._tiers[nocab_uuid] = tier
+        return tier in self._visible
 
     def _visible_or_none(self, card: GenericCard | None) -> GenericCard | None:
         if card is not None and self._is_visible(card):

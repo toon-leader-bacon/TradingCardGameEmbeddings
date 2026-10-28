@@ -299,6 +299,73 @@ class TestAllDecks:
         assert list(box.all_decks(GameId.MTG)) == []
 
 
+class TestDeckCardCounts:
+    def test_yields_each_decks_distinct_cards_with_counts(self) -> None:
+        box = DeckBox()
+        a, b = uuid4(), uuid4()
+        deck = _deck("Pair", [a, a, a, b])
+        box.create(deck)
+
+        (counted,) = box.deck_card_counts(GameId.MTG)
+
+        assert counted.nocab_uuid == deck.nocab_uuid
+        assert sorted(counted.card_counts) == sorted([(a, 3), (b, 1)])
+
+    def test_each_deck_comes_once(self) -> None:
+        box = DeckBox()
+        decks = [
+            _deck(f"deck {position}", [uuid4(), uuid4()]) for position in range(20)
+        ]
+        for deck in decks:
+            box.create(deck)
+
+        dealt = [counted.nocab_uuid for counted in box.deck_card_counts(GameId.MTG)]
+
+        assert sorted(dealt) == sorted(deck.nocab_uuid for deck in decks)
+
+    def test_an_updated_deck_comes_once_with_its_new_cards(self) -> None:
+        box = DeckBox()
+        first, second = _deck("First", [uuid4()]), _deck("Second", [uuid4()])
+        box.create(first)
+        box.create(second)
+        new_card = uuid4()
+        box.update(first.nocab_uuid, card_nocab_uuids=[new_card, new_card])
+
+        counted = {deck.nocab_uuid: deck for deck in box.deck_card_counts(GameId.MTG)}
+
+        assert len(counted) == 2
+        assert counted[first.nocab_uuid].card_counts == [(new_card, 2)]
+
+    def test_a_deck_with_no_cards_is_yielded_empty(self) -> None:
+        box = DeckBox()
+        empty = _deck("Empty", [])
+        box.create(empty)
+
+        assert list(box.deck_card_counts(GameId.MTG)) == [(empty.nocab_uuid, [])]
+
+    def test_card_less_decks_come_with_carded_ones(self) -> None:
+        box = DeckBox()
+        empty, full = _deck("Empty", []), _deck("Full", [uuid4()])
+        box.create(empty)
+        box.create(full)
+        box.create(_deck("Other game, empty", [], source_game=GameId.POKEMON))
+
+        counted = {deck.nocab_uuid: deck for deck in box.deck_card_counts(GameId.MTG)}
+
+        assert set(counted) == {empty.nocab_uuid, full.nocab_uuid}
+        assert counted[empty.nocab_uuid].card_counts == []
+
+    def test_only_the_given_game(self) -> None:
+        box = DeckBox()
+        mtg_deck = _deck("Mono Red", [uuid4()], source_game=GameId.MTG)
+        box.create(mtg_deck)
+        box.create(_deck("Fire Deck", [uuid4()], source_game=GameId.POKEMON))
+
+        counted = list(box.deck_card_counts(GameId.MTG))
+
+        assert [deck.nocab_uuid for deck in counted] == [mtg_deck.nocab_uuid]
+
+
 class TestVersionFor:
     @staticmethod
     def _saved_box(

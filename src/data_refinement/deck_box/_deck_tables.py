@@ -303,6 +303,47 @@ class DeckTables:
             params = (source_game.value,)
         yield from self._connection.execute(sql, params)
 
+    def deck_card_rows_in_storage_order(self) -> Iterator[tuple[str, str, int]]:
+        """Every deck_cards row, every game, as (deck_uuid, card_uuid,
+        count), lazily, in rowid order: one sequential pass over the table.
+        insert_deck_cards writes a deck's rows in one statement, so each
+        deck's rows are adjacent.
+
+        Inputs: none. Output: Iterator of raw (str, str, int) tuples.
+        Side effects: none. Exceptions: none.
+        """
+        yield from self._connection.execute(
+            "SELECT deck_uuid, card_uuid, count FROM deck_cards ORDER BY rowid"
+        )
+
+    def deck_uuids_outside(self, source_game: GameId) -> set[str]:
+        """The stored uuids of every deck not of source_game (empty for a
+        one-game box, the usual case).
+
+        Inputs: source_game. Output: set[str].
+        Side effects: none. Exceptions: none.
+        """
+        cursor = self._connection.execute(
+            "SELECT nocab_uuid FROM decks WHERE source_game != ?",
+            (source_game.value,),
+        )
+        return {deck_uuid for (deck_uuid,) in cursor}
+
+    def card_less_deck_uuids(self, source_game: GameId) -> Iterator[str]:
+        """The stored uuids of source_game's decks with no deck_cards rows,
+        lazily (one index probe per deck).
+
+        Inputs: source_game. Output: Iterator[str].
+        Side effects: none. Exceptions: none.
+        """
+        cursor = self._connection.execute(
+            "SELECT nocab_uuid FROM decks d WHERE source_game = ? AND NOT EXISTS "
+            "(SELECT 1 FROM deck_cards c WHERE c.deck_uuid = d.nocab_uuid)",
+            (source_game.value,),
+        )
+        for (deck_uuid,) in cursor:
+            yield deck_uuid
+
     def deck_count(self, source_game: GameId) -> int:
         """How many decks rows source_game has.
 
@@ -403,7 +444,9 @@ class DeckTables:
 
     def insert_deck_cards(self, deck_uuid: UUID, card_nocab_uuids: list[UUID]) -> None:
         """Insert deck_uuid's card multiset into deck_cards, one
-        (deck_uuid, card_uuid, count) row per distinct card.
+        (deck_uuid, card_uuid, count) row per distinct card, in one
+        statement: a deck's rows must be one adjacent run for
+        DeckBox.deck_card_counts, so keep every write path that way.
 
         Inputs: deck_uuid, card_nocab_uuids. Output: none.
         Side effects: INSERTs, uncommitted. Exceptions: none.
@@ -441,7 +484,9 @@ class DeckTables:
         metadata into this connection. A deck path also provides has
         its existing deck_cards rows cleared first, since INSERT OR
         REPLACE into decks alone wouldn't remove card rows path's
-        version doesn't have.
+        version doesn't have. The copy is one statement in path's rowid
+        order, so each deck's rows stay one adjacent run (see
+        insert_deck_cards).
 
         Inputs: path, a DeckBox SQLite file. Output: none.
         Side effects: ATTACHes path read-only, writes and commits into

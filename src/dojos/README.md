@@ -168,14 +168,17 @@ rows never straddle TRAIN and TEST.
   metadata `nocab_split_order: uniform_shuffle`; `splits_exist()` treats
   a file without it as missing, so splits written before this rule are
   rebuilt on the next construction.
-  `DeckBoxDealer` does the same for a `DeckBox`: each deck's split is the
-  `HoldoutSpec`'s (`deck_split_of`, a hash, so approximate ratios and
-  stable as the box grows), cached in its own small SQLite index that is
-  rebuilt when the spec's deck split or the box's deck set changes (the
-  contrastive recipe names it `data/splits/contrastive/<dojo>.<split
-  tag>.db`, so runs under different holdouts keep separate files), and
-  fixed-size deck samples per split read straight from SQLite (fixed order:
-  by deck uuid).
+  `DeckBoxDealer` does the same for a deck box, read through its
+  level-2 `DeckSnapshot` (`../data_refinement/snapshots/`). Each deck's
+  split is the `HoldoutSpec`'s (`deck_split_of`, a hash, so approximate
+  ratios and stable as the box grows), held by a `DeckSplitIndex`: a
+  uint8 code per snapshot row, cached as
+  `<cache dir>/<game>.<split tag>.deck_splits.arrow` with the snapshot
+  stamp it numbers and rebuilt when that stamp or the deck split changes.
+  Decks are dealt as fixed-size samples per split, rebuilt from the
+  snapshot's arrays (name `""`, no provenance): TEST and VALIDATION in
+  deck uuid order, TRAIN in a fresh permutation per pass from a generator
+  seeded at construction, so a run's epochs are reproducible.
   `GameBalancedChunkReader` reads one split file as a pass of rows drawn
   evenly across the values of a column (a game), optionally dropping rows
   first (`keep_row`); a dojo returns it from `GenericDojo._chunks` to
@@ -224,7 +227,7 @@ rows never straddle TRAIN and TEST.
 ## `contrastive/` - InfoNCE over deck co-occurrence
 
 Trains embeddings directly on how cards sit together in decks, sourced
-from a `DeckBox` through a `DeckBoxDealer`: no metric, no parquet file, no
+from a deck snapshot through a `DeckBoxDealer`: no metric, no parquet file, no
 learned decoder head. It doesn't fit the generic cells because InfoNCE
 needs every item's embedding in a batch jointly, not a row-independent
 `(output, label) -> loss`.

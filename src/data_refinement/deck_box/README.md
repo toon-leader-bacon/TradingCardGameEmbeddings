@@ -82,6 +82,12 @@ metrics too.
     recur), `update` (overwrites only the fields given), `replace`,
     `delete`, `get_by_uuid`; lazy `all_uuids`/`all_decks` generators,
     so a box larger than memory reads the same as a small one.
+  - `deck_card_counts(game)`: every deck once as `DeckCardCounts`
+    (uuid plus distinct `(card uuid, count)` pairs), streamed from one
+    sequential pass over `deck_cards` in storage order. This is the bulk
+    read the level-2 deck snapshot is built from (`../snapshots/`). It
+    relies on every write putting a deck's card rows in one statement,
+    so they are adjacent.
   - `card_binder_version_for(game)`: the stamped binder version the
     decks were minted against, or `None` when never stamped or cleared
     by an unfinished run; callers treat `None` as stale.
@@ -100,7 +106,7 @@ metrics too.
   - `uuids_ranked_randomly(game, seed)`: a seeded, reproducible ranking
     computed inside SQLite (the held-out-deck-card metric samples decks
     with it). Training's deck splits come from the `HoldoutSpec` instead
-    (`src/dojos/file_managers/deck_box_dealer.py`).
+    (`src/dojos/file_managers/deck_split_index.py`).
   - `load([])` opens an empty in-memory box; `load([path])` connects
     straight to `path`; `load([p1, p2, ...])` merges read-only into
     memory, last path wins. `open_read_only(path)` opens an existing
@@ -122,8 +128,9 @@ metrics too.
     on every stage deriving deterministic deck ids (see
     `extraction.py`). The module docstring has the details.
 - `deck_lookup.py` — `DeckLookup`, `DeckBox`'s read-only surface as a
-  Protocol (the `CardLookup` counterpart). Dojos, their data
-  constructors and `DeckBoxDealer` take a `DeckLookup`, so a reader
+  Protocol (the `CardLookup` counterpart), and `DeckCardCounts`. Dojos,
+  their data constructors and the snapshot builder take a `DeckLookup`,
+  so a reader
   cannot write through a box that `load()` connected straight to its
   file. The type checker enforces this; a box from `open_read_only()`
   also refuses writes at runtime.

@@ -164,6 +164,13 @@ class _RecordingShelf(CardShelf):
         self.requested_boxes.append(path)
         return f"box:{path.name}"
 
+    def deck_snapshot(self, game: GameId, deck_box_path: Path) -> Any:
+        self.requested_boxes.append(deck_box_path)
+        return f"snapshot:{game.value}"
+
+    def deck_split_index(self, snapshot: Any, holdout: Any) -> Any:
+        return f"split index:{snapshot}"
+
 
 def _stub_dojo(name: str, mods: list | None = None) -> GenericDojo:
     """A GenericDojo shell (no data) with a name and a task mod pipeline."""

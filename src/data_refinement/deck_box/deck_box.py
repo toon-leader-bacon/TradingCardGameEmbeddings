@@ -100,6 +100,7 @@ from src.data_refinement.deck_box._deck_tables import (
     deck_from_row,
     stamp_metadata_at,
 )
+from src.data_refinement.deck_box.deck_lookup import DeckCardCounts
 from src.schema.card import GenericDeck, Provenance
 from src.schema.game_id import GameId
 
@@ -476,6 +477,62 @@ class DeckBox:
         """
         yield from self._decks_from_rows(self._tables.deck_rows(source_game))
 
+    def deck_card_counts(self, source_game: GameId) -> Iterator[DeckCardCounts]:
+        """Every source_game deck's distinct cards and copy counts, each
+        deck once, in storage order (no guaranteed order), streamed in one
+        sequential pass over deck_cards.
+
+        For bulk readers (the level-2 deck snapshot build): no GenericDeck
+        is built and the multiset is never expanded. Sequential, because a
+        read in deck uuid order is one random seek per deck (hours over
+        MTG's 40 GB box). Each deck's rows are adjacent (every write puts
+        a deck's cards in one statement), so a deck is grouped from
+        consecutive rows. A deck with no deck_cards rows is yielded last,
+        with no card counts. Assumes every deck_cards row has a decks row
+        (delete removes both together).
+
+        Inputs:
+            source_game: which game's decks.
+        Output: a lazy generator of DeckCardCounts.
+        Side effects: none.
+        Exceptions: none.
+
+        Example:
+            >>> for deck in box.deck_card_counts(GameId.MTG):
+            ...     deck.nocab_uuid, deck.card_counts
+        """
+        other_games = self._tables.deck_uuids_outside(source_game)
+        # One UUID per distinct card, not per row (161M rows on MTG)
+        card_uuid_of: dict[str, UUID] = {}
+        current_key: str | None = None
+        card_counts: list[tuple[UUID, int]] = []
+        yielded = 0
+        for (
+            deck_uuid,
+            card_uuid,
+            count,
+        ) in self._tables.deck_card_rows_in_storage_order():
+            if deck_uuid in other_games:
+                continue
+            # A new deck starts (compared as stored text): hand back the last
+            if deck_uuid != current_key:
+                if current_key is not None:
+                    yield DeckCardCounts(UUID(current_key), card_counts)
+                    yielded += 1
+                current_key, card_counts = deck_uuid, []
+            card = card_uuid_of.get(card_uuid)
+            if card is None:
+                card = card_uuid_of[card_uuid] = UUID(card_uuid)
+            card_counts.append((card, count))
+        if current_key is not None:
+            yield DeckCardCounts(UUID(current_key), card_counts)
+            yielded += 1
+
+        # Decks without cards have no deck_cards rows; look only if any exist
+        if yielded < self._tables.deck_count(source_game):
+            for deck_uuid in self._tables.card_less_deck_uuids(source_game):
+                yield DeckCardCounts(UUID(deck_uuid), [])
+
     def version_for(self, source_game: GameId) -> str | None:
         """A cheap version of this box's source_game decks: a hash of the
         CardBinder version they were minted against
@@ -546,8 +603,8 @@ class DeckBox:
     ) -> Iterator[tuple[UUID, int, int]]:
         """Rank every source_game deck by a one-time randomized order.
 
-        Exists specifically so a caller (DeckBoxDealer) can assign an
-        exact-ratio train/test/validation split without ever
+        Exists so a caller (the held-out-deck-card metric) can sample decks
+        in a reproducible random order without ever
         materializing this game's full uuid list in Python, or
         knowing this class's table/column names - the ranking runs
         entirely inside this connection. A plain read (no side

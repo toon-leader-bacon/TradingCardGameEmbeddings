@@ -1,7 +1,6 @@
 import math
 import dataclasses
 import logging
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -10,7 +9,6 @@ import pytest
 import torch
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.deck_box.deck_box import DeckBox
 from src.dojos.contrastive.contrastive_batch import ContrastiveBatch
 from src.dojos.contrastive.styles.missing_card import MissingCardInfoNCELoss
 from src.dojos.contrastive.dojo import ContrastiveDojo
@@ -25,6 +23,7 @@ from src.schema.card import GenericCard, GenericDeck, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 from tests.dojos.padding import padded
+from tests.snapshot_fixtures import binder_with_cards, dealer_over
 
 
 def _card(name: str = "card") -> GenericCard:
@@ -118,15 +117,14 @@ def _deck_holdout(
 def _dealer_with_decks(
     count: int, deck_split_ratios: tuple[float, float, float] = (1, 0, 0)
 ) -> DeckBoxDealer:
-    box = DeckBox()
-    for _ in range(count):
-        box.create(_deck())
-    # A throwaway index file - these tests don't care about a dealer's
-    # persisted index location, only its dealt-decks behavior, so a
-    # fresh tempdir per call avoids threading a tmp_path fixture
-    # through every one of this module's test methods.
-    index_path = Path(tempfile.mkdtemp()) / "dealer.db"
-    return DeckBoxDealer(box, GameId.MTG, index_path, _deck_holdout(deck_split_ratios))
+    """A dealer over count decks, minted against a one-card binder, so its
+    card_binder_version differs from an empty CardBinder()'s (the tests
+    that pass CardBinder() opt out with strict_version_check=False)."""
+    return dealer_over(
+        [_deck() for _ in range(count)],
+        _deck_holdout(deck_split_ratios),
+        binder_with_cards(1),
+    )
 
 
 # Two decks per batch (the test pair constructor costs 2 cards a deck)
@@ -337,27 +335,24 @@ class TestBudget:
 
 
 class TestVersionCheck:
-    def test_raises_when_dealer_has_no_recorded_card_binder_version(self) -> None:
+    def test_raises_when_dealer_has_no_recorded_card_binder_version(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dealer = _dealer_with_decks(2)
+        monkeypatch.setattr(
+            DeckBoxDealer, "card_binder_version", property(lambda self: None)
+        )
         with pytest.raises(ValueError, match="CardBinder"):
             ContrastiveDojo(
-                dealer=_dealer_with_decks(2),
+                dealer=dealer,
                 pair_constructor=_ScriptedPairConstructor([]),
                 card_lookup=CardBinder(),
                 holdout=_deck_holdout(),
             )
 
     def test_passes_when_dealers_recorded_version_matches(self, tmp_path: Path) -> None:
-        binder = CardBinder()
-        box = DeckBox()
-        box.create(_deck())
-        path = tmp_path / "mtg.db"
-        box.save(path, GameId.MTG, binder.version_for(GameId.MTG))
-        dealer = DeckBoxDealer(
-            DeckBox.load([path]),
-            GameId.MTG,
-            tmp_path / "dealer.db",
-            _deck_holdout(),
-        )
+        binder = binder_with_cards(1)
+        dealer = dealer_over([_deck()], _deck_holdout(), binder, tmp_path)
 
         dojo = ContrastiveDojo(
             dealer=dealer,
@@ -371,17 +366,9 @@ class TestVersionCheck:
     def test_raises_when_dealers_recorded_version_is_stale(
         self, tmp_path: Path
     ) -> None:
-        binder = CardBinder()
-        box = DeckBox()
-        box.create(_deck())
-        path = tmp_path / "mtg.db"
-        box.save(path, GameId.MTG, "stale-version")
-        dealer = DeckBoxDealer(
-            DeckBox.load([path]),
-            GameId.MTG,
-            tmp_path / "dealer.db",
-            _deck_holdout(),
-        )
+        binder = binder_with_cards(1)
+        dealer = dealer_over([_deck()], _deck_holdout(), binder, tmp_path)
+        binder.create(_card("added after the snapshot"))
 
         with pytest.raises(ValueError, match="CardBinder"):
             ContrastiveDojo(
