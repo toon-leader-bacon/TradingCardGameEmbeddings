@@ -3,7 +3,7 @@
 
 from typing import Any, Callable
 
-from src.dojos.mods.card_field_mods import FieldMask
+from src.dojos.mods.card_field_mods import UNBOUNDED_VARIANTS, FieldMask
 from src.dojos.mods.mod_specs import (
     CardDropoutSpec,
     CardSubsampleSpec,
@@ -52,6 +52,10 @@ def _parse_mod_spec(section: ConfigSection) -> ModSpec:
         {kind: shuffle_keys}
         {kind: random_key_mask, probability: 0.1}
         {kind: weighted_field_mask, table: [<rows>]}   (see _parse_mask_table)
+
+    The first three take an optional `variants:` int (default -1):
+    negative draws fresh every time, 0 turns the mod off, N > 0 (at most
+    100) gives each card at most N cacheable texts.
         {kind: card_dropout, drop_probability: 0.1, groups: [0]}
         {kind: card_subsample, keep_fraction: 0.8, groups: [1]}
         {kind: duplicate_collapse}
@@ -132,14 +136,15 @@ def _parse_field_mask(raw_paths: list[Any], where: str) -> FieldMask:
 
 # Each mod kind's parser, by its config name
 _MOD_PARSERS: dict[str, Callable[[ConfigSection], ModSpec]] = {
-    "shuffle_keys": lambda section: ShuffleKeysSpec(),
+    "shuffle_keys": lambda section: ShuffleKeysSpec(_parse_variants(section)),
     "random_key_mask": lambda section: RandomKeyMaskSpec(
-        section.required("probability", float)
+        section.required("probability", float), _parse_variants(section)
     ),
     "weighted_field_mask": lambda section: WeightedFieldMaskSpec(
         _parse_mask_table(
             section.required_section_list("table"), section.location_of("table")
-        )
+        ),
+        _parse_variants(section),
     ),
     "card_dropout": lambda section: CardDropoutSpec(
         section.required("drop_probability", float), _parse_groups(section)
@@ -149,6 +154,17 @@ _MOD_PARSERS: dict[str, Callable[[ConfigSection], ModSpec]] = {
     ),
     "duplicate_collapse": lambda section: DuplicateCollapseSpec(_parse_groups(section)),
 }
+
+
+def _parse_variants(section: ConfigSection) -> int:
+    """A card-field mod entry's optional `variants:` int; UNBOUNDED_VARIANTS
+    when absent. The mod's constructor checks the upper bound.
+
+    Inputs: section (one mod entry). Output: int.
+    Side effects: records variants as read.
+    Exceptions: ValueError if variants is not an int.
+    """
+    return section.optional("variants", int, UNBOUNDED_VARIANTS)
 
 
 def _parse_groups(section: ConfigSection) -> tuple[int, ...]:
