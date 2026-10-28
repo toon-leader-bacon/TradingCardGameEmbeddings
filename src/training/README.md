@@ -134,13 +134,15 @@ Top level:
   can name, keyed `"<metric source>.<metric stem>"` (e.g.
   `gwent_one.color_mask`). The key becomes the dojo's `name`, so same-stem
   metrics from different games cannot collide. `build_dojos()` loads each
-  game's binder (and deck box) once, through a `CardShelf`. The 17lands
+  game's binder (and deck box, card and deck snapshots, and deck split
+  index) once, through a `CardShelf`. The 17lands
   keys (`seventeenlands_<family>.<stem>`) each train on their metric's
   all-sets, all-formats slice file. Contrastive
   entries (`contrastive.gwent`, `contrastive.flesh_and_blood`,
-  `contrastive.slay_the_spire_2`) read the game's final deck box directly
-  (positives: two cards from the same deck; split index under
-  `data/splits/contrastive/`). Every dojo, contrastive or metric, takes
+  `contrastive.slay_the_spire_2`) read the game's deck snapshot, checked
+  against its final deck box when the dojo is built (positives: two cards
+  from the same deck; split index under `data/splits/contrastive/`). Run
+  `scripts/build_training_snapshots.py` after deck box ingestion. Every dojo, contrastive or metric, takes
   the game's default augmentation mods, or a run config's per-dojo
   replacement (`mods:`); a metric dojo runs them after its own task mods.
   Deck mods are opt-in, for the dojos and groups in `DECK_MOD_GROUPS`.

@@ -1,127 +1,76 @@
-"""Mechanical train/test/validation wrapper over a DeckBox, backed by
-its own small SQLite index file.
+"""Mechanical train/test/validation dealing over one game's deck snapshot.
 
-The DeckBox counterpart of file_manager_parquet.py: the same "split
-management for training consumption" job, on SQLite instead of parquet.
-Nothing is held in memory per split; every read is a query.
+The deck-snapshot counterpart of file_manager_parquet.py: the same "split
+management for training consumption" job, over level-2 Arrow arrays
+(src/data_refinement/snapshots/) instead of SQLite queries.
 
-THE SPLIT ASSIGNMENT comes from the run's HoldoutSpec
-(HoldoutSpec.deck_split_of): a pure function of the spec and each deck's
-uuid, so every dojo and evaluation built from the same spec agrees on it,
-and a deck keeps its split when the box grows. The index file is only a
-cache of that function over every deck of the game, so decks_for() and
-deck_count() can query a split without holding its uuids in memory.
+THE SPLIT ASSIGNMENT is the run's DeckSplitIndex: HoldoutSpec.deck_split_of
+over every deck of the snapshot, a pure function of the spec and each
+deck's uuid, so every dojo and evaluation built from the same spec agrees
+on it, and a deck keeps its split when the box grows.
 
-THE INDEX IS REBUILT at construction when it is empty, or when the spec's
-deck_split_key(source_game) or the box's set of source_game deck uuids
-differs from what the index records (an index from before the spec split
-decks records neither, so it is rebuilt, never reused). The uuid set is
-compared by an order-independent digest taken in the same pass as the
-count, not by deck content: a deck edited in place keeps its uuid and its
-split, so the index stays right.
+REPRODUCIBILITY: split membership is fixed by the spec. The fixed order
+(shuffle=False, used for TEST and VALIDATION) is deck uuid order. Deck
+uuids are hash-derived, so effectively random: the first N decks of a
+split are a random sample, the same one every time. The per-epoch
+reshuffle (shuffle=True, used for TRAIN) is a NumPy permutation of the
+split's rows drawn from a generator seeded at construction, so a run's
+sequence of epochs is reproducible. The split's rows are held in memory
+to do that: an int64 row array is about 44 MB for MTG's TRAIN split.
 
-REPRODUCIBILITY: split MEMBERSHIP is fixed by the spec, and the fixed
-order (shuffle=False) is by deck uuid, independent of ingestion order.
-Deck uuids are hash-derived (uuid5 of the source id), so effectively
-random: the first N decks of a split are a random sample, the same one
-every time and whatever the holdout seed. The PER-EPOCH RESHUFFLE
-(decks_for(..., shuffle=True), used for TRAIN) is NOT reproducible - it
-issues a fresh, unseeded `ORDER BY RANDOM()` per call. Full
-reproducibility would mean holding a split's full uuid list in memory,
-which this class exists to avoid.
+A dealt deck is a GenericDeck rebuilt from its snapshot row: its cards
+expanded by count, in card-index order (a multiset, so order carries no
+meaning), name "" and provenance None (the snapshot keeps neither; no
+contrastive consumer reads them).
 """
 
-import sqlite3
-from pathlib import Path
 from typing import Iterator
 from uuid import UUID
 
-from src.data_refinement.deck_box.deck_lookup import DeckLookup
+import numpy as np
+
+from src.data_refinement.snapshots.deck_snapshot import DeckSnapshot
+from src.dojos.file_managers.deck_split_index import DeckSplitIndex
 from src.schema.card import GenericDeck
 from src.schema.game_id import GameId
-from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
-
-# One dealer's index file holds exactly one game's assignment (by
-# convention - index_path is meant to be per-game, e.g.
-# data/splits/contrastive/<dojo>.db), so no source_game column is needed.
-# index_info records what the assignment was built from (see
-# _INFO_DECK_SPLIT_KEY / _INFO_DECK_SET).
-_SCHEMA_DDL = """
-CREATE TABLE IF NOT EXISTS deck_splits (
-    deck_uuid TEXT PRIMARY KEY,
-    split TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_deck_splits_split ON deck_splits(split);
-CREATE TABLE IF NOT EXISTS index_info (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-"""
-
-_INFO_DECK_SPLIT_KEY = "deck_split_key"
-_INFO_DECK_SET = "deck_set"
-
-# The digest of a uuid set: the sum of their 128-bit values, wrapped
-_UUID_SET_MODULUS = 2**128
-
-# _assign_splits() batches inserts at this size rather than collecting
-# every row before writing - keeping peak memory bounded regardless of
-# how many decks a game has.
-_ASSIGN_SPLITS_BATCH_SIZE = 10_000
 
 
 class DeckBoxDealer:
-    """Holds one game's train/test/validation deck split (a cache of the
-    HoldoutSpec's, in its own SQLite file at index_path) and deals out raw
-    deck samples from it. Non-swappable - mechanical plumbing, not a
-    research surface.
+    """Deals one game's decks, split by a DeckSplitIndex, as raw deck
+    samples. Non-swappable - mechanical plumbing, not a research surface.
+    Safe to deal from one thread at a time (the prefetch worker), whichever
+    thread built it.
     """
 
     def __init__(
-        self,
-        deck_box: DeckLookup,
-        source_game: GameId,
-        index_path: Path,
-        holdout: HoldoutSpec,
+        self, snapshot: DeckSnapshot, split_index: DeckSplitIndex, shuffle_seed: int
     ) -> None:
-        """Connect to (or create) index_path's split index for
-        source_game, rebuilding it from holdout if it is missing or stale.
+        """Deal from snapshot's decks, split by split_index.
 
         Inputs:
-            deck_box: the deck store to deal from - never queried through
-                anything but its public interface.
-            source_game: which game's decks to deal. Only this game's
-                uuids are considered.
-            index_path: this dealer's own SQLite file (separate from
-                deck_box's own file). Created if it doesn't exist.
-            holdout: the run's spec; holdout.deck_split_of assigns every
-                deck's split.
+            snapshot: the game's open deck snapshot.
+            split_index: the run's split over snapshot's rows.
+            shuffle_seed: seeds the per-epoch TRAIN reshuffle.
         Output: none (constructor).
-        Side effects: creates index_path's parent directory and the file
-            if missing; reads every source_game deck uuid in deck_box; rebuilds
-            the index (one transaction) when it is empty or stale (see
-            this module's docstring).
-        Exceptions: UnknownDeckSplitError if holdout has no deck split
-            (raised before anything touches disk).
+        Side effects: none.
+        Exceptions: ValueError if split_index numbers another snapshot's
+            rows (its snapshot_stamp differs from snapshot.stamp).
 
         Example:
-            >>> dealer = DeckBoxDealer(
-            ...     deck_box, GameId.MTG, Path("data/splits/contrastive/mtg.db"), holdout
-            ... )
+            >>> dealer = DeckBoxDealer(decks, split_index, shuffle_seed=0)
         """
-        # Validate inputs: an unknown deck split raises here, before any I/O
-        self._deck_split_key = holdout.deck_split_key(source_game)
+        # Validate inputs: the split's row numbers must be this snapshot's
+        if split_index.snapshot_stamp != snapshot.stamp:
+            raise ValueError(
+                "DeckBoxDealer: the split index numbers the rows of another "
+                f"{snapshot.source_game.value} deck snapshot; rebuild it with "
+                "DeckSplitIndex.load_or_build"
+            )
 
-        self._deck_box = deck_box
-        self._source_game = source_game
-        self._holdout = holdout
-        self._connection = self._connect_index(index_path)
-
-        # Rebuild the cached assignment unless it matches this spec and box
-        deck_set = self._box_deck_set_digest()
-        if not self._index_is_current(deck_set):
-            self._assign_splits(deck_set)
+        self._snapshot = snapshot
+        self._split_index = split_index
+        self._shuffle_rng = np.random.default_rng(shuffle_seed)
 
     @property
     def deck_split_key(self) -> str:
@@ -134,28 +83,28 @@ class DeckBoxDealer:
             >>> cached.deck_split_key == dealer.deck_split_key
             True
         """
-        return self._deck_split_key
+        return self._split_index.deck_split_key
 
     @property
     def source_game(self) -> GameId:
-        """The game this dealer was constructed for.
+        """The snapshot's game.
 
         Inputs: none. Output: GameId. Side effects: none.
         Exceptions: none.
         """
-        return self._source_game
+        return self._snapshot.source_game
 
     @property
     def card_binder_version(self) -> str | None:
-        """The CardBinder version self._deck_box's source_game decks
-        were minted against, read live - this dealer never caches it,
-        since deck_box.card_binder_version_for() is already cheap.
+        """The CardBinder version the dealt decks were minted against: the
+        card snapshot's card_binder_version, which equals the deck box's
+        (build_deck_snapshot refuses a box minted against another binder).
 
-        Inputs: none. Output: str | None (None means untrustworthy -
-        see DeckBox.card_binder_version_for()'s own docstring).
+        Inputs: none. Output: str | None (always a str here; the type
+            keeps ContrastiveDojo's check unchanged).
         Side effects: none. Exceptions: none.
         """
-        return self._deck_box.card_binder_version_for(self._source_game)
+        return self._snapshot.stamp.card_snapshot.card_binder_version
 
     def decks_for(
         self,
@@ -169,19 +118,17 @@ class DeckBoxDealer:
         Inputs:
             split: which split to deal from.
             decks_per_sample: how many decks per yielded group.
-            shuffle: whether to issue a fresh, freshly-ordered read of
-                this split before grouping (e.g. once per epoch for
-                TRAIN). NOT reproducible given a seed - see this
-                module's docstring's accepted trade-off. True by
-                default.
+            shuffle: whether to deal this pass in a fresh permutation
+                drawn from the dealer's seeded generator (e.g. once per
+                epoch for TRAIN), or in deck uuid order. True by default.
             keep_remainder: whether the split's last decks, too few to
                 fill a group, are yielded as one shorter final group
                 (True) or dropped (False, the default).
         Output: a generator of lists of GenericDeck, each of length
             decks_per_sample, except a shorter last one when
             keep_remainder is True.
-        Side effects: none beyond reading from self._deck_box and this
-            dealer's own index.
+        Side effects: a shuffled pass advances the shuffle generator
+            (when the generator is first advanced).
         Exceptions: ValueError if decks_per_sample <= 0.
 
         Example:
@@ -191,16 +138,18 @@ class DeckBoxDealer:
         if decks_per_sample <= 0:
             raise ValueError("decks_per_sample must be positive")
 
-        # Stream this split's uuids - freshly (re)ordered per call when
-        # shuffle=True, a fixed repeatable order otherwise.
-        group: list[UUID] = []
-        for nocab_uuid in self._stream_split_uuids(split, shuffle):
-            group.append(nocab_uuid)
-            if len(group) == decks_per_sample:
-                yield self._decks_by_uuids(group)
-                group = []
-        if group and keep_remainder:
-            yield self._decks_by_uuids(group)
+        # This pass's row order
+        rows = self._split_index.rows_of(split)
+        if shuffle:
+            # Permute positions: rows itself is the index's read-only array
+            rows = rows[self._shuffle_rng.permutation(len(rows))]
+
+        # Deal full groups, then the remainder if asked
+        for start in range(0, len(rows), decks_per_sample):
+            group = rows[start : start + decks_per_sample]
+            if len(group) < decks_per_sample and not keep_remainder:
+                return
+            yield [self._deck_at(row) for row in group.tolist()]
 
     def training_decks(
         self, decks_per_sample: int, shuffle: bool = True
@@ -244,192 +193,40 @@ class DeckBoxDealer:
         Example:
             >>> dealer.deck_count(Split.TRAIN)
         """
-        cursor = self._connection.execute(
-            "SELECT COUNT(*) FROM deck_splits WHERE split = ?", (split.value,)
-        )
-        return cursor.fetchone()[0]
+        return len(self._split_index.rows_of(split))
 
-    # region Private Helpers - construction
-
-    def _connect_index(self, index_path: Path) -> sqlite3.Connection:
-        """Connect to (creating, and creating its parent directory and
-        schema, if needed) index_path.
-
-        The connection is writable, because __init__ builds the index
-        through it, but it is written only during construction. After
-        that it is only read, and may be read from any thread, one
-        thread at a time (SQLite here is built serialized), so a dealer
-        built on one thread can be read by a prefetch worker on another.
-
-        Private helper - single consumer is __init__.
-        Inputs: index_path. Output: an open sqlite3.Connection.
-        Side effects: creates the parent directory, the file and its tables
-        if missing. Exceptions: OSError / sqlite3.Error on failure.
-        """
-        index_path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(str(index_path), check_same_thread=False)
-        connection.row_factory = sqlite3.Row
-        connection.executescript(_SCHEMA_DDL)
-        connection.commit()
-        return connection
-
-    def _box_deck_set_digest(self) -> str:
-        """An order-independent digest of deck_box's source_game deck
-        uuids: their count and the sum of their 128-bit values modulo
-        _UUID_SET_MODULUS, streamed (never collected).
-
-        Private helper - single consumer is __init__.
-        Inputs: none. Output: str ("<count>:<hex sum>").
-        Side effects: reads deck_box. Exceptions: none beyond deck_box's
-        own.
-        """
-        count = 0
-        total = 0
-        for deck_uuid in self._deck_box.all_uuids(self._source_game):
-            count += 1
-            total = (total + deck_uuid.int) % _UUID_SET_MODULUS
-        return f"{count}:{total:032x}"
-
-    def _index_is_current(self, deck_set: str) -> bool:
-        """Whether the index holds an assignment built from this spec's
-        deck_split_key and the deck uuid set digested as deck_set.
-
-        Private helper - single consumer is __init__. An empty
-        deck_splits table is never current, even for an empty box -
-        rebuilding nothing is cheap. Safe because _assign_splits() writes
-        the rows and index_info in one transaction: a crash leaves the
-        previous (stale) state or nothing, never a half-built index
-        recorded as current.
-        Inputs: deck_set (_box_deck_set_digest's). Output: bool.
-        Side effects: reads the index.
-        Exceptions: sqlite3.Error on a read failure.
-        """
-        if (
-            self._connection.execute("SELECT 1 FROM deck_splits LIMIT 1").fetchone()
-            is None
-        ):
-            return False
-        recorded = {
-            row["key"]: row["value"]
-            for row in self._connection.execute("SELECT key, value FROM index_info")
-        }
-        return (
-            recorded.get(_INFO_DECK_SPLIT_KEY) == self._deck_split_key
-            and recorded.get(_INFO_DECK_SET) == deck_set
-        )
-
-    def _assign_splits(self, deck_set: str) -> None:
-        """Replace the index's assignment with holdout.deck_split_of over
-        every source_game deck, and record what it was built from.
-
-        Private helper - single consumer is __init__. Streams
-        deck_box.all_uuids(source_game), batching
-        _ASSIGN_SPLITS_BATCH_SIZE rows per INSERT (never the whole game's
-        uuids collected first).
-
-        CRASH-SAFETY: the delete, every insert and the index_info write
-        run inside one `with self._connection:` transaction, so a raise
-        or a killed process rolls back to the previous state - never a
-        partial assignment that _index_is_current() could take for a
-        complete one.
-        Inputs: deck_set (recorded in index_info).
-        Output: None.
-        Side effects: rewrites deck_splits and index_info.
-        Exceptions: sqlite3.Error on a write failure (rolled back).
-        """
-        batch: list[tuple[str, str]] = []
-        with self._connection:
-            # Clear the old assignment
-            self._connection.execute("DELETE FROM deck_splits")
-
-            # Assign every deck from the spec, in bounded batches
-            for deck_uuid in self._deck_box.all_uuids(self._source_game):
-                split = self._holdout.deck_split_of(deck_uuid, self._source_game)
-                batch.append((str(deck_uuid), split.value))
-                if len(batch) >= _ASSIGN_SPLITS_BATCH_SIZE:
-                    self._insert_split_batch(batch)
-                    batch = []
-            if batch:
-                self._insert_split_batch(batch)
-
-            # Record what this assignment was built from
-            self._write_index_info(deck_set)
-
-    def _write_index_info(self, deck_set: str) -> None:
-        """Record deck_split_key and deck_set in index_info. NOT
-        committed here - _assign_splits() commits once.
-
-        Private helper - single consumer is _assign_splits().
-        Inputs: deck_set. Output: None. Side effects: writes index_info
-        (uncommitted). Exceptions: sqlite3.Error on a write failure.
-        """
-        self._connection.executemany(
-            "INSERT OR REPLACE INTO index_info (key, value) VALUES (?, ?)",
-            [(_INFO_DECK_SPLIT_KEY, self._deck_split_key), (_INFO_DECK_SET, deck_set)],
-        )
-
-    def _insert_split_batch(self, batch: list[tuple[str, str]]) -> None:
-        """Insert one batch of (deck_uuid, split) rows into deck_splits.
-        NOT committed here - _assign_splits() commits once, after every
-        batch has been inserted (see its own docstring's crash-safety
-        note).
-
-        Private helper - single consumer is _assign_splits().
-        Inputs: batch. Output: None. Side effects: writes deck_splits
-        (uncommitted). Exceptions: sqlite3.Error on a write failure.
-        """
-        self._connection.executemany(
-            "INSERT OR REPLACE INTO deck_splits (deck_uuid, split) VALUES (?, ?)",
-            batch,
-        )
-
-    # endregion Private Helpers - construction
-
-    # region Private Helpers - reading
-
-    def _stream_split_uuids(self, split: Split, shuffle: bool) -> Iterator[UUID]:
-        """Every uuid assigned to split, in shuffled or fixed order.
-
-        Private helper - single consumer is decks_for(). shuffle=True
-        issues a fresh `ORDER BY RANDOM()` query (see this module's
-        docstring's accepted trade-off - NOT reproducible given a
-        seed); shuffle=False reads in deck uuid order (fixed and
-        independent of ingestion order - see this module's docstring).
-        Inputs: split, shuffle. Output: iterator of UUID.
-        Side effects: reads the index. Exceptions: sqlite3.Error.
-        """
-        if shuffle:
-            cursor = self._connection.execute(
-                "SELECT deck_uuid FROM deck_splits WHERE split = ? ORDER BY RANDOM()",
-                (split.value,),
-            )
-        else:
-            cursor = self._connection.execute(
-                "SELECT deck_uuid FROM deck_splits WHERE split = ? ORDER BY deck_uuid",
-                (split.value,),
-            )
-        for row in cursor:
-            yield UUID(row["deck_uuid"])
-
-    def _decks_by_uuids(self, uuids: list[UUID]) -> list[GenericDeck]:
-        """Look up a group of decks by uuid, in order, via one
-        self._deck_box.get_by_uuids() call - never a join against
-        DeckBox's internal schema.
+    def _deck_at(self, row: int) -> GenericDeck:
+        """The snapshot's deck at row as a GenericDeck: its card indices
+        repeated by count and mapped through the card snapshot's
+        card_uuids.
 
         Private helper - single consumer is decks_for().
-        Inputs: uuids. Output: the decks, in uuids' order.
-        Side effects: reads deck_box.
-        Exceptions: RuntimeError if a uuid is no longer in deck_box.
+        Inputs: row. Output: GenericDeck (name "", provenance None).
+        Side effects: none. Exceptions: none.
         """
-        result: list[GenericDeck] = []
-        for nocab_uuid, deck in zip(uuids, self._deck_box.get_by_uuids(uuids)):
-            if deck is None:
-                raise RuntimeError(
-                    f"DeckBoxDealer: {nocab_uuid} no longer resolves in "
-                    "deck_box - was deck_box mutated after this dealer "
-                    "was constructed?"
-                )
-            result.append(deck)
-        return result
+        snapshot = self._snapshot
+        start = int(snapshot.deck_offsets[row])
+        end = int(snapshot.deck_offsets[row + 1])
 
-    # endregion Private Helpers - reading
+        # Expand the multiset, then name each copy by its uuid
+        copies = np.repeat(
+            snapshot.card_indices[start:end], snapshot.card_counts[start:end]
+        )
+        card_uuids = snapshot.card_snapshot.card_uuids
+        return GenericDeck(
+            nocab_uuid=_uuid_of(snapshot.deck_uuid_bytes[row]),
+            source_game=snapshot.source_game,
+            name="",
+            card_nocab_uuids=[card_uuids[index] for index in copies.tolist()],
+            provenance=None,
+        )
+
+
+def _uuid_of(uuid_bytes: np.ndarray) -> UUID:
+    """A deck's uuid from its 16-byte row of deck_uuid_bytes.
+
+    Private helper - single consumer is DeckBoxDealer._deck_at.
+    Inputs: uuid_bytes (uint8, shape (16,)). Output: UUID.
+    Side effects: none. Exceptions: none.
+    """
+    return UUID(bytes=uuid_bytes.tobytes())

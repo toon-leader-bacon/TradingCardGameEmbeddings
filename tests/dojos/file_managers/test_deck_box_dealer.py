@@ -1,66 +1,57 @@
-import sqlite3
 import threading
+from collections import Counter
 from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
 
-from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.card_binder.card_binder import CardBinder
 from src.dojos.file_managers.deck_box_dealer import DeckBoxDealer
+from src.dojos.file_managers.deck_split_index import DeckSplitIndex
 from src.schema.card import GenericDeck
 from src.schema.game_id import GameId
-from src.schema.holdout import HoldoutSpec, UnknownDeckSplitError
+from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
+from tests.snapshot_fixtures import (
+    binder_with_cards,
+    built_snapshots,
+    dealer_over,
+    stamped_deck_box,
+)
 
 
-def _deck(game: GameId = GameId.MTG) -> GenericDeck:
-    return GenericDeck(
-        nocab_uuid=uuid4(),
-        source_game=game,
-        name="deck",
-        card_nocab_uuids=[uuid4()],
-        provenance=None,
-    )
-
-
-def _box_with_decks(count: int) -> tuple[DeckBox, list[UUID]]:
-    box = DeckBox()
-    uuids = []
-    for _ in range(count):
-        deck = _deck()
-        box.create(deck)
-        uuids.append(deck.nocab_uuid)
-    return box, uuids
+def _decks(count: int, binder: CardBinder | None = None) -> list[GenericDeck]:
+    card_uuids = list(binder.all_uuids(GameId.MTG)) if binder else [uuid4()]
+    return [
+        GenericDeck(
+            nocab_uuid=uuid4(),
+            source_game=GameId.MTG,
+            name="deck",
+            card_nocab_uuids=card_uuids,
+            provenance=None,
+        )
+        for _ in range(count)
+    ]
 
 
 def _holdout(
     deck_split_ratios: tuple[float, float, float] | None = (8, 1, 1),
-    seed: int = 1,
     held_out_games: frozenset[GameId] = frozenset(),
 ) -> HoldoutSpec:
     return HoldoutSpec(
-        seed=seed,
+        seed=1,
         tier_ratios=(1, 0, 0),
         held_out_games=held_out_games,
         deck_split_ratios=deck_split_ratios,
     )
 
 
-def _dealer(
-    box: DeckBox,
-    tmp_path: Path,
-    holdout: HoldoutSpec | None = None,
-    name: str = "dealer",
-) -> DeckBoxDealer:
-    return DeckBoxDealer(
-        box, GameId.MTG, tmp_path / f"{name}.db", holdout or _holdout()
-    )
-
-
-def _dealt_uuids(dealer: DeckBoxDealer, split: Split) -> list[UUID]:
+def _dealt_uuids(
+    dealer: DeckBoxDealer, split: Split, shuffle: bool = False
+) -> list[UUID]:
     return [
         deck.nocab_uuid
-        for group in dealer.decks_for(split, 1, shuffle=False)
+        for group in dealer.decks_for(split, 1, shuffle=shuffle)
         for deck in group
     ]
 
@@ -73,324 +64,162 @@ def _split_counts(dealer: DeckBoxDealer) -> tuple[int, int, int]:
     )
 
 
-class TestSourceGameAndCardBinderVersion:
-    def test_source_game_is_the_constructor_argument(self, tmp_path: Path) -> None:
-        box, _ = _box_with_decks(1)
+class TestProperties:
+    def test_source_game_is_the_snapshots(self) -> None:
+        assert dealer_over(_decks(1), _holdout()).source_game == GameId.MTG
 
-        dealer = _dealer(box, tmp_path)
+    def test_card_binder_version_is_the_card_snapshots(self) -> None:
+        binder = binder_with_cards(2)
 
-        assert dealer.source_game == GameId.MTG
+        dealer = dealer_over(_decks(1, binder), _holdout(), binder)
 
-    def test_card_binder_version_is_none_for_an_unstamped_box(
-        self, tmp_path: Path
-    ) -> None:
-        box, _ = _box_with_decks(1)
+        assert dealer.card_binder_version == binder.version_for(GameId.MTG)
 
-        dealer = _dealer(box, tmp_path)
-
-        assert dealer.card_binder_version is None
-
-    def test_card_binder_version_reflects_the_box(self, tmp_path: Path) -> None:
-        box, _ = _box_with_decks(1)
-        path = tmp_path / "mtg.db"
-        box.save(path, GameId.MTG, "binder-v1")
-        loaded = DeckBox.load([path])
-
-        dealer = _dealer(loaded, tmp_path)
-
-        assert dealer.card_binder_version == "binder-v1"
-
-    def test_deck_split_key_is_the_holdouts_for_this_game(self, tmp_path: Path) -> None:
-        box, _ = _box_with_decks(1)
+    def test_deck_split_key_is_the_holdouts_for_this_game(self) -> None:
         holdout = _holdout()
-
-        dealer = _dealer(box, tmp_path, holdout)
-
+        dealer = dealer_over(_decks(1), holdout)
         assert dealer.deck_split_key == holdout.deck_split_key(GameId.MTG)
 
 
 class TestInit:
-    def test_an_unknown_deck_split_raises_before_touching_disk(
-        self, tmp_path: Path
-    ) -> None:
-        box, _ = _box_with_decks(1)
-
-        with pytest.raises(UnknownDeckSplitError):
-            _dealer(box, tmp_path, _holdout(deck_split_ratios=None))
-        assert not (tmp_path / "dealer.db").exists()
-
-    def test_only_considers_the_given_game(self, tmp_path: Path) -> None:
-        box = DeckBox()
-        mtg_deck = _deck()
-        box.create(mtg_deck)
-        box.create(_deck(GameId.POKEMON))
-
-        dealer = _dealer(box, tmp_path)
-
-        dealt = {uuid for split in Split for uuid in _dealt_uuids(dealer, split)}
-        assert dealt == {mtg_deck.nocab_uuid}
-
-    def test_a_current_index_is_reused(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        box, _ = _box_with_decks(10)
-        _dealer(box, tmp_path)
-
-        def _fail(self: DeckBoxDealer, deck_set: str) -> None:
-            raise AssertionError("a current index must not be rebuilt")
-
-        monkeypatch.setattr(DeckBoxDealer, "_assign_splits", _fail)
-        reused = _dealer(box, tmp_path)
-
-        assert sum(_split_counts(reused)) == 10
-
-    def test_a_changed_deck_split_rebuilds_the_index(self, tmp_path: Path) -> None:
-        box, _ = _box_with_decks(10)
-        _dealer(box, tmp_path, _holdout(deck_split_ratios=(1, 0, 0)))
-
-        rebuilt = _dealer(box, tmp_path, _holdout(deck_split_ratios=(0, 1, 0)))
-
-        assert _split_counts(rebuilt) == (0, 10, 0)
-
-    def test_a_changed_tier_split_alone_keeps_the_index(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        box, _ = _box_with_decks(10)
-        _dealer(box, tmp_path)
-        other_tiers = HoldoutSpec(
-            seed=1,
-            tier_ratios=(8, 1, 1),
-            held_out_games=frozenset(),
-            deck_split_ratios=(8, 1, 1),
+    def test_a_split_index_of_another_snapshot_is_refused(self, tmp_path: Path) -> None:
+        binder = binder_with_cards(1)
+        first = built_snapshots(
+            binder, stamped_deck_box(_decks(2), binder, tmp_path / "a"), tmp_path / "a"
         )
-
-        def _fail(self: DeckBoxDealer, deck_set: str) -> None:
-            raise AssertionError("card tiers do not change a deck split")
-
-        monkeypatch.setattr(DeckBoxDealer, "_assign_splits", _fail)
-        _dealer(box, tmp_path, other_tiers)
-
-    def test_a_grown_box_is_reindexed_and_old_decks_keep_their_split(
-        self, tmp_path: Path
-    ) -> None:
-        box, _ = _box_with_decks(20)
-        first = _dealer(box, tmp_path)
-        before = {split: set(_dealt_uuids(first, split)) for split in Split}
-        new_deck = _deck()
-        box.create(new_deck)
-
-        second = _dealer(box, tmp_path)
-
-        after = {split: set(_dealt_uuids(second, split)) for split in Split}
-        assert sum(_split_counts(second)) == 21
-        for split in Split:
-            assert after[split] - {new_deck.nocab_uuid} == before[split]
-
-    def test_same_count_but_different_decks_is_reindexed(self, tmp_path: Path) -> None:
-        box, uuids = _box_with_decks(5)
-        _dealer(box, tmp_path)
-        box.delete(uuids[0])
-        replacement = _deck()
-        box.create(replacement)
-
-        dealer = _dealer(box, tmp_path)
-
-        dealt = {uuid for split in Split for uuid in _dealt_uuids(dealer, split)}
-        assert replacement.nocab_uuid in dealt
-        assert uuids[0] not in dealt
-
-    def test_an_index_from_before_deck_holdouts_is_rebuilt(
-        self, tmp_path: Path
-    ) -> None:
-        box, _ = _box_with_decks(10)
-        # An old-style index: an assignment with no index_info record
-        index_path = tmp_path / "dealer.db"
-        legacy = sqlite3.connect(str(index_path))
-        legacy.execute(
-            "CREATE TABLE deck_splits (deck_uuid TEXT PRIMARY KEY, split TEXT NOT NULL)"
+        second = built_snapshots(
+            binder, stamped_deck_box(_decks(3), binder, tmp_path / "b"), tmp_path / "b"
         )
-        legacy.execute("INSERT INTO deck_splits VALUES (?, ?)", (str(uuid4()), "test"))
-        legacy.commit()
-        legacy.close()
+        index = DeckSplitIndex.load_or_build(first, _holdout(), tmp_path / "splits")
 
-        dealer = _dealer(box, tmp_path, _holdout(deck_split_ratios=(1, 0, 0)))
-
-        assert _split_counts(dealer) == (10, 0, 0)
-
-    def test_a_crash_mid_rebuild_keeps_the_previous_index(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        # _assign_splits() runs the delete, every batch and the index_info
-        # write in one transaction: a failure partway through a multi-batch
-        # rebuild leaves the previous assignment, still recorded as built
-        # from the previous spec - never a mix.
-        import src.dojos.file_managers.deck_box_dealer as deck_box_dealer_module
-
-        box, _ = _box_with_decks(5)
-        _dealer(box, tmp_path, _holdout(deck_split_ratios=(1, 0, 0)))
-        monkeypatch.setattr(deck_box_dealer_module, "_ASSIGN_SPLITS_BATCH_SIZE", 2)
-        call_count = 0
-        real_insert_split_batch = DeckBoxDealer._insert_split_batch
-
-        def _raise_on_second_batch(self: DeckBoxDealer, batch: list) -> None:
-            nonlocal call_count
-            call_count += 1
-            if call_count == 2:
-                raise RuntimeError("simulated crash mid-rebuild")
-            real_insert_split_batch(self, batch)
-
-        monkeypatch.setattr(
-            DeckBoxDealer, "_insert_split_batch", _raise_on_second_batch
-        )
-
-        with pytest.raises(RuntimeError, match="simulated crash"):
-            _dealer(box, tmp_path, _holdout(deck_split_ratios=(0, 1, 0)))
-        assert call_count == 2, "the fault must land mid-multi-batch"
-
-        monkeypatch.undo()
-        verification = sqlite3.connect(str(tmp_path / "dealer.db"))
-        rows = verification.execute(
-            "SELECT split, COUNT(*) FROM deck_splits GROUP BY split"
-        ).fetchall()
-        verification.close()
-        assert dict(rows) == {"train": 5}
-
-        # A retry under the new spec still sees the index as stale
-        retried = _dealer(box, tmp_path, _holdout(deck_split_ratios=(0, 1, 0)))
-        assert _split_counts(retried) == (0, 5, 0)
+        with pytest.raises(ValueError, match="another"):
+            DeckBoxDealer(second, index, shuffle_seed=0)
 
 
 class TestPartition:
-    def test_every_deck_lands_in_its_holdout_split(self, tmp_path: Path) -> None:
-        box, uuids = _box_with_decks(50)
+    def test_every_deck_lands_in_its_holdout_split(self) -> None:
+        decks = _decks(50)
         holdout = _holdout(deck_split_ratios=(1, 1, 1))
-        dealer = _dealer(box, tmp_path, holdout)
+        dealer = dealer_over(decks, holdout)
 
         for split in Split:
             expected = {
-                uuid
-                for uuid in uuids
-                if holdout.deck_split_of(uuid, GameId.MTG) == split
+                deck.nocab_uuid
+                for deck in decks
+                if holdout.deck_split_of(deck.nocab_uuid, GameId.MTG) == split
             }
             assert set(_dealt_uuids(dealer, split)) == expected
 
-    def test_every_deck_is_dealt_exactly_once_across_splits(
-        self, tmp_path: Path
-    ) -> None:
-        box, uuids = _box_with_decks(30)
-        dealer = _dealer(box, tmp_path, _holdout(deck_split_ratios=(1, 1, 1)))
+    def test_every_deck_is_dealt_exactly_once_across_splits(self) -> None:
+        decks = _decks(30)
+        dealer = dealer_over(decks, _holdout(deck_split_ratios=(1, 1, 1)))
 
         dealt = [uuid for split in Split for uuid in _dealt_uuids(dealer, split)]
 
-        assert sorted(dealt) == sorted(uuids)
+        assert sorted(dealt) == sorted(deck.nocab_uuid for deck in decks)
 
-    def test_a_held_out_games_decks_are_all_validation(self, tmp_path: Path) -> None:
-        box, _ = _box_with_decks(10)
+    def test_a_held_out_games_decks_are_all_validation(self) -> None:
         holdout = _holdout(held_out_games=frozenset({GameId.MTG}))
+        assert _split_counts(dealer_over(_decks(10), holdout)) == (0, 0, 10)
 
-        dealer = _dealer(box, tmp_path, holdout)
-
-        assert _split_counts(dealer) == (0, 0, 10)
-
-    def test_deck_count_matches_decks_dealt(self, tmp_path: Path) -> None:
-        box, _ = _box_with_decks(30)
-        dealer = _dealer(box, tmp_path, _holdout(deck_split_ratios=(1, 1, 1)))
-
+    def test_deck_count_matches_decks_dealt(self) -> None:
+        dealer = dealer_over(_decks(30), _holdout(deck_split_ratios=(1, 1, 1)))
         for split in Split:
             assert dealer.deck_count(split) == len(_dealt_uuids(dealer, split))
 
 
 class TestDecksForSplit:
-    def test_raises_on_non_positive_decks_per_sample(self, tmp_path: Path) -> None:
-        box, _ = _box_with_decks(3)
-        dealer = _dealer(box, tmp_path)
-
+    def test_raises_on_non_positive_decks_per_sample(self) -> None:
+        dealer = dealer_over(_decks(3), _holdout())
         with pytest.raises(ValueError):
             list(dealer.training_decks(0))
 
-    def test_drops_a_trailing_partial_group(self, tmp_path: Path) -> None:
-        box, _ = _box_with_decks(10)
-        dealer = _dealer(box, tmp_path, _holdout(deck_split_ratios=(1, 0, 0)))
+    def test_drops_a_trailing_partial_group(self) -> None:
+        dealer = dealer_over(_decks(10), _holdout(deck_split_ratios=(1, 0, 0)))
 
         groups = list(dealer.training_decks(decks_per_sample=3))
 
-        assert len(groups) == 3
-        assert all(len(group) == 3 for group in groups)
+        assert [len(group) for group in groups] == [3, 3, 3]
 
-    def test_keep_remainder_yields_a_shorter_last_group(self, tmp_path: Path) -> None:
-        box, _ = _box_with_decks(10)
-        dealer = _dealer(box, tmp_path, _holdout(deck_split_ratios=(1, 0, 0)))
+    def test_keep_remainder_yields_a_shorter_last_group(self) -> None:
+        dealer = dealer_over(_decks(10), _holdout(deck_split_ratios=(1, 0, 0)))
 
         groups = list(dealer.decks_for(Split.TRAIN, 3, keep_remainder=True))
 
         assert [len(group) for group in groups] == [3, 3, 3, 1]
 
-    def test_the_fixed_order_is_by_deck_uuid(self, tmp_path: Path) -> None:
-        box, uuids = _box_with_decks(12)
-        dealer = _dealer(box, tmp_path, _holdout(deck_split_ratios=(1, 0, 0)))
+    def test_an_empty_split_deals_nothing(self) -> None:
+        dealer = dealer_over(_decks(4), _holdout(deck_split_ratios=(1, 0, 0)))
+        assert list(dealer.test_decks(2)) == []
+        assert list(dealer.validation_decks(2, shuffle=False)) == []
+
+    def test_the_fixed_order_is_by_deck_uuid(self) -> None:
+        decks = _decks(12)
+        dealer = dealer_over(decks, _holdout(deck_split_ratios=(1, 0, 0)))
 
         dealt = _dealt_uuids(dealer, Split.TRAIN)
 
-        assert dealt == sorted(uuids, key=str)
+        assert dealt == sorted((deck.nocab_uuid for deck in decks), key=str)
         assert dealt == _dealt_uuids(dealer, Split.TRAIN)
 
-    def test_shuffle_true_preserves_membership_across_reshuffles(
-        self, tmp_path: Path
-    ) -> None:
-        box, _ = _box_with_decks(20)
-        dealer = _dealer(box, tmp_path, _holdout(deck_split_ratios=(1, 0, 0)))
+    def test_shuffles_keep_membership_and_change_order(self) -> None:
+        dealer = dealer_over(_decks(40), _holdout(deck_split_ratios=(1, 0, 0)))
 
-        first = {
-            deck.nocab_uuid
-            for group in dealer.training_decks(1, shuffle=True)
-            for deck in group
-        }
-        second = {
-            deck.nocab_uuid
-            for group in dealer.training_decks(1, shuffle=True)
-            for deck in group
-        }
+        first = _dealt_uuids(dealer, Split.TRAIN, shuffle=True)
+        second = _dealt_uuids(dealer, Split.TRAIN, shuffle=True)
 
-        assert first == second
+        assert set(first) == set(second)
+        assert first != second
 
-    def test_groups_hold_each_decks_full_content(self, tmp_path: Path) -> None:
-        box, uuids = _box_with_decks(6)
-        dealer = _dealer(box, tmp_path, _holdout(deck_split_ratios=(1, 0, 0)))
+    def test_the_same_seed_gives_the_same_epochs(self, tmp_path: Path) -> None:
+        decks = _decks(40)
+        holdout = _holdout(deck_split_ratios=(1, 0, 0))
+        dealer_a = dealer_over(decks, holdout, root=tmp_path / "a", shuffle_seed=7)
+        dealer_b = dealer_over(decks, holdout, root=tmp_path / "b", shuffle_seed=7)
 
-        dealt = [deck for group in dealer.training_decks(3) for deck in group]
+        for _ in range(2):
+            assert _dealt_uuids(dealer_a, Split.TRAIN, shuffle=True) == _dealt_uuids(
+                dealer_b, Split.TRAIN, shuffle=True
+            )
 
-        assert sorted(dealt, key=lambda deck: str(deck.nocab_uuid)) == [
-            box.get_by_uuid(nocab_uuid) for nocab_uuid in sorted(uuids, key=str)
+    def test_dealt_decks_hold_each_decks_card_multiset(self) -> None:
+        binder = binder_with_cards(4)
+        card_uuids = list(binder.all_uuids(GameId.MTG))
+        decks = [
+            GenericDeck(uuid4(), GameId.MTG, "named", card_uuids[:2] * 3),
+            GenericDeck(uuid4(), GameId.MTG, "named", card_uuids),
         ]
+        dealer = dealer_over(decks, _holdout(deck_split_ratios=(1, 0, 0)), binder)
 
-    def test_a_deck_deleted_after_indexing_raises(self, tmp_path: Path) -> None:
-        box, uuids = _box_with_decks(4)
-        dealer = _dealer(box, tmp_path, _holdout(deck_split_ratios=(1, 0, 0)))
-        box.delete(uuids[0])
+        dealt = {
+            deck.nocab_uuid: deck
+            for group in dealer.training_decks(1, shuffle=False)
+            for deck in group
+        }
 
-        with pytest.raises(RuntimeError, match="no longer resolves"):
-            list(dealer.training_decks(4))
+        for deck in decks:
+            rebuilt = dealt[deck.nocab_uuid]
+            assert Counter(rebuilt.card_nocab_uuids) == Counter(deck.card_nocab_uuids)
+            assert rebuilt.source_game == GameId.MTG
+            assert rebuilt.name == ""
+            assert rebuilt.provenance is None
 
 
 class TestReadFromAnotherThread:
-    def test_a_dealer_built_on_one_thread_deals_on_another(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_dealer_built_on_one_thread_deals_on_another(self) -> None:
         # The prefetch worker's case: built here, read on a worker thread
-        memory_box, uuids = _box_with_decks(5)
-        memory_box.save(tmp_path / "mtg.db", GameId.MTG, "binder-v1")
-        box = DeckBox.open_read_only(tmp_path / "mtg.db")
-        dealer = _dealer(box, tmp_path, _holdout(deck_split_ratios=(1, 0, 0)))
+        decks = _decks(5)
+        dealer = dealer_over(decks, _holdout(deck_split_ratios=(1, 0, 0)))
         dealt: list[UUID] = []
         counted: list[int] = []
 
         def deal() -> None:
             counted.append(dealer.deck_count(Split.TRAIN))
-            dealt.extend(_dealt_uuids(dealer, Split.TRAIN))
+            dealt.extend(_dealt_uuids(dealer, Split.TRAIN, shuffle=True))
 
         worker = threading.Thread(target=deal)
         worker.start()
         worker.join(timeout=5)
 
         assert counted == [5]
-        assert sorted(dealt) == sorted(uuids)
+        assert sorted(dealt) == sorted(deck.nocab_uuid for deck in decks)
