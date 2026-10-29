@@ -1,0 +1,4 @@
+dojo,max_batch_cost,batches,cards,first_batch_s,seconds,ms_per_batch,ms_per_card
+contrastive.mtg,512,300,153600,0.382,13.952,46.51,0.0908
+contrastive.flesh_and_blood,512,300,153598,0.069,13.778,45.93,0.0897
+contrastive.dominion,512,300,153600,0.045,9.934,33.11,0.0647

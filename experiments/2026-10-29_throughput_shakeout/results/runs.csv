@@ -1,0 +1,8 @@
+run,max_batch_cost,dojos,rounds,startup_s,round_s,first_round_cards_per_s,steady_cards_per_s,steady_ms_per_step,vram_peak_gib,vram_reserved_gib,cache_rows,cache_encoded,cache_uncacheable,evictions,py_cpu_pct_median,gpu_compute_pct_median,free_ram_gb_min,python_ws_gb_max,python_vram_gb_max
+three_baked_n0,512,3,4,200.0,204 206 207 206,5017,4961,103.2,4.46,6.42,40670,40670,0,0,1503.65,5.9,11.49,6.46,6.82
+three_baked_n4,512,3,4,14.0,361 260 249 242,2837,4083,125.4,4.53,5.83,103430,62760,0,0,1490.5,25.0,11.36,6.56,6.2
+three_baked_n0_b2048,2048,3,4,14.0,169 171 170 169,6065,6035,339.4,3.9,3.96,40670,0,0,0,1235.0,3.8,11.79,6.39,4.28
+control_mtg_n0,512,1,1,183.0,593,5181,5181,98.8,4.46,6.44,34666,34666,0,0,1502.9,4.7,12.3,6.14,6.85
+three_baked_n0_omp2,512,3,2,13.0,159 158,6457,6471,79.1,3.72,3.73,40670,0,0,0,345.8,6.5,11.75,6.22,4.12
+three_baked_n0_omp1,512,3,2,13.0,154 154,6655,6667,76.8,3.72,3.73,40670,0,0,0,223.65,6.6,11.76,6.22,4.12
+three_baked_n0_omp2_b2048,2048,3,2,14.0,172 172,5963,5941,344.8,3.9,3.96,40670,0,0,0,374.6,3.9,11.92,6.36,4.28
