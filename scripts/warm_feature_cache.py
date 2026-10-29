@@ -31,6 +31,7 @@ from src.run_logging import (
     script_logger,
 )
 from src.training.dojo_catalog import DOJO_CATALOG
+from src.training.binder_mods import require_writable_save_directory
 from src.training.dojo_recipes.card_shelf import CardShelf
 from src.training.run_config import (
     RunConfig,
@@ -107,13 +108,15 @@ def main() -> int:
     if not _has_something_to_warm(config):
         return 1
     require_device(config.device)
+    if config.binder_mods is not None:
+        require_writable_save_directory(config.binder_mods)
 
     # Build exactly the run's model, so its fingerprint matches the run's
     model = build_model(
         config.model, seed=config.plan.seed, compute_precision=config.limits.precision
     ).to(config.device)
     with closing_feature_cache(model):
-        warm_feature_cache(model, config, CardShelf())
+        warm_feature_cache(model, config, CardShelf(binder_mods=config.binder_mods))
     return 0
 
 

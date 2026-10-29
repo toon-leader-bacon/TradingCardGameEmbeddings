@@ -124,12 +124,19 @@ Top level:
   `build_fingerprint` names the frozen stages' rows, and
   `assemble_feature_cache` chains the VRAM, RAM and disk tiers it sets.
   `scripts/run_training.py`'s `build_card_pipeline` calls both.
+- [binder_mods.py](binder_mods.py) and
+  [binder_mods_spec.py](binder_mods_spec.py): the optional `binder_mods:`
+  section (`BinderModsSpec`), a card-field mod pipeline applied once to
+  every card of each game before any dojo is built. `modded_binder(game,
+  spec)` returns a `ModdedCardBinder` whose `version_for(game)` answers
+  the clean binder's version, so card snapshots, metric dojos and the
+  contrastive dojo accept it unchanged. See "Binder mods" under How to run.
 - [config_parsing/](config_parsing/): the parsers `run_config.py` delegates
   to. `config_section.py` holds `ConfigSection`, the typed, key-checked
   reader of one mapping (every getter records its key, so unread keys
   raise) and the shared scalar checks; `diet_parsing.py`,
-  `model_parsing.py` and `mod_parsing.py` parse the `diet:`, `model:` and
-  `mods:` sections.
+  `model_parsing.py` and `mod_parsing.py` parse the `diet:`, `model:`,
+  `mods:` and `binder_mods:` sections.
 - [dojo_catalog.py](dojo_catalog.py): `DOJO_CATALOG`, every dojo a config
   can name, keyed `"<metric source>.<metric stem>"` (e.g.
   `gwent_one.color_mask`). The key becomes the dojo's `name`, so same-stem
@@ -392,6 +399,45 @@ is one per card, for preflight and training alike (`card_cost`).
 built (their heads, dropout) and, separately, the model's initial weights:
 `build_model(spec, seed=plan.seed)` rebuilds a run's starting weights
 exactly, which is what an untrained control needs.
+
+### Binder mods
+
+An optional top-level `binder_mods:` section changes every card once,
+before any dojo is built, so TRAIN, VALIDATION and TEST all see the
+changed cards. Dojo `mods:` still run on top, per draw.
+
+```yaml
+binder_mods:
+  pipeline:                    # card-field entries, as in mods:; non-empty
+    - {kind: shuffle_keys}
+  seed: 0                      # optional; the bake's own seed, not the run's
+  save_directory: data/cache/binder_mods/shuffled   # optional; "" = don't save
+```
+
+- **What a card goes through.** Every card but the game's Unknown sentinel,
+  in `nocab_uuid` order with a fixed seed, so even an unbounded mod gives
+  the same binder every time. `train_only` is ignored and
+  `default_augmentation` never rewrites this pipeline. A baked card is
+  cacheable: it is the one text for its uuid for the whole run.
+- **Saved bakes.** With `save_directory`, each game is written as
+  `<game>.jsonl`, its alias ledger and `<game>.stamp.json` (format
+  version, clean binder version, a sha256 of `repr(pipeline)`, seed). The
+  stamp is moved into place last and marks the bake complete. A later run
+  whose spec matches loads the file without loading the clean binder; a
+  different pipeline or seed aborts with `BinderModsMismatchError`. The
+  stamp does not cover mod code or a re-ingested clean binder: delete the
+  directory after changing either.
+- **When it runs.** `run_training.py` checks the save directory is writable
+  right after parsing the config. The bake happens lazily inside
+  `build_dojos`, on the first dojo of each game, so `--check` is the cheap
+  way to bake ahead of an experiment's arms. `warm_feature_cache.py`
+  passes the same spec, so it warms the baked texts.
+- **Order.** The bake runs before every dojo mod and before label
+  extraction, so a binder mod that renames or moves keys (`key_case`,
+  `flatten_keys`) stops a dojo's field masks from matching (see the note
+  in `../dojos/mods/mod_pipeline.py`).
+- **Not covered.** `fit_whitening.py`, `survey_dojo_baselines.py` and
+  `run_evaluation.py` take no run config and always use the clean cards.
 
 Directly from code, assuming `model` is a `SingleCardModel`/`MultiCardModel`
 and `dojos` is a list of constructed `Dojo`s:

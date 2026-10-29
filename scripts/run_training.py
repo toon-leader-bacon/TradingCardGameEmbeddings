@@ -85,6 +85,7 @@ from src.training.diet.prefetching_batch_streams import (
     build_model_warmer,
     NO_BATCH_WARMING,
 )
+from src.training.binder_mods import require_writable_save_directory
 from src.training.dojo_catalog import DOJO_CATALOG, build_dojos
 from src.training.dojo_recipes.card_shelf import CardShelf
 from src.training.feature_cache_assembly import (
@@ -231,6 +232,9 @@ def main() -> int:
     require_whitening_fits_run(config.model, config.plan.holdout)
     if not command_line.check_only:
         _require_new_run_directory(config.run_directory)
+    # A bad save path fails here, before any binder is loaded or modded
+    if config.binder_mods is not None:
+        require_writable_save_directory(config.binder_mods)
     # Dojo heads and dropout draw from torch's global RNG; the model's own
     # initial weights are seeded separately, by build_model with plan.seed.
     # The offset keeps the first dojo head from replaying the model's stream
@@ -238,7 +242,7 @@ def main() -> int:
 
     # Build the dojos and check each one before committing to a run
     context = DojoBuildContext(
-        shelf=CardShelf(),
+        shelf=CardShelf(binder_mods=config.binder_mods),
         holdout=config.plan.holdout,
         card_embedding_size=config.model.card_embedding_size,
         rng_seed=config.plan.seed,

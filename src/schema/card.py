@@ -38,6 +38,14 @@ class Provenance:
     same way, so one dataclass serves both rather than two
     near-identical ones.
 
+    One deck from several sources keeps only the first source's
+    provenance. Decks keyed by their card multiset
+    (deck_box/multiset_deck.py) are stored once, so when two sources
+    post the same list (e.g. Zenodo and HearthstoneTopDecks), the
+    source ingested first is the only one recorded. If an analysis
+    must know every deck one source contributed, re-run ingestion for
+    just that source into its own DeckBox.
+
     Inputs: none (data holder).
     Output: n/a.
     Side effects: none.

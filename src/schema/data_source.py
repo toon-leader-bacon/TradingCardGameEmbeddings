@@ -81,6 +81,24 @@ class DataSource(str, Enum):
     # source's decks/kingdoms are minted by its own metrics directly
     # (no card_binder ingestion stage: card names resolve against the
     # already-ingested DOMINIONTABS binder instead).
+    LIMITLESS_PLAY = "limitless_play"  # play.limitlesstcg.com's tournament
+    # standings decklists (see src/data_retrieval/limitless_play/downloader.py
+    # and src/data_refinement/deck_box/limitless_play/extraction_stage.py)
+    # — distinct from POKEMON_TCG (that deck's cards' own data source).
+    HEARTHSTONETOPDECKS = "hearthstonetopdecks"  # hearthstonetopdecks.com's
+    # deck pages; source_id is the page's URL slug (see
+    # src/data_retrieval/hearthstonetopdecks/downloader.py and
+    # src/data_refinement/deck_box/hearthstonetopdecks/extraction_stage.py)
+    # — distinct from HEARTHSTONEJSON (that deck's cards' own data source).
+    ZENODO_HEARTHSTONE_DECKS = "zenodo_hearthstone_decks"  # the Zenodo
+    # "Hearthstone Decks Dataset" (record 10198504); source_id is idDeck (see
+    # src/data_retrieval/zenodo_hearthstone_decks/downloader.py and
+    # src/data_refinement/deck_box/zenodo_hearthstone_decks/extraction_stage.py).
+    FABTCGMETA_ONLINE_DECKS = "fabtcgmeta_online_decks"  # fabtcgmeta.com's
+    # online (Talishar) decklists; source_id is the deck's hash (see
+    # src/data_retrieval/fabtcgmeta_online_decks/downloader.py and
+    # src/data_refinement/deck_box/fabtcgmeta_online_decks/extraction_stage.py)
+    # — distinct from CARDVAULT_FABTCG (that deck's cards' own data source).
     SYSTEM = "system"  # minted internally by CardBinder itself for
     # synthetic sentinel cards (e.g. the "Unknown" fallback card — see
     # CardBinder.ensure_unknown_card()), never fetched from an external

@@ -14,6 +14,8 @@ from src.data_refinement.snapshots.stamps import DeckSnapshotStamp
 from src.dojos.file_managers.deck_split_index import DeckSplitIndex
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
+from src.training.binder_mods import modded_binder
+from src.training.binder_mods_spec import BinderModsSpec
 
 # Deck split indices (and caches derived from a deck split) live here
 DECK_SPLIT_CACHE_DIRECTORY = Path("data/splits/contrastive")
@@ -24,12 +26,17 @@ class CardShelf:
     and each deck split index at most once."""
 
     def __init__(
-        self, deck_split_cache_directory: Path = DECK_SPLIT_CACHE_DIRECTORY
+        self,
+        deck_split_cache_directory: Path = DECK_SPLIT_CACHE_DIRECTORY,
+        binder_mods: BinderModsSpec | None = None,
     ) -> None:
         """Inputs: deck_split_cache_directory (where deck_split_index
-        caches its files; tests pass a temporary one).
+        caches its files; tests pass a temporary one); binder_mods (the
+        run's binder mod pipeline, applied to each game's binder as it
+        loads; None hands out the binders as saved).
         Side effects: none (nothing loads until asked)."""
         self._deck_split_cache_directory = deck_split_cache_directory
+        self._binder_mods = binder_mods
         self._card_binders: dict[GameId, CardBinder] = {}
         self._deck_boxes: dict[Path, DeckBox] = {}
         self._card_snapshots: dict[GameId, CardSnapshot] = {}
@@ -49,23 +56,27 @@ class CardShelf:
 
     def card_binder(self, game: GameId) -> CardBinder:
         """game's binder from CardBinder.default_output_path, loaded on
-        first request.
+        first request; with binder_mods, modded_binder(game, binder_mods)
+        instead (saved bake or clean binder with the pipeline applied).
 
         Inputs: game (GameId). Output: CardBinder.
-        Side effects: reads the binder file on first call per game.
-        Exceptions: FileNotFoundError if the binder file does not exist.
+        Side effects: reads the binder file on first call per game; with
+            binder_mods, as modded_binder (may write its save directory).
+        Exceptions: FileNotFoundError if the binder file does not exist;
+            with binder_mods, as modded_binder.
 
         Example:
             >>> CardShelf().card_binder(GameId.GWENT)
         """
         if game not in self._card_binders:
-            path = CardBinder.default_output_path(game)
-            if not path.exists():
-                raise FileNotFoundError(
-                    f"no {game.value} card binder at {path}; run "
-                    "scripts/run_card_binder_ingestion.py first"
-                )
-            self._card_binders[game] = CardBinder.load([path])
+            binder: CardBinder
+            if self._binder_mods is not None:
+                # A ModdedCardBinder answers the clean version, so snapshots
+                # and dojos check it as they would the clean binder
+                binder = modded_binder(game, self._binder_mods)
+            else:
+                binder = CardBinder.load([CardBinder.existing_output_path(game)])
+            self._card_binders[game] = binder
         return self._card_binders[game]
 
     def card_lookup(self, games: Sequence[GameId]) -> MultiGameCardLookup:

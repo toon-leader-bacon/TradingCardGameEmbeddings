@@ -17,7 +17,7 @@ lists and are opt-in per dojo, for the groups the catalog allows
 import dataclasses
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar, Generic
 
 from src.dojos.mods.card_field_mods import (
     UNBOUNDED_VARIANTS,
@@ -27,6 +27,19 @@ from src.dojos.mods.card_field_mods import (
     RandomKeyMaskMod,
     ShuffleKeysMod,
     WeightedFieldMaskMod,
+)
+from src.dojos.mods.content_style_mods import (
+    BoolSpelling,
+    BoolToStringMod,
+    FlattenKeysMod,
+    KeyCase,
+    KeyCaseMod,
+    ListToStringMod,
+    NumberToStringMod,
+    StyleChoiceMod,
+    StyleT,
+    ValueCase,
+    ValueCaseMod,
 )
 from src.dojos.mods.deck_mods import (
     CardDropoutMod,
@@ -186,6 +199,94 @@ class WeightedFieldMaskSpec(CardFieldModSpec):
         """See ModSpec.build."""
         return WeightedFieldMaskMod(
             self.table,
+            probability=self.probability,
+            rng_seed=rng_seed,
+            variants=self.variants,
+        )
+
+
+@dataclass(frozen=True)
+class StyleChoiceSpec(CardFieldModSpec, Generic[StyleT]):
+    """Template Method base for the content style specs
+    (src/dojos/mods/content_style_mods.py): the fields and build() are
+    shared, each subclass names only its MOD_CLASS.
+
+    styles: the styles one is drawn from per card (None: the mod's
+        DEFAULT_STYLES).
+    variants, probability: as ShuffleKeysSpec.
+
+    Example:
+        >>> KeyCaseSpec(styles=(KeyCase.CAMEL,)).build(rng_seed=0)
+    """
+
+    MOD_CLASS: ClassVar[type[StyleChoiceMod[Any]]]
+
+    styles: tuple[StyleT, ...] | None = None
+    variants: int = UNBOUNDED_VARIANTS
+    probability: float = 1.0
+
+    def build(self, rng_seed: int | None) -> CardFieldMod:
+        """See ModSpec.build."""
+        return type(self).MOD_CLASS(
+            styles=self.styles,
+            probability=self.probability,
+            rng_seed=rng_seed,
+            variants=self.variants,
+        )
+
+
+@dataclass(frozen=True)
+class KeyCaseSpec(StyleChoiceSpec[KeyCase]):
+    """Builds a KeyCaseMod; see StyleChoiceSpec."""
+
+    MOD_CLASS = KeyCaseMod
+
+
+@dataclass(frozen=True)
+class FlattenKeysSpec(StyleChoiceSpec[str]):
+    """Builds a FlattenKeysMod (styles are separators); see StyleChoiceSpec."""
+
+    MOD_CLASS = FlattenKeysMod
+
+
+@dataclass(frozen=True)
+class ValueCaseSpec(StyleChoiceSpec[ValueCase]):
+    """Builds a ValueCaseMod; see StyleChoiceSpec."""
+
+    MOD_CLASS = ValueCaseMod
+
+
+@dataclass(frozen=True)
+class BoolToStringSpec(StyleChoiceSpec[BoolSpelling]):
+    """Builds a BoolToStringMod; see StyleChoiceSpec."""
+
+    MOD_CLASS = BoolToStringMod
+
+
+@dataclass(frozen=True)
+class ListToStringSpec(StyleChoiceSpec[str]):
+    """Builds a ListToStringMod (styles are separators); see StyleChoiceSpec."""
+
+    MOD_CLASS = ListToStringMod
+
+
+@dataclass(frozen=True)
+class NumberToStringSpec(CardFieldModSpec):
+    """Builds a NumberToStringMod (src/dojos/mods/content_style_mods.py).
+
+    No styles: one fixed spelling, so variants only switches it off at 0.
+    variants, probability: as ShuffleKeysSpec.
+
+    Example:
+        >>> NumberToStringSpec(probability=0.5).build(rng_seed=0)
+    """
+
+    variants: int = UNBOUNDED_VARIANTS
+    probability: float = 1.0
+
+    def build(self, rng_seed: int | None) -> CardFieldMod:
+        """See ModSpec.build."""
+        return NumberToStringMod(
             probability=self.probability,
             rng_seed=rng_seed,
             variants=self.variants,

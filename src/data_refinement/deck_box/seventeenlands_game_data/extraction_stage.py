@@ -48,9 +48,9 @@ import numpy as np
 import pyarrow.csv as pa_csv
 from tqdm import tqdm
 
-from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.data_refinement.deck_box.deck_box import DeckBox
+from src.data_refinement.deck_box.unknown_card import require_unknown_card_uuid
 from src.data_refinement.seventeenlands.chunk_decks import ChunkDecks, GameKeys
 from src.data_refinement.seventeenlands.csv_header import read_csv_header
 from src.data_refinement.seventeenlands.game_data.game_data_chunk_parser import (
@@ -113,7 +113,7 @@ class SeventeenLandsGameDataDeckExtractionStage:
             >>> deck_uuids = stage.extract(None, box, binder)
         """
         # Validate inputs: unmatched columns stand for the sentinel
-        _require_unknown_card(card_lookup, self.SOURCE_GAME)
+        require_unknown_card_uuid(card_lookup, self.SOURCE_GAME)
 
         path = raw_path if raw_path is not None else self.DEFAULT_RAW_PATH
         csv_paths = sorted(path.glob("*.csv")) if path.is_dir() else [path]
@@ -205,20 +205,6 @@ class SeventeenLandsGameDataDeckExtractionStage:
                 )
             )
             stored[deck.nocab_uuid] = None
-
-
-def _require_unknown_card(card_lookup: CardLookup, source_game: GameId) -> None:
-    """Raise unless source_game's Unknown sentinel card is on card_lookup.
-
-    Inputs: card_lookup, source_game. Output: none. Side effects: none.
-    Exceptions: RuntimeError naming the missing seeding step.
-    """
-    if card_lookup.get_by_uuid(CardBinder.unknown_card_uuid(source_game)) is None:
-        raise RuntimeError(
-            f"SeventeenLandsGameDataDeckExtractionStage: {source_game!r}'s "
-            "Unknown sentinel card is not seeded — call "
-            "CardBinder.ensure_unknown_card() before extract()"
-        )
 
 
 def _log_unmatched_names(csv_path: Path, parser: GameDataChunkParser) -> None:

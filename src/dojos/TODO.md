@@ -79,3 +79,17 @@
   - **Cost.** Seeding a `random.Random` per card is about 7 us; a keyed
     hash turned straight into a choice would be about 1 us, if a
     batch-building profile ever shows it.
+- **More content style mods** (`mods/content_style_mods.py`).
+  - *Wrap scalars:* put each scalar value in a one-element list
+    (`"hp": 60` -> `"hp": [60]`), all or nothing like the others.
+  - *Text formats:* write a card as YAML, CSV, XML or plain
+    `key: value` text instead of JSON. A mod cannot do this alone: mods
+    edit `raw_content` (a dict) and `serialize_card_to_json`
+    (`src/encoder_model/card_serialization.py`) always writes JSON.
+    Planned design: a `text_format` field on `GenericCard` (default JSON,
+    ignored by equality and kept by `dataclasses.replace`, like
+    `cacheable`) that a format mod sets and the serializer dispatches on.
+    The feature cache keys on the text, so it needs no change. Possibly
+    too hard a task early on (the model may learn formatting before card
+    content); maybe pair it with passing raw tokens, not just the pooled
+    vector, into the card embedding model.

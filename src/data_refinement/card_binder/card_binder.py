@@ -653,6 +653,18 @@ class CardBinder:
             >>> empty_binder = CardBinder.load([])
         """
         binder = CardBinder()
+        binder._add_files(paths)
+        return binder
+
+    def _add_files(self, paths: list[Path]) -> None:
+        """Add every card and alias in paths to this binder, as load()
+        describes (last-path-wins). Shared by load() and subclasses that
+        construct themselves first.
+
+        Inputs: paths. Output: none.
+        Side effects: reads each path and its alias ledger; mutates this
+            binder. Exceptions: as load().
+        """
         for path in paths:
             with open(path, "r", encoding="utf-8") as binder_file:
                 for line in binder_file:
@@ -670,7 +682,7 @@ class CardBinder:
                             ),
                         ),
                     )
-                    binder._upsert_card(card)
+                    self._upsert_card(card)
 
             alias_ledger_path = CardBinder._alias_ledger_path(path)
             if alias_ledger_path.exists():
@@ -678,16 +690,15 @@ class CardBinder:
                     for line in ledger_file:
                         alias_row = json.loads(line)
                         nocab_uuid = UUID(alias_row["nocab_uuid"])
-                        aliased_card = binder.get_by_uuid(nocab_uuid)
+                        aliased_card = self.get_by_uuid(nocab_uuid)
                         if aliased_card is None:
                             continue
-                        binder.register_alias(
+                        self.register_alias(
                             aliased_card.source_game,
                             DataSource(alias_row["data_source"]),
                             alias_row["source_id"],
                             nocab_uuid,
                         )
-        return binder
 
     @staticmethod
     def default_output_path(source_game: GameId) -> Path:
@@ -713,6 +724,26 @@ class CardBinder:
         return CardBinder.DEFAULT_OUTPUT_DIR / CardBinder.DEFAULT_OUTPUT_NAME.format(
             game=source_game.value
         )
+
+    @staticmethod
+    def existing_output_path(source_game: GameId) -> Path:
+        """default_output_path(source_game), checked to exist, for a
+        reader that needs the published binder (training).
+
+        Inputs: source_game. Output: Path. Side effects: none.
+        Exceptions: FileNotFoundError naming the ingestion script.
+
+        Example:
+            >>> CardBinder.existing_output_path(GameId.GWENT)
+            PosixPath('data/final/cards/gwent.jsonl')
+        """
+        path = CardBinder.default_output_path(source_game)
+        if not path.exists():
+            raise FileNotFoundError(
+                f"no {source_game.value} card binder at {path}; run "
+                "scripts/run_card_binder_ingestion.py first"
+            )
+        return path
 
     def save(self, path: Path, source_game: GameId) -> None:
         """Write this binder's cards for one game to path, as JSONL.
