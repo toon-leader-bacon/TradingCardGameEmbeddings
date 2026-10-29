@@ -350,3 +350,49 @@ it once (or with NumPy), and compute each batch's baseline once and carry
 it on the batch. If the main thread's 49% mostly disappears, the step
 would fall from about 77 ms toward 40 ms. That would be a source change in
 the middle of the experiment, so it is the human's call.
+
+### 2026-10-29 15:15 · Code change mid-experiment: commit 14a101e (confound)
+
+The human approved the fix. **Every run before this entry used 666ce89 or
+f4325e6 (the same training code); every `fix_*` run uses 14a101e.**
+Diff (`git show 14a101e -- src`):
+- `clique_positive_mask` builds its labels from one flat index tensor
+  (`repeat_interleave`, `bincount` for the range and repeat checks) instead
+  of reading and writing a tensor element by element.
+- `ContrastiveBatch.baseline` (new, optional): `ContrastiveDojo.batches()`
+  stores the baseline it already computed to skip degenerate batches, and
+  `baseline_loss` reads it, so the training thread no longer builds the
+  masks for loss weighting. The loss itself still builds them once.
+`check.sh` all passed (4,631 tests). Microbenchmark, one thread, a
+512-card batch of 256 two-card cliques: 6.06 → 1.35 ms per call.
+
+That 6 ms × 3 calls per batch is about 18 ms, less than the about 37 ms
+per step the profile put on that path. A likely reason (to check in the
+re-profile): each of the old loop's thousands of tiny torch operations
+released and re-took the GIL, and with the worker thread competing for it,
+each re-take could wait (the GIL "convoy" effect), so the loop cost far more
+in training than alone.
+
+Runs: `fix_omp1` (control: `three_baked_n0_omp1`, 6,667 cards/s),
+`fix_default_threads` (control: `three_baked_n0`, 4,961), then
+`fix_pyspy_all` (control: `pyspy_all`). Prediction: `fix_omp1` reaches
+at least 9,000 cards/s (the main thread's 49% mostly gone); a result under
+7,500 means the training thread's mask work was not the limit after all.
+- 2026-10-29 15:30 · fix runs done (all exit 0): `fix_omp1` 9,922 cards/s (+49%), `fix_default_threads` 7,553 (+52%) → [bench note](bench_notes/2026-10-29_1530_fix_runs.md)
+
+### 2026-10-29 15:35 · PI: the fix is confirmed; the next hotspot is a stream self-wait
+
+- **Prediction met:** `fix_omp1` reached 9,922 cards/s against the bar of
+  9,000. The thread setting and the fix add up: 4,961 → 9,922 cards/s
+  (2.0×) from both together.
+- **The convoy reading** (14:15 entry) is consistent: the old loop cost
+  about 37 ms per step in training against 18 ms alone, and removing it
+  saved about 25 ms per step (76.8 → 51.6 ms).
+- **Next hotspot:** 27% of the training thread is torch.cuda event record
+  and wait from `_on_default_stream`, which makes the caller's stream and
+  the default stream wait on each other around every cache lookup. On the
+  training thread the caller *is* the default stream, so this waits on
+  itself. Candidate fix (not applied): skip both waits when the caller's
+  stream is the default stream. Expected: about 10-14 ms off a 52 ms step.
+- **Worker:** idle 45%, so it has room; its remaining time is per-deck
+  Python (`known_card_uuids`, `source_games_of`, `_deck_at`).

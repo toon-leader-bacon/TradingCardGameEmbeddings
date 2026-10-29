@@ -107,6 +107,11 @@ ARMS: dict[str, dict[str, Any]] = {
     # with idle stacks, and GIL holders only
     "pyspy_all": {**_THREE, "phases.0.max_rounds": 2},
     "pyspy_gil": {**_THREE, "phases.0.max_rounds": 2},
+    # After the clique-mask fix (commit 4: vectorized mask, carried baseline):
+    # unprofiled at OMP 1 and at default threads, and py-spy --idle again
+    "fix_omp1": {**_THREE, "phases.0.max_rounds": 2},
+    "fix_default_threads": {**_THREE, "phases.0.max_rounds": 2},
+    "fix_pyspy_all": {**_THREE, "phases.0.max_rounds": 2},
     "three_baked_n0_omp2_b2048": {
         **_THREE,
         "hardware.max_batch_cost": 2048,

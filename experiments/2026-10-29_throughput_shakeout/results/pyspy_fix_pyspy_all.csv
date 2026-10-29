@@ -1,0 +1,260 @@
+run,thread,kind,function,samples,share_of_thread
+fix_pyspy_all,MainThread,inclusive,<module> (run_training.py:835),9826,0.9653
+fix_pyspy_all,MainThread,inclusive,main (run_training.py:287),9246,0.9083
+fix_pyspy_all,MainThread,inclusive,train (run_training.py:729),9246,0.9083
+fix_pyspy_all,MainThread,inclusive,run (src\training\trainer.py:247),9246,0.9083
+fix_pyspy_all,MainThread,inclusive,_run_phase (src\training\trainer.py:280),8985,0.8827
+fix_pyspy_all,MainThread,inclusive,_attempt_step (src\training\trainer.py:507),8983,0.8825
+fix_pyspy_all,MainThread,inclusive,_train_round (src\training\trainer.py:475),8982,0.8824
+fix_pyspy_all,MainThread,inclusive,_take_step (src\training\trainer.py:564),7294,0.7166
+fix_pyspy_all,MainThread,inclusive,_call_impl (torch\nn\modules\module.py:1787),6252,0.6142
+fix_pyspy_all,MainThread,inclusive,forward (src\encoder_model\card_encoder_model.py:239),6249,0.6139
+fix_pyspy_all,MainThread,inclusive,_wrapped_call_impl (torch\nn\modules\module.py:1776),6244,0.6134
+fix_pyspy_all,MainThread,inclusive,_loss_of (src\training\trainer.py:643),6237,0.6127
+fix_pyspy_all,MainThread,inclusive,_padded_sequences (src\encoder_model\card_encoder_model.py:270),4309,0.4233
+fix_pyspy_all,MainThread,inclusive,embed (src\encoder_model\card_embedding_pipeline.py:118),3591,0.3528
+fix_pyspy_all,MainThread,inclusive,features (src\encoder_model\feature_cache\pooled_feature_cache.py:206),3336,0.3277
+fix_pyspy_all,MainThread,inclusive,_look_up_or_encode (src\encoder_model\feature_cache\pooled_feature_cache.py:336),3332,0.3273
+fix_pyspy_all,MainThread,inclusive,lookup (src\encoder_model\feature_cache\tiered_feature_store.py:67),3255,0.3198
+fix_pyspy_all,MainThread,inclusive,lookup (src\encoder_model\feature_cache\tensor_feature_slab.py:131),2825,0.2775
+fix_pyspy_all,MainThread,inclusive,__enter__ (contextlib.py:137),2822,0.2772
+fix_pyspy_all,MainThread,inclusive,wait_stream (torch\cuda\streams.py:75),2816,0.2766
+fix_pyspy_all,MainThread,inclusive,_on_default_stream (src\encoder_model\feature_cache\tensor_feature_slab.py:427),2814,0.2765
+fix_pyspy_all,MainThread,inclusive,record_event (torch\cuda\streams.py:89),1855,0.1822
+fix_pyspy_all,MainThread,inclusive,record (torch\cuda\streams.py:205),1853,0.182
+fix_pyspy_all,MainThread,inclusive,_padded_sequences (src\encoder_model\card_encoder_model.py:276),1637,0.1608
+fix_pyspy_all,MainThread,inclusive,contextualize (src\encoder_model\multi_card_model.py:99),1609,0.1581
+fix_pyspy_all,MainThread,inclusive,forward (torch\nn\modules\transformer.py:540),1592,0.1564
+fix_pyspy_all,MainThread,inclusive,forward (torch\nn\modules\transformer.py:947),1187,0.1166
+fix_pyspy_all,MainThread,inclusive,compute_loss (src\dojos\contrastive\dojo.py:200),1064,0.1045
+fix_pyspy_all,MainThread,inclusive,_loss_of (src\training\trainer.py:644),1058,0.1039
+fix_pyspy_all,MainThread,inclusive,_sa_block (torch\nn\modules\transformer.py:968),923,0.0907
+fix_pyspy_all,MainThread,inclusive,_take_step (src\training\trainer.py:572),915,0.0899
+fix_pyspy_all,MainThread,inclusive,backward (torch\_tensor.py:630),910,0.0894
+fix_pyspy_all,MainThread,inclusive,backward (torch\autograd\__init__.py:364),909,0.0893
+fix_pyspy_all,MainThread,inclusive,_engine_run_backward (torch\autograd\graph.py:865),904,0.0888
+fix_pyspy_all,MainThread,inclusive,wait_event (torch\cuda\streams.py:61),904,0.0888
+fix_pyspy_all,MainThread,inclusive,wait (torch\cuda\streams.py:217),903,0.0887
+fix_pyspy_all,MainThread,inclusive,forward (torch\nn\modules\activation.py:1491),894,0.0878
+fix_pyspy_all,MainThread,inclusive,calculate (src\dojos\contrastive\styles\single_card.py:186),702,0.069
+fix_pyspy_all,MainThread,inclusive,embed (src\encoder_model\card_embedding_pipeline.py:114),561,0.0551
+fix_pyspy_all,MainThread,inclusive,serialize_card_to_json (src\encoder_model\card_serialization.py:35),552,0.0542
+fix_pyspy_all,MainThread,self,record (torch\cuda\streams.py:205),1853,0.182
+fix_pyspy_all,MainThread,self,_engine_run_backward (torch\autograd\graph.py:865),904,0.0888
+fix_pyspy_all,MainThread,self,wait (torch\cuda\streams.py:217),903,0.0887
+fix_pyspy_all,MainThread,self,iterencode (json\encoder.py:258),405,0.0398
+fix_pyspy_all,MainThread,self,multi_head_attention_forward (torch\nn\functional.py:6630),377,0.037
+fix_pyspy_all,MainThread,self,to_device (src\utils\device_copy.py:42),365,0.0359
+fix_pyspy_all,MainThread,self,of_text (src\encoder_model\feature_cache\card_text_key.py:57),299,0.0294
+fix_pyspy_all,MainThread,self,forward (torch\nn\modules\linear.py:134),286,0.0281
+fix_pyspy_all,MainThread,self,multi_head_attention_forward (torch\nn\functional.py:6637),230,0.0226
+fix_pyspy_all,MainThread,self,dropout (torch\nn\functional.py:1441),213,0.0209
+fix_pyspy_all,MainThread,self,_take_step (src\training\trainer.py:591),192,0.0189
+fix_pyspy_all,MainThread,self,_save (torch\serialization.py:1286),185,0.0182
+fix_pyspy_all,MainThread,self,clique_positive_mask (src\dojos\contrastive\contrastive_loss.py:169),173,0.017
+fix_pyspy_all,MainThread,self,layer_norm (torch\nn\functional.py:2936),137,0.0135
+fix_pyspy_all,MainThread,self,_query_in_batches (src\encoder_model\feature_cache\sqlite_feature_store.py:280),136,0.0134
+fix_pyspy_all,MainThread,self,info_nce_masks (src\dojos\contrastive\contrastive_loss.py:197),112,0.011
+fix_pyspy_all,MainThread,self,deck_count (src\data_refinement\deck_box\_deck_tables.py:354),109,0.0107
+fix_pyspy_all,MainThread,self,_gather (src\encoder_model\feature_cache\tensor_feature_slab.py:349),97,0.0095
+fix_pyspy_all,MainThread,self,get_scale (torch\amp\grad_scaler.py:554),90,0.0088
+fix_pyspy_all,MainThread,self,_require_finite (src\training\trainer.py:648),90,0.0088
+fix_pyspy_all,MainThread,self,_in_projection_packed (torch\nn\functional.py:5823),89,0.0087
+fix_pyspy_all,MainThread,self,info_nce_masks (src\dojos\contrastive\contrastive_loss.py:198),86,0.0084
+fix_pyspy_all,MainThread,self,dumps (json\__init__.py:238),77,0.0076
+fix_pyspy_all,MainThread,self,forward (torch\nn\modules\transformer.py:947),74,0.0073
+fix_pyspy_all,MainThread,self,__post_init__ (src\dojos\contrastive\contrastive_loss.py:77),66,0.0065
+fix_pyspy_all,MainThread,self,wait_stream (torch\cuda\streams.py:75),60,0.0059
+fix_pyspy_all,MainThread,self,same_key_mask (src\dojos\contrastive\contrastive_loss.py:119),59,0.0058
+fix_pyspy_all,MainThread,self,clique_positive_mask (src\dojos\contrastive\contrastive_loss.py:167),57,0.0056
+fix_pyspy_all,MainThread,self,get_data (<frozen importlib._bootstrap_external>:1190),56,0.0055
+fix_pyspy_all,MainThread,self,features (src\encoder_model\feature_cache\pooled_feature_cache.py:213),56,0.0055
+fix_pyspy_all,MainThread,self,cpu (torch\storage.py:264),56,0.0055
+fix_pyspy_all,MainThread,self,of_text (src\encoder_model\feature_cache\card_text_key.py:55),49,0.0048
+fix_pyspy_all,MainThread,self,info_nce_masks (src\dojos\contrastive\contrastive_loss.py:194),46,0.0045
+fix_pyspy_all,MainThread,self,forward (src\encoder_model\card_encoder_model.py:239),45,0.0044
+fix_pyspy_all,MainThread,self,_allocate (src\encoder_model\feature_cache\tensor_feature_slab.py:330),42,0.0041
+fix_pyspy_all,MainThread,self,_fold_duplicates (src\encoder_model\feature_cache\pooled_feature_cache.py:443),38,0.0037
+fix_pyspy_all,MainThread,self,_move_up_a_bucket (src\encoder_model\feature_cache\slot_policy.py:343),38,0.0037
+fix_pyspy_all,MainThread,self,_negative_log_sum_exp (src\dojos\contrastive\contrastive_loss.py:388),36,0.0035
+fix_pyspy_all,MainThread,self,lookup (src\encoder_model\feature_cache\tensor_feature_slab.py:119),36,0.0035
+fix_pyspy_all,MainThread,self,serialize_card_to_json (src\encoder_model\card_serialization.py:35),34,0.0033
+fix_pyspy_all,tqdm_monitor,inclusive,_bootstrap (threading.py:1032),9573,1.0
+fix_pyspy_all,tqdm_monitor,inclusive,run (tqdm\_monitor.py:69),9573,1.0
+fix_pyspy_all,tqdm_monitor,inclusive,wait (threading.py:359),9573,1.0
+fix_pyspy_all,tqdm_monitor,inclusive,wait (threading.py:655),9573,1.0
+fix_pyspy_all,tqdm_monitor,inclusive,_bootstrap_inner (threading.py:1075),9573,1.0
+fix_pyspy_all,tqdm_monitor,self,wait (threading.py:359),9573,1.0
+fix_pyspy_all,batch-prefetch,inclusive,_bootstrap (threading.py:1032),9193,0.9904
+fix_pyspy_all,batch-prefetch,inclusive,_bootstrap_inner (threading.py:1075),9193,0.9904
+fix_pyspy_all,batch-prefetch,inclusive,run (threading.py:1012),9193,0.9904
+fix_pyspy_all,batch-prefetch,inclusive,_run_worker (src\training\diet\prefetching_batch_streams.py:424),5012,0.54
+fix_pyspy_all,batch-prefetch,inclusive,_run_worker (src\training\diet\prefetching_batch_streams.py:423),4179,0.4502
+fix_pyspy_all,batch-prefetch,inclusive,_wait_for_work (src\training\diet\prefetching_batch_streams.py:454),4176,0.4499
+fix_pyspy_all,batch-prefetch,inclusive,wait (threading.py:355),4174,0.4497
+fix_pyspy_all,batch-prefetch,inclusive,_produce (src\training\diet\prefetching_batch_streams.py:500),3869,0.4168
+fix_pyspy_all,batch-prefetch,inclusive,next_batch (src\training\diet\dojo_batch_stream.py:41),3868,0.4167
+fix_pyspy_all,batch-prefetch,inclusive,batches (src\dojos\contrastive\dojo.py:152),2224,0.2396
+fix_pyspy_all,batch-prefetch,inclusive,build (src\dojos\contrastive\styles\single_card.py:112),1601,0.1725
+fix_pyspy_all,batch-prefetch,inclusive,candidate_uuids (src\dojos\contrastive\pair_constructor.py:248),1522,0.164
+fix_pyspy_all,batch-prefetch,inclusive,_reserve_cards (src\training\diet\prefetching_batch_streams.py:520),1140,0.1228
+fix_pyspy_all,batch-prefetch,inclusive,_produce (src\training\diet\prefetching_batch_streams.py:503),1137,0.1225
+fix_pyspy_all,batch-prefetch,inclusive,reserve (src\encoder_model\card_encoder_model.py:100),996,0.1073
+fix_pyspy_all,batch-prefetch,inclusive,reserve (src\training\diet\prefetching_batch_streams.py:726),992,0.1069
+fix_pyspy_all,batch-prefetch,inclusive,known_card_uuids (src\dojos\contrastive\pair_constructor.py:53),902,0.0972
+fix_pyspy_all,batch-prefetch,inclusive,batches (src\dojos\contrastive\dojo.py:142),730,0.0786
+fix_pyspy_all,batch-prefetch,inclusive,decks_for (src\dojos\file_managers\deck_box_dealer.py:152),695,0.0749
+fix_pyspy_all,batch-prefetch,inclusive,constant_logit_loss (src\dojos\contrastive\styles\single_card.py:203),695,0.0749
+fix_pyspy_all,batch-prefetch,inclusive,_usable_baseline (src\dojos\contrastive\dojo.py:280),689,0.0742
+fix_pyspy_all,batch-prefetch,inclusive,batches (src\dojos\contrastive\dojo.py:153),689,0.0742
+fix_pyspy_all,batch-prefetch,inclusive,known_card_uuids (src\dojos\contrastive\pair_constructor.py:49),676,0.0728
+fix_pyspy_all,batch-prefetch,inclusive,source_games_of (src\data_refinement\card_binder\visible_card_lookup.py:58),640,0.069
+fix_pyspy_all,batch-prefetch,inclusive,reserve (src\encoder_model\card_embedding_pipeline.py:203),527,0.0568
+fix_pyspy_all,batch-prefetch,inclusive,serialize_card_to_json (src\encoder_model\card_serialization.py:35),515,0.0555
+fix_pyspy_all,batch-prefetch,inclusive,source_games_of (src\data_refinement\card_binder\card_binder.py:275),490,0.0528
+fix_pyspy_all,batch-prefetch,inclusive,reserve (src\encoder_model\card_embedding_pipeline.py:204),448,0.0483
+fix_pyspy_all,batch-prefetch,inclusive,full_draw (src\dojos\contrastive\pair_constructor.py:331),446,0.048
+fix_pyspy_all,batch-prefetch,inclusive,dumps (json\__init__.py:238),442,0.0476
+fix_pyspy_all,batch-prefetch,inclusive,build (src\dojos\contrastive\styles\single_card.py:117),394,0.0424
+fix_pyspy_all,batch-prefetch,inclusive,iterencode (json\encoder.py:258),373,0.0402
+fix_pyspy_all,batch-prefetch,inclusive,_masks (src\dojos\contrastive\styles\single_card.py:216),364,0.0392
+fix_pyspy_all,batch-prefetch,inclusive,encode (json\encoder.py:200),336,0.0362
+fix_pyspy_all,batch-prefetch,inclusive,source_games_of (src\data_refinement\card_binder\card_binder.py:277),305,0.0329
+fix_pyspy_all,batch-prefetch,inclusive,reserve (src\encoder_model\feature_cache\pooled_feature_cache.py:261),304,0.0328
+fix_pyspy_all,batch-prefetch,inclusive,source_games_of (src\data_refinement\card_binder\visible_card_lookup.py:61),301,0.0324
+fix_pyspy_all,batch-prefetch,inclusive,_look_up_or_encode (src\encoder_model\feature_cache\pooled_feature_cache.py:336),300,0.0323
+fix_pyspy_all,batch-prefetch,inclusive,_deck_at (src\dojos\file_managers\deck_box_dealer.py:213),299,0.0322
+fix_pyspy_all,batch-prefetch,inclusive,lookup (src\encoder_model\feature_cache\tiered_feature_store.py:67),293,0.0316
+fix_pyspy_all,batch-prefetch,self,wait (threading.py:355),4174,0.4497
+fix_pyspy_all,batch-prefetch,self,source_games_of (src\data_refinement\card_binder\card_binder.py:275),480,0.0517
+fix_pyspy_all,batch-prefetch,self,known_card_uuids (src\dojos\contrastive\pair_constructor.py:53),433,0.0466
+fix_pyspy_all,batch-prefetch,self,iterencode (json\encoder.py:258),373,0.0402
+fix_pyspy_all,batch-prefetch,self,source_games_of (src\data_refinement\card_binder\card_binder.py:277),299,0.0322
+fix_pyspy_all,batch-prefetch,self,_deck_at (src\dojos\file_managers\deck_box_dealer.py:213),185,0.0199
+fix_pyspy_all,batch-prefetch,self,_gather (src\encoder_model\feature_cache\tensor_feature_slab.py:349),156,0.0168
+fix_pyspy_all,batch-prefetch,self,_deck_at (src\dojos\file_managers\deck_box_dealer.py:220),153,0.0165
+fix_pyspy_all,batch-prefetch,self,<genexpr> (src\encoder_model\feature_cache\tensor_feature_slab.py:229),125,0.0135
+fix_pyspy_all,batch-prefetch,self,draw (src\dojos\contrastive\pair_constructor.py:307),122,0.0131
+fix_pyspy_all,batch-prefetch,self,uuid5 (uuid.py:733),109,0.0117
+fix_pyspy_all,batch-prefetch,self,__hash__ (uuid.py:269),107,0.0115
+fix_pyspy_all,batch-prefetch,self,clique_positive_mask (src\dojos\contrastive\contrastive_loss.py:169),107,0.0115
+fix_pyspy_all,batch-prefetch,self,info_nce_masks (src\dojos\contrastive\contrastive_loss.py:197),105,0.0113
+fix_pyspy_all,batch-prefetch,self,input_shape_of (src\schema\type_hints.py:90),94,0.0101
+fix_pyspy_all,batch-prefetch,self,_wrapfunc (numpy\_core\fromnumeric.py:49),93,0.01
+fix_pyspy_all,batch-prefetch,self,source_games_of (src\data_refinement\card_binder\visible_card_lookup.py:61),87,0.0094
+fix_pyspy_all,batch-prefetch,self,_thinned (src\dojos\contrastive\pair_constructor.py:280),83,0.0089
+fix_pyspy_all,batch-prefetch,self,dumps (json\__init__.py:238),78,0.0084
+fix_pyspy_all,batch-prefetch,self,constant_logit_baseline (src\dojos\contrastive\contrastive_loss.py:272),67,0.0072
+fix_pyspy_all,batch-prefetch,self,info_nce_masks (src\dojos\contrastive\contrastive_loss.py:198),66,0.0071
+fix_pyspy_all,batch-prefetch,self,__post_init__ (src\dojos\contrastive\contrastive_loss.py:77),60,0.0065
+fix_pyspy_all,batch-prefetch,self,of_text (src\encoder_model\feature_cache\card_text_key.py:57),57,0.0061
+fix_pyspy_all,batch-prefetch,self,_deck_at (src\dojos\file_managers\deck_box_dealer.py:216),54,0.0058
+fix_pyspy_all,batch-prefetch,self,_is_visible_uuid (src\data_refinement\card_binder\visible_card_lookup.py:112),51,0.0055
+fix_pyspy_all,batch-prefetch,self,clique_positive_mask (src\dojos\contrastive\contrastive_loss.py:167),50,0.0054
+fix_pyspy_all,batch-prefetch,self,same_key_mask (src\dojos\contrastive\contrastive_loss.py:119),50,0.0054
+fix_pyspy_all,batch-prefetch,self,source_games_of (src\data_refinement\card_binder\visible_card_lookup.py:57),48,0.0052
+fix_pyspy_all,batch-prefetch,self,__init__ (uuid.py:189),42,0.0045
+fix_pyspy_all,batch-prefetch,self,draw (src\dojos\contrastive\pair_constructor.py:313),40,0.0043
+fix_pyspy_all,batch-prefetch,self,info_nce_masks (src\dojos\contrastive\contrastive_loss.py:194),39,0.0042
+fix_pyspy_all,batch-prefetch,self,_wrapfunc (numpy\_core\fromnumeric.py:54),35,0.0038
+fix_pyspy_all,batch-prefetch,self,same_key_mask (src\dojos\contrastive\contrastive_loss.py:117),33,0.0036
+fix_pyspy_all,batch-prefetch,self,encode (json\encoder.py:200),32,0.0034
+fix_pyspy_all,batch-prefetch,self,_fold_duplicates (src\encoder_model\feature_cache\pooled_feature_cache.py:443),31,0.0033
+fix_pyspy_all,batch-prefetch,self,source_games_of (src\data_refinement\card_binder\card_binder.py:274),30,0.0032
+fix_pyspy_all,batch-prefetch,self,lookup (src\encoder_model\feature_cache\tensor_feature_slab.py:119),30,0.0032
+fix_pyspy_all,batch-prefetch,self,_move_up_a_bucket (src\encoder_model\feature_cache\slot_policy.py:339),28,0.003
+fix_pyspy_all,batch-prefetch,self,_deck_at (src\dojos\file_managers\deck_box_dealer.py:217),28,0.003
+fix_pyspy_all,batch-prefetch,self,_is_visible_uuid (src\data_refinement\card_binder\visible_card_lookup.py:116),26,0.0028
+fix_pyspy_all,run-sampler,inclusive,_bootstrap (threading.py:1032),9282,1.0
+fix_pyspy_all,run-sampler,inclusive,_bootstrap_inner (threading.py:1075),9282,1.0
+fix_pyspy_all,run-sampler,inclusive,run (threading.py:1012),9282,1.0
+fix_pyspy_all,run-sampler,inclusive,wait (threading.py:359),9278,0.9996
+fix_pyspy_all,run-sampler,inclusive,_run (src\training\recording\run_sampler.py:153),9278,0.9996
+fix_pyspy_all,run-sampler,inclusive,wait (threading.py:655),9278,0.9996
+fix_pyspy_all,run-sampler,inclusive,_write_row (src\training\recording\run_sampler.py:166),4,0.0004
+fix_pyspy_all,run-sampler,inclusive,_run (src\training\recording\run_sampler.py:154),4,0.0004
+fix_pyspy_all,run-sampler,inclusive,<genexpr> (src\encoder_model\feature_cache\tiered_feature_store.py:125),2,0.0002
+fix_pyspy_all,run-sampler,inclusive,_row (src\training\recording\run_sampler.py:185),2,0.0002
+fix_pyspy_all,run-sampler,inclusive,stats (src\encoder_model\feature_cache\pooled_feature_cache.py:306),2,0.0002
+fix_pyspy_all,run-sampler,inclusive,feature_cache_stats (src\encoder_model\card_encoder_model.py:125),2,0.0002
+fix_pyspy_all,run-sampler,inclusive,tier_stats (src\encoder_model\feature_cache\tensor_feature_slab.py:228),2,0.0002
+fix_pyspy_all,run-sampler,inclusive,tier_stats (src\encoder_model\feature_cache\tiered_feature_store.py:125),2,0.0002
+fix_pyspy_all,run-sampler,inclusive,write (src\training\recording\csv_table.py:55),2,0.0002
+fix_pyspy_all,run-sampler,self,wait (threading.py:359),9278,0.9996
+fix_pyspy_all,run-sampler,self,tier_stats (src\encoder_model\feature_cache\tensor_feature_slab.py:228),2,0.0002
+fix_pyspy_all,run-sampler,self,write (src\training\recording\csv_table.py:55),2,0.0002
+fix_pyspy_all,ThreadPoolExecutor-0_0,inclusive,_bootstrap (threading.py:1032),12,1.0
+fix_pyspy_all,ThreadPoolExecutor-0_0,inclusive,_bootstrap_inner (threading.py:1075),12,1.0
+fix_pyspy_all,ThreadPoolExecutor-0_0,inclusive,run (threading.py:1012),12,1.0
+fix_pyspy_all,ThreadPoolExecutor-0_0,inclusive,_materialize_copy (transformers\core_model_loading.py:1238),11,0.9167
+fix_pyspy_all,ThreadPoolExecutor-0_0,inclusive,run (concurrent\futures\thread.py:59),11,0.9167
+fix_pyspy_all,ThreadPoolExecutor-0_0,inclusive,_job (transformers\core_model_loading.py:1262),11,0.9167
+fix_pyspy_all,ThreadPoolExecutor-0_0,inclusive,_worker (concurrent\futures\thread.py:93),11,0.9167
+fix_pyspy_all,ThreadPoolExecutor-0_0,inclusive,_worker (concurrent\futures\thread.py:90),1,0.0833
+fix_pyspy_all,ThreadPoolExecutor-0_0,self,_materialize_copy (transformers\core_model_loading.py:1238),11,0.9167
+fix_pyspy_all,ThreadPoolExecutor-0_0,self,_worker (concurrent\futures\thread.py:90),1,0.0833
+fix_pyspy_all,ThreadPoolExecutor-0_3,inclusive,run (threading.py:1012),9,1.0
+fix_pyspy_all,ThreadPoolExecutor-0_3,inclusive,_bootstrap (threading.py:1032),9,1.0
+fix_pyspy_all,ThreadPoolExecutor-0_3,inclusive,_bootstrap_inner (threading.py:1075),9,1.0
+fix_pyspy_all,ThreadPoolExecutor-0_3,inclusive,run (concurrent\futures\thread.py:59),8,0.8889
+fix_pyspy_all,ThreadPoolExecutor-0_3,inclusive,_job (transformers\core_model_loading.py:1262),8,0.8889
+fix_pyspy_all,ThreadPoolExecutor-0_3,inclusive,_worker (concurrent\futures\thread.py:93),8,0.8889
+fix_pyspy_all,ThreadPoolExecutor-0_3,inclusive,_materialize_copy (transformers\core_model_loading.py:1238),7,0.7778
+fix_pyspy_all,ThreadPoolExecutor-0_3,inclusive,_materialize_copy (transformers\core_model_loading.py:1240),1,0.1111
+fix_pyspy_all,ThreadPoolExecutor-0_3,inclusive,_worker (concurrent\futures\thread.py:90),1,0.1111
+fix_pyspy_all,ThreadPoolExecutor-0_3,self,_materialize_copy (transformers\core_model_loading.py:1238),7,0.7778
+fix_pyspy_all,ThreadPoolExecutor-0_3,self,_materialize_copy (transformers\core_model_loading.py:1240),1,0.1111
+fix_pyspy_all,ThreadPoolExecutor-0_3,self,_worker (concurrent\futures\thread.py:90),1,0.1111
+fix_pyspy_all,ThreadPoolExecutor-0_2,inclusive,_bootstrap (threading.py:1032),9,1.0
+fix_pyspy_all,ThreadPoolExecutor-0_2,inclusive,_bootstrap_inner (threading.py:1075),9,1.0
+fix_pyspy_all,ThreadPoolExecutor-0_2,inclusive,run (threading.py:1012),9,1.0
+fix_pyspy_all,ThreadPoolExecutor-0_2,inclusive,run (concurrent\futures\thread.py:59),8,0.8889
+fix_pyspy_all,ThreadPoolExecutor-0_2,inclusive,_job (transformers\core_model_loading.py:1262),8,0.8889
+fix_pyspy_all,ThreadPoolExecutor-0_2,inclusive,_worker (concurrent\futures\thread.py:93),8,0.8889
+fix_pyspy_all,ThreadPoolExecutor-0_2,inclusive,_materialize_copy (transformers\core_model_loading.py:1238),5,0.5556
+fix_pyspy_all,ThreadPoolExecutor-0_2,inclusive,_materialize_copy (transformers\core_model_loading.py:1240),3,0.3333
+fix_pyspy_all,ThreadPoolExecutor-0_2,inclusive,_worker (concurrent\futures\thread.py:90),1,0.1111
+fix_pyspy_all,ThreadPoolExecutor-0_2,self,_materialize_copy (transformers\core_model_loading.py:1238),5,0.5556
+fix_pyspy_all,ThreadPoolExecutor-0_2,self,_materialize_copy (transformers\core_model_loading.py:1240),3,0.3333
+fix_pyspy_all,ThreadPoolExecutor-0_2,self,_worker (concurrent\futures\thread.py:90),1,0.1111
+fix_pyspy_all,ThreadPoolExecutor-0_1,inclusive,_bootstrap (threading.py:1032),9,1.0
+fix_pyspy_all,ThreadPoolExecutor-0_1,inclusive,_bootstrap_inner (threading.py:1075),9,1.0
+fix_pyspy_all,ThreadPoolExecutor-0_1,inclusive,run (threading.py:1012),9,1.0
+fix_pyspy_all,ThreadPoolExecutor-0_1,inclusive,_materialize_copy (transformers\core_model_loading.py:1238),8,0.8889
+fix_pyspy_all,ThreadPoolExecutor-0_1,inclusive,run (concurrent\futures\thread.py:59),8,0.8889
+fix_pyspy_all,ThreadPoolExecutor-0_1,inclusive,_job (transformers\core_model_loading.py:1262),8,0.8889
+fix_pyspy_all,ThreadPoolExecutor-0_1,inclusive,_worker (concurrent\futures\thread.py:93),8,0.8889
+fix_pyspy_all,ThreadPoolExecutor-0_1,inclusive,_worker (concurrent\futures\thread.py:90),1,0.1111
+fix_pyspy_all,ThreadPoolExecutor-0_1,self,_materialize_copy (transformers\core_model_loading.py:1238),8,0.8889
+fix_pyspy_all,ThreadPoolExecutor-0_1,self,_worker (concurrent\futures\thread.py:90),1,0.1111
+fix_pyspy_all,thread (24548),inclusive,_find_and_load_unlocked (<frozen importlib._bootstrap>:1331),4,1.0
+fix_pyspy_all,thread (24548),inclusive,_find_and_load (<frozen importlib._bootstrap>:1360),4,1.0
+fix_pyspy_all,thread (24548),inclusive,_load_unlocked (<frozen importlib._bootstrap>:935),4,1.0
+fix_pyspy_all,thread (24548),inclusive,exec_module (<frozen importlib._bootstrap_external>:999),3,0.75
+fix_pyspy_all,thread (24548),inclusive,_call_with_frames_removed (<frozen importlib._bootstrap>:488),3,0.75
+fix_pyspy_all,thread (24548),inclusive,<module> (run_training.py:38),3,0.75
+fix_pyspy_all,thread (24548),inclusive,<module> (dataclasses.py:223),1,0.25
+fix_pyspy_all,thread (24548),inclusive,namedtuple (collections\__init__.py:441),1,0.25
+fix_pyspy_all,thread (24548),inclusive,<module> (inspect.py:1736),1,0.25
+fix_pyspy_all,thread (24548),inclusive,<module> (dataclasses.py:5),1,0.25
+fix_pyspy_all,thread (24548),inclusive,exec_module (<frozen importlib._bootstrap_external>:995),1,0.25
+fix_pyspy_all,thread (24548),inclusive,get_data (<frozen importlib._bootstrap_external>:1190),1,0.25
+fix_pyspy_all,thread (24548),inclusive,get_code (<frozen importlib._bootstrap_external>:1091),1,0.25
+fix_pyspy_all,thread (24548),inclusive,<module> (ctypes\__init__.py:556),1,0.25
+fix_pyspy_all,thread (24548),inclusive,<module> (run_training.py:42),1,0.25
+fix_pyspy_all,thread (24548),inclusive,<module> (torch\__init__.py:14),1,0.25
+fix_pyspy_all,thread (24548),inclusive,<module> (ctypes\_endian.py:2),1,0.25
+fix_pyspy_all,thread (24548),self,<module> (dataclasses.py:223),1,0.25
+fix_pyspy_all,thread (24548),self,namedtuple (collections\__init__.py:441),1,0.25
+fix_pyspy_all,thread (24548),self,get_data (<frozen importlib._bootstrap_external>:1190),1,0.25
+fix_pyspy_all,thread (24548),self,<module> (ctypes\_endian.py:2),1,0.25
+fix_pyspy_all,Thread-1 (_readerthread),inclusive,_bootstrap (threading.py:1032),2,1.0
+fix_pyspy_all,Thread-1 (_readerthread),inclusive,_bootstrap_inner (threading.py:1075),2,1.0
+fix_pyspy_all,Thread-1 (_readerthread),inclusive,run (threading.py:1012),2,1.0
+fix_pyspy_all,Thread-1 (_readerthread),inclusive,_readerthread (subprocess.py:1599),2,1.0
+fix_pyspy_all,Thread-1 (_readerthread),self,_readerthread (subprocess.py:1599),2,1.0
+fix_pyspy_all,Thread-2 (_readerthread),inclusive,_bootstrap (threading.py:1032),2,1.0
+fix_pyspy_all,Thread-2 (_readerthread),inclusive,_bootstrap_inner (threading.py:1075),2,1.0
+fix_pyspy_all,Thread-2 (_readerthread),inclusive,run (threading.py:1012),2,1.0
+fix_pyspy_all,Thread-2 (_readerthread),inclusive,_readerthread (subprocess.py:1599),2,1.0
+fix_pyspy_all,Thread-2 (_readerthread),self,_readerthread (subprocess.py:1599),2,1.0
