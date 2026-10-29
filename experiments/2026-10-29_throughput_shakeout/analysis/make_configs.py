@@ -103,6 +103,10 @@ ARMS: dict[str, dict[str, Any]] = {
     # Same config as three_baked_n0; OMP_NUM_THREADS=2 comes from env/<arm>.env
     "three_baked_n0_omp2": {**_THREE, "phases.0.max_rounds": 2},
     "three_baked_n0_omp1": {**_THREE, "phases.0.max_rounds": 2},
+    # three_baked_n0_omp1 under py-spy (analysis/run_pyspy.sh): every thread
+    # with idle stacks, and GIL holders only
+    "pyspy_all": {**_THREE, "phases.0.max_rounds": 2},
+    "pyspy_gil": {**_THREE, "phases.0.max_rounds": 2},
     "three_baked_n0_omp2_b2048": {
         **_THREE,
         "hardware.max_batch_cost": 2048,

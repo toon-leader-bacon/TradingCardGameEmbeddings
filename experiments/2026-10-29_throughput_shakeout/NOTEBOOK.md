@@ -319,3 +319,34 @@ prefetch worker for cores. Two short probes to size the fix:
 - 2026-10-29 14:19 · run three_baked_n0_omp1 done (exit 0, 6 min, about 6,670 cards/s, CPU 224%) → [bench note](bench_notes/2026-10-29_1419_three_baked_n0_omp1_done.md)
 - 2026-10-29 14:25 · run three_baked_n0_omp2_b2048 done (exit 0, 6 min, about 5,940 cards/s: no gain over default threads at 2048) → [bench note](bench_notes/2026-10-29_1425_three_baked_n0_omp2_b2048_done.md)
 - 2026-10-29 14:35 · batch-build benchmark done (27 ms per 512-card batch without dojo mods, 42 ms with) → [bench note](bench_notes/2026-10-29_1435_batch_build_bench.md)
+- 2026-10-29 14:56 · py-spy runs done (both exit 0 on the second attempt; no measurable overhead) → [bench note](bench_notes/2026-10-29_1456_pyspy_runs.md)
+
+### 2026-10-29 15:00 · PI: py-spy replaces the GIL inference
+
+The human asked for a measurement before choosing between fewer Python
+objects (snapshot stage 2) and worker processes. What it shows:
+- **The GIL is not saturated.** It is held about 48% of the time, so the
+  two Python threads are not mainly waiting on each other. The Results
+  section's "one GIL shared by worker and training thread" reading was
+  wrong; it stays there as written, corrected here.
+- **The worker is not the bottleneck either.** It is idle 35% of the time.
+- **The training thread is, and half of its time is one function.**
+  `clique_positive_mask` loops over every card index and reads and writes a
+  torch tensor element by element. Each element access is a full torch
+  operation (dispatch, a 0-d tensor, a bool conversion), mostly spent in
+  C++ with the GIL released, which is why the GIL looks free while the
+  thread is busy. It runs once per batch in the worker (to check the
+  baseline is usable) and again in the training thread (loss weighting's
+  baseline), on identical inputs.
+- **Text serialization and hashing are small** (JSON 2.4% of the training
+  thread, cache lookup 6%). The earlier suggestion that they dominate was
+  wrong.
+- **The thread result fits:** the 512 × 512 mask operations around the loop
+  can be split over OpenMP threads, so with 8 threads each tiny operation
+  paid for waking and spinning them.
+
+Candidate fix (not applied): build `clique_of` as a Python list and convert
+it once (or with NumPy), and compute each batch's baseline once and carry
+it on the batch. If the main thread's 49% mostly disappears, the step
+would fall from about 77 ms toward 40 ms. That would be a source change in
+the middle of the experiment, so it is the human's call.
