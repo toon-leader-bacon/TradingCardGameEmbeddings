@@ -150,13 +150,16 @@ class ContrastiveDojo:
             if len(deck_sample) < _MIN_DECKS_PER_SAMPLE:
                 return
             batch = self._pair_constructor.build(deck_sample, self._lookups[split])
-            if not self._has_usable_baseline(batch):
+            baseline = self._usable_baseline(batch)
+            if baseline is None:
                 _logger.warning(
                     "Skipping a degenerate ContrastiveBatch (no anchor with "
                     "both a positive and a negative) built from %d deck(s)",
                     len(deck_sample),
                 )
                 continue
+            # Carried, so the training step does not compute it again
+            batch = dataclasses.replace(batch, baseline=baseline)
             # Mod first, so the budget check sees the batch actually yielded
             batch = self._modded(batch, is_training=split == Split.TRAIN)
             self._check_within(batch, budget)
@@ -209,7 +212,8 @@ class ContrastiveDojo:
         duplicate cards shrink its negatives, so no single number fits
         every batch.
         Inputs: batch, a ContrastiveBatch this dojo yielded.
-        Output: float > 0.
+        Output: float > 0: batch.baseline when batches() set it, otherwise
+            computed from the batch's identities and cliques.
         Side effects: none.
         Exceptions: TypeError if batch isn't a ContrastiveBatch; ValueError
             from the loss if the batch has no anchor or no negative.
@@ -220,6 +224,8 @@ class ContrastiveDojo:
         """
         if not isinstance(batch, ContrastiveBatch):
             raise TypeError(f"{self.name} needs a ContrastiveBatch")
+        if batch.baseline is not None:
+            return batch.baseline
         return self._contrastive_loss.constant_logit_loss(
             identities=batch.identities,
             positive_cliques=batch.positive_cliques,
@@ -257,25 +263,25 @@ class ContrastiveDojo:
         inputs = cast(BatchedTrainingInput, [item for item, _ in data])
         return dataclasses.replace(batch, inputs=inputs)
 
-    def _has_usable_baseline(self, batch: ContrastiveBatch) -> bool:
-        """Whether batch has an anchor with a positive and a negative, i.e.
-        its loss and baseline are defined. False e.g. when every deck but
-        one was skipped, or (missing card) every deck misses the same card.
+    def _usable_baseline(self, batch: ContrastiveBatch) -> float | None:
+        """batch's baseline when it has an anchor with a positive and a
+        negative, i.e. its loss and baseline are defined; None otherwise,
+        e.g. when every deck but one was skipped, or (missing card) every
+        deck misses the same card.
 
         Private helper - single caller is batches().
         Inputs: batch, as the pair constructor built it.
-        Output: bool.
+        Output: float > 0, or None.
         Side effects: none.
         Exceptions: whatever the loss raises for a malformed batch (a
-            pair-constructor bug); DegenerateBatchError means False.
+            pair-constructor bug); DegenerateBatchError means None.
         """
         try:
-            self._contrastive_loss.constant_logit_loss(
+            return self._contrastive_loss.constant_logit_loss(
                 batch.identities, batch.positive_cliques
             )
         except DegenerateBatchError:
-            return False
-        return True
+            return None
 
     def _decks_within(self, budget: BatchBudget) -> int:
         """Decks per batch: as many as fit budget, assuming unit card cost.

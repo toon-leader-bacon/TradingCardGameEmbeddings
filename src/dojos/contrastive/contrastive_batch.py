@@ -38,6 +38,11 @@ class ContrastiveBatch:
         loss may also read meaning into the order within a clique: the
         missing-card style's cliques are [context, card] pairs, defined
         by MissingCardPairConstructor alone.
+    baseline: the batch's constant-logit loss (ContrastiveLoss.
+        constant_logit_loss of identities and positive_cliques), set by
+        ContrastiveDojo.batches() once it has checked the batch is usable,
+        so the training step does not compute it again; None until then.
+        Mods keep identities and cliques, so it stays valid through them.
 
     A style's loss may likewise read meaning into a card's position within
     an item (odd one out: the intruder is last; card in contexts: the
@@ -53,6 +58,7 @@ class ContrastiveBatch:
     inputs: BatchedTrainingInput
     identities: list[tuple[UUID, ...]]
     positive_cliques: list[list[int]]
+    baseline: float | None = None
 
     def __len__(self) -> int:
         """Example count: one per surviving source deck (positive clique)."""
