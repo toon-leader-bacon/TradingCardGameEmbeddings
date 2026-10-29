@@ -239,6 +239,8 @@ def main() -> int:
     # initial weights are seeded separately, by build_model with plan.seed.
     # The offset keeps the first dojo head from replaying the model's stream
     torch.manual_seed(config.plan.seed + _DOJO_SEED_OFFSET)
+    # Before any tensor work: see HardwareLimits.torch_cpu_threads
+    torch.set_num_threads(config.limits.torch_cpu_threads)
 
     # Build the dojos and check each one before committing to a run
     context = DojoBuildContext(

@@ -412,11 +412,16 @@ class TensorFeatureSlab:
 def _on_default_stream(device: torch.device | None) -> Iterator[None]:
     """Run the body on device's default CUDA stream, after the caller's
     current stream, and make the caller's stream wait for it afterwards.
-    Does nothing without a CUDA device.
+    Does nothing without a CUDA device, or when the caller is already on
+    the default stream (the training thread): its work is already in order,
+    and each wait records and waits on a CUDA event, which py-spy showed
+    at about 27% of the training thread on ROCm (2026-10-29 throughput
+    shake-out).
 
     Private helper - consumers are TensorFeatureSlab.lookup and put_many.
     Inputs: device (CUDA, or None). Output: a context manager.
-    Side effects: stream waits and a stream switch for the body.
+    Side effects: stream waits and a stream switch for the body, only for
+        a caller on another stream.
     Exceptions: whatever the body raises (the waits still run).
     """
     if device is None:
@@ -424,6 +429,9 @@ def _on_default_stream(device: torch.device | None) -> Iterator[None]:
         return
     caller = torch.cuda.current_stream(device)
     default = torch.cuda.default_stream(device)
+    if caller == default:
+        yield
+        return
     default.wait_stream(caller)
     try:
         with torch.cuda.stream(default):

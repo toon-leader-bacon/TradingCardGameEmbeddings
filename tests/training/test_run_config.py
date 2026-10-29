@@ -140,6 +140,12 @@ class TestParseRunConfig:
         cast(dict[str, Any], document["hardware"])["prefetch_depth"] = 4
         assert parse_run_config(document).limits.prefetch_depth == 4
 
+    def test_hardware_torch_cpu_threads_defaults_to_one_and_is_parsed(self) -> None:
+        assert parse_run_config(_document()).limits.torch_cpu_threads == 1
+        document = _document()
+        cast(dict[str, Any], document["hardware"])["torch_cpu_threads"] = 4
+        assert parse_run_config(document).limits.torch_cpu_threads == 4
+
     def test_a_phase_without_dojos_trains_every_non_held_out_dojo(self) -> None:
         phase = parse_run_config(_document()).plan.phases[0]
         assert phase.dojo_names == ("a", "b")

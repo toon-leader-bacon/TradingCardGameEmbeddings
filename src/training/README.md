@@ -298,6 +298,10 @@ Points worth knowing:
   quarantine mid-round redraws the rest of the round.
 - Batches come from a `BatchFeed` (`diet/batch_feed.py`), one per phase,
   in schedule order (see `diet/README.md`, "Prefetch").
+  - `hardware.torch_cpu_threads` (default 1) sets torch's intra-op CPU
+    threads at startup. A step's CPU side is many small tensor operations;
+    one thread per core spent the CPU spinning idle threads (2026-10-29
+    throughput shake-out).
   - With `hardware.prefetch_depth: N` (default 0), a worker thread builds
     the next N scheduled steps while the GPU trains.
     `scripts/run_training.py` passes a `batch_warmer` that pins and warms
