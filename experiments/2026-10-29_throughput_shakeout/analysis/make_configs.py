@@ -112,6 +112,10 @@ ARMS: dict[str, dict[str, Any]] = {
     "fix_omp1": {**_THREE, "phases.0.max_rounds": 2},
     "fix_default_threads": {**_THREE, "phases.0.max_rounds": 2},
     "fix_pyspy_all": {**_THREE, "phases.0.max_rounds": 2},
+    # After the stream self-wait fix and torch_cpu_threads default 1 (f85006c):
+    # no env file, so the default thread count is what is tested
+    "quickwins": {**_THREE, "phases.0.max_rounds": 2},
+    "quickwins_pyspy_all": {**_THREE, "phases.0.max_rounds": 2},
     "three_baked_n0_omp2_b2048": {
         **_THREE,
         "hardware.max_batch_cost": 2048,

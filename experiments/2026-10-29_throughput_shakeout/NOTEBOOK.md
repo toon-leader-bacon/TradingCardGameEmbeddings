@@ -396,3 +396,24 @@ at least 9,000 cards/s (the main thread's 49% mostly gone); a result under
   stream is the default stream. Expected: about 10-14 ms off a 52 ms step.
 - **Worker:** idle 45%, so it has room; its remaining time is per-deck
   Python (`known_card_uuids`, `source_games_of`, `_deck_at`).
+
+### 2026-10-29 15:50 · Code change mid-experiment: commit f85006c (confound)
+
+The human asked for the quick wins. **Runs before this entry used
+666ce89 / f4325e6 / 14a101e; `quickwins*` runs use f85006c.** Diff
+(`git show f85006c -- src scripts`):
+- `_on_default_stream` does nothing when the caller is already on the
+  default stream (the training thread), so no CUDA event is recorded or
+  waited on there.
+- `HardwareLimits.torch_cpu_threads` (default 1), applied with
+  `torch.set_num_threads` at startup in `run_training.py`.
+Not done: dropping the attention layers for single-card items. That
+changes the model (a training-quality question), so it is left for an
+experiment.
+`check.sh` all passed (4,632 tests).
+
+Runs: `quickwins` (no env file: the new default sets one thread;
+control `fix_omp1`, 9,922 cards/s) and `quickwins_pyspy_all`.
+Prediction: 11,500-14,000 cards/s (10-14 ms off a 52 ms step). Matching
+`fix_omp1` without the env var confirms `torch.set_num_threads(1)`
+does what `OMP_NUM_THREADS=1` did.
