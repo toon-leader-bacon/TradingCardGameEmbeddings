@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from src.encoder_model.feature_cache.feature_store import TierStats
-from src.encoder_model.feature_cache.pooled_feature_cache import FeatureCacheStats
+from src.encoder_model.feature_cache.frozen_feature_cache import FeatureCacheStats
 from src.training.recording.run_sampler import RunSampler, SampledSources
 
 

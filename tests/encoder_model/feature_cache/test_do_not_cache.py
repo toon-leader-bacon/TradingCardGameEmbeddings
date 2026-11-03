@@ -9,7 +9,7 @@ import torch
 
 from src.encoder_model.card_embedding_pipeline import CardEmbeddingPipeline
 from src.encoder_model.embedding_head import LinearEmbeddingHead
-from src.encoder_model.feature_cache.pooled_feature_cache import PooledFeatureCache
+from src.encoder_model.feature_cache.frozen_feature_cache import FrozenFeatureCache
 from src.encoder_model.pooling.mean_pooling import MeanPooling
 from src.schema.card_factory import GenericCardFactory
 from tests.encoder_model.fakes import HIDDEN, FakeTextEncoder
@@ -23,11 +23,11 @@ def _pool(texts: list[str]) -> torch.Tensor:
     return torch.stack([torch.full((WIDTH,), float(len(text))) for text in texts])
 
 
-def _cache() -> PooledFeatureCache:
+def _cache() -> FrozenFeatureCache:
     return memory_cache(WIDTH)
 
 
-def _rows_used(cache: PooledFeatureCache) -> int:
+def _rows_used(cache: FrozenFeatureCache) -> int:
     return cache.stats().tiers[0].rows_used
 
 
@@ -91,7 +91,7 @@ class TestReserve:
 
 
 class TestPipeline:
-    def _pipeline(self, cache: PooledFeatureCache) -> CardEmbeddingPipeline:
+    def _pipeline(self, cache: FrozenFeatureCache) -> CardEmbeddingPipeline:
         head = LinearEmbeddingHead(HIDDEN, 4)
         return CardEmbeddingPipeline(
             FakeTextEncoder(), None, MeanPooling(HIDDEN), head, cache

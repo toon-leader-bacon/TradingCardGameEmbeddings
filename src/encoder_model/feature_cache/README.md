@@ -1,10 +1,18 @@
 # feature_cache
 
-This package caches what a card pipeline's frozen stages (text encoder,
-optional token whitening, mean pooling) output for each card text. The
-frozen stages then run once per distinct text instead of on every
-training step. The embedding head and everything after it still run on
-every call.
+This package caches what a card pipeline's frozen stages output for
+each card text, at one of two cuts (a `CutPoint`):
+
+- **pooled**: after the text encoder, optional token whitening and mean
+  pooling; one vector per text. Only the head runs live.
+- **tokens**: the text encoder's token states, one row per real token
+  (`RaggedTokenStates`): its whole output, or the states after layer k
+  of a `LayeredTextEncoder`. The encoder's layers above k, the
+  enrichment and the pooling run live, and may train (attention
+  pooling, the top layers of ModernBERT).
+
+The frozen stages then run once per distinct text instead of on every
+training step.
 
 The cache is optional: `CardEmbeddingPipeline(..., feature_cache=None)`
 runs every stage on every call. Rows can live in three tiers, VRAM,
@@ -32,19 +40,38 @@ key.
   - the pooling label;
   - the compute precision;
   - the width;
-  - the storage dtype.
+  - the storage dtype;
+  - the cut (only written into the digest for a token cut, whose
+    enrichment and pooling are "none": its rows come before them).
 
   `digest()` names a row set on disk.
+- `cut_point.py`: `CutPoint`, a union of `PooledCutPoint` and
+  `TokenCutPoint(layer)` (`layer` None: the encoder's whole output).
+  The one source of truth for the cut: the fingerprint holds it, and
+  the stores' row kind (`cut.row_kind`) and the pipeline's
+  `PipelineCut` are derived from it.
+- `ragged_token_states.py`: `RaggedTokenStates(values (T, W), lengths
+  (N,) int64 CPU)`, token states packed without padding:
+  `from_encoding`, `to_encoding`, `select`, `to`, `concatenate`.
+- `feature_row_kind.py`: `FeatureRowKind[F]` (Strategy), what the stores
+  need to know about a feature type: `row_counts`, `flat_rows`,
+  `from_flat_rows`, `select`, `concatenate`, `to` (which detaches).
+  `POOLED_ROWS` (Tensor, a row per text) and `TOKEN_ROWS`
+  (RaggedTokenStates, a row per token). Also `require_offer_shape`, the
+  check every `put_many` makes first.
 - `feature_store.py`: `FeatureStore[F]` (Protocol): batched,
   thread-safe `lookup(keys, device) -> StoreLookup` and
   `put_many(keys, features, durable) -> admitted`, `pin(keys)` /
-  `unpin(keys)`, plus `tier_stats()`, `storage_dtype` and `close()`.
-  Also `TierStats` (hits, fill, `pinned_rows`, `refused_for_pins`), and
-  `require_offer_shape`, the shape check every `put_many` makes.
+  `unpin(keys)`, plus `tier_stats()`, `storage_dtype`, `row_kind` and
+  `close()`. Also `TierStats` (hits, fill, `pinned_rows`,
+  `refused_for_pins`). Fill and capacity count rows of the row kind.
 - `slot_policy.py`: `SlotPolicy` (Strategy), which decides which offered
   keys a memory tier admits and which held keys it evicts, given the
-  tier's pinned keys: `admit(offered, free_rows, pinned) ->
-  AdmissionDecision`. None evicts a pinned key.
+  tier's pinned keys: `admit(offered, free_rows, pinned, *,
+  row_counts=None) -> AdmissionDecision`, where `row_counts` is each
+  offered key's rows (None: one each). The evicting policies record
+  each held key's rows and evict until the admitted rows fit. None
+  evicts a pinned key.
   - `FillUntilFull` admits while rows are free and never evicts.
   - `FirstInFirstOut`, `LeastRecentlyUsed` (the default) and
     `LeastFrequentlyUsed` (fewest hits, oldest first among ties) share
@@ -57,26 +84,34 @@ key.
     refuses stays remembered. Under prefetch a card's reservation is its
     first offer, so its step encodes it again.
 - `tensor_feature_slab.py`: `TensorFeatureSlab(name, capacity_rows,
-  storage_dtype, policy, placement)`, a memory tier. Its rows sit in one
-  preallocated tensor, with a CPU dict from key to row. `SlabPlacement`
+  storage_dtype, policy, placement, row_kind)`, a memory tier. Its rows
+  sit in one preallocated tensor, with a CPU dict from key to its rows
+  (an int64 array: one row pooled, one per token). A key's rows need not
+  be adjacent: freed rows go on a stack, so token rows never fragment. `SlabPlacement`
   is `FOLLOW_FIRST_PUT` (the first put's device, VRAM in training) or
   `PINNED_HOST` (the RAM tier).
 - `sqlite_feature_store.py`: `SqliteFeatureStore(path, fingerprint,
   capacity_rows)`, the disk tier. One file holds any number of row sets,
-  one per fingerprint digest. It keeps only durable puts and admits
-  until its row set is full.
+  one per fingerprint digest; its row kind follows the fingerprint's
+  cut. One blob per key (a token cut's blob holds its tokens' rows, so
+  the row count is the blob's size over width x itemsize). It keeps
+  only durable puts and admits until its row set's rows are full.
 - `tiered_feature_store.py`: `TieredFeatureStore(tiers)`, the chain,
-  fastest tier first.
-- `pooled_feature_cache.py`: `PooledFeatureCache(store, fingerprint,
+  fastest tier first; every tier must hold the same row kind.
+- `frozen_feature_cache.py`: `FrozenFeatureCache[F](store, fingerprint,
   durable_misses)`, the component the pipeline calls, with
-  `features`, `reserve` and `release`. Also `FeatureReservation` and
+  `features`, `reserve` and `release`; it refuses a store whose row
+  kind is not the fingerprint's cut's. Also `FeatureReservation` and
   `FeatureCacheStats`.
 
 ## How it works
 
 `CardEmbeddingPipeline.embed(cards)` serializes the cards, then calls
-`cache.features(texts, pool_live, device)`, where `pool_live` is the
-pipeline's own encode -> enrich -> pool:
+`cache.features(texts, cut.encode_before_cut, device)`, where `cut` is
+the pipeline's `PipelineCut` for the cache's cut point
+(`../pipeline_cut.py`), and finishes with `cut.pool_after_cut` and the
+head. Every step below goes through the store's row kind, so it is the
+same for both cuts:
 
 1. Check that the active autocast is the fingerprint's compute
    precision.
@@ -84,7 +119,7 @@ pipeline's own encode -> enrich -> pool:
 3. `store.lookup(keys, device)`: the chain asks each tier in turn about
    the keys the tiers above missed, and offers each lower-tier hit to
    the tiers above it (promotion).
-4. Run `pool_live` once, under `no_grad`, on the misses only. Round the
+4. Run `encode_before_cut` once, under `no_grad`, on the misses only. Round the
    result to the storage dtype and offer it to every tier
    (write-through), so each tier's policy decides what to keep.
 5. Return float32 rows on `device`, in the texts' order.
@@ -95,12 +130,13 @@ receives float32, as on the live path.
 
 ```mermaid
 flowchart LR
-    E[embed] --> C[PooledFeatureCache]
+    E[embed] --> C[FrozenFeatureCache]
     C -->|lookup / put_many| T[TieredFeatureStore]
     T --> V[VRAM slab]
     T --> R[pinned RAM slab]
     T --> D[(SQLite, per fingerprint)]
-    C -->|misses only| P[text encoder -> whitening -> mean pooling]
+    C -->|misses only| P[stages before the cut]
+    E -->|after the cut| L[rest of the cut, then the head]
 ```
 
 ### Reservations
@@ -152,10 +188,11 @@ Invariants:
   counted in `FeatureCacheStats.uncacheable`. `reserve` skips it
   entirely, so its encode runs in the step.
 - **Frozen stages only, always in eval mode.** The pipeline refuses a
-  cache when a stage before the head has a parameter with
-  `requires_grad`. With a cache, `train()` keeps those stages in eval.
-  `ModelSpec` refuses a pooled cut with attention or transformer
-  pooling.
+  cache when a stage before its cut has a parameter with
+  `requires_grad` (`PipelineCut.check_frozen`). With a cache, `train()`
+  keeps those stages in eval. `ModelSpec` refuses a pooled cut with
+  attention or transformer pooling, and trainable text layers unless
+  the cut is inside the encoder below them.
 - **One compute precision.** `features()` raises `ValueError` when the
   active autocast is not the fingerprint's precision.
 - **A pinned source for the disk.** `SqliteFeatureStore` refuses a
@@ -173,6 +210,10 @@ Invariants:
 - **Lifecycle.** The SQLite connection opens on first use (WAL,
   `synchronous=NORMAL`, a 30 s busy timeout), so building a model creates
   no file. `close()` closes it, and a closed store refuses further use.
+
+A token row set is far larger than a pooled one: about 35-300 rows per
+card instead of one, so the same MiB budget holds that many times fewer
+cards, and VRAM usually holds only a hot subset.
 
 The disk file runs about 3x its row payload at pooled widths. Each row
 carries its 64-character digest and its key, and a 4 KiB page holds only
@@ -194,6 +235,24 @@ model.release(reservation)
 model.feature_cache_stats()          # FeatureCacheStats(texts, encoded, admitted, tiers, uncacheable)
 model.close_feature_cache()
 ```
+
+A token cut after ModernBERT's layer 20, training its top 2 layers and
+an attention pooling:
+
+```python
+from src.encoder_model.feature_cache.cut_point import TokenCutPoint
+from src.encoder_model.modernbert_text_encoder import load_text_encoder
+
+encoder = load_text_encoder("answerdotai/ModernBERT-base", trainable_top_layers=2)
+fingerprint = build_fingerprint(encoder.source(), None, "attention", "fp16", 768,
+                                FeatureStorageDtype.FP16, TokenCutPoint(20))
+cache = assemble_feature_cache(spec.feature_cache, fingerprint)
+pipeline = CardEmbeddingPipeline(encoder, None, AttentionPooling(768), head, cache)
+```
+
+In a run config: `model: {trainable_text_layers: 2, pooling: {kind:
+attention}, feature_cache: {cut: tokens, cut_layer: 20, storage_dtype:
+fp16, vram: {capacity_mib: 4096}, ram: {...}, disk: {...}}}`.
 
 From a run config, see `model.feature_cache` and `warm_feature_cache` in
 `../../training/README.md`. `scripts/warm_feature_cache.py <config>`

@@ -2,11 +2,12 @@
 
 import torch
 
+from src.encoder_model.feature_cache.feature_row_kind import POOLED_ROWS
 from src.encoder_model.feature_cache.feature_storage_dtype import FeatureStorageDtype
 from src.encoder_model.feature_cache.frozen_stage_fingerprint import (
     FrozenStageFingerprint,
 )
-from src.encoder_model.feature_cache.pooled_feature_cache import PooledFeatureCache
+from src.encoder_model.feature_cache.frozen_feature_cache import FrozenFeatureCache
 from src.encoder_model.feature_cache.slot_policy import FillUntilFull
 from src.encoder_model.feature_cache.tensor_feature_slab import (
     SlabPlacement,
@@ -35,7 +36,12 @@ def vram_slab(
 ) -> TensorFeatureSlab:
     """A fill-until-full slab that follows its first put (CPU in tests)."""
     return TensorFeatureSlab(
-        "vram", capacity, storage, FillUntilFull(), SlabPlacement.FOLLOW_FIRST_PUT
+        "vram",
+        capacity,
+        storage,
+        FillUntilFull(),
+        SlabPlacement.FOLLOW_FIRST_PUT,
+        POOLED_ROWS,
     )
 
 
@@ -44,7 +50,7 @@ def memory_cache(
     capacity: int = 10,
     storage: FeatureStorageDtype = FeatureStorageDtype.FP32,
     precision: Precision = "fp32",
-) -> PooledFeatureCache:
+) -> FrozenFeatureCache:
     """A cache over one fill-until-full slab, chained as the assembly does."""
     chain = TieredFeatureStore([vram_slab(capacity, storage)])
-    return PooledFeatureCache(chain, fingerprint(width, storage, precision), False)
+    return FrozenFeatureCache(chain, fingerprint(width, storage, precision), False)

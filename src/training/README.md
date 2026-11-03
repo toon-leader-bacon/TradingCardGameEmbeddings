@@ -81,12 +81,14 @@ Top level:
   (`HoldoutSpec.card_tier_key`; the deck split does not matter) before any
   dojo is built, and copies the stats file into the run directory as
   `whitening_stats.pt`; the recorded `run_config.yaml` points at that
-  copy. An optional `model.feature_cache:` caches each card text's
-  pooled vector, so the frozen stages run once per distinct text
-  (`../encoder_model/README.md`):
+  copy. An optional `model.feature_cache:` caches what the frozen stages
+  make of each card text, so they run once per distinct text
+  (`../encoder_model/feature_cache/README.md`):
 
   ```yaml
   feature_cache:
+    cut: pooled                               # pooled (default) | tokens
+    cut_layer: 20                             # tokens only; absent = the encoder's output
     storage_dtype: fp16                       # fp32 (default) | fp16 | bf16
     vram: {capacity_mib: 512, policy: lru}    # lru | fifo | lfu | fill_until_full
     ram:  {capacity_mib: 4096, admission: first_offer}  # | second_offer
@@ -96,8 +98,14 @@ Top level:
 
   - An empty section means a single 512 MiB VRAM tier. Naming any tier
     gives exactly the tiers named.
-  - It needs `pooling: {kind: mean}`, because attention and transformer
-    pooling are trainable.
+  - `cut: pooled` caches the pooled vector and needs `pooling: {kind:
+    mean}`, because attention and transformer pooling are trainable.
+  - `cut: tokens` caches token states (one row per token, so tier
+    budgets hold far fewer cards); everything after the cut runs live,
+    so any pooling works. With `cut_layer: k` (ModernBERT only) the
+    encoder's layers above k run live too, and
+    `model.trainable_text_layers: n` (n <= layer_count - k; default 0)
+    trains its top n layers.
   - A disk tier needs a Hugging Face checkpoint (one with a commit
     hash). The disk stores only warm-ups unless `write: all`.
   - The top-level `warm_feature_cache: [gwent, mtg]` (it requires the
@@ -120,7 +128,7 @@ Top level:
   the `model:` section above. `pooling_label(spec)` gives a pooling's
   stable name for a feature cache fingerprint.
 - [feature_cache_assembly.py](feature_cache_assembly.py): a
-  `FeatureCacheSpec` -> the `PooledFeatureCache` it describes.
+  `FeatureCacheSpec` -> the `FrozenFeatureCache` it describes.
   `build_fingerprint` names the frozen stages' rows, and
   `assemble_feature_cache` chains the VRAM, RAM and disk tiers it sets.
   `scripts/run_training.py`'s `build_card_pipeline` calls both.

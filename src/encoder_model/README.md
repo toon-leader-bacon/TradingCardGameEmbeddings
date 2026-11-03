@@ -23,8 +23,25 @@ so each card's embedding is contextualized by the rest of its group.
   (token states plus attention mask), with `output_dim` (the token
   width). `PretrainedTextEncoder` wraps a Hugging Face model
   (ModernBERT-base by default, `max_length=384`, optionally frozen) and
-  batches texts by length to limit padding. `StaticEmbeddingTextEncoder`
-  is a small from-scratch alternative.
+  batches texts by length to limit padding. `LayeredTextEncoder` is a
+  TextEncoder that can run in two parts, split after any layer
+  (`layer_count`, `encode_through(texts, layer)`, `encode_from(encoding,
+  layer)`, `is_frozen_through(layer)`, `keep_frozen_layers_in_eval()`): what a
+  token cut inside the encoder needs; its frozen layers stay in eval
+  mode, so a cache never stores train-mode states. `StaticEmbeddingTextEncoder` is a small from-scratch
+  alternative.
+- `modernbert_text_encoder.py` - `ModernBertTextEncoder(checkpoint,
+  trainable_top_layers=0)`, the `LayeredTextEncoder` for ModernBERT
+  checkpoints: frozen except its top `trainable_top_layers` layers and
+  final norm (the frozen layers stay in eval mode). Its `encode` runs
+  split at that boundary, so every use takes one forward path.
+  `load_text_encoder(checkpoint, trainable_top_layers)` picks it for a
+  ModernBERT checkpoint and a frozen `PretrainedTextEncoder` otherwise.
+- `modernbert_layer_stack.py` - `ModernBertLayerStack(model)`, an Adapter
+  that replays `ModernBertModel.forward` in two halves (`run_through`,
+  `run_from`), with the same masks, rotary tables and positions; the
+  halves reproduce the whole model exactly. Supports the `sdpa` and
+  `eager` attention implementations.
 - `enrichment/` - `TokenEnrichment` Strategy, `TokenEncoding` ->
   `TokenEncoding` (same mask, width may change), the pipeline's optional
   slot. `TokenWhitening(stats)`: `(x - mean) @ projection` on every token,
@@ -70,15 +87,27 @@ so each card's embedding is contextualized by the rest of its group.
   place the stages are chained. `embed(cards)` serializes, encodes,
   enriches (when an enrichment is given), pools and projects; every card
   is independent. With a `feature_cache` (see `feature_cache/`), the
-  stages before the head run only on texts the cache has not seen, and
-  `warm(cards, precision)` fills it ahead of time. The constructor
-  refuses a cache when any stage before the head is trainable. Every
+  stages before the cache's cut run only on texts the cache has not
+  seen, and `warm(cards, precision)` fills it ahead of time. The
+  constructor refuses a cache when a stage before its cut is trainable.
+  Every
   stage reports `input_dim`/`output_dim` (the text encoder only
   `output_dim`), and the constructor raises `ValueError` if adjacent
   widths differ. Its `output_dim` is the one source of a model's
   embedding width.
-- `feature_cache/` - `PooledFeatureCache`, the pooled vector of each card
-  text, kept in a chain of tiers. The VRAM and pinned-RAM tiers are
+- `pipeline_cut.py` - `PipelineCut` Strategy, the pipeline split in two
+  where a cache stands in: `encode_before_cut(texts)` (what the cache
+  stores) and `pool_after_cut(features)` (the rest, up to the pooled
+  vector). `PooledCut` (everything before the head; also the no-cache
+  path), `EncoderOutputCut` (any text encoder's whole token output) and
+  `LayerCut(k)` (a `LayeredTextEncoder`'s states after layer k; its
+  layers above k, the enrichment and the pooling run live and may
+  train).
+  `build_pipeline_cut(cut_point, ...)` builds the one the cache's
+  `CutPoint` names.
+- `feature_cache/` - `FrozenFeatureCache`, what the stages before a cut
+  make of each card text (a pooled vector, or ragged token states), kept
+  in a chain of tiers. The VRAM and pinned-RAM tiers are
   slabs under a swappable `SlotPolicy` (LRU by default). The disk tier
   is SQLite, one row set per frozen-stage fingerprint, so runs share
   encodes. The cache is keyed by the serialized text, so modded cards

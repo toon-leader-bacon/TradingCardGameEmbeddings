@@ -1,11 +1,15 @@
-"""TensorFeatureSlab: a FeatureStore[Tensor] holding fixed-width feature
-rows in one preallocated tensor, in VRAM or in pinned host memory.
+"""TensorFeatureSlab: a FeatureStore[F] holding feature rows in one
+preallocated tensor, in VRAM or in pinned host memory.
 
 The rows live in one (capacity, width) tensor, placed by SlabPlacement:
 on the device of the first put (VRAM in training), or in pinned CPU
-memory (the RAM tier). Keys and the key -> row index stay in a CPU dict,
-so a lookup reads nothing back from the device: one dict pass and one
-gather. The slab is not an nn.Module, so model.to(device) does not move
+memory (the RAM tier). A key holds as many rows as its row kind says:
+one for a pooled feature, one per token for token states. Its rows need
+not be adjacent: free rows sit on a stack, so a ragged slab never
+fragments. Keys and the key -> rows index stay on the CPU, so a lookup
+reads nothing back from the device: one dict pass and one gather.
+
+The slab is not an nn.Module, so model.to(device) does not move
 it and it is never in a state_dict.
 
 Thread safety: a lock serializes lookup and put_many, and on CUDA every
@@ -30,18 +34,21 @@ import contextlib
 import threading
 from collections import Counter
 from enum import Enum
-from typing import Iterator, Sequence
+from typing import Generic, Iterator, Sequence, TypeVar
 
+import numpy as np
 import torch
 
 from src.encoder_model.feature_cache.card_text_key import CardTextKey
 from src.encoder_model.feature_cache.feature_storage_dtype import FeatureStorageDtype
-from src.encoder_model.feature_cache.feature_store import (
-    StoreLookup,
-    TierStats,
+from src.encoder_model.feature_cache.feature_row_kind import (
+    FeatureRowKind,
     require_offer_shape,
 )
+from src.encoder_model.feature_cache.feature_store import StoreLookup, TierStats
 from src.encoder_model.feature_cache.slot_policy import AdmissionDecision, SlotPolicy
+
+F = TypeVar("F")
 
 
 class SlabPlacement(Enum):
@@ -51,9 +58,10 @@ class SlabPlacement(Enum):
     PINNED_HOST = "pinned_host"  # pinned CPU memory (the RAM tier)
 
 
-class TensorFeatureSlab:
-    """FeatureStore[Tensor]: fixed-width rows in one lazily allocated
-    tensor, admission and eviction by an injected SlotPolicy (Strategy)."""
+class TensorFeatureSlab(Generic[F]):
+    """FeatureStore[F]: rows in one lazily allocated tensor, admission and
+    eviction by an injected SlotPolicy (Strategy), the feature type's rows
+    by an injected FeatureRowKind (Strategy)."""
 
     def __init__(
         self,
@@ -62,17 +70,21 @@ class TensorFeatureSlab:
         storage_dtype: FeatureStorageDtype,
         policy: SlotPolicy,
         placement: SlabPlacement,
+        row_kind: FeatureRowKind[F],
     ) -> None:
-        """Inputs: name (for stats, e.g. "vram"), capacity_rows (>= 1),
-            storage_dtype (rows are stored in it), policy (decides
-            admission and eviction; sized for capacity_rows), placement.
+        """Inputs: name (for stats, e.g. "vram"), capacity_rows (>= 1, in
+            the row kind's rows), storage_dtype (rows are stored in it),
+            policy (decides admission and eviction; sized for
+            capacity_rows), placement, row_kind (POOLED_ROWS or
+            TOKEN_ROWS).
         Output: none (constructor). Side effects: none; nothing is
             allocated until the first put_many.
         Exceptions: ValueError if capacity_rows < 1.
 
         Example:
             >>> slab = TensorFeatureSlab("ram", 1000, FeatureStorageDtype.FP16,
-            ...                          LeastRecentlyUsed(1000), SlabPlacement.PINNED_HOST)
+            ...                          LeastRecentlyUsed(1000), SlabPlacement.PINNED_HOST,
+            ...                          POOLED_ROWS)
         """
         if capacity_rows < 1:
             raise ValueError(f"capacity_rows must be >= 1, got {capacity_rows}")
@@ -81,10 +93,15 @@ class TensorFeatureSlab:
         self._storage_dtype = storage_dtype.torch_dtype
         self._policy = policy
         self._placement = placement
+        self._row_kind = row_kind
         self._lock = threading.Lock()
-        self._row_of: dict[CardTextKey, int] = {}
-        # Rows freed by eviction, reused before any never-used row
-        self._released_rows: list[int] = []
+        # Each held key's rows (int64), in its feature's row order
+        self._rows_of: dict[CardTextKey, np.ndarray] = {}
+        self._rows_used = 0
+        # Rows freed by eviction: a stack (its first _released_count
+        # entries), reused before any never-used row
+        self._released_rows = np.empty(capacity_rows, dtype=np.int64)
+        self._released_count = 0
         self._next_unused_row = 0
         self._hits = 0
         # Pin counts by key, held or not yet held; a key leaves at zero
@@ -96,12 +113,12 @@ class TensorFeatureSlab:
 
     def lookup(
         self, keys: Sequence[CardTextKey], device: torch.device
-    ) -> StoreLookup[torch.Tensor]:
+    ) -> StoreLookup[F]:
         """Which keys the slab holds, and their rows in one gather.
 
         Inputs: keys (distinct), device (where hits should land).
-        Output: StoreLookup; hits (len(hit_positions), width) in the
-            storage dtype, on device.
+        Output: StoreLookup; hits (one per hit position) in the storage
+            dtype, on device.
         Side effects: tells the policy which keys were hit; counts hits;
             a pinned slab gathers into a fresh pinned buffer.
         Exceptions: none.
@@ -111,42 +128,42 @@ class TensorFeatureSlab:
             [1]
         """
         hit_positions: list[int] = []
-        hit_rows: list[int] = []
+        hit_rows: list[np.ndarray] = []
         miss_positions: list[int] = []
         with self._lock:
             # Split the keys on the CPU index alone
             for position, key in enumerate(keys):
-                row = self._row_of.get(key)
-                if row is None:
+                rows = self._rows_of.get(key)
+                if rows is None:
                     miss_positions.append(position)
                 else:
                     hit_positions.append(position)
-                    hit_rows.append(row)
+                    hit_rows.append(rows)
             if not hit_positions:
                 return StoreLookup(hit_positions, None, miss_positions)
 
-            # Gather every hit's row at once, on the slab's stream
+            # Gather every hit's rows at once, on the slab's stream
             self._policy.record_hits([keys[position] for position in hit_positions])
             self._hits += len(hit_positions)
             with _on_default_stream(self._cuda_device(device)):
-                hits = self._gather(hit_rows, device)
-            _hand_to_current_stream(hits)
+                flat = self._gather(np.concatenate(hit_rows), device)
+            _hand_to_current_stream(flat)
+        hits = self._row_kind.from_flat_rows(flat, [len(rows) for rows in hit_rows])
         result = StoreLookup(hit_positions, hits, miss_positions)
         return result
 
-    def put_many(
-        self, keys: Sequence[CardTextKey], features: torch.Tensor, durable: bool
-    ) -> int:
-        """Offer rows for keys; store the unheld ones the policy admits.
+    def put_many(self, keys: Sequence[CardTextKey], features: F, durable: bool) -> int:
+        """Offer features for keys; store the unheld ones the policy admits.
 
-        Inputs: keys (distinct), features (len(keys), width) on any device,
-            any float dtype (copied to the slab's placement and dtype),
-            durable (ignored: a memory tier is never durable).
+        Inputs: keys (distinct), features (one per key, on any device, any
+            float dtype; copied to the slab's placement and dtype), durable
+            (ignored: a memory tier is never durable).
         Output: int, how many keys were newly admitted.
         Side effects: allocates the slab on the first call; writes admitted
             rows; drops evicted keys.
-        Exceptions: ValueError if features is not 2-D, its row count is not
-            len(keys), keys repeat, or its width differs from the slab's;
+        Exceptions: ValueError if features' rows are not 2-D, it does not
+            hold len(keys) texts, keys repeat, or its width differs from
+            the slab's;
             RuntimeError if the policy's decision is malformed (see
             _require_decision_fits). Either way the slab's rows are
             unchanged; after a RuntimeError the policy's own state may have
@@ -156,33 +173,41 @@ class TensorFeatureSlab:
             >>> slab.put_many([key_a, key_b], torch.randn(2, 768, device="cuda"), durable=False)
             2
         """
+        kind = self._row_kind
         with self._lock:
             # Check the offer and the policy's decision before changing anything
+            flat = kind.flat_rows(features)
             width = None if self._rows is None else self._rows.shape[1]
-            require_offer_shape(keys, features, width)
-            fresh_keys, fresh_features = self._split_unheld(keys, features)
-            if not fresh_keys:
+            row_counts = require_offer_shape(kind, keys, features, width)
+            fresh = [i for i, key in enumerate(keys) if key not in self._rows_of]
+            if not fresh:
                 return 0
+            fresh_keys = [keys[i] for i in fresh]
+            count_of = {keys[i]: row_counts[i] for i in fresh}
             # Allocate first: a failed allocation must not advance the policy
             if self._rows is None:
-                self._rows = self._allocate(fresh_features)
+                self._rows = self._allocate(flat.shape[1], flat.device)
             decision = self._policy.admit(
-                fresh_keys, self._free_row_count(), self._pins.keys()
+                fresh_keys,
+                self._free_row_count(),
+                self._pins.keys(),
+                row_counts=[count_of[key] for key in fresh_keys],
             )
-            self._require_decision_fits(decision, fresh_keys)
+            self._require_decision_fits(decision, fresh_keys, count_of)
             self._refused_for_pins += decision.refused_for_pins
             self._evicted += len(decision.evicted)
 
             # Make room, then write in one copy
-            with _on_default_stream(self._cuda_device(features.device)):
+            with _on_default_stream(self._cuda_device(flat.device)):
                 for key in decision.evicted:
-                    self._released_rows.append(self._row_of.pop(key))
+                    self._release(self._rows_of.pop(key))
                 if decision.admitted:
-                    rows = [self._claim_row(key) for key in decision.admitted]
-                    selected = _select_admitted_rows(
-                        fresh_keys, decision.admitted, fresh_features
-                    )
-                    self._write(rows, selected)
+                    rows = [
+                        self._claim_rows(key, count_of[key])
+                        for key in decision.admitted
+                    ]
+                    selected = _select_admitted(kind, keys, decision.admitted, features)
+                    self._write(np.concatenate(rows), kind.flat_rows(selected))
         return len(decision.admitted)
 
     def pin(self, keys: Sequence[CardTextKey]) -> None:
@@ -226,12 +251,14 @@ class TensorFeatureSlab:
         """This slab's totals. Inputs: none. Output: one TierStats.
         Side effects: none. Exceptions: none."""
         with self._lock:
-            pinned_rows = sum(1 for key in self._pins if key in self._row_of)
+            pinned_rows = sum(
+                len(self._rows_of[key]) for key in self._pins if key in self._rows_of
+            )
             return (
                 TierStats(
                     self._name,
                     self._hits,
-                    len(self._row_of),
+                    self._rows_used,
                     self._capacity_rows,
                     pinned_rows,
                     self._refused_for_pins,
@@ -244,6 +271,12 @@ class TensorFeatureSlab:
         """The dtype rows are stored in. Inputs: none. Output: torch.dtype.
         Side effects: none. Exceptions: none."""
         return self._storage_dtype
+
+    @property
+    def row_kind(self) -> FeatureRowKind[F]:
+        """The feature type's row algebra. Inputs: none.
+        Output: FeatureRowKind. Side effects: none. Exceptions: none."""
+        return self._row_kind
 
     def close(self) -> None:
         """Nothing to release: the rows are freed with the slab. Inputs:
@@ -274,21 +307,6 @@ class TensorFeatureSlab:
         else:
             self._pins[key] -= 1
 
-    def _split_unheld(
-        self, keys: Sequence[CardTextKey], features: torch.Tensor
-    ) -> tuple[list[CardTextKey], torch.Tensor]:
-        """The keys not held yet, and their rows of features.
-
-        Private helper - single consumer is put_many (lock held).
-        Inputs: keys, features. Output: (keys, rows), same order.
-        Side effects: none. Exceptions: none.
-        """
-        positions = [i for i, key in enumerate(keys) if key not in self._row_of]
-        if len(positions) == len(keys):
-            return list(keys), features
-        index = torch.tensor(positions, dtype=torch.long, device=features.device)
-        return [keys[i] for i in positions], features.index_select(0, index)
-
     def _free_row_count(self) -> int:
         """Rows not holding a key: released ones plus never-used ones.
 
@@ -296,57 +314,78 @@ class TensorFeatureSlab:
         Inputs: none. Output: int. Side effects: none. Exceptions: none.
         """
         never_used = self._capacity_rows - self._next_unused_row
-        return len(self._released_rows) + never_used
+        return self._released_count + never_used
 
-    def _claim_row(self, key: CardTextKey) -> int:
-        """Take a free row for key (a released one first) and index it.
+    def _claim_rows(self, key: CardTextKey, count: int) -> np.ndarray:
+        """Take count free rows for key (released ones first, then never
+        used ones) and index them.
 
         Private helper - single consumer is put_many.
-        Inputs: key (not held). Output: int, the row.
-        Side effects: records key -> row; consumes a free row.
+        Inputs: key (not held), count (>= 1). Output: int64 array of rows.
+        Side effects: records key -> rows; consumes free rows.
         Exceptions: none (put_many checked there is room).
         """
-        if self._released_rows:
-            row = self._released_rows.pop()
-        else:
-            row = self._next_unused_row
-            self._next_unused_row += 1
-        self._row_of[key] = row
-        return row
+        reused = min(count, self._released_count)
+        start = self._released_count - reused
+        result = self._released_rows[start : self._released_count].copy()
+        self._released_count = start
+        fresh = count - reused
+        if fresh:
+            unused = np.arange(
+                self._next_unused_row, self._next_unused_row + fresh, dtype=np.int64
+            )
+            self._next_unused_row += fresh
+            result = np.concatenate([result, unused])
+        self._rows_of[key] = result
+        self._rows_used += count
+        return result
 
-    def _allocate(self, features: torch.Tensor) -> torch.Tensor:
-        """An empty (capacity_rows, width) tensor in the storage dtype:
-        on features' device, or pinned on the host.
+    def _release(self, rows: np.ndarray) -> None:
+        """Return an evicted key's rows to the free stack.
 
         Private helper - single consumer is put_many.
-        Inputs: features (N, width). Output: Tensor.
+        Inputs: rows. Output: none. Side effects: as described.
+        Exceptions: none.
+        """
+        end = self._released_count + len(rows)
+        self._released_rows[self._released_count : end] = rows
+        self._released_count = end
+        self._rows_used -= len(rows)
+
+    def _allocate(self, width: int, device: torch.device) -> torch.Tensor:
+        """An empty (capacity_rows, width) tensor in the storage dtype:
+        on device, or pinned on the host.
+
+        Private helper - single consumer is put_many.
+        Inputs: width, device (the first offer's). Output: Tensor.
         Side effects: allocates device or pinned host memory (pinned only
             when CUDA is available). Exceptions: torch's out-of-memory
             error if it does not fit.
         """
-        shape = (self._capacity_rows, features.shape[1])
+        shape = (self._capacity_rows, width)
         if self._placement is SlabPlacement.PINNED_HOST:
             # Pinned memory needs a CUDA (or ROCm) runtime; plain CPU without one
             return torch.empty(
                 shape, dtype=self._storage_dtype, pin_memory=torch.cuda.is_available()
             )
-        return torch.empty(shape, dtype=self._storage_dtype, device=features.device)
+        return torch.empty(shape, dtype=self._storage_dtype, device=device)
 
-    def _gather(self, rows: list[int], device: torch.device) -> torch.Tensor:
+    def _gather(self, rows: np.ndarray, device: torch.device) -> torch.Tensor:
         """The given rows, in order, as one (len(rows), width) tensor on
         device: an index_select, through a fresh pinned buffer for a
         pinned slab.
 
         Private helper - single consumer is lookup (on the default stream;
         lookup then records the result on the caller's stream).
-        Inputs: rows (held), device. Output: Tensor in the storage dtype.
+        Inputs: rows (held, int64), device. Output: Tensor in the storage
+            dtype.
         Side effects: copies the row indices (and the rows) between
             devices; a pinned slab's copy to a CUDA device is
             non_blocking from a fresh pinned buffer.
         Exceptions: none.
         """
         assert self._rows is not None  # a held row means the slab exists
-        index = torch.tensor(rows, dtype=torch.long, device=self._rows.device)
+        index = torch.from_numpy(rows).to(self._rows.device)
         if self._placement is SlabPlacement.FOLLOW_FIRST_PUT:
             return self._rows.index_select(0, index).to(device)
         # Pinned: gather on the CPU into a fresh pinned buffer, then copy
@@ -358,36 +397,40 @@ class TensorFeatureSlab:
         torch.index_select(self._rows, 0, index, out=staging)
         return staging.to(device, non_blocking=device.type == "cuda")
 
-    def _write(self, rows: list[int], features: torch.Tensor) -> None:
+    def _write(self, rows: np.ndarray, features: torch.Tensor) -> None:
         """Write features (copied to the slab's device and dtype) into
         rows, in order.
 
         Private helper - single consumer is put_many (on the default stream).
-        Inputs: rows, features (len(rows), width). Output: none.
+        Inputs: rows (int64), features (len(rows), width). Output: none.
         Side effects: overwrites those slab rows. A pinned slab copies
             device features to the host with a blocking copy
             (non_blocking=False), so the row is complete before any later
             CPU gather reads it. Exceptions: none.
         """
         assert self._rows is not None  # put_many allocates before writing
-        index = torch.tensor(rows, dtype=torch.long, device=self._rows.device)
+        index = torch.from_numpy(rows).to(self._rows.device)
         # detach: the slab is storage, never part of an autograd graph. The
         # copy to a pinned slab blocks (to() defaults to non_blocking=False)
         data = features.detach().to(self._rows.device, self._storage_dtype)
         self._rows.index_copy_(0, index, data)
 
     def _require_decision_fits(
-        self, decision: AdmissionDecision, offered: Sequence[CardTextKey]
+        self,
+        decision: AdmissionDecision,
+        offered: Sequence[CardTextKey],
+        count_of: dict[CardTextKey, int],
     ) -> None:
         """Private helper - single consumer is put_many.
 
-        Inputs: decision, offered (the keys put_many offered the policy).
+        Inputs: decision, offered (the keys put_many offered the policy),
+            count_of (each offered key's row count).
         Output: none. Side effects: none.
         Exceptions: RuntimeError if decision admits keys that are not a
             subsequence of offered (repeated, reordered or never offered),
             evicts a key twice, one the slab does not hold or a pinned
-            one, or admits more keys than the free rows plus its
-            evictions.
+            one, or admits more rows than the free rows plus its
+            evictions' rows.
         """
         if not _is_subsequence(decision.admitted, offered):
             raise RuntimeError(
@@ -396,15 +439,17 @@ class TensorFeatureSlab:
             )
         if len(set(decision.evicted)) != len(decision.evicted):
             raise RuntimeError("the slot policy evicted a key twice")
-        if any(key not in self._row_of for key in decision.evicted):
+        if any(key not in self._rows_of for key in decision.evicted):
             raise RuntimeError("the slot policy evicted a key the slab does not hold")
         if any(key in self._pins for key in decision.evicted):
             raise RuntimeError("the slot policy evicted a pinned key")
-        room = self._free_row_count() + len(decision.evicted)
-        if len(decision.admitted) > room:
+        room = self._free_row_count() + sum(
+            len(self._rows_of[key]) for key in decision.evicted
+        )
+        wanted = sum(count_of[key] for key in decision.admitted)
+        if wanted > room:
             raise RuntimeError(
-                f"the slot policy admitted {len(decision.admitted)} keys "
-                f"with room for {room}"
+                f"the slot policy admitted {wanted} rows with room for {room}"
             )
 
 
@@ -457,27 +502,25 @@ def _hand_to_current_stream(tensor: torch.Tensor) -> None:
         tensor.record_stream(current)
 
 
-def _select_admitted_rows(
+def _select_admitted(
+    kind: FeatureRowKind[F],
     keys: Sequence[CardTextKey],
     admitted: Sequence[CardTextKey],
-    features: torch.Tensor,
-) -> torch.Tensor:
-    """The rows of features that belong to the admitted keys, in admitted
-    order.
+    features: F,
+) -> F:
+    """The texts of features that belong to the admitted keys, in admitted
+    order; features itself when every key was admitted.
 
     Private helper - single consumer is TensorFeatureSlab.put_many.
-    Inputs: keys (features' row order), admitted (a subsequence of keys),
-        features (len(keys), width).
-    Output: Tensor (len(admitted), width), on features' device.
-    Side effects: none. Exceptions: none.
+    Inputs: kind, keys (features' text order), admitted (a subsequence of
+        keys), features.
+    Output: F, on features' device. Side effects: none. Exceptions: none.
     """
     # Every key admitted (the common case): a subsequence of equal length
     if len(admitted) == len(keys):
         return features
     position_of = {key: position for position, key in enumerate(keys)}
-    positions = [position_of[key] for key in admitted]
-    index = torch.tensor(positions, dtype=torch.long, device=features.device)
-    return features.index_select(0, index)
+    return kind.select(features, [position_of[key] for key in admitted])
 
 
 def _is_subsequence(

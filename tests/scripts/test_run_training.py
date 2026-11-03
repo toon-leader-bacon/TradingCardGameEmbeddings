@@ -9,6 +9,7 @@ import torch
 import yaml
 
 from src.encoder_model.enrichment.token_whitening import TokenWhitening
+from src.encoder_model.feature_cache.cut_point import TokenCutPoint
 from src.encoder_model.feature_cache.feature_storage_dtype import FeatureStorageDtype
 from src.encoder_model.pooling.attention_pooling import AttentionPooling
 from src.encoder_model.pooling.mean_pooling import MeanPooling
@@ -23,6 +24,7 @@ from src.training.model_spec import (
     EmbeddingHeadKind,
     DiskTierSpec,
     FeatureCacheSpec,
+    FeatureCut,
     MemoryTierSpec,
     MeanPoolingSpec,
     ModelSpec,
@@ -153,7 +155,7 @@ def test_the_residual_mlp_head_takes_its_sizes() -> None:
 def _seeded_weights(
     script: ModuleType, monkeypatch: pytest.MonkeyPatch, seed: int
 ) -> list[torch.Tensor]:
-    monkeypatch.setattr(script, "PretrainedTextEncoder", lambda **_: FakeTextEncoder())
+    monkeypatch.setattr(script, "load_text_encoder", lambda *_: FakeTextEncoder())
     spec = ModelSpec(EmbeddingHeadKind.RESIDUAL_MLP, "ckpt", 16)
     model = script.build_model(spec, seed=seed)
     return [p.detach().clone() for p in model.parameters() if p.requires_grad]
@@ -264,6 +266,22 @@ def test_a_feature_cache_spec_attaches_a_sized_cache() -> None:
     # 1 MiB of HIDDEN-wide fp16 rows
     assert cache.stats().tiers[0].capacity_rows == 2**20 // (HIDDEN * 2)
     assert cache.fingerprint.pooling == "mean"
+
+
+def test_a_token_cut_caches_the_encoder_output_before_a_trainable_pooling() -> None:
+    script = _load_script()
+    cache_spec = FeatureCacheSpec(cut=FeatureCut.TOKENS, vram=MemoryTierSpec(1))
+    spec = ModelSpec(
+        EmbeddingHeadKind.LINEAR_PROJECTION,
+        "ckpt",
+        16,
+        pooling=AttentionPoolingSpec(),
+        feature_cache=cache_spec,
+    )
+    cache = script.build_card_pipeline(spec, FakeTextEncoder()).feature_cache
+    assert cache is not None
+    assert cache.fingerprint.cut == TokenCutPoint(None)
+    assert (cache.fingerprint.pooling, cache.fingerprint.width) == ("none", HIDDEN)
 
 
 def test_no_feature_cache_spec_builds_no_cache() -> None:

@@ -10,6 +10,11 @@ import hashlib
 import json
 from dataclasses import dataclass
 
+from src.encoder_model.feature_cache.cut_point import (
+    CutPoint,
+    PooledCutPoint,
+    TokenCutPoint,
+)
 from src.encoder_model.feature_cache.feature_storage_dtype import FeatureStorageDtype
 from src.encoder_model.precision import Precision
 from src.encoder_model.text_encoder import TextEncoderSource
@@ -26,6 +31,10 @@ class FrozenStageFingerprint:
     compute_precision: the autocast the frozen stages run under.
     width: the cached rows' width.
     storage_dtype: the dtype rows are stored in.
+    cut: where the pipeline is cut (pooled by default). A token cut's rows
+        come before the enrichment and pooling, so it must say "none"
+        for both. Written into the digest only for a token cut, so every
+        pooled row set keeps the digest it had before cuts existed.
     """
 
     text_encoder: TextEncoderSource | None
@@ -34,6 +43,19 @@ class FrozenStageFingerprint:
     compute_precision: Precision
     width: int
     storage_dtype: FeatureStorageDtype
+    cut: CutPoint = PooledCutPoint()
+
+    def __post_init__(self) -> None:
+        """Inputs: none (checks self). Output: none. Side effects: none.
+        Exceptions: ValueError if a token cut names an enrichment or a
+            pooling (its rows do not depend on them)."""
+        if isinstance(self.cut, TokenCutPoint) and (
+            self.enrichment != "none" or self.pooling != "none"
+        ):
+            raise ValueError(
+                "a token cut's fingerprint has enrichment and pooling 'none': "
+                "its rows come before them"
+            )
 
     def digest(self) -> str:
         """The sha256 hex of this fingerprint's canonical JSON: equal
@@ -68,9 +90,10 @@ class FrozenStageFingerprint:
         enrichment = (
             "" if self.enrichment == "none" else f" whitened {self.enrichment[:7]}"
         )
+        cut = "" if isinstance(self.cut, PooledCutPoint) else f" {self.cut.describe()}"
         return (
             f"{encoder}{enrichment} {self.pooling} {self.compute_precision} "
-            f"-> {self.width} {self.storage_dtype.value}"
+            f"-> {self.width} {self.storage_dtype.value}{cut}"
         )
 
     def _as_mapping(self) -> dict[str, object]:
@@ -80,7 +103,7 @@ class FrozenStageFingerprint:
         Inputs: none. Output: dict. Side effects: none. Exceptions: none.
         """
         source = self.text_encoder
-        return {
+        result: dict[str, object] = {
             "text_encoder": (
                 None
                 if source is None
@@ -97,3 +120,7 @@ class FrozenStageFingerprint:
             "width": self.width,
             "storage_dtype": self.storage_dtype.value,
         }
+        # Only a token cut adds a key, so pooled digests never change
+        if not isinstance(self.cut, PooledCutPoint):
+            result["cut"] = self.cut.describe()
+        return result

@@ -5,7 +5,7 @@ head. SingleCardModel and MultiCardModel each own one; this is the only
 place the stages are chained. See README.md.
 """
 
-from typing import List, Sequence
+from typing import Any, List, Sequence
 
 import torch
 import torch.nn as nn
@@ -13,10 +13,11 @@ import torch.nn as nn
 from src.encoder_model.card_serialization import serialize_card_to_json
 from src.encoder_model.embedding_head import EmbeddingHead
 from src.encoder_model.enrichment.token_enrichment import TokenEnrichment
-from src.encoder_model.feature_cache.pooled_feature_cache import (
+from src.encoder_model.feature_cache.frozen_feature_cache import (
     FeatureReservation,
-    PooledFeatureCache,
+    FrozenFeatureCache,
 )
+from src.encoder_model.pipeline_cut import PipelineCut, PooledCut, build_pipeline_cut
 from src.encoder_model.pooling.token_pooling import TokenPooling
 from src.encoder_model.precision import Precision, autocast_for, parameter_device
 from src.encoder_model.text_encoder import TextEncoder
@@ -36,10 +37,12 @@ class CardEmbeddingPipeline(nn.Module):
     Strategy + dependency injection: all four stages are handed in, so any
     one can be swapped without touching this class or the models.
 
-    With a feature_cache, the frozen stages before the head (text encoder,
-    enrichment, pooling) run only on texts the cache has not seen; the
-    head always runs. The cache is a plain attribute, not a submodule, so
-    state_dict() and checkpoints are the same with or without it.
+    With a feature_cache, the stages before the cache's cut run only on
+    texts the cache has not seen: for a pooled cut, everything before the
+    head; for a token cut, the text encoder through the cut's layer (the
+    rest runs live, see pipeline_cut.py). The head always runs. The cache
+    is a plain attribute, not a submodule, so state_dict() and
+    checkpoints are the same with or without it.
     """
 
     def __init__(
@@ -48,18 +51,19 @@ class CardEmbeddingPipeline(nn.Module):
         enrichment: TokenEnrichment | None,
         pooling: TokenPooling,
         embedding_head: EmbeddingHead,
-        feature_cache: PooledFeatureCache | None = None,
+        feature_cache: FrozenFeatureCache[Any] | None = None,
     ) -> None:
         """Inputs: text_encoder, enrichment (None: tokens go straight to
             the pooling), pooling, embedding_head, feature_cache (None:
-            every stage runs on every card).
+            every stage runs on every card; its fingerprint's cut point
+            says where the pipeline is cut).
         Output: none (constructor). Side effects: none.
         Exceptions: ValueError if adjacent widths do not chain:
             text_encoder.output_dim -> enrichment -> pooling.input_dim, and
             pooling.output_dim -> embedding_head.input_dim; or if a
-            feature_cache is given while the text encoder, enrichment or
-            pooling has a trainable parameter (cached features would go
-            stale).
+            feature_cache is given while a stage before its cut has a
+            trainable parameter (cached features would go stale), or its
+            cut is inside a text encoder that cannot be split.
 
         Example:
             >>> encoder = PretrainedTextEncoder("answerdotai/ModernBERT-base")
@@ -71,14 +75,21 @@ class CardEmbeddingPipeline(nn.Module):
         super().__init__()
         # Validate that each stage's output width is the next one's input
         _check_widths_chain(text_encoder, enrichment, pooling, embedding_head)
+        # The cut follows the cache; without one, the whole live path
+        cut: PipelineCut[Any] = PooledCut(text_encoder, enrichment, pooling)
         if feature_cache is not None:
-            _check_cached_stages_frozen(text_encoder, enrichment, pooling)
+            cut = build_pipeline_cut(
+                feature_cache.fingerprint.cut, text_encoder, enrichment, pooling
+            )
+            cut.check_frozen()
         self.text_encoder: TextEncoder = text_encoder
         self.enrichment: TokenEnrichment | None = enrichment
         self.pooling: TokenPooling = pooling
         self.embedding_head: EmbeddingHead = embedding_head
         # Plain attribute (not an nn.Module), so it stays out of state_dict
-        self._feature_cache: PooledFeatureCache | None = feature_cache
+        self._feature_cache: FrozenFeatureCache[Any] | None = feature_cache
+        # Plain attribute too: it only refers to the stages above
+        self._cut: PipelineCut[Any] = cut
 
     @property
     def output_dim(self) -> int:
@@ -87,9 +98,9 @@ class CardEmbeddingPipeline(nn.Module):
         return self.embedding_head.output_dim
 
     @property
-    def feature_cache(self) -> PooledFeatureCache | None:
-        """The cache of pooled features, or None. Inputs: none.
-        Output: PooledFeatureCache or None. Side effects: none.
+    def feature_cache(self) -> FrozenFeatureCache[Any] | None:
+        """The cache of the stages before the cut, or None. Inputs: none.
+        Output: FrozenFeatureCache or None. Side effects: none.
         Exceptions: none."""
         return self._feature_cache
 
@@ -110,18 +121,21 @@ class CardEmbeddingPipeline(nn.Module):
             >>> pipeline.embed([card_a, card_b]).shape
             torch.Size([2, 256])
         """
-        # Serialize every card, then pool: through the cache when there is one
+        # Serialize every card, then run up to the cut: through the cache
+        # when there is one
         texts = [serialize_card_to_json(card) for card in cards]
+        cut = self._cut
         if self._feature_cache is None:
-            pooled = self._pool_live(texts)
+            features = cut.encode_before_cut(texts)
         else:
-            pooled = self._feature_cache.features(
+            features = self._feature_cache.features(
                 texts,
-                self._pool_live,
+                cut.encode_before_cut,
                 parameter_device(self),
                 cacheable=_cacheable_of(cards),
             )
-        # Project; the head always runs, cached or not
+        # The rest of the way to the pooled vector, then the head
+        pooled = cut.pool_after_cut(features)
         return self.embedding_head(pooled)
 
     def warm(
@@ -164,7 +178,7 @@ class CardEmbeddingPipeline(nn.Module):
                 texts = [serialize_card_to_json(card) for card in chunk]
                 cache.features(
                     texts,
-                    self._pool_live,
+                    self._cut.encode_before_cut,
                     device,
                     durable=durable,
                     cacheable=_cacheable_of(chunk),
@@ -186,9 +200,9 @@ class CardEmbeddingPipeline(nn.Module):
             see warm).
         Output: FeatureReservation, to hand to release once the batch's
             step has looked its features up.
-        Side effects: see PooledFeatureCache.reserve; the frozen stages run
+        Side effects: see FrozenFeatureCache.reserve; the frozen stages run
             without autograd under precision's autocast.
-        Exceptions: see PooledFeatureCache.reserve.
+        Exceptions: see FrozenFeatureCache.reserve.
 
         Example:
             >>> reservation = pipeline.reserve(batch_cards, "fp16")
@@ -203,7 +217,7 @@ class CardEmbeddingPipeline(nn.Module):
             texts = [serialize_card_to_json(card) for card in cards]
             result = cache.reserve(
                 texts,
-                self._pool_live,
+                self._cut.encode_before_cut,
                 device,
                 durable=durable,
                 cacheable=_cacheable_of(cards),
@@ -214,8 +228,8 @@ class CardEmbeddingPipeline(nn.Module):
         """Remove a reservation's pins. Any thread.
 
         Inputs: reservation (from this pipeline's reserve). Output: none.
-        Side effects: see PooledFeatureCache.release.
-        Exceptions: see PooledFeatureCache.release; ValueError for a
+        Side effects: see FrozenFeatureCache.release.
+        Exceptions: see FrozenFeatureCache.release; ValueError for a
             non-empty reservation when there is no cache.
 
         Example:
@@ -228,12 +242,12 @@ class CardEmbeddingPipeline(nn.Module):
             raise ValueError("a reservation with keys, but this pipeline has no cache")
 
     def train(self, mode: bool = True) -> "CardEmbeddingPipeline":
-        """Set train/eval mode; with a cache, the stages before the head
+        """Set train/eval mode; with a cache, the stages before its cut
         stay in eval, so cached features are always eval-mode features.
 
         Inputs: mode (bool). Output: self.
-        Side effects: sets every submodule's mode, then returns the text
-            encoder, enrichment and pooling to eval when there is a cache.
+        Side effects: sets every submodule's mode, then returns the stages
+            before the cache's cut to eval when there is a cache.
         Exceptions: none.
 
         Example:
@@ -242,27 +256,8 @@ class CardEmbeddingPipeline(nn.Module):
         """
         super().train(mode)
         if self._feature_cache is not None:
-            for stage in (self.text_encoder, self.enrichment, self.pooling):
-                if stage is not None:
-                    stage.eval()
+            self._cut.keep_cached_stages_in_eval()
         return self
-
-    def _pool_live(self, texts: list[str]) -> torch.Tensor:
-        """The stages before the head, on texts: encode, enrich (when
-        there is an enrichment), pool.
-
-        Private helper - consumers are embed, warm and reserve, directly or
-        as the cache's pool_live.
-        Inputs: texts (non-empty, serialized cards).
-        Output: (len(texts), pooling.output_dim) tensor.
-        Side effects: none beyond autograd.
-        Exceptions: whatever the stages raise.
-        """
-        encoding = self.text_encoder.encode(texts)
-        # Enrich the tokens, when this pipeline has an enrichment
-        if self.enrichment is not None:
-            encoding = self.enrichment(encoding)
-        return self.pooling(encoding)
 
 
 def _cacheable_of(cards: Sequence[GenericCard]) -> list[bool]:
@@ -303,32 +298,4 @@ def _check_widths_chain(
         if width_out != width_in:
             raise ValueError(
                 f"{producer} output_dim {width_out} != {consumer} input_dim {width_in}"
-            )
-
-
-def _check_cached_stages_frozen(
-    text_encoder: TextEncoder,
-    enrichment: TokenEnrichment | None,
-    pooling: TokenPooling,
-) -> None:
-    """Private helper - single consumer is CardEmbeddingPipeline.__init__.
-
-    Inputs: the stages a pooled feature cache stands in for.
-    Output: none. Side effects: none.
-    Exceptions: ValueError naming the first stage with a parameter that
-        requires grad (e.g. "pooling has trainable parameters; a feature
-        cache needs every stage before the head frozen").
-    """
-    stages: list[tuple[str, nn.Module | None]] = [
-        ("text encoder", text_encoder),
-        ("enrichment", enrichment),
-        ("pooling", pooling),
-    ]
-    for name, stage in stages:
-        if stage is None:
-            continue
-        if any(parameter.requires_grad for parameter in stage.parameters()):
-            raise ValueError(
-                f"{name} has trainable parameters; a feature cache needs every "
-                "stage before the head frozen"
             )

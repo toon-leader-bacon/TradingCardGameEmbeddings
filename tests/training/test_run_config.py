@@ -36,6 +36,7 @@ from src.training.plan import (
     Temperature,
     Uniform,
 )
+from src.encoder_model.feature_cache.cut_point import TokenCutPoint
 from src.encoder_model.feature_cache.feature_storage_dtype import FeatureStorageDtype
 from src.training.model_spec import (
     AdmissionKind,
@@ -931,7 +932,7 @@ class TestFeatureCache:
     @pytest.mark.parametrize(
         ("section", "message"),
         [
-            ({"cut": "tokens"}, "config.model.feature_cache.cut"),
+            ({"cut": "logits"}, "config.model.feature_cache.cut"),
             ({"storage_dtype": "int8"}, "config.model.feature_cache.storage_dtype"),
             ({"capacity_mib": 64}, "capacity_mib"),
             ({"vram": {"capacity_mib": 0}}, "capacity_mib"),
@@ -1034,3 +1035,41 @@ class TestBinderMods:
         document["binder_mods"] = {}
         with pytest.raises(ValueError, match="binder_mods"):
             parse_run_config(document)
+
+
+class TestTokenCutConfig:
+    def test_a_token_cut_parses_with_its_layer(self) -> None:
+        section = {"cut": "tokens", "cut_layer": 20}
+        model = parse_run_config(_with(["model", "feature_cache"], section)).model
+        assert model.feature_cache is not None
+        assert model.feature_cache.cut_point == TokenCutPoint(20)
+
+    def test_a_token_cut_without_a_layer_caches_the_whole_output(self) -> None:
+        section = {"cut": "tokens"}
+        model = parse_run_config(_with(["model", "feature_cache"], section)).model
+        assert model.feature_cache is not None
+        assert model.feature_cache.cut_point == TokenCutPoint(None)
+
+    def test_a_pooled_cut_takes_no_layer(self) -> None:
+        section = {"cut": "pooled", "cut_layer": 3}
+        with pytest.raises(ValueError, match="cut_layer"):
+            parse_run_config(_with(["model", "feature_cache"], section))
+
+    def test_trainable_text_layers_parse_with_a_cut_inside_the_encoder(self) -> None:
+        document = _with(["model", "feature_cache"], {"cut": "tokens", "cut_layer": 20})
+        document["model"]["trainable_text_layers"] = 2  # type: ignore[index]
+        assert parse_run_config(document).model.trainable_text_layers == 2
+
+    @pytest.mark.parametrize("section", [{"cut": "pooled"}, {"cut": "tokens"}])
+    def test_trainable_text_layers_need_a_cut_inside_the_encoder(
+        self, section: dict[str, Any]
+    ) -> None:
+        document = _with(["model", "feature_cache"], section)
+        document["model"]["trainable_text_layers"] = 1  # type: ignore[index]
+        with pytest.raises(ValueError, match="trainable_text_layers"):
+            parse_run_config(document)
+
+    def test_a_token_cut_allows_a_trainable_pooling(self) -> None:
+        document = _with(["model", "feature_cache"], {"cut": "tokens", "cut_layer": 4})
+        document["model"]["pooling"] = {"kind": "attention"}  # type: ignore[index]
+        assert parse_run_config(document).model.feature_cache is not None

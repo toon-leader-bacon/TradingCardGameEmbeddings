@@ -18,15 +18,27 @@ exist but are not yet compared; see `README.md` and
   `trust_remote_code`), ModernBERT-large if VRAM allows, and a small
   decoder model's hidden states. Re-run `scripts/report_card_content.py`
   for token counts under any new tokenizer.
-- [ ] **Cache frozen token states for the trainable poolings.**
-  `AttentionPooling` and `TransformerPooling` read every card's token
-  states each step. With the LM frozen those never change, so caching
-  them makes pooling training far faster (fp16 token states: gwent
-  ~175 MB, MTG ~9 GB). The pooled cut exists (`feature_cache/`, mean
-  pooling only); a token-level cut needs ragged storage and a RAM/disk
-  tier (`plans/frozen_feature_cache.md`, v1.3). Random noise mods
-  (key shuffle, random key mask) give a new text on nearly every draw,
-  so they gain nothing from any cache.
+- [ ] **Measure the token cut in training.** `feature_cache: {cut:
+  tokens}` exists (with `cut_layer` and `trainable_text_layers` for
+  ModernBERT). Not yet measured in a real run: step time with attention
+  pooling, VRAM/RAM tier sizing (fp16 token states: gwent ~175 MB, MTG
+  ~9 GB), hit rates under the mixed diet. Random noise mods (key
+  shuffle, random key mask) give a new text on nearly every draw, so
+  they gain nothing from any cache.
+- [ ] **Bucket the live upper half by length.** After a token-cut
+  lookup, `RaggedTokenStates.to_encoding` pads the whole batch to its
+  longest card before the encoder's layers above the cut run; sorting
+  into length buckets first (as `PretrainedTextEncoder` does) would cut
+  wasted attention, which matters once layers above the cut train.
+- [ ] **A disk tier for encoders without a pinned source.** The disk tier
+  refuses a fingerprint whose text encoder has no checkpoint revision,
+  so an encoder trained here (or a local path) only gets the memory
+  tiers. A weights digest as the source would let it use the disk.
+- [ ] **Split other architectures.** Only ModernBERT is a
+  `LayeredTextEncoder` (`ModernBertLayerStack`). Another Hugging Face
+  architecture needs its own small adapter; any `TextEncoder` can
+  already be cached at its whole output (`cut: tokens`, no
+  `cut_layer`).
 - [ ] **Whitening after pooling.** `TokenWhitening` whitens
   tokens before pooling only. Offline, whitening the mean-pooled card
   vector instead scored best (`experiments/2026-10-10_pooling_probe/NOTEBOOK.md`). After a
@@ -46,7 +58,7 @@ exist but are not yet compared; see `README.md` and
   so a row's text can be recovered from the card binder later. It cannot
   replace the text key: a mod keeps the uuid and changes the text, so one
   uuid has many rows. Storing it means threading uuids through
-  `PooledFeatureCache.features` and `FeatureStore.put_many`, which take
+  `FrozenFeatureCache.features` and `FeatureStore.put_many`, which take
   texts and keys only today.
 - [ ] **Avoid the round trip on a disk hit with a RAM tier.** A disk hit is
   decoded on the CPU, moved to the caller's device, and then promotion

@@ -11,23 +11,26 @@ Schema:
              dtype TEXT, created_at TEXT)
     features(digest TEXT, key BLOB, row BLOB,
              PRIMARY KEY (digest, key)) WITHOUT ROWID
-A row is the raw bytes of one storage-dtype vector.
+A row is the raw bytes of one key's storage-dtype rows: one vector for
+a pooled cut, its tokens' vectors one after another for a token cut (the
+row count is the blob's size over width x itemsize). Capacity counts
+rows of the fingerprint's cut, as every tier's does.
 """
 
 import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import torch
 
 from src.encoder_model.feature_cache.card_text_key import CardTextKey
-from src.encoder_model.feature_cache.feature_store import (
-    StoreLookup,
-    TierStats,
+from src.encoder_model.feature_cache.feature_row_kind import (
+    FeatureRowKind,
     require_offer_shape,
 )
+from src.encoder_model.feature_cache.feature_store import StoreLookup, TierStats
 from src.encoder_model.feature_cache.frozen_stage_fingerprint import (
     FrozenStageFingerprint,
 )
@@ -50,14 +53,17 @@ CREATE TABLE IF NOT EXISTS features (
 
 
 class SqliteFeatureStore:
-    """FeatureStore[Tensor] in one SQLite file, scoped to one row set."""
+    """FeatureStore in one SQLite file, scoped to one row set; its feature
+    type follows the fingerprint's cut (Tensor for pooled,
+    RaggedTokenStates for tokens)."""
 
     def __init__(
         self, path: Path, fingerprint: FrozenStageFingerprint, capacity_rows: int
     ) -> None:
         """Inputs: path (the database file; may not exist yet), fingerprint
-            (names and describes this store's row set; width and storage
-            dtype come from it), capacity_rows (>= 1, for this row set).
+            (names and describes this store's row set; width, storage
+            dtype and row kind come from it), capacity_rows (>= 1, rows of
+            the cut's kind, for this row set).
         Output: none (constructor). Side effects: none; no I/O until the
             first lookup or put_many.
         Exceptions: ValueError if capacity_rows < 1, or the fingerprint's
@@ -73,6 +79,10 @@ class SqliteFeatureStore:
         self._path = path
         self._fingerprint = fingerprint
         self._digest = fingerprint.digest()
+        self._row_kind: FeatureRowKind[Any] = fingerprint.cut.row_kind
+        self._row_bytes = (
+            fingerprint.width * fingerprint.storage_dtype.torch_dtype.itemsize
+        )
         self._capacity_rows = capacity_rows
         self._lock = threading.Lock()
         self._connection: sqlite3.Connection | None = None
@@ -82,11 +92,11 @@ class SqliteFeatureStore:
 
     def lookup(
         self, keys: Sequence[CardTextKey], device: torch.device
-    ) -> StoreLookup[torch.Tensor]:
+    ) -> StoreLookup[Any]:
         """The stored rows of keys, read in batches.
 
         Inputs: keys (distinct), device.
-        Output: StoreLookup; hits (len(hit_positions), width) in the storage
+        Output: StoreLookup; hits (one per hit position) in the storage
             dtype on device.
         Side effects: opens the database on first use; counts hits.
         Exceptions: RuntimeError after close(); sqlite3.Error from the
@@ -105,19 +115,21 @@ class SqliteFeatureStore:
             self._hits += len(hit_positions)
         if not hit_positions:
             return StoreLookup([], None, miss_positions)
-        rows = [found[keys[i]] for i in hit_positions]
-        result = StoreLookup(
-            hit_positions, self._decode(rows).to(device), miss_positions
-        )
+        blobs = [found[keys[i]] for i in hit_positions]
+        row_counts = [len(blob) // self._row_bytes for blob in blobs]
+        flat = self._decode(blobs).to(device)
+        hits = self._row_kind.from_flat_rows(flat, row_counts)
+        result = StoreLookup(hit_positions, hits, miss_positions)
         return result
 
     def put_many(
-        self, keys: Sequence[CardTextKey], features: torch.Tensor, durable: bool
+        self, keys: Sequence[CardTextKey], features: Any, durable: bool
     ) -> int:
         """Store durable rows for keys this row set lacks, while it has room.
 
-        Inputs: keys (distinct), features (len(keys), width) on any device,
-            durable (a non-durable put is ignored).
+        Inputs: keys (distinct), features (one per key, of the cut's
+            feature type) on any device, durable (a non-durable put is
+            ignored).
         Output: int, rows newly written.
         Side effects: opens the database on first use; one transaction.
         Exceptions: ValueError for a length or width mismatch;
@@ -128,22 +140,29 @@ class SqliteFeatureStore:
             >>> store.put_many([key_a], torch.randn(1, 768), durable=True)
             1
         """
-        require_offer_shape(keys, features, self._fingerprint.width)
+        row_counts = require_offer_shape(
+            self._row_kind, keys, features, self._fingerprint.width
+        )
         if not durable or not keys:
             return 0
         with self._lock:
             connection = self._open()
             if self._rows_used >= self._capacity_rows:
                 return 0
-            payload = self._encode(features)
+            payload = self._encode(self._row_kind.flat_rows(features), row_counts)
             # Skip held keys, then take only what the row set has room for
             held = _select_held_keys(connection, self._digest, keys)
-            fresh = [i for i, key in enumerate(keys) if key not in held]
-            fresh = fresh[: max(0, self._capacity_rows - self._rows_used)]
+            fresh = _fitting_fresh(
+                keys, held, row_counts, self._capacity_rows - self._rows_used
+            )
             written = _insert_rows(
                 connection, self._digest, [(keys[i], payload[i]) for i in fresh]
             )
-            self._rows_used += written
+            # INSERT OR IGNORE may skip a key another process just wrote
+            if written == len(fresh):
+                self._rows_used += sum(row_counts[i] for i in fresh)
+            else:
+                self._rows_used = _count_rows(connection, self._digest, self._row_bytes)
         return written
 
     def pin(self, keys: Sequence[CardTextKey]) -> None:
@@ -164,6 +183,12 @@ class SqliteFeatureStore:
                     "disk", self._hits, self._rows_used, self._capacity_rows, 0, 0
                 ),
             )
+
+    @property
+    def row_kind(self) -> FeatureRowKind[Any]:
+        """The fingerprint's cut's row kind. Inputs: none.
+        Output: FeatureRowKind. Side effects: none. Exceptions: none."""
+        return self._row_kind
 
     @property
     def storage_dtype(self) -> torch.dtype:
@@ -200,34 +225,43 @@ class SqliteFeatureStore:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self._path, check_same_thread=False)
         try:
-            self._rows_used = _prepare(connection, self._digest, self._fingerprint)
+            _prepare(connection, self._digest, self._fingerprint)
+            self._rows_used = _count_rows(connection, self._digest, self._row_bytes)
         except BaseException:
             connection.close()
             raise
         self._connection = connection
         return connection
 
-    def _encode(self, features: torch.Tensor) -> list[bytes]:
-        """One bytes value per row, in the storage dtype.
+    def _encode(self, rows: torch.Tensor, row_counts: Sequence[int]) -> list[bytes]:
+        """One bytes value per key: its rows, in the storage dtype.
 
         Private helper - single consumer is put_many.
-        Inputs: features (N, width). Output: list of N bytes.
-        Side effects: copies features to the CPU. Exceptions: none.
+        Inputs: rows (sum(row_counts), width), row_counts (one per key).
+        Output: list of len(row_counts) bytes.
+        Side effects: copies rows to the CPU. Exceptions: none.
         """
-        stored = features.detach().to("cpu", self.storage_dtype).contiguous()
-        raw = stored.view(torch.uint8).numpy()
-        return [row.tobytes() for row in raw]
+        stored = rows.detach().to("cpu", self.storage_dtype).contiguous()
+        raw = stored.view(torch.uint8).numpy().reshape(-1)
+        result: list[bytes] = []
+        start = 0
+        for count in row_counts:
+            end = start + count * self._row_bytes
+            result.append(raw[start:end].tobytes())
+            start = end
+        return result
 
-    def _decode(self, rows: list[bytes]) -> torch.Tensor:
-        """The (len(rows), width) CPU tensor of stored rows, in order.
+    def _decode(self, blobs: list[bytes]) -> torch.Tensor:
+        """The (total rows, width) CPU tensor of stored blobs' rows, in order.
 
         Private helper - single consumer is lookup.
-        Inputs: rows (each width * itemsize bytes). Output: Tensor in the
-            storage dtype. Side effects: none. Exceptions: none.
+        Inputs: blobs (each a multiple of width * itemsize bytes).
+        Output: Tensor in the storage dtype. Side effects: none.
+        Exceptions: none.
         """
-        buffer = bytearray(b"".join(rows))
+        buffer = bytearray(b"".join(blobs))
         flat = torch.frombuffer(buffer, dtype=self.storage_dtype)
-        return flat.reshape(len(rows), self._fingerprint.width)
+        return flat.reshape(-1, self._fingerprint.width)
 
 
 def _select_rows(
@@ -342,13 +376,13 @@ def _require_row_set_matches(
 
 def _prepare(
     connection: sqlite3.Connection, digest: str, fingerprint: FrozenStageFingerprint
-) -> int:
-    """Configure a fresh connection, create the schema if absent, register
-    the row set and count its rows.
+) -> None:
+    """Configure a fresh connection, create the schema if absent and
+    register the row set.
 
     Private helper - single consumer is SqliteFeatureStore._open.
     Inputs: connection (just opened), digest, fingerprint.
-    Output: int, the row set's stored rows.
+    Output: none.
     Side effects: sets WAL, synchronous=NORMAL and the busy timeout;
         creates tables; inserts the row set if new.
     Exceptions: ValueError if the row set is registered with another width
@@ -370,7 +404,42 @@ def _prepare(
             ),
         )
     _require_row_set_matches(connection, digest, fingerprint)
-    (rows_used,) = connection.execute(
-        "SELECT COUNT(*) FROM features WHERE digest = ?", (digest,)
+
+
+def _count_rows(connection: sqlite3.Connection, digest: str, row_bytes: int) -> int:
+    """The row set's stored rows: its blobs' total size over one row's.
+
+    Private helper - consumers are SqliteFeatureStore._open and put_many.
+    Inputs: connection, digest, row_bytes (width x itemsize).
+    Output: int. Side effects: none. Exceptions: sqlite3.Error.
+    """
+    (total_bytes,) = connection.execute(
+        "SELECT COALESCE(SUM(LENGTH(row)), 0) FROM features WHERE digest = ?",
+        (digest,),
     ).fetchone()
-    return int(rows_used)
+    return int(total_bytes) // row_bytes
+
+
+def _fitting_fresh(
+    keys: Sequence[CardTextKey],
+    held: set[bytes],
+    row_counts: Sequence[int],
+    free_rows: int,
+) -> list[int]:
+    """The positions of keys not held, in order, while their rows fit in
+    free_rows.
+
+    Private helper - single consumer is SqliteFeatureStore.put_many.
+    Inputs: keys, held (the stored keys' bytes), row_counts, free_rows.
+    Output: list[int]. Side effects: none. Exceptions: none.
+    """
+    result: list[int] = []
+    used = 0
+    for position, key in enumerate(keys):
+        if key in held:
+            continue
+        if used + row_counts[position] > free_rows:
+            break
+        result.append(position)
+        used += row_counts[position]
+    return result

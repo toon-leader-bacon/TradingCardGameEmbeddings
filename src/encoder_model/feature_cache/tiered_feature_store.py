@@ -8,26 +8,29 @@ An eviction therefore needs no demotion copy: the row is usually already
 below.
 """
 
-from typing import Sequence
+from typing import Generic, Sequence, TypeVar
 
 import torch
 
 from src.encoder_model.feature_cache.card_text_key import CardTextKey
+from src.encoder_model.feature_cache.feature_row_kind import FeatureRowKind
 from src.encoder_model.feature_cache.feature_store import (
     FeatureStore,
     StoreLookup,
     TierStats,
 )
 
+F = TypeVar("F")
 
-class TieredFeatureStore:
-    """FeatureStore[Tensor] over an ordered chain of FeatureStore[Tensor]."""
 
-    def __init__(self, tiers: Sequence[FeatureStore[torch.Tensor]]) -> None:
+class TieredFeatureStore(Generic[F]):
+    """FeatureStore[F] over an ordered chain of FeatureStore[F]."""
+
+    def __init__(self, tiers: Sequence[FeatureStore[F]]) -> None:
         """Inputs: tiers, top (fastest) first.
         Output: none (constructor). Side effects: none.
-        Exceptions: ValueError if tiers is empty or their storage dtypes
-            differ.
+        Exceptions: ValueError if tiers is empty, or their storage dtypes
+            or row kinds differ.
 
         Example:
             >>> TieredFeatureStore([vram_slab, ram_slab, sqlite_store])
@@ -39,11 +42,14 @@ class TieredFeatureStore:
             raise ValueError(
                 f"every tier must store one dtype, got {sorted(map(str, dtypes))}"
             )
+        if len({id(tier.row_kind) for tier in tiers}) > 1:
+            raise ValueError("every tier must hold the same row kind")
         self._tiers = list(tiers)
+        self._row_kind: FeatureRowKind[F] = tiers[0].row_kind
 
     def lookup(
         self, keys: Sequence[CardTextKey], device: torch.device
-    ) -> StoreLookup[torch.Tensor]:
+    ) -> StoreLookup[F]:
         """Ask each tier in turn about the keys the tiers above missed;
         offer lower-tier hits to the tiers above.
 
@@ -57,7 +63,7 @@ class TieredFeatureStore:
             >>> chain.lookup([in_ram, nowhere], torch.device("cuda")).miss_positions
             [1]
         """
-        found_parts: list[tuple[list[int], torch.Tensor]] = []
+        found_parts: list[tuple[list[int], F]] = []
         remaining = list(range(len(keys)))
 
         # Each tier answers the keys every tier above it missed
@@ -71,12 +77,10 @@ class TieredFeatureStore:
                 self._promote(depth, [keys[p] for p in positions], answer.hits)
             remaining = [remaining[i] for i in answer.miss_positions]
 
-        result = _merge_parts(found_parts, remaining)
+        result = _merge_parts(self._row_kind, found_parts, remaining)
         return result
 
-    def put_many(
-        self, keys: Sequence[CardTextKey], features: torch.Tensor, durable: bool
-    ) -> int:
+    def put_many(self, keys: Sequence[CardTextKey], features: F, durable: bool) -> int:
         """Offer the rows to every tier (write-through).
 
         Inputs: keys (distinct), features, durable.
@@ -130,15 +134,19 @@ class TieredFeatureStore:
         Side effects: none. Exceptions: none."""
         return self._tiers[0].storage_dtype
 
+    @property
+    def row_kind(self) -> FeatureRowKind[F]:
+        """The tiers' shared row kind. Inputs: none. Output: FeatureRowKind.
+        Side effects: none. Exceptions: none."""
+        return self._row_kind
+
     def close(self) -> None:
         """Close every tier. Inputs: none. Output: none.
         Side effects: every tier's close. Exceptions: none."""
         for tier in self._tiers:
             tier.close()
 
-    def _promote(
-        self, depth: int, keys: list[CardTextKey], features: torch.Tensor
-    ) -> None:
+    def _promote(self, depth: int, keys: list[CardTextKey], features: F) -> None:
         """Offer rows found at depth to every tier above it (not durably).
 
         Private helper - single consumer is lookup.
@@ -151,13 +159,16 @@ class TieredFeatureStore:
 
 
 def _merge_parts(
-    found_parts: list[tuple[list[int], torch.Tensor]], miss_positions: list[int]
-) -> StoreLookup[torch.Tensor]:
+    kind: FeatureRowKind[F],
+    found_parts: list[tuple[list[int], F]],
+    miss_positions: list[int],
+) -> StoreLookup[F]:
     """One StoreLookup from per-tier hits, with hit_positions ascending and
     hits reordered to match.
 
     Private helper - single consumer is TieredFeatureStore.lookup.
-    Inputs: found_parts ((positions, rows) per tier that hit),
+    Inputs: kind (the tiers' row kind), found_parts ((positions, hits)
+        per tier that hit),
         miss_positions (ascending). Output: StoreLookup.
     Side effects: none. Exceptions: none.
     """
@@ -168,7 +179,6 @@ def _merge_parts(
         return StoreLookup(positions, rows, miss_positions)
     # Several tiers hit: concatenate, then sort rows by position
     positions = [p for part_positions, _ in found_parts for p in part_positions]
-    rows = torch.cat([part_rows for _, part_rows in found_parts])
+    hits = kind.concatenate([part_hits for _, part_hits in found_parts])
     order = sorted(range(len(positions)), key=positions.__getitem__)
-    index = torch.tensor(order, dtype=torch.long, device=rows.device)
-    return StoreLookup(sorted(positions), rows.index_select(0, index), miss_positions)
+    return StoreLookup(sorted(positions), kind.select(hits, order), miss_positions)

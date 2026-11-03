@@ -3,7 +3,7 @@
 Status: v1 (pooled cut), v1.1 (VRAM, RAM and disk tiers; prefetch) and
 v1.2 (scheduled prefetch with pinning; more slot policies; the
 do-not-cache stamp) are built and documented in the READMEs cited
-below. v1.3 and v1.4 are direction.
+below, as is v1.3 (the token-level cut). v1.4 is direction.
 
 ## Goal
 
@@ -81,20 +81,6 @@ separate vectorization job for the contrastive dojo.
 - The disk file's size (~3x payload) and the CPU -> GPU -> CPU round
   trip of a disk hit promoted into RAM are tracked in
   `src/encoder_model/TODO.md`.
-
-## v1.3: more cut points
-
-After BERT (token states) and after token whitening. These need ragged
-storage (one flat buffer plus offsets per card) and make the RAM and
-disk tiers essential: roughly 400 KB per card at the token level,
-against 1.5 KB pooled at fp16. They allow training attention pooling on
-cached token states, or adding token features to the pooled vector.
-This changes the pipeline seam: a token-level cut sits between encoding
-and pooling, so `embed()` and the type of its cache parameter change. A
-cut after the embedding head, for a fully frozen encoder in extrinsic
-evaluation, closes `src/evaluation/TODO.md` "Shared frozen features".
-Pinning matters more here: far fewer token-level rows fit in
-VRAM.
 
 ## v1.4: experiments
 

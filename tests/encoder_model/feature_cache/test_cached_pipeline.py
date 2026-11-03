@@ -1,4 +1,4 @@
-"""A CardEmbeddingPipeline with a PooledFeatureCache: the same embeddings as
+"""A CardEmbeddingPipeline with a FrozenFeatureCache: the same embeddings as
 without one, the frozen stages skipped on hits, warm() filling ahead, the
 state_dict untouched, and trainable stages before the cut refused. Also the
 models' warm()/feature_cache_stats() entry points."""
@@ -12,7 +12,7 @@ import torch
 
 from src.encoder_model.card_embedding_pipeline import CardEmbeddingPipeline
 from src.encoder_model.embedding_head import LinearEmbeddingHead
-from src.encoder_model.feature_cache.pooled_feature_cache import PooledFeatureCache
+from src.encoder_model.feature_cache.frozen_feature_cache import FrozenFeatureCache
 from src.encoder_model.multi_card_model import MultiCardModel
 from src.encoder_model.pooling.attention_pooling import AttentionPooling
 from src.encoder_model.pooling.mean_pooling import MeanPooling
@@ -52,7 +52,7 @@ def _card(name: str, text: str = "") -> GenericCard:
     )
 
 
-def _cache(capacity: int = 100) -> PooledFeatureCache:
+def _cache(capacity: int = 100) -> FrozenFeatureCache:
     return memory_cache(HIDDEN, capacity)
 
 

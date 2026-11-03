@@ -15,7 +15,7 @@ import torch
 import torch.nn as nn
 
 from src.encoder_model.card_embedding_pipeline import CardEmbeddingPipeline
-from src.encoder_model.feature_cache.pooled_feature_cache import (
+from src.encoder_model.feature_cache.frozen_feature_cache import (
     FeatureCacheStats,
     FeatureReservation,
 )

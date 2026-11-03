@@ -34,7 +34,7 @@ from typing import Callable
 
 import torch
 
-from src.encoder_model.feature_cache.pooled_feature_cache import FeatureCacheStats
+from src.encoder_model.feature_cache.frozen_feature_cache import FeatureCacheStats
 from src.training.recording.csv_table import CsvTable
 
 _logger = logging.getLogger(__name__)
