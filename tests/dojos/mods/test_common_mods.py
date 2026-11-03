@@ -3,7 +3,6 @@
 import copy
 import random
 from datetime import datetime, timezone
-from uuid import uuid4
 
 import pytest
 
@@ -13,11 +12,12 @@ from src.schema.card import GenericCard, Provenance
 from src.schema.card_factory import GenericCardFactory, MissingPathPolicy
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
+from tests.dojos.mods.card_ids import content_uuid
 
 
 def _card(raw_content: dict) -> GenericCard:
     return GenericCard(
-        nocab_uuid=uuid4(),
+        nocab_uuid=content_uuid(raw_content),
         source_game=GameId.GWENT,
         name="Test Card",
         raw_content=raw_content,
@@ -93,7 +93,7 @@ def test_shuffle_deck_returns_new_list_and_leaves_input_order_unchanged() -> Non
     deck = [_card({"i": i}) for i in range(5)]
     original = list(deck)
 
-    shuffled, label = ShuffleDeckMod().apply_single((deck, 7))
+    shuffled, label = ShuffleDeckMod(rng_seed=0).apply_single((deck, 7))
 
     assert shuffled is not deck  # a new list, even if the order happened to match
     assert deck == original
@@ -131,7 +131,7 @@ def test_shuffle_deck_leaves_the_global_random_untouched() -> None:
 def test_shuffle_deck_of_an_empty_deck_returns_a_new_empty_list() -> None:
     deck: list = []
 
-    shuffled, _ = ShuffleDeckMod().apply_single((deck, 0))
+    shuffled, _ = ShuffleDeckMod(rng_seed=0).apply_single((deck, 0))
 
     assert shuffled == [] and shuffled is not deck
 
@@ -142,7 +142,7 @@ def test_mods_reject_the_wrong_input_shape() -> None:
     with pytest.raises(AssertionError):
         MaskTargetKeyMod("faction").apply_single(([card, card], 0))
     with pytest.raises(AssertionError):
-        ShuffleDeckMod().apply_single((card, 0))
+        ShuffleDeckMod(rng_seed=0).apply_single((card, 0))
 
 
 def test_pipeline_of_several_masks_never_mutates_inputs() -> None:

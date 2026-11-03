@@ -114,6 +114,31 @@ rows never straddle TRAIN and TEST.
   unchanged and training continues; constructor arguments are validated.
   Each such mod keeps a `ModTally` (cards seen, changed, failed, and the
   first failure) so a mod that never fires or keeps failing is visible.
+  `content_style_mods.py` holds more card-field mods (same `variants`,
+  `probability`, best effort and tally). These change how a card is
+  written, not what it says, aimed at transfer to games whose schemas
+  differ from ours. Each applies one style to the whole card at every
+  depth, picked per card from its `styles` (a `DEFAULT_STYLES` ClassVar
+  when not given):
+  - `KeyCaseMod` re-cases every key (snake, upper_snake, camel, pascal,
+    kebab or title). A key with other characters (`{R}`) is kept, and a
+    card whose keys collide after renaming passes through.
+  - `FlattenKeysMod` joins nested object paths into top-level keys with a
+    separator. Lists stay lists, with their objects flattened in place.
+  - `ValueCaseMod` upper- or lower-cases string values, skipping
+    `MASK_TOKEN`.
+  - `BoolToStringMod`, `ListToStringMod` (joins lists of scalars with a
+    separator) and `NumberToStringMod` turn values into strings.
+  A mod with one style draws nothing, so its cards are deterministic,
+  never stamped, whatever `variants` says. With probability below 1 such
+  a card has two texts: the original and the restyle. `NumberToStringMod`
+  has no styles and is always deterministic. The tree walks are in
+  `content_rewrite.py` (a `ContentRewrite` Strategy: one rule each for
+  keys, scalars and whole lists).
+  **Order matters.** These mods rename keys or change value types, so
+  anything that finds fields by name or path (`MaskTargetKeyMod`,
+  `WeightedFieldMaskMod`, label extraction) must run before them. Run
+  after, it finds nothing and the label leaks silently (see `ModPipeline`).
   `deck_mods.py` holds train-only deck mods that thin the card lists of a
   multi-card or multi-group input (a `DeckThinningMod` Template Method
   base): `CardDropoutMod` drops each card with a probability,
@@ -143,11 +168,14 @@ rows never straddle TRAIN and TEST.
   none). **The do-not-cache stamp.** Every mod that builds a card passes
   it through `Mod.stamped_if_random`, which sets `GenericCard.cacheable`
   to False (`GenericCardFactory.stamp_do_not_cache`) unless the mod's
-  `deterministic_cards` is True. Only `MaskTargetKeyMod` sets it; the
-  card-field augmentations draw at random, so `CardFieldMod` stamps every
-  card it changes. Later mods keep the stamp, and a feature cache
-  encodes a stamped card's text without storing it. Mods that build no
-  card (deck mods, `ShuffleDeckMod`, `GroupSwapMod`) never stamp. `mod_specs.py` holds `ModSpec`s: frozen, shareable recipes, one
+  `deterministic_cards` is True: always for `MaskTargetKeyMod` and
+  `NumberToStringMod`, for a card-field mod with `variants` > 0, and for
+  a content style mod with one style. Otherwise a card-field mod draws
+  at random and stamps every card it changes. Later mods keep the stamp,
+  and a feature cache encodes a stamped card's text without storing it.
+  Mods that build no card (deck mods, `ShuffleDeckMod`, `GroupSwapMod`)
+  never stamp.
+  `mod_specs.py` holds `ModSpec`s: frozen, shareable recipes, one
   per card-field or deck mod (`DeckModSpec` for the latter, carrying its
   `groups`), that each dojo builds into its own mods (a mod's
   random state and tally are per dojo, so mod objects are never shared).

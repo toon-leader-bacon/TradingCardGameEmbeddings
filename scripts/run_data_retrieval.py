@@ -7,8 +7,9 @@ fetch, so calling both unconditionally is always safe). See
 src/data_retrieval/README.md for what each source actually does.
 
 Several of these (spire_codex_runs, play_gwent, pitchstack,
-fabtcg_decklists, sts_gg, seventeenlands) are 10+ hour crawls, and
-almost every downloader below reports its own progress via tqdm.
+fabtcg_decklists, sts_gg, seventeenlands, limitless_play,
+hearthstonetopdecks) are 10+ hour crawls, and almost every downloader
+below reports its own progress via tqdm.
 Running several in one process/terminal makes their progress bars fight
 over the same lines, so `--all` instead spawns one subprocess per
 downloader, each in its own new console window — tqdm then has a real,
@@ -58,10 +59,20 @@ from src.data_retrieval.dominiontabs.downloader import DominionTabsCardDownloade
 from src.data_retrieval.download_utils import download_to_string
 from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.fabtcg_decklists.downloader import FabtcgDecklistDownloader
+from src.data_retrieval.fabtcgmeta_online_decks.downloader import (
+    FabtcgmetaOnlineDecksDownloader,
+)
 from src.data_retrieval.gwent_one.downloader import GwentOneDownloader
 from src.data_retrieval.hearthstonejson.downloader import HearthstoneJsonDownloader
+from src.data_retrieval.hearthstonetopdecks.downloader import (
+    HearthstoneTopDecksDownloader,
+)
+from src.data_retrieval.zenodo_hearthstone_decks.downloader import (
+    ZenodoHearthstoneDecksDownloader,
+)
 from src.data_retrieval.isotropic.downloader import IsotropicGameLogDownloader
 from src.data_retrieval.pitchstack.downloader import PitchstackDeckDownloader
+from src.data_retrieval.limitless_play.downloader import LimitlessPlayDownloader
 from src.data_retrieval.play_gwent.downloader import PlayGwentDownloader
 from src.data_retrieval.pokemon_tcg.downloader import PokemonTcgDataDownloader
 from src.data_retrieval.scryfall.downloader import ScryfallOracleDownloader
@@ -143,6 +154,14 @@ def run_hearthstonejson() -> None:
     _run_standard(HearthstoneJsonDownloader(_HEARTHSTONEJSON_LISTING_URL))
 
 
+def run_hearthstonetopdecks() -> None:
+    _run_standard(HearthstoneTopDecksDownloader())
+
+
+def run_zenodo_hearthstone_decks() -> None:
+    _run_standard(ZenodoHearthstoneDecksDownloader())
+
+
 def run_spire_codex_cards() -> None:
     _run_standard(SpireCodexCardDownloader())
 
@@ -157,6 +176,10 @@ def run_gwent_one() -> None:
 
 def run_sts_gg() -> None:
     _run_standard(STSGGRunDownloader())
+
+
+def run_limitless_play() -> None:
+    _run_standard(LimitlessPlayDownloader())
 
 
 def run_play_gwent() -> None:
@@ -183,6 +206,10 @@ def run_fabtcg_decklists() -> None:
     _run_standard(FabtcgDecklistDownloader())
 
 
+def run_fabtcgmeta_online_decks() -> None:
+    _run_standard(FabtcgmetaOnlineDecksDownloader())
+
+
 def run_seventeenlands() -> None:
     _run_standard(SeventeenLandsDownloader())
 
@@ -191,9 +218,12 @@ DOWNLOADERS: dict[str, Callable[[], None]] = {
     "cardvault_fabtcg": run_cardvault_fabtcg,
     "dominiontabs": run_dominiontabs,
     "fabtcg_decklists": run_fabtcg_decklists,
+    "fabtcgmeta_online_decks": run_fabtcgmeta_online_decks,
     "gwent_one": run_gwent_one,
     "hearthstonejson": run_hearthstonejson,
+    "hearthstonetopdecks": run_hearthstonetopdecks,
     "isotropic": run_isotropic,
+    "limitless_play": run_limitless_play,
     "pitchstack": run_pitchstack,
     "play_gwent": run_play_gwent,
     "pokemon_tcg": run_pokemon_tcg,
@@ -202,6 +232,7 @@ DOWNLOADERS: dict[str, Callable[[], None]] = {
     "spire_codex_cards": run_spire_codex_cards,
     "spire_codex_runs": run_spire_codex_runs,
     "sts_gg": run_sts_gg,
+    "zenodo_hearthstone_decks": run_zenodo_hearthstone_decks,
 }
 
 

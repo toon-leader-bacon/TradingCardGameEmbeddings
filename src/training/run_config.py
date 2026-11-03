@@ -39,12 +39,14 @@ from src.training.config_parsing.config_section import (
 )
 from src.training.config_parsing.diet_parsing import parse_diet
 from src.training.config_parsing.mod_parsing import (
+    parse_binder_mods,
     parse_default_augmentation,
     parse_mod_overrides,
 )
 from src.training.config_parsing.model_parsing import parse_model
 from src.training.learning_rate_schedule import LearningRateSchedule
 from src.training.loss_weighting import DEFAULT_BASELINE_FLOOR, LossWeighting
+from src.training.binder_mods_spec import BinderModsSpec
 from src.training.model_spec import ModelSpec
 from src.training.plan import (
     DietRule,
@@ -93,6 +95,10 @@ class RunConfig:
     default_augmentation: rates rewriting every game default card-field
         mod (top-level `default_augmentation: {probability, variants}`);
         dojos named in mod_overrides are not touched. Nothing by default.
+    binder_mods: the mod pipeline applied once to every card of each
+        game the run loads, before any dojo is built (top-level
+        `binder_mods:`, see binder_mods.py); None means cards are used as
+        the binder holds them.
     """
 
     run_directory: Path
@@ -106,6 +112,7 @@ class RunConfig:
     regression_loss: RegressionLossKind = RegressionLossKind.MSE
     warm_feature_cache: tuple[GameId, ...] = ()
     default_augmentation: AugmentationRates = AugmentationRates()
+    binder_mods: BinderModsSpec | None = None
 
     def __post_init__(self) -> None:
         # No duplicate dojos (the Trainer keys dojos by name and would
@@ -203,8 +210,9 @@ def parse_run_config(
     mod_parsing.parse_default_augmentation), staple_subsampling (optional: dojo name
     -> t, see _parse_staple_thresholds), loss_weights (optional: dojo name
     -> multiplier), baseline_floor and weight_by_baseline (optional; see
-    _parse_loss_weighting), and regression_loss (optional: mse or huber;
-    see _parse_regression_loss).
+    _parse_loss_weighting), regression_loss (optional: mse or huber;
+    see _parse_regression_loss), and binder_mods (optional: see
+    mod_parsing.parse_binder_mods).
     A phase without a "dojos" key trains every run dojo that is not held out.
 
     Inputs: document (ConfigDocument), catalog_names (every dojo name a
@@ -272,6 +280,11 @@ def parse_run_config(
     staple_thresholds = _parse_staple_thresholds(
         top.optional_section("staple_subsampling")
     )
+    binder_mods = (
+        parse_binder_mods(top.required_section("binder_mods"))
+        if top.has("binder_mods")
+        else None
+    )
     warm_feature_cache = tuple(
         _parse_game(value, top.location_of("warm_feature_cache"))
         for value in top.optional_str_list("warm_feature_cache")
@@ -291,6 +304,7 @@ def parse_run_config(
             regression_loss=regression_loss,
             warm_feature_cache=warm_feature_cache,
             default_augmentation=default_augmentation,
+            binder_mods=binder_mods,
         ),
     )
     return result

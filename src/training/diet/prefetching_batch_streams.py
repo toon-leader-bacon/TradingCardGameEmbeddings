@@ -53,7 +53,7 @@ import torch
 
 from src.dojos.dojo import DojoBatch
 from src.encoder_model.card_encoder_model import CardEncoderModel
-from src.encoder_model.feature_cache.pooled_feature_cache import FeatureReservation
+from src.encoder_model.feature_cache.frozen_feature_cache import FeatureReservation
 from src.encoder_model.precision import Precision, parameter_device
 from src.schema.card import GenericCard
 from src.schema.type_hints import iter_cards

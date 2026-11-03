@@ -164,7 +164,9 @@ class TestBatches:
         with caplog.at_level(logging.WARNING):
             batches = list(dojo.batches(Split.TRAIN, _BUDGET))
 
-        assert batches == [good_batch, good_batch]
+        # The good batch twice, each carrying its baseline (2 negatives: ln 3)
+        carried = dataclasses.replace(good_batch, baseline=pytest.approx(math.log(3)))
+        assert batches == [carried, carried]
         assert "degenerate" in caplog.text
 
 
@@ -454,11 +456,20 @@ class TestMods:
         batch = next(dojo.batches(Split.TEST, _BUDGET))
         assert batch.inputs == original.inputs
 
-    def test_no_mods_yields_the_batch_itself(self) -> None:
+    def test_no_mods_yields_the_batch_cards_unchanged(self) -> None:
         original = self._batch()
         dojo = self._dojo(original, [])
-        assert next(dojo.batches(Split.TRAIN, _BUDGET)) is original
+        batch = next(dojo.batches(Split.TRAIN, _BUDGET))
+        assert batch.inputs is original.inputs
         assert dojo.mod_tallies() == {}
+
+    def test_yielded_batches_carry_their_baseline(self) -> None:
+        dojo = self._dojo(self._batch(), [RandomKeyMaskMod(rng_seed=0)])
+
+        batch = next(dojo.batches(Split.TRAIN, _BUDGET))
+
+        # 4 single cards in cliques of 2: each anchor has 2 negatives
+        assert batch.baseline == pytest.approx(math.log(3))
 
 
 class TestBaselineLoss:
@@ -476,6 +487,22 @@ class TestBaselineLoss:
             positive_cliques=[[0, 1], [2, 3], [4, 5]],
         )
         assert dojo.baseline_loss(batch) == pytest.approx(math.log(5))
+
+    def test_reads_a_carried_baseline_without_recomputing(self) -> None:
+        dojo = ContrastiveDojo(
+            dealer=_dealer_with_decks(1),
+            pair_constructor=_ScriptedPairConstructor([]),
+            card_lookup=CardBinder(),
+            holdout=_deck_holdout(),
+            strict_version_check=False,
+        )
+        batch = ContrastiveBatch(
+            inputs=[_card() for _ in range(6)],
+            identities=[(uuid4(),) for _ in range(6)],
+            positive_cliques=[[0, 1], [2, 3], [4, 5]],
+            baseline=1.25,
+        )
+        assert dojo.baseline_loss(batch) == 1.25
 
     def test_rejects_a_foreign_batch(self) -> None:
         dojo = ContrastiveDojo(

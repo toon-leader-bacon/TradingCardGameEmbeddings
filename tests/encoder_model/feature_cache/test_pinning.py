@@ -1,6 +1,6 @@
 """Pins and reservations: pin-aware slot policies, TensorFeatureSlab pin
 counts, TieredFeatureStore and SqliteFeatureStore pins, and
-PooledFeatureCache / pipeline / model reserve and release."""
+FrozenFeatureCache / pipeline / model reserve and release."""
 
 from pathlib import Path
 from typing import AbstractSet, Sequence
@@ -8,13 +8,14 @@ from typing import AbstractSet, Sequence
 import pytest
 import torch
 
+from src.encoder_model.feature_cache.feature_row_kind import POOLED_ROWS
 from src.encoder_model.card_embedding_pipeline import CardEmbeddingPipeline
 from src.encoder_model.embedding_head import LinearEmbeddingHead
 from src.encoder_model.feature_cache.card_text_key import CardTextKey
 from src.encoder_model.feature_cache.feature_storage_dtype import FeatureStorageDtype
-from src.encoder_model.feature_cache.pooled_feature_cache import (
+from src.encoder_model.feature_cache.frozen_feature_cache import (
     FeatureReservation,
-    PooledFeatureCache,
+    FrozenFeatureCache,
 )
 from src.encoder_model.feature_cache.slot_policy import (
     AdmissionDecision,
@@ -57,12 +58,13 @@ def _lru_slab(capacity: int) -> TensorFeatureSlab:
         FP32,
         LeastRecentlyUsed(capacity),
         SlabPlacement.FOLLOW_FIRST_PUT,
+        POOLED_ROWS,
     )
 
 
-def _lru_cache(capacity: int) -> PooledFeatureCache:
+def _lru_cache(capacity: int) -> FrozenFeatureCache:
     chain = TieredFeatureStore([_lru_slab(capacity)])
-    return PooledFeatureCache(chain, fingerprint(WIDTH), durable_misses=False)
+    return FrozenFeatureCache(chain, fingerprint(WIDTH), durable_misses=False)
 
 
 def _pool(texts: list[str]) -> torch.Tensor:
@@ -73,7 +75,7 @@ def _failing_pool(texts: list[str]) -> torch.Tensor:
     raise RuntimeError("the frozen stages failed")
 
 
-def _pinned_rows(cache: PooledFeatureCache) -> int:
+def _pinned_rows(cache: FrozenFeatureCache) -> int:
     return cache.stats().tiers[0].pinned_rows
 
 
@@ -92,6 +94,8 @@ class _EvictsEverything:
         offered: Sequence[CardTextKey],
         free_rows: int,
         pinned: AbstractSet[CardTextKey],
+        *,
+        row_counts: Sequence[int] | None = None,
     ) -> AdmissionDecision:
         evicted = list(self._held) if free_rows == 0 else []
         return AdmissionDecision(admitted=list(offered), evicted=evicted)
@@ -185,7 +189,12 @@ class TestSlabPins:
     def test_a_policy_that_evicts_a_pinned_key_is_refused(self) -> None:
         a, b = _keys("a", "b")
         slab = TensorFeatureSlab(
-            "vram", 1, FP32, _EvictsEverything([a]), SlabPlacement.FOLLOW_FIRST_PUT
+            "vram",
+            1,
+            FP32,
+            _EvictsEverything([a]),
+            SlabPlacement.FOLLOW_FIRST_PUT,
+            POOLED_ROWS,
         )
         slab.put_many([a], _rows(1), durable=False)
         slab.pin([a])
@@ -272,7 +281,7 @@ class TestCacheReservations:
 
 
 class TestPipelineReservations:
-    def _pipeline(self, cache: PooledFeatureCache | None) -> CardEmbeddingPipeline:
+    def _pipeline(self, cache: FrozenFeatureCache | None) -> CardEmbeddingPipeline:
         head = LinearEmbeddingHead(HIDDEN, 4)
         return CardEmbeddingPipeline(
             FakeTextEncoder(), None, MeanPooling(HIDDEN), head, cache

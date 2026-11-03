@@ -100,6 +100,25 @@ class TestCliquePositiveMask:
         with pytest.raises(ValueError, match="range"):
             clique_positive_mask([[0, 3]], 3)
 
+    def test_no_cliques_gives_an_empty_mask(self) -> None:
+        mask = clique_positive_mask([], 3)
+
+        assert mask.shape == (3, 3) and not mask.any()
+
+    def test_raises_on_a_negative_index(self) -> None:
+        with pytest.raises(ValueError, match="range"):
+            clique_positive_mask([[-1, 0]], 3)
+
+    def test_matches_a_per_index_expansion_on_a_large_batch(self) -> None:
+        # 256 decks x 2 cards, as a 512-card training batch
+        cliques = [[2 * deck, 2 * deck + 1] for deck in range(256)]
+        mask = clique_positive_mask(cliques, 512)
+
+        expected = torch.zeros(512, 512, dtype=torch.bool)
+        for first, second in cliques:
+            expected[first, second] = expected[second, first] = True
+        assert torch.equal(mask, expected)
+
     def test_raises_on_an_index_in_two_cliques(self) -> None:
         with pytest.raises(ValueError, match="more than one"):
             clique_positive_mask([[0, 1], [1, 2]], 3)

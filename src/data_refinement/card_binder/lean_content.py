@@ -17,12 +17,9 @@ so the walkers below recurse rather than manage an explicit stack.
 """
 
 import re
-from typing import Callable, Sequence, Union
+from typing import Callable, Sequence
 
-JsonValue = Union[
-    None, bool, int, float, str, list["JsonValue"], dict[str, "JsonValue"]
-]
-JsonObject = dict[str, JsonValue]
+from src.schema.json_types import JsonObject, JsonValue
 
 _URL = re.compile(r"https?://\S+")
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")

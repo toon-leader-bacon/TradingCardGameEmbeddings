@@ -1,5 +1,10 @@
-"""PooledFeatureCache: pooled features of card texts, computed by the
-frozen stages once and then looked up.
+"""FrozenFeatureCache: what the frozen stages before a pipeline's cut
+make of each card text, computed once and then looked up.
+
+The feature type F follows the fingerprint's CutPoint: pooled vectors
+(Tensor) for a pooled cut, RaggedTokenStates for a token cut. The cache
+reaches F only through its store's FeatureRowKind, so every step below
+is the same for both.
 
 The one component CardEmbeddingPipeline talks to when it has a cache.
 Keys are texts (CardTextKey), so a modded card is just another key; the
@@ -22,11 +27,12 @@ it is admitted.
 
 import threading
 from dataclasses import dataclass
-from typing import Callable, Sequence
+from typing import Callable, Generic, Sequence, TypeVar
 
 import torch
 
 from src.encoder_model.feature_cache.card_text_key import CardTextKey
+from src.encoder_model.feature_cache.feature_row_kind import FeatureRowKind
 from src.encoder_model.feature_cache.feature_store import (
     FeatureStore,
     StoreLookup,
@@ -43,8 +49,10 @@ _PRECISION_OF_DTYPE: dict[torch.dtype, Precision] = {
     torch.bfloat16: "bf16",
 }
 
-# texts -> (len(texts), width) pooled features, live through the frozen stages
-LivePooling = Callable[[list[str]], torch.Tensor]
+F = TypeVar("F")
+
+# texts -> their features, live through the frozen stages before the cut
+LiveFrozenStages = Callable[[list[str]], F]
 
 
 @dataclass(frozen=True)
@@ -116,13 +124,13 @@ class _UniqueTexts:
     inverse: list[int]
 
 
-class PooledFeatureCache:
-    """Pooled features by card text, over an injected FeatureStore
+class FrozenFeatureCache(Generic[F]):
+    """Frozen-stage features by card text, over an injected FeatureStore
     (dependency injection: the storage and its policies are the store's)."""
 
     def __init__(
         self,
-        store: FeatureStore[torch.Tensor],
+        store: FeatureStore[F],
         fingerprint: FrozenStageFingerprint,
         durable_misses: bool,
     ) -> None:
@@ -132,17 +140,23 @@ class PooledFeatureCache:
             on the training path is kept by a durable tier).
         Output: none (constructor). Side effects: none.
         Exceptions: ValueError if the store's dtype is not the
-            fingerprint's storage dtype.
+            fingerprint's storage dtype, or its row kind is not the
+            fingerprint's cut's.
 
         Example:
-            >>> cache = PooledFeatureCache(chain, fingerprint, durable_misses=False)
+            >>> cache = FrozenFeatureCache(chain, fingerprint, durable_misses=False)
         """
         if store.storage_dtype != fingerprint.storage_dtype.torch_dtype:
             raise ValueError(
                 f"the store holds {store.storage_dtype}, the fingerprint says "
                 f"{fingerprint.storage_dtype.value}"
             )
+        if store.row_kind is not fingerprint.cut.row_kind:
+            raise ValueError(
+                f"the store's row kind does not hold a {fingerprint.cut.describe()} cut"
+            )
         self._store = store
+        self._row_kind: FeatureRowKind[F] = store.row_kind
         self._fingerprint = fingerprint
         self._durable_misses = durable_misses
         self._totals_lock = threading.Lock()
@@ -163,34 +177,32 @@ class PooledFeatureCache:
     def features(
         self,
         texts: Sequence[str],
-        pool_live: LivePooling,
+        encode_live: LiveFrozenStages[F],
         device: torch.device,
         durable: bool | None = None,
         cacheable: Sequence[bool] | None = None,
-    ) -> torch.Tensor:
-        """Pooled features for texts: stored ones looked up, the rest
-        encoded by pool_live in one call and the cacheable ones offered
-        to the store.
+    ) -> F:
+        """Features for texts: stored ones looked up, the rest encoded by
+        encode_live in one call and the cacheable ones offered to the store.
 
         Inputs: texts (non-empty, serialized cards; duplicates allowed),
-            pool_live (the frozen stages: texts -> (N, width) on device),
+            encode_live (the frozen stages: texts -> F on device),
             device (where the caller computes and the result goes), durable
             (whether the misses go to a durable tier; None: the cache's
             durable_misses), cacheable (parallel to texts: False for a
             stamped card's text, which is looked up and encoded but never
             offered; None: every text is cacheable).
-        Output: detached float32 Tensor (len(texts), width) on device, in
+        Output: detached float32 F on device, one entry per text in
             texts' order, each row rounded through the storage dtype.
-        Side effects: runs pool_live under no_grad on the misses; the store
+        Side effects: runs encode_live under no_grad on the misses; the store
             may admit them and promote lower-tier hits; totals grow.
         Exceptions: ValueError if texts is empty, cacheable's length is not
             texts', or the active autocast on device's type is not the
-            fingerprint's compute precision; whatever pool_live or the
+            fingerprint's compute precision; whatever encode_live or the
             store raise.
 
         Example:
-            >>> cache.features(["{...}", "{...}"], pipeline_pool_live, torch.device("cuda")).shape
-            torch.Size([2, 768])
+            >>> cache.features(["{...}", "{...}"], cut.encode_before_cut, torch.device("cuda"))
         """
         # Validate inputs
         if not texts:
@@ -203,23 +215,20 @@ class PooledFeatureCache:
 
         # Fold duplicates, then look up or encode each distinct text
         unique = _fold_duplicates(texts, flags)
-        found, missed = self._look_up_or_encode(unique, pool_live, device, keep_durably)
+        found, missed = self._look_up_or_encode(
+            unique, encode_live, device, keep_durably
+        )
 
         # Assemble the distinct rows, then expand back to texts' order
-        result = _assemble_distinct(
-            found.hit_positions, found.hits, found.miss_positions, missed
-        )
+        result = self._assemble_distinct(found, missed, device)
         if len(unique.keys) < len(texts):
-            inverse = torch.tensor(
-                unique.inverse, dtype=torch.long, device=result.device
-            )
-            result = result.index_select(0, inverse)
+            result = self._row_kind.select(result, unique.inverse)
         return result
 
     def reserve(
         self,
         texts: Sequence[str],
-        pool_live: LivePooling,
+        encode_live: LiveFrozenStages[F],
         device: torch.device,
         durable: bool | None = None,
         cacheable: Sequence[bool] | None = None,
@@ -231,7 +240,7 @@ class PooledFeatureCache:
         is not pinned.
 
         Inputs: texts (serialized cards; duplicates allowed; empty, or none
-            cacheable, gives an empty reservation), pool_live, device,
+            cacheable, gives an empty reservation), encode_live, device,
             durable, cacheable (as features).
         Output: FeatureReservation over the distinct keys, outstanding
             until released.
@@ -240,11 +249,12 @@ class PooledFeatureCache:
             texts total does not grow.
         Exceptions: ValueError if cacheable's length is not texts', or the
             active autocast is not the fingerprint's compute precision
-            (before anything is pinned); whatever pool_live or the store
+            (before anything is pinned); whatever encode_live or the store
             raise, after unpinning.
 
         Example:
-            >>> reservation = cache.reserve(batch_texts, pipeline_pool_live, torch.device("cuda"))
+            >>> cuda = torch.device("cuda")
+            >>> reservation = cache.reserve(batch_texts, cut.encode_before_cut, cuda)
         """
         # Validate inputs
         flags = _cacheable_flags(texts, cacheable)
@@ -258,7 +268,7 @@ class PooledFeatureCache:
         unique = _fold_duplicates(kept, [True] * len(kept))
         self._store.pin(unique.keys)
         try:
-            self._look_up_or_encode(unique, pool_live, device, keep_durably)
+            self._look_up_or_encode(unique, encode_live, device, keep_durably)
         except BaseException:
             self._store.unpin(unique.keys)
             raise
@@ -320,26 +330,26 @@ class PooledFeatureCache:
     def _look_up_or_encode(
         self,
         unique: _UniqueTexts,
-        pool_live: LivePooling,
+        encode_live: LiveFrozenStages[F],
         device: torch.device,
         durable: bool,
-    ) -> tuple[StoreLookup[torch.Tensor], torch.Tensor | None]:
+    ) -> tuple[StoreLookup[F], F | None]:
         """Look the distinct texts up, and encode and offer the misses.
 
         Private helper - consumers are features and reserve.
-        Inputs: unique, pool_live, device, durable.
+        Inputs: unique, encode_live, device, durable.
         Output: (the store's lookup, the encoded misses as float32 or None
             when nothing missed).
         Side effects: the store's lookup; _encode_misses on the misses.
-        Exceptions: whatever pool_live or the store raise.
+        Exceptions: whatever encode_live or the store raise.
         """
         found = self._store.lookup(unique.keys, device)
         # Encode only the misses, round them as the store would, and offer
         # them; a rejected miss is still rounded the same way
-        missed: torch.Tensor | None = None
+        missed: F | None = None
         if found.miss_positions:
             missed = self._encode_misses(
-                unique, found.miss_positions, pool_live, durable
+                unique, found.miss_positions, encode_live, device, durable
             )
         return found, missed
 
@@ -347,26 +357,29 @@ class PooledFeatureCache:
         self,
         unique: _UniqueTexts,
         miss_positions: list[int],
-        pool_live: LivePooling,
+        encode_live: LiveFrozenStages[F],
+        device: torch.device,
         durable: bool,
-    ) -> torch.Tensor:
-        """Run pool_live on the missing texts, round to the storage dtype
+    ) -> F:
+        """Run encode_live on the missing texts, round to the storage dtype
         and offer the cacheable ones to the store.
 
         Private helper - single consumer is _look_up_or_encode.
-        Inputs: unique, miss_positions (into unique), pool_live, durable.
-        Output: float32 Tensor (len(miss_positions), width), detached.
-        Side effects: one no_grad pool_live call; store.put_many of the
+        Inputs: unique, miss_positions (into unique), encode_live, device,
+            durable.
+        Output: float32 F (one per miss), detached, on device.
+        Side effects: one no_grad encode_live call; store.put_many of the
             cacheable rows (none: no call); encoded, admitted and
             uncacheable totals grow.
-        Exceptions: whatever pool_live or put_many raise.
+        Exceptions: whatever encode_live or put_many raise.
         """
         keys = [unique.keys[position] for position in miss_positions]
         texts = [unique.texts[position] for position in miss_positions]
         # The frozen stages, without a graph: nothing before the cut trains
+        kind = self._row_kind
         with torch.no_grad():
-            pooled = pool_live(texts)
-        rounded = pooled.detach().to(self._store.storage_dtype)
+            encoded = encode_live(texts)
+        rounded = kind.to(encoded, device, self._store.storage_dtype)
         # Offer only the cacheable rows; a stamped text is never stored
         offered = [
             row
@@ -378,14 +391,38 @@ class PooledFeatureCache:
             offered_keys = [keys[row] for row in offered]
             offered_rows = rounded
             if len(offered) < len(keys):
-                index = torch.tensor(offered, dtype=torch.long, device=rounded.device)
-                offered_rows = rounded.index_select(0, index)
+                offered_rows = kind.select(rounded, offered)
             admitted = self._store.put_many(offered_keys, offered_rows, durable)
         with self._totals_lock:
             self._admitted += admitted
             self._encoded += len(keys)
             self._uncacheable += len(keys) - len(offered)
-        return rounded.float()
+        return kind.to(rounded, device, torch.float32)
+
+    def _assemble_distinct(
+        self, found: StoreLookup[F], missed: F | None, device: torch.device
+    ) -> F:
+        """One float32 F with the hits and the encoded misses in their
+        distinct-text positions.
+
+        Private helper - single consumer is features.
+        Inputs: found (hits in the storage dtype on device), missed
+            (float32, or None when nothing missed; at least one of the
+            two has rows), device.
+        Output: float32 F on device. Side effects: none. Exceptions: none.
+        """
+        kind = self._row_kind
+        # All hits or all misses: the rows are already in distinct order
+        if missed is None:
+            assert found.hits is not None  # every distinct text was a hit
+            return kind.to(found.hits, device, torch.float32)
+        if found.hits is None:
+            return missed
+        # Mixed: hits then misses, reordered by distinct position
+        joined = kind.concatenate([kind.to(found.hits, device, torch.float32), missed])
+        source_of = found.hit_positions + found.miss_positions
+        order = sorted(range(len(source_of)), key=source_of.__getitem__)
+        return kind.select(joined, order)
 
     def _require_precision(self, device: torch.device) -> None:
         """Private helper - consumers are features and reserve.
@@ -413,7 +450,7 @@ def _cacheable_flags(
 ) -> list[bool]:
     """cacheable as a list parallel to texts (all True for None).
 
-    Private helper - consumers are PooledFeatureCache.features and reserve.
+    Private helper - consumers are FrozenFeatureCache.features and reserve.
     Inputs: texts, cacheable. Output: list[bool]. Side effects: none.
     Exceptions: ValueError if cacheable's length is not texts'.
     """
@@ -428,7 +465,7 @@ def _fold_duplicates(texts: Sequence[str], cacheable: Sequence[bool]) -> _Unique
     """Key every text once and record where each position's text went; a
     distinct text is cacheable if any of its positions is.
 
-    Private helper - consumers are PooledFeatureCache.features and reserve.
+    Private helper - consumers are FrozenFeatureCache.features and reserve.
     Inputs: texts, cacheable (parallel to texts). Output: _UniqueTexts.
     Side effects: none. Exceptions: none.
     """
@@ -446,36 +483,4 @@ def _fold_duplicates(texts: Sequence[str], cacheable: Sequence[bool]) -> _Unique
         elif flag:
             result.cacheable[index] = True
         result.inverse.append(index)
-    return result
-
-
-def _assemble_distinct(
-    hit_positions: list[int],
-    hits: torch.Tensor | None,
-    miss_positions: list[int],
-    missed: torch.Tensor | None,
-) -> torch.Tensor:
-    """One float32 (len(hit_positions) + len(miss_positions), width) tensor
-    with hits and missed rows in their distinct-text positions.
-
-    Private helper - single consumer is PooledFeatureCache.features.
-    Inputs: the lookup's positions and rows (hits in storage dtype), the
-        encoded misses (float32); at least one of hits/missed is not None.
-    Output: float32 Tensor on their device. Side effects: none.
-    Exceptions: none.
-    """
-    # All hits or all misses: the rows are already in distinct order
-    if missed is None:
-        assert hits is not None  # every distinct text was a hit
-        return hits.float()
-    if hits is None:
-        return missed
-
-    # Mixed: scatter both into one table
-    result = missed.new_empty(
-        (len(hit_positions) + len(miss_positions), missed.shape[1])
-    )
-    device = missed.device
-    result[torch.tensor(hit_positions, dtype=torch.long, device=device)] = hits.float()
-    result[torch.tensor(miss_positions, dtype=torch.long, device=device)] = missed
     return result

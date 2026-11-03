@@ -18,7 +18,6 @@ import pkgutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
-from uuid import uuid4
 
 import pytest
 
@@ -34,6 +33,14 @@ from src.dojos.mods.card_field_mods import (
     WeightedFieldMaskMod,
 )
 from src.dojos.mods.common_mods import MaskTargetKeyMod, NoOpMod, ShuffleDeckMod
+from src.dojos.mods.content_style_mods import (
+    BoolToStringMod,
+    FlattenKeysMod,
+    KeyCaseMod,
+    ListToStringMod,
+    NumberToStringMod,
+    ValueCaseMod,
+)
 from src.dojos.mods.deck_mods import (
     CardDropoutMod,
     CardSubsampleMod,
@@ -48,6 +55,7 @@ from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 from src.schema.type_hints import InputShape, TrainingDatum
 from src.utils.drop_table import DropTable
+from tests.dojos.mods.card_ids import content_uuid
 
 # Applications per datum; enough for every random branch of every mod
 _ROUNDS = 25
@@ -151,6 +159,42 @@ _CASES = (
         _ALL_SHAPES,
     ),
     ModCase(
+        "key_case",
+        KeyCaseMod,
+        lambda seed: KeyCaseMod(rng_seed=seed),
+        _ALL_SHAPES,
+    ),
+    ModCase(
+        "flatten_keys",
+        FlattenKeysMod,
+        lambda seed: FlattenKeysMod((".", "/"), rng_seed=seed),
+        _ALL_SHAPES,
+    ),
+    ModCase(
+        "value_case",
+        ValueCaseMod,
+        lambda seed: ValueCaseMod(rng_seed=seed, variants=4),
+        _ALL_SHAPES,
+    ),
+    ModCase(
+        "bool_to_string",
+        BoolToStringMod,
+        lambda seed: BoolToStringMod(rng_seed=seed),
+        _ALL_SHAPES,
+    ),
+    ModCase(
+        "list_to_string",
+        ListToStringMod,
+        lambda seed: ListToStringMod(rng_seed=seed),
+        _ALL_SHAPES,
+    ),
+    ModCase(
+        "number_to_string",
+        NumberToStringMod,
+        lambda seed: NumberToStringMod(rng_seed=seed, probability=0.5),
+        _ALL_SHAPES,
+    ),
+    ModCase(
         "mask_target_top_level",
         MaskTargetKeyMod,
         lambda seed: MaskTargetKeyMod("name"),
@@ -214,7 +258,7 @@ def _card(game: GameId, name: str, raw_content: dict[str, Any]) -> GenericCard:
     """A card with fixed provenance. Inputs: game, name, raw_content.
     Output: GenericCard. Side effects: none. Exceptions: none."""
     return GenericCard(
-        nocab_uuid=uuid4(),
+        nocab_uuid=content_uuid(raw_content),
         source_game=game,
         name=name,
         raw_content=raw_content,
@@ -259,6 +303,7 @@ def _binder() -> CardBinder:
             {
                 "name": "Pikachu",
                 "hp": "60",
+                "stage": {"is_basic": True, "retreat": 1},
                 "attacks": [
                     {"name": "Gnaw", "cost": ["Colorless"], "damage": "10"},
                     {"name": "Thunder Jolt", "cost": ["Lightning", "Colorless"]},

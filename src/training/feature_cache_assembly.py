@@ -1,4 +1,4 @@
-"""A run's FeatureCacheSpec -> the PooledFeatureCache its model uses.
+"""A run's FeatureCacheSpec -> the FrozenFeatureCache its model uses.
 
 The composition root for the feature cache: picks each tier's store and
 policy, chains them fastest first, and names the rows with a
@@ -9,16 +9,20 @@ spec-to-store mapping lives here.
 
 import hashlib
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
-import torch
 
+from src.encoder_model.feature_cache.cut_point import (
+    CutPoint,
+    PooledCutPoint,
+    TokenCutPoint,
+)
 from src.encoder_model.feature_cache.feature_storage_dtype import FeatureStorageDtype
 from src.encoder_model.feature_cache.feature_store import FeatureStore
 from src.encoder_model.feature_cache.frozen_stage_fingerprint import (
     FrozenStageFingerprint,
 )
-from src.encoder_model.feature_cache.pooled_feature_cache import PooledFeatureCache
+from src.encoder_model.feature_cache.frozen_feature_cache import FrozenFeatureCache
 from src.encoder_model.feature_cache.slot_policy import (
     FillUntilFull,
     FirstInFirstOut,
@@ -60,13 +64,13 @@ _POLICY_BUILDERS: dict[SlotPolicyKind, Callable[[int], SlotPolicy]] = {
 def assemble_feature_cache(
     spec: FeatureCacheSpec,
     fingerprint: FrozenStageFingerprint,
-) -> PooledFeatureCache:
+) -> FrozenFeatureCache[Any]:
     """The cache spec describes: its tiers (VRAM, then RAM, then disk, each
     when set) chained fastest first, its rows named by fingerprint.
 
     Inputs: spec (which tiers, their budgets and policies), fingerprint
         (every tier's width and storage dtype come from it alone).
-    Output: PooledFeatureCache, empty in memory (the disk tier opens on
+    Output: FrozenFeatureCache, empty in memory (the disk tier opens on
         first use).
     Side effects: none.
     Exceptions: ValueError if a tier's capacity holds no row, or spec has a
@@ -76,7 +80,7 @@ def assemble_feature_cache(
     Example:
         >>> cache = assemble_feature_cache(spec.feature_cache, fingerprint)
     """
-    tiers: list[FeatureStore[torch.Tensor]] = []
+    tiers: list[FeatureStore[Any]] = []
 
     # One store per tier set, fastest first
     if spec.vram is not None:
@@ -93,7 +97,7 @@ def assemble_feature_cache(
         tiers.append(_build_disk_tier(spec.disk, fingerprint))
 
     durable_misses = spec.disk is not None and spec.disk.write is DiskWrite.ALL
-    result = PooledFeatureCache(TieredFeatureStore(tiers), fingerprint, durable_misses)
+    result = FrozenFeatureCache(TieredFeatureStore(tiers), fingerprint, durable_misses)
     return result
 
 
@@ -104,20 +108,27 @@ def build_fingerprint(
     compute_precision: Precision,
     width: int,
     storage_dtype: FeatureStorageDtype,
+    cut: CutPoint = PooledCutPoint(),
 ) -> FrozenStageFingerprint:
     """The fingerprint of the stages a run's cache stands in for.
 
     Inputs: source (the text encoder's), enrichment (the whitening spec,
         or None), pooling (the pooling kind, e.g. "mean"), compute_precision
-        (the run's), width (the pooling's output_dim), storage_dtype
-        (the cache spec's).
+        (the run's), width (the cached rows': the pooling's output_dim for
+        a pooled cut, the text encoder's for a token cut), storage_dtype
+        (the cache spec's), cut (the cache spec's cut point). A token
+        cut's rows come before the enrichment and pooling, so it records
+        neither.
     Output: FrozenStageFingerprint.
-    Side effects: reads the whitening stats file, when there is one.
+    Side effects: reads the whitening stats file, when there is one and
+        the cut is pooled.
     Exceptions: FileNotFoundError for a missing stats file.
 
     Example:
         >>> build_fingerprint(encoder.source(), None, "mean", "fp16", 768, FeatureStorageDtype.FP16)
     """
+    if isinstance(cut, TokenCutPoint):
+        enrichment, pooling = None, "none"
     enrichment_digest = (
         "none" if enrichment is None else _file_sha256(enrichment.stats_path)
     )
@@ -128,6 +139,7 @@ def build_fingerprint(
         compute_precision=compute_precision,
         width=width,
         storage_dtype=storage_dtype,
+        cut=cut,
     )
 
 
@@ -149,7 +161,12 @@ def _build_memory_tier(
     )
     policy = _build_policy(spec.policy, spec.admission, capacity_rows)
     return TensorFeatureSlab(
-        name, capacity_rows, fingerprint.storage_dtype, policy, placement
+        name,
+        capacity_rows,
+        fingerprint.storage_dtype,
+        policy,
+        placement,
+        fingerprint.cut.row_kind,
     )
 
 

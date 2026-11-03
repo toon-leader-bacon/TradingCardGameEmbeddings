@@ -31,7 +31,7 @@ from src.training.model_spec import (
 def parse_model(section: ConfigSection) -> ModelSpec:
     """{"embedding_head", "checkpoint", "card_embedding_size",
     ["mlp_hidden_dim", "mlp_num_blocks"], ["group_attention"], ["pooling"],
-    ["enrichment"], ["feature_cache"]} -> ModelSpec.
+    ["enrichment"], ["feature_cache"], ["trainable_text_layers"]} -> ModelSpec.
 
     Inputs: section ("model"). Output: ModelSpec.
     Side effects: none.
@@ -75,10 +75,14 @@ def parse_model(section: ConfigSection) -> ModelSpec:
         enrichment = parse_by_kind(
             section.required_section("enrichment"), _ENRICHMENT_PARSERS
         )
-    # The optional cache of the frozen stages' output
+    # The optional cache of the frozen stages' output, and how much of the
+    # text encoder trains
     feature_cache = None
     if section.has("feature_cache"):
         feature_cache = _parse_feature_cache(section.required_section("feature_cache"))
+    trainable_text_layers = section.optional(
+        "trainable_text_layers", int, ModelSpec.trainable_text_layers
+    )
     section.reject_unread_keys()
     return construct_at(
         section.where,
@@ -92,6 +96,7 @@ def parse_model(section: ConfigSection) -> ModelSpec:
             pooling=pooling,
             enrichment=enrichment,
             feature_cache=feature_cache,
+            trainable_text_layers=trainable_text_layers,
         ),
     )
 
@@ -163,8 +168,8 @@ def _parse_group_attention(section: ConfigSection) -> GroupAttentionSpec:
 
 
 def _parse_feature_cache(section: ConfigSection) -> FeatureCacheSpec:
-    """`model.feature_cache: {[cut], [storage_dtype], [vram], [ram], [disk]}`
-    -> FeatureCacheSpec. With no tier key at all, the default VRAM tier;
+    """`model.feature_cache: {[cut], [cut_layer], [storage_dtype], [vram],
+    [ram], [disk]}` -> FeatureCacheSpec. With no tier key at all, the default VRAM tier;
     otherwise exactly the tiers given.
 
     Private helper - single caller is parse_model().
@@ -175,6 +180,9 @@ def _parse_feature_cache(section: ConfigSection) -> FeatureCacheSpec:
     """
     defaults = FeatureCacheSpec()
     cut = section.optional_choice("cut", FeatureCut, defaults.cut)
+    cut_layer: int | None = None
+    if section.has("cut_layer"):
+        cut_layer = section.required("cut_layer", int)
     storage_dtype = section.optional_choice(
         "storage_dtype", FeatureStorageDtype, defaults.storage_dtype
     )
@@ -187,7 +195,7 @@ def _parse_feature_cache(section: ConfigSection) -> FeatureCacheSpec:
     section.reject_unread_keys()
     return construct_at(
         section.where,
-        lambda: FeatureCacheSpec(cut, storage_dtype, vram, ram, disk),
+        lambda: FeatureCacheSpec(cut, storage_dtype, vram, ram, disk, cut_layer),
     )
 
 

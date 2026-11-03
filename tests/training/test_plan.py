@@ -52,6 +52,8 @@ def test_limits_and_fault_policy_reject_non_positive_values() -> None:
         HardwareLimits(max_batch_cost=1, precision="fp8")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="prefetch_depth"):
         HardwareLimits(max_batch_cost=1, prefetch_depth=-1)
+    with pytest.raises(ValueError, match="torch_cpu_threads"):
+        HardwareLimits(max_batch_cost=1, torch_cpu_threads=0)
     with pytest.raises(ValueError):
         FaultPolicy(max_consecutive_dojo_failures=0)
 

@@ -8,8 +8,9 @@ business; the cache only looks up and offers. Every store is
 thread-safe: a prefetch worker and the training thread may call it at
 once.
 
-Generic in the feature type F: (N, dim) tensors at the pooled cut; a
-ragged token-feature type at a token-level cut later.
+Generic in the feature type F: (N, dim) tensors at the pooled cut,
+RaggedTokenStates at a token cut. Capacity is counted in rows of the
+store's row kind (one per pooled feature, one per token).
 """
 
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from typing import Generic, Protocol, Sequence, TypeVar
 import torch
 
 from src.encoder_model.feature_cache.card_text_key import CardTextKey
+from src.encoder_model.feature_cache.feature_row_kind import FeatureRowKind
 
 F = TypeVar("F")
 
@@ -93,7 +95,7 @@ class FeatureStore(Protocol[F]):
             top tier).
         Side effects: may write rows and evict others.
         Exceptions: ValueError for a shape or width mismatch (see
-            require_offer_shape); RuntimeError from a slab whose policy
+            feature_row_kind.require_offer_shape); RuntimeError from a slab whose policy
             decided something malformed; sqlite3.Error from a disk tier."""
         ...
 
@@ -128,32 +130,16 @@ class FeatureStore(Protocol[F]):
         Side effects: none. Exceptions: none."""
         ...
 
+    @property
+    def row_kind(self) -> FeatureRowKind[F]:
+        """The row algebra of F: how many storage rows each feature takes,
+        and how to select and join features. Inputs: none.
+        Output: FeatureRowKind. Side effects: none. Exceptions: none."""
+        ...
+
     def close(self) -> None:
         """Release what the store holds open (a database connection);
         nothing for a memory tier. Inputs: none. Output: none.
         Side effects: as described; the store must not be used after.
         Exceptions: none."""
         ...
-
-
-def require_offer_shape(
-    keys: Sequence[CardTextKey], features: torch.Tensor, width: int | None = None
-) -> None:
-    """The shape check every FeatureStore.put_many makes first.
-
-    Inputs: keys, features, width (the store's, or None while it has none).
-    Output: none. Side effects: none.
-    Exceptions: ValueError if features is not 2-D, its row count is not
-        len(keys), keys repeat, or (with width) its width differs.
-
-    Example:
-        >>> require_offer_shape([key_a], torch.zeros(1, 768), width=768)
-    """
-    if features.dim() != 2:
-        raise ValueError(f"features must be 2-D, got shape {tuple(features.shape)}")
-    if len(keys) != features.shape[0]:
-        raise ValueError(f"{len(keys)} keys but {features.shape[0]} feature rows")
-    if len(set(keys)) != len(keys):
-        raise ValueError("put_many was offered the same key twice")
-    if width is not None and features.shape[1] != width:
-        raise ValueError(f"features are {features.shape[1]} wide, the store {width}")

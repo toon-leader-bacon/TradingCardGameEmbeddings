@@ -7,6 +7,7 @@ from typing import AbstractSet, Sequence
 import pytest
 import torch
 
+from src.encoder_model.feature_cache.feature_row_kind import POOLED_ROWS
 from src.encoder_model.feature_cache.card_text_key import CardTextKey
 from src.encoder_model.feature_cache.feature_storage_dtype import FeatureStorageDtype
 from src.encoder_model.feature_cache.feature_store import StoreLookup, TierStats
@@ -38,7 +39,7 @@ def _slab(
     storage: FeatureStorageDtype = FP32,
 ) -> TensorFeatureSlab:
     return TensorFeatureSlab(
-        "vram", capacity, storage, policy or FillUntilFull(), placement
+        "vram", capacity, storage, policy or FillUntilFull(), placement, POOLED_ROWS
     )
 
 
@@ -53,6 +54,8 @@ class _Greedy:
         offered: Sequence[CardTextKey],
         free_rows: int,
         pinned: AbstractSet[CardTextKey],
+        *,
+        row_counts: Sequence[int] | None = None,
     ) -> AdmissionDecision:
         return AdmissionDecision(admitted=list(offered), evicted=[])
 
@@ -68,6 +71,8 @@ class _Reordering:
         offered: Sequence[CardTextKey],
         free_rows: int,
         pinned: AbstractSet[CardTextKey],
+        *,
+        row_counts: Sequence[int] | None = None,
     ) -> AdmissionDecision:
         return AdmissionDecision(admitted=list(reversed(offered)), evicted=[])
 
@@ -83,6 +88,8 @@ class _Inventing:
         offered: Sequence[CardTextKey],
         free_rows: int,
         pinned: AbstractSet[CardTextKey],
+        *,
+        row_counts: Sequence[int] | None = None,
     ) -> AdmissionDecision:
         return AdmissionDecision(admitted=_keys("never offered"), evicted=[])
 
@@ -314,6 +321,9 @@ class TestSlabsOnTheGpu:
         keys = _keys(*[str(i) for i in range(256)])
         rows = torch.arange(256 * 64, dtype=torch.float32, device=cuda).reshape(256, 64)
         side = torch.cuda.Stream()
+        # rows is made on the default stream: the side stream must not read it
+        # before arange finishes (a caller orders its own inputs)
+        side.wait_stream(torch.cuda.current_stream(cuda))
         with torch.cuda.stream(side):
             written = rows * 2
             slab.put_many(keys, written, durable=False)

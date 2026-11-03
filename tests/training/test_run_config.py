@@ -6,7 +6,14 @@ import pytest
 import torch
 
 from src.dojos.mods.card_field_mods import UNBOUNDED_VARIANTS, FieldMask
+from src.dojos.mods.content_style_mods import BoolSpelling, KeyCase, ValueCase
 from src.dojos.mods.mod_specs import (
+    BoolToStringSpec,
+    FlattenKeysSpec,
+    KeyCaseSpec,
+    ListToStringSpec,
+    NumberToStringSpec,
+    ValueCaseSpec,
     AugmentationRates,
     CardDropoutSpec,
     CardSubsampleSpec,
@@ -29,6 +36,7 @@ from src.training.plan import (
     Temperature,
     Uniform,
 )
+from src.encoder_model.feature_cache.cut_point import TokenCutPoint
 from src.encoder_model.feature_cache.feature_storage_dtype import FeatureStorageDtype
 from src.training.model_spec import (
     AdmissionKind,
@@ -132,6 +140,12 @@ class TestParseRunConfig:
         document = _document()
         cast(dict[str, Any], document["hardware"])["prefetch_depth"] = 4
         assert parse_run_config(document).limits.prefetch_depth == 4
+
+    def test_hardware_torch_cpu_threads_defaults_to_one_and_is_parsed(self) -> None:
+        assert parse_run_config(_document()).limits.torch_cpu_threads == 1
+        document = _document()
+        cast(dict[str, Any], document["hardware"])["torch_cpu_threads"] = 4
+        assert parse_run_config(document).limits.torch_cpu_threads == 4
 
     def test_a_phase_without_dojos_trains_every_non_held_out_dojo(self) -> None:
         phase = parse_run_config(_document()).plan.phases[0]
@@ -492,6 +506,35 @@ class TestModOverrides:
         assert specs[1] == RandomKeyMaskSpec(probability=0.1, variants=0)
         assert cast(WeightedFieldMaskSpec, specs[2]).variants == 100
 
+    def test_parses_every_content_style_kind(self) -> None:
+        mods = {
+            "a": [
+                {"kind": "key_case", "styles": ["camel", "kebab"], "variants": 2},
+                {"kind": "flatten_keys", "styles": [".", "/"]},
+                {"kind": "value_case", "styles": ["lower"], "probability": 0.5},
+                {"kind": "bool_to_string", "styles": ["yes_no"]},
+                {"kind": "list_to_string", "styles": [" | "]},
+                {"kind": "number_to_string", "probability": 0.25},
+            ]
+        }
+        specs = parse_run_config(self._with_mods(mods)).mod_overrides["a"]
+
+        assert specs == (
+            KeyCaseSpec(styles=(KeyCase.CAMEL, KeyCase.KEBAB), variants=2),
+            FlattenKeysSpec(styles=(".", "/")),
+            ValueCaseSpec(styles=(ValueCase.LOWER,), probability=0.5),
+            BoolToStringSpec(styles=(BoolSpelling.YES_NO,)),
+            ListToStringSpec(styles=(" | ",)),
+            NumberToStringSpec(probability=0.25),
+        )
+
+    def test_absent_styles_use_the_mod_defaults(self) -> None:
+        mods = {"a": [{"kind": "key_case"}, {"kind": "flatten_keys"}]}
+        specs = parse_run_config(self._with_mods(mods)).mod_overrides["a"]
+
+        assert specs == (KeyCaseSpec(), FlattenKeysSpec())
+        assert cast(KeyCaseSpec, specs[0]).build(rng_seed=0).styles == tuple(KeyCase)
+
     def test_variants_default_to_unbounded(self) -> None:
         mods = {"a": [{"kind": "shuffle_keys"}]}
         specs = parse_run_config(self._with_mods(mods)).mod_overrides["a"]
@@ -632,6 +675,14 @@ class TestModOverrides:
             ({"a": [{"kind": "random_key_mask", "probability": 2}]}, "config.mods.a.0"),
             ({"a": [{"kind": "shuffle_keys", "variants": 101}]}, "at most 100"),
             ({"a": [{"kind": "shuffle_keys", "variants": 1.5}]}, "variants"),
+            (
+                {"a": [{"kind": "key_case", "styles": ["camelCase"]}]},
+                "config.mods.a.0.styles.0",
+            ),
+            ({"a": [{"kind": "key_case", "styles": []}]}, "empty"),
+            ({"a": [{"kind": "flatten_keys", "styles": [""]}]}, "non-empty"),
+            ({"a": [{"kind": "list_to_string", "styles": [1]}]}, "styles"),
+            ({"a": [{"kind": "number_to_string", "styles": ["x"]}]}, "styles"),
             ({"a": [_weighted([])]}, "config.mods.a.0.table"),
             (
                 {"a": [_weighted([{"weight": 1, "mask": [["x"]], "table": []}])]},
@@ -881,7 +932,7 @@ class TestFeatureCache:
     @pytest.mark.parametrize(
         ("section", "message"),
         [
-            ({"cut": "tokens"}, "config.model.feature_cache.cut"),
+            ({"cut": "logits"}, "config.model.feature_cache.cut"),
             ({"storage_dtype": "int8"}, "config.model.feature_cache.storage_dtype"),
             ({"capacity_mib": 64}, "capacity_mib"),
             ({"vram": {"capacity_mib": 0}}, "capacity_mib"),
@@ -954,3 +1005,71 @@ class TestDefaultAugmentation:
         specs = parse_run_config(document).mod_overrides[dojo]
         assert specs[0] == ShuffleKeysSpec(probability=0.2)
         assert cast(WeightedFieldMaskSpec, specs[1]).probability == 0.3
+
+
+class TestBinderMods:
+    def test_absent_means_none(self) -> None:
+        assert parse_run_config(_document()).binder_mods is None
+
+    def test_parses_the_section(self) -> None:
+        document = _document()
+        document["binder_mods"] = {
+            "pipeline": [{"kind": "shuffle_keys", "variants": 1}],
+            "save_directory": "data/cache/binder_mods/shuffled",
+        }
+        spec = parse_run_config(document).binder_mods
+        assert spec is not None
+        assert spec.pipeline == (ShuffleKeysSpec(variants=1),)
+        assert spec.save_directory == Path("data/cache/binder_mods/shuffled")
+
+    def test_default_augmentation_leaves_the_pipeline_alone(self) -> None:
+        document = _document()
+        document["default_augmentation"] = {"probability": 0.1, "variants": 4}
+        document["binder_mods"] = {"pipeline": [{"kind": "shuffle_keys"}]}
+        spec = parse_run_config(document).binder_mods
+        assert spec is not None
+        assert spec.pipeline == (ShuffleKeysSpec(),)
+
+    def test_empty_section_is_an_error(self) -> None:
+        document = _document()
+        document["binder_mods"] = {}
+        with pytest.raises(ValueError, match="binder_mods"):
+            parse_run_config(document)
+
+
+class TestTokenCutConfig:
+    def test_a_token_cut_parses_with_its_layer(self) -> None:
+        section = {"cut": "tokens", "cut_layer": 20}
+        model = parse_run_config(_with(["model", "feature_cache"], section)).model
+        assert model.feature_cache is not None
+        assert model.feature_cache.cut_point == TokenCutPoint(20)
+
+    def test_a_token_cut_without_a_layer_caches_the_whole_output(self) -> None:
+        section = {"cut": "tokens"}
+        model = parse_run_config(_with(["model", "feature_cache"], section)).model
+        assert model.feature_cache is not None
+        assert model.feature_cache.cut_point == TokenCutPoint(None)
+
+    def test_a_pooled_cut_takes_no_layer(self) -> None:
+        section = {"cut": "pooled", "cut_layer": 3}
+        with pytest.raises(ValueError, match="cut_layer"):
+            parse_run_config(_with(["model", "feature_cache"], section))
+
+    def test_trainable_text_layers_parse_with_a_cut_inside_the_encoder(self) -> None:
+        document = _with(["model", "feature_cache"], {"cut": "tokens", "cut_layer": 20})
+        document["model"]["trainable_text_layers"] = 2  # type: ignore[index]
+        assert parse_run_config(document).model.trainable_text_layers == 2
+
+    @pytest.mark.parametrize("section", [{"cut": "pooled"}, {"cut": "tokens"}])
+    def test_trainable_text_layers_need_a_cut_inside_the_encoder(
+        self, section: dict[str, Any]
+    ) -> None:
+        document = _with(["model", "feature_cache"], section)
+        document["model"]["trainable_text_layers"] = 1  # type: ignore[index]
+        with pytest.raises(ValueError, match="trainable_text_layers"):
+            parse_run_config(document)
+
+    def test_a_token_cut_allows_a_trainable_pooling(self) -> None:
+        document = _with(["model", "feature_cache"], {"cut": "tokens", "cut_layer": 4})
+        document["model"]["pooling"] = {"kind": "attention"}  # type: ignore[index]
+        assert parse_run_config(document).model.feature_cache is not None

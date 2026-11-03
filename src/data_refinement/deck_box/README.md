@@ -137,6 +137,14 @@ metrics too.
 - `_deck_tables.py` — `DeckTables`, private to `deck_box.py`: one method
   per SQL statement. Row writes never commit; `create_schema()` and
   `merge_from()` do, so they run only when a box is built.
+- `unknown_card.py` — `require_unknown_card_uuid(card_lookup, game)`:
+  the Unknown sentinel's uuid, raising if the binder lacks it. New
+  stages use it; older ones still carry their own copy of the check.
+- `multiset_deck.py` — `store_multiset_deck(...)`: stores a deck under
+  its copy-count multiset hash once (`create_if_absent()`), returning
+  its uuid only when this call created it. Used by the stages whose
+  identity is the multiset (limitless_play, hearthstonetopdecks,
+  zenodo_hearthstone_decks).
 - `extraction.py` — `DeckExtractionStage`, the Strategy Protocol every
   deck source implements: `extract(self, raw_path, box, card_lookup) ->
   list[UUID]` plus `SOURCE_GAME: ClassVar[GameId]`. A stage reads cards
@@ -161,7 +169,11 @@ card reference it can't match, rather than dropping it.
 | `sts_gg/` | `StsGgDeckExtractionStage` | Slay the Spire 2 | sts_gg `runs.jsonl` | `uuid5(ns, run_id)` |
 | `spire_codex_runs/` | `SpireCodexRunsDeckExtractionStage` | Slay the Spire 2 | spire_codex `runs/page_*.jsonl.gz` | `uuid5(ns, f"{run_hash}:{player_index}")` |
 | `fabtcg_decklists/` | `FabtcgDecklistsExtractionStage` | Flesh and Blood | fabtcg.com decklist HTML (parsed by `fragment_parsing.py`) | `uuid5(ns, deck_slug)` |
+| `fabtcgmeta_online_decks/` | `FabtcgmetaOnlineDecksExtractionStage` | Flesh and Blood | fabtcgmeta.com's Talishar online-deck shards (`archive/` and `recent/`, `{deck hash: deck}`); each card line matched by name, name key or front face, then by pitch | `deck_uuid_from_cards()` over the copy-count multiset |
 | `play_gwent/` | `PlayGwentDeckExtractionStage` | Gwent | playgwent.com `guides.jsonl` | `uuid5(ns, guide_id)` |
+| `limitless_play/` | `LimitlessPlayDeckExtractionStage` | Pokemon | limitless_play `standings.jsonl`: player decklists, cards matched by set code + number via `card_index.py` (needs pokemon_tcg's `sets/en.json`), then by newest same-name card; non-60-card lists skipped | `deck_uuid_from_cards()` over the copy-count multiset; identical lists stored once |
+| `hearthstonetopdecks/` | `HearthstoneTopDecksDeckExtractionStage` | Hearthstone | hearthstonetopdecks `decks.jsonl`: one deck code per page, decoded by `deckstring.py`; each dbfId matched through the binder's HEARTHSTONEJSON alias (cards taken as their current version); heroes and sideboard cards dropped | `deck_uuid_from_cards()` over the copy-count multiset; identical lists stored once |
+| `zenodo_hearthstone_decks/` | `ZenodoHearthstoneDecksExtractionStage` | Hearthstone | the Zenodo dataset's directory: `cards.csv` (one row per card copy, by name) plus `decks.csv` (archetype, for the deck name); names matched exactly, each card taken as its latest version | `deck_uuid_from_cards()` over the copy-count multiset; identical lists stored once (also across `hearthstonetopdecks/`) |
 | `seventeenlands_game_data/` | `SeventeenLandsGameDataDeckExtractionStage` | MTG | 17lands `game_data` CSVs (`deck_<name>` copy-count columns), read with the shared `../seventeenlands/` parser | `deck_uuid_from_cards()` over the full copy-count multiset: every distinct decklist any game played, stored once (an unmatched column counts as the Unknown card) |
 
 ## How it works

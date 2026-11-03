@@ -1,10 +1,10 @@
+import dataclasses
 import copy
 import logging
 import random
 from collections import Counter
 from datetime import datetime, timezone
 from typing import Callable
-from uuid import uuid4
 
 import pytest
 
@@ -27,11 +27,12 @@ from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 from src.utils.drop_table import DropTable
+from tests.dojos.mods.card_ids import content_uuid
 
 
 def _card(raw_content: dict) -> GenericCard:
     return GenericCard(
-        nocab_uuid=uuid4(),
+        nocab_uuid=content_uuid(raw_content),
         source_game=GameId.GWENT,
         name="Test Card",
         raw_content=raw_content,
@@ -323,8 +324,12 @@ def _text(card: GenericCard) -> str:
     return repr(list(card.raw_content.items()))
 
 
-def _wide_card() -> GenericCard:
-    return _card({f"key_{index}": index for index in range(8)})
+def _wide_card(copy_index: int = 0) -> GenericCard:
+    # Same content every time; copy_index gives a distinct, fixed card id
+    card = _card({f"key_{index}": index for index in range(8)})
+    if copy_index == 0:
+        return card
+    return dataclasses.replace(card, nocab_uuid=content_uuid(f"wide {copy_index}"))
 
 
 _FOUR_ROWS = DropTable.of(
@@ -368,10 +373,12 @@ class TestBoundedVariants:
         masked_keys = {
             next(
                 k
-                for k, v in mod.apply_single((_wide_card(), 0))[0].raw_content.items()
+                for k, v in mod.apply_single((_wide_card(copy), 0))[
+                    0
+                ].raw_content.items()
                 if v == MASK_TOKEN
             )
-            for _ in range(40)
+            for copy in range(40)
         }
         assert len(masked_keys) > 1
 
@@ -433,22 +440,22 @@ class TestVariantSeeds:
         assert MAX_VARIANTS == 100 == len(set(VARIANT_SEEDS))
 
     def test_same_inputs_same_draws(self) -> None:
-        card_uuid = uuid4()
+        card_uuid = content_uuid("variant test card")
         first = card_variant_rng(5, card_uuid, 7)
         second = card_variant_rng(5, card_uuid, 7)
         assert [first.random() for _ in range(5)] == [second.random() for _ in range(5)]
 
     def test_variant_card_and_salt_each_change_the_draws(self) -> None:
-        card_uuid = uuid4()
+        card_uuid = content_uuid("variant test card")
         base = card_variant_rng(5, card_uuid, 7).random()
         assert card_variant_rng(6, card_uuid, 7).random() != base
-        assert card_variant_rng(5, uuid4(), 7).random() != base
+        assert card_variant_rng(5, content_uuid("another card"), 7).random() != base
         assert card_variant_rng(5, card_uuid, 8).random() != base
 
     @pytest.mark.parametrize("variant", [-1, MAX_VARIANTS])
     def test_rejects_a_variant_outside_the_table(self, variant: int) -> None:
         with pytest.raises(IndexError):
-            card_variant_rng(variant, uuid4(), 0)
+            card_variant_rng(variant, content_uuid("card"), 0)
 
 
 _GATED_MODS: dict[str, Callable[[float, int], CardFieldMod]] = {

@@ -138,17 +138,30 @@ def clique_positive_mask(
         >>> clique_positive_mask([[0, 1], [2]], 3).sum().item()
         2
     """
+    # Every clique member as one flat index tensor, and its clique's number
+    # (whole-tensor ops: indexing a tensor element by element costs a
+    # torch dispatch per element)
+    indices = torch.tensor(
+        [index for clique in positive_cliques for index in clique], dtype=torch.long
+    )
+    labels = torch.repeat_interleave(
+        torch.arange(len(positive_cliques)),
+        torch.tensor([len(clique) for clique in positive_cliques], dtype=torch.long),
+    )
+
+    # Validate: in range, and in at most one clique
+    out_of_range = (indices < 0) | (indices >= unit_count)
+    if bool(out_of_range.any()):
+        index = int(indices[out_of_range][0])
+        raise ValueError(f"clique index {index} out of range 0..{unit_count - 1}")
+    repeats = torch.bincount(indices, minlength=unit_count) > 1
+    if bool(repeats.any()):
+        index = int(repeats.nonzero()[0])
+        raise ValueError(f"index {index} is in more than one clique")
+
     # Label each index with its clique; -1 means no clique
     clique_of = torch.full((unit_count,), -1, dtype=torch.long)
-    for clique_index, clique in enumerate(positive_cliques):
-        for index in clique:
-            if not 0 <= index < unit_count:
-                raise ValueError(
-                    f"clique index {index} out of range 0..{unit_count - 1}"
-                )
-            if clique_of[index] != -1:
-                raise ValueError(f"index {index} is in more than one clique")
-            clique_of[index] = clique_index
+    clique_of[indices] = labels
 
     # Same clique, a real clique, and not the unit itself
     same_clique = clique_of.unsqueeze(1) == clique_of.unsqueeze(0)

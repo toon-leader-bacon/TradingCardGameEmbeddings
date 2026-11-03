@@ -384,11 +384,18 @@ class HardwareLimits:
         builds each batch on the training thread when needed. The worker
         never builds past a round, so runs are reproducible across
         depths.
+    torch_cpu_threads: torch's intra-op CPU threads
+        (torch.set_num_threads, applied by scripts/run_training.py). 1, the
+        default: the CPU side of a step is many small tensor operations,
+        and torch's default (one thread per core) spent the CPU spinning
+        those threads instead (2026-10-29 throughput shake-out: 1 thread
+        trained 34% faster than 8, at 224% CPU instead of 1,500%).
     """
 
     max_batch_cost: int
     precision: Precision = "fp32"
     prefetch_depth: int = 0
+    torch_cpu_threads: int = 1
 
     def __post_init__(self) -> None:
         if self.max_batch_cost < 1:
@@ -397,3 +404,5 @@ class HardwareLimits:
             raise ValueError(f"precision must be one of {get_args(Precision)}")
         if self.prefetch_depth < 0:
             raise ValueError("prefetch_depth must be >= 0")
+        if self.torch_cpu_threads < 1:
+            raise ValueError("torch_cpu_threads must be >= 1")

@@ -52,7 +52,8 @@ from src.encoder_model.embedding_head import (
     LinearEmbeddingHead,
     ResidualMlpEmbeddingHead,
 )
-from src.encoder_model.feature_cache.pooled_feature_cache import FeatureCacheStats
+from src.encoder_model.feature_cache.cut_point import PooledCutPoint
+from src.encoder_model.feature_cache.frozen_feature_cache import FeatureCacheStats
 from src.encoder_model.multi_card_model import MultiCardModel
 from src.encoder_model.pooling.attention_pooling import AttentionPooling
 from src.encoder_model.pooling.mean_pooling import MeanPooling
@@ -62,7 +63,8 @@ from src.encoder_model.enrichment.token_whitening import TokenWhitening
 from src.encoder_model.whitening.whitening_stats import WhiteningStats
 from src.encoder_model.precision import Precision
 from src.encoder_model.single_card_model import SingleCardModel
-from src.encoder_model.text_encoder import PretrainedTextEncoder, TextEncoder
+from src.encoder_model.modernbert_text_encoder import load_text_encoder
+from src.encoder_model.text_encoder import TextEncoder
 from src.run_logging import (
     RUN_LOG_NAME,
     LoggingSettings,
@@ -85,6 +87,7 @@ from src.training.diet.prefetching_batch_streams import (
     build_model_warmer,
     NO_BATCH_WARMING,
 )
+from src.training.binder_mods import require_writable_save_directory
 from src.training.dojo_catalog import DOJO_CATALOG, build_dojos
 from src.training.dojo_recipes.card_shelf import CardShelf
 from src.training.feature_cache_assembly import (
@@ -231,14 +234,19 @@ def main() -> int:
     require_whitening_fits_run(config.model, config.plan.holdout)
     if not command_line.check_only:
         _require_new_run_directory(config.run_directory)
+    # A bad save path fails here, before any binder is loaded or modded
+    if config.binder_mods is not None:
+        require_writable_save_directory(config.binder_mods)
     # Dojo heads and dropout draw from torch's global RNG; the model's own
     # initial weights are seeded separately, by build_model with plan.seed.
     # The offset keeps the first dojo head from replaying the model's stream
     torch.manual_seed(config.plan.seed + _DOJO_SEED_OFFSET)
+    # Before any tensor work: see HardwareLimits.torch_cpu_threads
+    torch.set_num_threads(config.limits.torch_cpu_threads)
 
     # Build the dojos and check each one before committing to a run
     context = DojoBuildContext(
-        shelf=CardShelf(),
+        shelf=CardShelf(binder_mods=config.binder_mods),
         holdout=config.plan.holdout,
         card_embedding_size=config.model.card_embedding_size,
         rng_seed=config.plan.seed,
@@ -343,7 +351,7 @@ def _build_unseeded_model(
     Side effects: may download the pretrained checkpoint; draws from
         torch's global RNG. Exceptions: see build_model.
     """
-    text_encoder = PretrainedTextEncoder(checkpoint=spec.checkpoint, trainable=False)
+    text_encoder = load_text_encoder(spec.checkpoint, spec.trainable_text_layers)
     card_pipeline = build_card_pipeline(spec, text_encoder, compute_precision)
     attention = spec.group_attention
     if attention is None:
@@ -390,16 +398,23 @@ def build_card_pipeline(
         token_width = enrichment.output_dim
     pooling = _build_pooling(spec.pooling, token_width)
     head = _build_head(spec, pooling.output_dim)
-    # The cache stores the pooling's output, so it is as wide as the pooling
+    # A pooled cut stores the pooling's output, a token cut the encoder's
     cache = None
     if spec.feature_cache is not None:
+        cut = spec.feature_cache.cut_point
+        width = (
+            pooling.output_dim
+            if isinstance(cut, PooledCutPoint)
+            else text_encoder.output_dim
+        )
         fingerprint = build_fingerprint(
             text_encoder.source(),
             spec.enrichment,
             pooling_label(spec.pooling),
             compute_precision,
-            pooling.output_dim,
+            width,
             spec.feature_cache.storage_dtype,
+            cut,
         )
         cache = assemble_feature_cache(spec.feature_cache, fingerprint)
     return CardEmbeddingPipeline(text_encoder, enrichment, pooling, head, cache)

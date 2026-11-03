@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from uuid import uuid4
 
 import pytest
 
@@ -19,22 +18,38 @@ from src.dojos.mods.deck_mods import (
     DuplicateCollapseMod,
 )
 from src.dojos.mods.common_mods import MaskTargetKeyMod
+from src.dojos.mods.content_style_mods import (
+    BoolToStringMod,
+    FlattenKeysMod,
+    KeyCase,
+    KeyCaseMod,
+    ListToStringMod,
+    NumberToStringMod,
+    ValueCaseMod,
+)
 from src.dojos.mods.mod import MASK_TOKEN
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.dojos.mods.mod_specs import (
     AugmentationRates,
+    BoolToStringSpec,
     CardDropoutSpec,
     CardSubsampleSpec,
     DeckModSpec,
     DuplicateCollapseSpec,
+    FlattenKeysSpec,
+    KeyCaseSpec,
+    ListToStringSpec,
+    NumberToStringSpec,
     RandomKeyMaskSpec,
     ShuffleKeysSpec,
+    ValueCaseSpec,
     WeightedFieldMaskSpec,
 )
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 from src.utils.drop_table import DropTable
+from tests.dojos.mods.card_ids import content_uuid
 
 _TABLE = DropTable.of([(1, FieldMask.of_keys("name"))])
 
@@ -46,6 +61,12 @@ class TestSpecs:
             (ShuffleKeysSpec(), ShuffleKeysMod),
             (RandomKeyMaskSpec(probability=0.2), RandomKeyMaskMod),
             (WeightedFieldMaskSpec(_TABLE), WeightedFieldMaskMod),
+            (KeyCaseSpec(), KeyCaseMod),
+            (FlattenKeysSpec(), FlattenKeysMod),
+            (ValueCaseSpec(), ValueCaseMod),
+            (BoolToStringSpec(), BoolToStringMod),
+            (ListToStringSpec(), ListToStringMod),
+            (NumberToStringSpec(), NumberToStringMod),
         ],
     )
     def test_build_makes_a_fresh_mod_each_time(
@@ -63,6 +84,22 @@ class TestSpecs:
     def test_weighted_spec_validates_its_table_at_construction(self) -> None:
         with pytest.raises(TypeError):
             WeightedFieldMaskSpec(DropTable.of([(1, "name")]))  # type: ignore[arg-type]
+
+    def test_content_style_spec_passes_its_settings(self) -> None:
+        spec = KeyCaseSpec(styles=(KeyCase.CAMEL,), variants=3, probability=0.5)
+
+        mod = spec.build(rng_seed=0)
+
+        assert isinstance(mod, KeyCaseMod)
+        assert (mod.styles, mod.variants, mod.probability) == (
+            (KeyCase.CAMEL,),
+            3,
+            0.5,
+        )
+
+    def test_content_style_spec_validates_at_construction(self) -> None:
+        with pytest.raises(ValueError):
+            FlattenKeysSpec(styles=("",))
 
     def test_specs_are_immutable(self) -> None:
         spec = RandomKeyMaskSpec(probability=0.2)
@@ -152,7 +189,7 @@ def _rich_card() -> GenericCard:
         "category": "Beast",
     }
     return GenericCard(
-        nocab_uuid=uuid4(),
+        nocab_uuid=content_uuid(raw),
         source_game=GameId.GWENT,
         name="Card",
         raw_content=raw,

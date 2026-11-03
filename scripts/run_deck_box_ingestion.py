@@ -40,6 +40,15 @@ from src.data_refinement.deck_box.extraction import DeckExtractionStage
 from src.data_refinement.deck_box.fabtcg_decklists.extraction_stage import (
     FabtcgDecklistsExtractionStage,
 )
+from src.data_refinement.deck_box.fabtcgmeta_online_decks.extraction_stage import (
+    FabtcgmetaOnlineDecksExtractionStage,
+)
+from src.data_refinement.deck_box.hearthstonetopdecks.extraction_stage import (
+    HearthstoneTopDecksDeckExtractionStage,
+)
+from src.data_refinement.deck_box.limitless_play.extraction_stage import (
+    LimitlessPlayDeckExtractionStage,
+)
 from src.data_refinement.deck_box.play_gwent.extraction_stage import (
     PlayGwentDeckExtractionStage,
 )
@@ -57,6 +66,9 @@ from src.data_refinement.deck_box.seventeenlands_game_data.extraction_stage impo
 )
 from src.data_refinement.deck_box.sts_gg.extraction_stage import (
     StsGgDeckExtractionStage,
+)
+from src.data_refinement.deck_box.zenodo_hearthstone_decks.extraction_stage import (
+    ZenodoHearthstoneDecksExtractionStage,
 )
 from src.run_logging import (
     add_logging_arguments,
@@ -79,6 +91,10 @@ _STAGES: dict[str, tuple[DeckExtractionStage, Callable[[], Path]]] = {
         FabtcgDecklistsExtractionStage(),
         lambda: FabtcgDecklistsExtractionStage.DEFAULT_RAW_PATH,
     ),
+    "fabtcgmeta_online_decks": (
+        FabtcgmetaOnlineDecksExtractionStage(),
+        lambda: FabtcgmetaOnlineDecksExtractionStage.DEFAULT_RAW_PATH,
+    ),
     "play_gwent": (
         PlayGwentDeckExtractionStage(),
         lambda: PlayGwentDeckExtractionStage.DEFAULT_RAW_PATH,
@@ -86,6 +102,18 @@ _STAGES: dict[str, tuple[DeckExtractionStage, Callable[[], Path]]] = {
     "isotropic": (
         IsotropicDeckExtractionStage(),
         lambda: IsotropicDeckExtractionStage.DEFAULT_RAW_PATH,
+    ),
+    "hearthstonetopdecks": (
+        HearthstoneTopDecksDeckExtractionStage(),
+        lambda: HearthstoneTopDecksDeckExtractionStage.DEFAULT_RAW_PATH,
+    ),
+    "zenodo_hearthstone_decks": (
+        ZenodoHearthstoneDecksExtractionStage(),
+        lambda: ZenodoHearthstoneDecksExtractionStage.DEFAULT_RAW_PATH,
+    ),
+    "limitless_play": (
+        LimitlessPlayDeckExtractionStage(),
+        lambda: LimitlessPlayDeckExtractionStage.DEFAULT_RAW_PATH,
     ),
     "pokemon_tcg": (
         PokemonTcgDeckExtractionStage(),

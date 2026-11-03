@@ -8,6 +8,18 @@ class ModPipeline:
     """
     A ModPipeline is a list of Mods that are applied to the data in order.
 
+    ORDER MATTERS - RENAMING MODS GO LAST. KeyCaseMod and FlattenKeysMod
+    (content_style_mods.py) rename and move keys; the value mods there
+    (NumberToStringMod, BoolToStringMod, ListToStringMod, ValueCaseMod)
+    change value types. Anything that finds fields by name or path
+    (MaskTargetKeyMod, WeightedFieldMaskMod's FieldPath, label extraction
+    in a dojo) must run BEFORE them in the pipeline. Run it after and it
+    finds nothing: the best-effort mods pass the card through unchanged,
+    so a mask silently fails to fire and the label leaks into the input.
+    A dojo's own task mods come first and run-config mods are appended
+    after them (GenericDojo.append_mods), which keeps this order; watch
+    the masking mods' ModTally.cards_changed after adding a renaming mod.
+
     is_training selects which mods actually run: a mod whose own
     train_only is True is skipped when is_training=False, so a caller
     can run the same pipeline unconditionally across every split (see

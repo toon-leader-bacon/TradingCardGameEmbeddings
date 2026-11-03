@@ -15,12 +15,13 @@ from uuid import uuid4
 import pytest
 import torch
 
+from src.encoder_model.feature_cache.feature_row_kind import POOLED_ROWS
 from src.encoder_model.card_embedding_pipeline import CardEmbeddingPipeline
 from src.encoder_model.feature_cache.card_text_key import CardTextKey
 from src.encoder_model.feature_cache.feature_storage_dtype import FeatureStorageDtype
-from src.encoder_model.feature_cache.pooled_feature_cache import (
+from src.encoder_model.feature_cache.frozen_feature_cache import (
     FeatureReservation,
-    PooledFeatureCache,
+    FrozenFeatureCache,
 )
 from src.encoder_model.feature_cache.slot_policy import LeastRecentlyUsed
 from src.encoder_model.feature_cache.tensor_feature_slab import (
@@ -419,7 +420,7 @@ class TestLifecycle:
 
 
 def _cached_pipeline(
-    precision: Precision = "fp32", cache: PooledFeatureCache | None = None
+    precision: Precision = "fp32", cache: FrozenFeatureCache | None = None
 ) -> CardEmbeddingPipeline:
     """The fake card pipeline with a small in-memory feature cache."""
     pipeline = fake_card_pipeline(4)
@@ -432,15 +433,16 @@ def _cached_pipeline(
     )
 
 
-def _one_row_lru_cache() -> PooledFeatureCache:
+def _one_row_lru_cache() -> FrozenFeatureCache:
     slab = TensorFeatureSlab(
         "vram",
         1,
         FeatureStorageDtype.FP32,
         LeastRecentlyUsed(1),
         SlabPlacement.FOLLOW_FIRST_PUT,
+        POOLED_ROWS,
     )
-    return PooledFeatureCache(TieredFeatureStore([slab]), fingerprint(HIDDEN), False)
+    return FrozenFeatureCache(TieredFeatureStore([slab]), fingerprint(HIDDEN), False)
 
 
 class TestModelWarmer:
