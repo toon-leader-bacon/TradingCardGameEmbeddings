@@ -219,6 +219,23 @@ The disk file runs about 3x its row payload at pooled widths. Each row
 carries its 64-character digest and its key, and a 4 KiB page holds only
 about two 1.5 KB rows.
 
+## Known limits
+
+- **The RAM tier never sees VRAM's hits.** Under `lru` it ranks the
+  hottest keys as the oldest and evicts them first; `fifo` or
+  `fill_until_full` avoid that. A policy sharing recency across tiers
+  is still open.
+- **The fingerprint has no library versions.** A `torch` or
+  `transformers` upgrade that changes the encoder's numbers would reuse
+  stale disk rows. Adding the versions would invalidate the disk on
+  every ROCm nightly. For now, delete the row set (or the file) after
+  an upgrade that matters.
+- **Prefetch overlap is bounded.** A `put_many` from a side stream (the
+  prefetch worker's encode) makes the default stream wait for it. A
+  caller already on the default stream pays no sync.
+- The disk file's size and the CPU -> GPU -> CPU round trip of a disk
+  hit promoted into RAM are tracked in `../TODO.md`.
+
 ## How to run
 
 ```python
