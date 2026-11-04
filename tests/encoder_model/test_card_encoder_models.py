@@ -437,25 +437,31 @@ def test_forward_rejects_an_empty_first_group_or_example(make_model: Any) -> Non
 # --- embedding_dim and isolated_embeddings ----------------------------------
 
 
-_HEADS = [
-    LinearEmbeddingHead(HIDDEN, 5),
-    ResidualMlpEmbeddingHead(HIDDEN, 5, hidden_dim=4, num_blocks=1),
-]
+def _linear_head() -> EmbeddingHead:
+    return LinearEmbeddingHead(HIDDEN, 5)
 
 
-@pytest.mark.parametrize("head", _HEADS)
-def test_every_head_reports_the_widths_it_reads_and_produces(
-    head: EmbeddingHead,
-) -> None:
+def _residual_head() -> EmbeddingHead:
+    return ResidualMlpEmbeddingHead(HIDDEN, 5, hidden_dim=4, num_blocks=1)
+
+
+HEADS = [_linear_head, _residual_head]
+
+
+@pytest.mark.parametrize("make_head", HEADS)
+def test_every_head_reports_the_widths_it_reads_and_produces(make_head: Any) -> None:
+    head = make_head()
     assert head.input_dim == HIDDEN
     assert head.output_dim == 5
     assert head(torch.randn(2, HIDDEN)).shape == (2, 5)
 
 
-@pytest.mark.parametrize("head", _HEADS)
-def test_every_head_outputs_a_fixed_scale_embedding(head: EmbeddingHead) -> None:
-    embeddings = head(torch.randn(2, HIDDEN))
-    # Mean 0, variance 1 across the coordinates: L2 norm sqrt(width)
+@pytest.mark.parametrize("make_head", HEADS)
+def test_every_head_outputs_a_fixed_scale_embedding(make_head: Any) -> None:
+    embeddings = make_head()(torch.randn(2, HIDDEN))
+    # Mean 0, variance 1 across the coordinates: L2 norm sqrt(width). LayerNorm's
+    # eps pulls it lower when the pre-norm variance is tiny (~1% of random
+    # inputs miss 1e-3), so this relies on the per-test seed in conftest.py
     assert torch.allclose(embeddings.mean(dim=1), torch.zeros(2), atol=1e-5)
     assert torch.allclose(embeddings.norm(dim=1), torch.full((2,), 5**0.5), atol=1e-3)
 

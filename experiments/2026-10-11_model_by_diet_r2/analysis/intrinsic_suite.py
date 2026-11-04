@@ -14,7 +14,7 @@ module's standard layout and compare across experiments:
    (extrinsic_held_out.py), one chart per held-out dojo.
 
 Label sources (LABEL_SOURCES below):
-- game (GameLabels) and holdout_tier (HoldoutTierLabels, the runs' holdout);
+- game (GameClusterLabels) and holdout_tier (HoldoutTierClusterLabels, the runs' holdout);
 - fields whose dojos are held out in every cell (rarity tier across games,
   Hearthstone class, Flesh and Blood pitch, Slay the Spire 2 card type);
 - fields trained in the metric and mixed cells (MTG card type, Flesh and
@@ -49,19 +49,19 @@ import torch
 
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.encoder_model.card_serialization import serialize_card_to_json
-from src.evaluation.analyses.card_sample import PerLabelCap
-from src.evaluation.analyses.cluster_agreement import ClusterAgreement
-from src.evaluation.analyses.effective_rank import EffectiveRank
-from src.evaluation.analyses.embedding_analysis import EmbeddingAnalysis
-from src.evaluation.analyses.label_compactness import LabelCompactness
-from src.evaluation.analyses.projection_plot import ProjectionPlot
-from src.evaluation.embedding.embed_corpus import embed_corpus
-from src.evaluation.embedding.embedding_table import EmbeddingTable
-from src.evaluation.embedding.embedding_table_metadata import EmbeddingTableMetadata
+from src.evaluation.intrinsic.label_agreement.card_sample import PerLabelCap
+from src.evaluation.intrinsic.label_agreement.cluster_agreement import ClusterAgreement
+from src.evaluation.intrinsic.effective_rank import EffectiveRank
+from src.evaluation.intrinsic.embedding_analysis import EmbeddingAnalysis
+from src.evaluation.intrinsic.label_agreement.label_compactness import LabelCompactness
+from src.evaluation.intrinsic.projection.projection_plot import ProjectionPlot
+from src.evaluation.intrinsic.embedding.embed_corpus import embed_corpus
+from src.evaluation.intrinsic.embedding.embedding_table import EmbeddingTable
+from src.evaluation.intrinsic.embedding.embedding_table_metadata import EmbeddingTableMetadata
 from src.evaluation.extrinsic.learning_curves import plot_learning_curves
-from src.evaluation.labels.card_labels import CardLabels, GameLabels, HoldoutTierLabels
-from src.evaluation.labels.metric_parquet_labels import MetricParquetLabels
-from src.evaluation.select_corpus import CorpusSpec, select_corpus
+from src.evaluation.intrinsic.cluster_labels.cluster_labels import ClusterLabels, GameClusterLabels, HoldoutTierClusterLabels
+from src.evaluation.intrinsic.cluster_labels.metric_parquet_cluster_labels import MetricParquetClusterLabels
+from src.evaluation.intrinsic.embedding.select_corpus import CorpusSpec, select_corpus
 from src.schema.game_id import GameId
 from src.training.dojo_catalog import DOJO_CATALOG
 from src.training.run_config import parse_run_config, read_config_document
@@ -95,7 +95,7 @@ EXTRINSIC_ENCODERS = (
     "multi_mixed",
 )
 METRICS = Path("data/metrics")
-# (label source name, parquet) - held out in every cell, trained in the
+# (grouping, parquet) - held out in every cell, trained in the
 # metric and mixed cells, and the unseen game
 METRIC_LABELS = (
     ("heldout_rarity_tier", "cross_game/rarity_tier"),
@@ -213,24 +213,24 @@ def embed_encoder(label, cell, seed, model, binder, games) -> Path:
     return path
 
 
-def label_sources(holdout) -> list[CardLabels]:
-    sources: list[CardLabels] = [GameLabels(), HoldoutTierLabels(holdout)]
-    sources += [MetricParquetLabels(name, [METRICS / f"{p}.parquet"]) for name, p in METRIC_LABELS]
+def groupings(holdout) -> list[ClusterLabels]:
+    sources: list[ClusterLabels] = [GameClusterLabels(), HoldoutTierClusterLabels(holdout)]
+    sources += [MetricParquetClusterLabels(name, [METRICS / f"{p}.parquet"]) for name, p in METRIC_LABELS]
     return sources
 
 
-def analyze(label: str, table_path: Path, sources: list[CardLabels]) -> None:
+def analyze(label: str, table_path: Path, sources: list[ClusterLabels]) -> None:
     with EmbeddingTable.open(table_path) as table:
         run_one(EffectiveRank(), table, OUT / "intrinsic" / label / "unlabeled" / "effective_rank")
-        for labels in sources:
+        for cluster_labels in sources:
             sample = PerLabelCap(PER_LABEL_CAP)
             analyses: list[EmbeddingAnalysis] = [
-                ClusterAgreement(labels, sample, seed=SEED),
-                LabelCompactness(labels, sample, seed=SEED),
-                ProjectionPlot(labels, sample, seed=SEED),
+                ClusterAgreement(cluster_labels, sample, seed=SEED),
+                LabelCompactness(cluster_labels, sample, seed=SEED),
+                ProjectionPlot(cluster_labels, sample, seed=SEED),
             ]
             for analysis in analyses:
-                run_one(analysis, table, OUT / "intrinsic" / label / labels.name / analysis.name)
+                run_one(analysis, table, OUT / "intrinsic" / label / cluster_labels.grouping / analysis.name)
 
 
 def run_one(analysis: EmbeddingAnalysis, table: EmbeddingTable, out: Path) -> None:
@@ -266,7 +266,7 @@ def main() -> None:
     del first
     torch.cuda.empty_cache()
 
-    sources = label_sources(holdout)
+    sources = groupings(holdout)
     sample = cards[:: max(1, len(cards) // 64)][:64]
     for label, cell, seed in encoders():
         model = build_encoder(cell, seed, features, sample)

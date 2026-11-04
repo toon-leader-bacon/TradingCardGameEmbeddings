@@ -1,5 +1,10 @@
 # TODO (dojos)
 
+- Reorganize and clean up the dojos module. At time of writing, the dojos directory contains 10+ sub directories. The majority of these are metric specific organizational structure and largely mirrors data_refinement/metrics.
+  However, mixed in are common shared utilities and the `contrastive` dojos. Here's what I'm envisioning for the dojos module:
+  - A dedicated sub directory that maps similarly to the data_refinement/metrics directory and hide/ organize the bulk of these directories (and clearly illustrate the coupling with the data_refinement/metrics code). I'm not sure of the name, but maybe `dojos/dojos/*` is fine?
+  - The `dojos/dojos/` directory is a top level module, that is comparable to the `dojos/contrastive` module. I see these two types of dojos, contrastive and regular? standard? decoder-head? (the name for these dojos is not clear to me) as the two main splits and we should represent that in our dojos module directory layout.
+  - The dojos/dojos directory (Ok we've got to come up with a better name than that) should also separate the common infrastructure from the metrics mirror. So we'll want to separate out the loss, mods, generic, file_managers, etc from the scryfall, 17 lands, sts_gg etc. directories.
 - **Other deck-derived dojos should use the holdout's deck split.**
   Contrastive dojos take each deck's split from
   `HoldoutSpec.deck_split_of`. Other data built from decks still splits

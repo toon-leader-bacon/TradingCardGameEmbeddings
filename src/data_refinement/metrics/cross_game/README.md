@@ -50,7 +50,7 @@ object under the `card_binder_versions` schema key
 ([`../version_metadata.py`](../version_metadata.py),
 `MultiGameVersionMetadata`). A single-game metric file keeps its
 `game` / `card_binder_version` keys and does not carry this one.
-Evaluation reads it with `MetricParquetLabels("rarity_tier", [path])`.
+Evaluation reads it with `MetricParquetClusterLabels("rarity_tier", [path])`.
 
 ### Mapping
 

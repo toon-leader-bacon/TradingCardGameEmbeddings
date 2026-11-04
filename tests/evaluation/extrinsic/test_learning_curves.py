@@ -4,7 +4,7 @@ from typing import Mapping, Sequence
 
 import pytest
 
-from src.evaluation.chart_theme import ChartTheme
+from src.evaluation.charts.chart_theme import ChartTheme
 from src.evaluation.extrinsic.curve_renderer import CurveRenderer, CurveStyle, XAxis
 from src.evaluation.extrinsic.learning_curves import plot_learning_curves
 from src.training.recording.reports import RoundReport, SplitLoss
