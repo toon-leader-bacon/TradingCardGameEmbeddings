@@ -50,3 +50,51 @@
   - **Parallelize building:** worker processes or a prefetch thread, so
     the CPU builds the next batches while the GPU runs the current ones.
     This applies to training too, where throughput is a stated priority.
+    Measured 2026-10-22 (`../training/ENV_SIZING.md`, "Training step"):
+    with the GPU work down to ~20-50 ms a step, 78% of a training step
+    waits on the next batch, and single-card metric dojos over whole
+    games wait 0.9-2.3 s per step. The prefetch depth of 2 no longer
+    hides building; profile those dojos' builders first.
+- **Padded heads for multi-group dojos.** Multi-group dojos still receive
+  nested lists (`ModelEmbeddings`' second arm); their heads pack each group
+  with `generic/group_batching.py`. Two follow-ups:
+  - A padded multi-group type (`(examples, groups, max_cards, d)` or
+    groups flattened with an example index), so the heads skip the
+    per-card `from_nested` pack.
+  - Budget: `group_by_budget` charges examples x the costliest example's
+    total cards, but the encoder pads every group to the longest group in
+    the batch. A deck-pair batch can then hold up to (groups per example)
+    times more attention slots than the budget assumes. Charge
+    (examples x groups) x longest group for multi-group inputs.
+- **Bounded mod variants: follow-ups.** `variants:` is built for the
+  three card-field mods (`mods/variant_seeds.py`, `{kind: ..., variants:
+  N}`); every default is still unbounded (-1). Open:
+  - **Turn it on.** Pick N per mod and put it in
+    `augmentation_defaults.py`, and put `ShuffleKeysMod` back in the
+    defaults once bounded. That changes what the model trains on, so it
+    goes through experiment F (`experiments/TODO.md`), which can sweep N.
+  - **Cache admission and eviction.** Chained bounded mods multiply a
+    card's texts (field mask x key mask). Tune the tiers' slot policies
+    (`encoder_model/feature_cache/slot_policy.py`) for the balance
+    between noise and cache hits; the disk tier only writes during warm
+    today, so modded texts are not kept across runs.
+  - **Warm the modded corpus.** A bounded mod can list every variant of
+    a card, so warm() could encode them before training (about 5 min per
+    unit of N). Only if first-draw misses show up in a profile.
+  - **Cost.** Seeding a `random.Random` per card is about 7 us; a keyed
+    hash turned straight into a choice would be about 1 us, if a
+    batch-building profile ever shows it.
+- **More content style mods** (`mods/content_style_mods.py`).
+  - *Wrap scalars:* put each scalar value in a one-element list
+    (`"hp": 60` -> `"hp": [60]`), all or nothing like the others.
+  - *Text formats:* write a card as YAML, CSV, XML or plain
+    `key: value` text instead of JSON. A mod cannot do this alone: mods
+    edit `raw_content` (a dict) and `serialize_card_to_json`
+    (`src/encoder_model/card_serialization.py`) always writes JSON.
+    Planned design: a `text_format` field on `GenericCard` (default JSON,
+    ignored by equality and kept by `dataclasses.replace`, like
+    `cacheable`) that a format mod sets and the serializer dispatches on.
+    The feature cache keys on the text, so it needs no change. Possibly
+    too hard a task early on (the model may learn formatting before card
+    content); maybe pair it with passing raw tokens, not just the pooled
+    vector, into the card embedding model.

@@ -1,7 +1,6 @@
 import math
 import dataclasses
 import logging
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -10,7 +9,6 @@ import pytest
 import torch
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.deck_box.deck_box import DeckBox
 from src.dojos.contrastive.contrastive_batch import ContrastiveBatch
 from src.dojos.contrastive.styles.missing_card import MissingCardInfoNCELoss
 from src.dojos.contrastive.dojo import ContrastiveDojo
@@ -24,6 +22,8 @@ from src.schema.splits import Split
 from src.schema.card import GenericCard, GenericDeck, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
+from tests.dojos.padding import padded
+from tests.snapshot_fixtures import binder_with_cards, dealer_over
 
 
 def _card(name: str = "card") -> GenericCard:
@@ -54,13 +54,43 @@ class _ScriptedPairConstructor:
     """Test double: yields the given ContrastiveBatches in order,
     ignoring the actual decks/card_lookup it's called with."""
 
-    cards_per_deck = 1
+    cards_per_deck = 2
 
     def __init__(self, batches: list[ContrastiveBatch]) -> None:
         self._batches = iter(batches)
 
     def build(self, decks: list[GenericDeck], card_lookup: object) -> ContrastiveBatch:
         return next(self._batches)
+
+
+class _DeckCountingPairConstructor:
+    """Test double: records each deck sample's size and builds a small
+    usable batch (two decks of one card each) whatever it is given."""
+
+    cards_per_deck = 2
+
+    def __init__(self) -> None:
+        self.deck_counts: list[int] = []
+
+    def build(self, decks: list[GenericDeck], card_lookup: object) -> ContrastiveBatch:
+        self.deck_counts.append(len(decks))
+        return ContrastiveBatch(
+            inputs=[_card() for _ in range(4)],
+            identities=[(uuid4(),) for _ in range(4)],
+            positive_cliques=[[0, 1], [2, 3]],
+        )
+
+
+def _counting_dojo(
+    constructor: _DeckCountingPairConstructor, deck_count: int
+) -> ContrastiveDojo:
+    return ContrastiveDojo(
+        dealer=_dealer_with_decks(deck_count),
+        pair_constructor=constructor,
+        card_lookup=CardBinder(),
+        holdout=_deck_holdout(),
+        strict_version_check=False,
+    )
 
 
 class _RecordingLoss:
@@ -87,18 +117,18 @@ def _deck_holdout(
 def _dealer_with_decks(
     count: int, deck_split_ratios: tuple[float, float, float] = (1, 0, 0)
 ) -> DeckBoxDealer:
-    box = DeckBox()
-    for _ in range(count):
-        box.create(_deck())
-    # A throwaway index file - these tests don't care about a dealer's
-    # persisted index location, only its dealt-decks behavior, so a
-    # fresh tempdir per call avoids threading a tmp_path fixture
-    # through every one of this module's test methods.
-    index_path = Path(tempfile.mkdtemp()) / "dealer.db"
-    return DeckBoxDealer(box, GameId.MTG, index_path, _deck_holdout(deck_split_ratios))
+    """A dealer over count decks, minted against a one-card binder, so its
+    card_binder_version differs from an empty CardBinder()'s (the tests
+    that pass CardBinder() opt out with strict_version_check=False)."""
+    return dealer_over(
+        [_deck() for _ in range(count)],
+        _deck_holdout(deck_split_ratios),
+        binder_with_cards(1),
+    )
 
 
-_BUDGET = BatchBudget(max_cost=10, cost_of=lambda card: 1)
+# Two decks per batch (the test pair constructor costs 2 cards a deck)
+_BUDGET = BatchBudget(max_cost=4, cost_of=lambda card: 1)
 
 
 class TestBatches:
@@ -129,13 +159,14 @@ class TestBatches:
             card_lookup=CardBinder(),
             holdout=_deck_holdout(),
             strict_version_check=False,
-            decks_per_sample=2,
         )
 
         with caplog.at_level(logging.WARNING):
             batches = list(dojo.batches(Split.TRAIN, _BUDGET))
 
-        assert batches == [good_batch, good_batch]
+        # The good batch twice, each carrying its baseline (2 negatives: ln 3)
+        carried = dataclasses.replace(good_batch, baseline=pytest.approx(math.log(3)))
+        assert batches == [carried, carried]
         assert "degenerate" in caplog.text
 
 
@@ -154,7 +185,6 @@ class TestMalformedBatch:
             card_lookup=CardBinder(),
             holdout=_deck_holdout(),
             strict_version_check=False,
-            decks_per_sample=2,
             contrastive_loss=MissingCardInfoNCELoss(),
         )
 
@@ -178,7 +208,7 @@ class TestComputeLoss:
         )
 
         with pytest.raises(ValueError):
-            dojo.compute_loss([torch.randn(4)], batch)
+            dojo.compute_loss(padded([torch.randn(4)]), batch)
 
     def test_delegates_to_the_injected_loss(self) -> None:
         recording_loss = _RecordingLoss()
@@ -195,14 +225,14 @@ class TestComputeLoss:
             identities=[(uuid4(),), (uuid4(),)],
             positive_cliques=[[0, 1]],
         )
-        embeddings = [torch.randn(4), torch.randn(4)]
+        embeddings = padded([torch.randn(4), torch.randn(4)])
 
         dojo.compute_loss(embeddings, batch)
 
         called_embeddings, called_identities, called_positive_cliques = (
             recording_loss.calls[0]
         )
-        assert called_embeddings == embeddings
+        assert called_embeddings is embeddings
         assert called_identities == batch.identities
         assert called_positive_cliques == batch.positive_cliques
 
@@ -217,7 +247,7 @@ class TestBudget:
             strict_version_check=False,
         )
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="fits only 0 deck"):
             list(dojo.batches(Split.TRAIN, BatchBudget(1, lambda card: 1)))
 
     def test_raises_when_a_built_batch_exceeds_the_budget(self) -> None:
@@ -233,11 +263,11 @@ class TestBudget:
             card_lookup=CardBinder(),
             holdout=_deck_holdout(),
             strict_version_check=False,
-            decks_per_sample=2,
         )
 
-        with pytest.raises(ValueError):
-            list(dojo.batches(Split.TRAIN, BatchBudget(2, lambda card: 1)))
+        # Two decks fit by count (4 // 2), but these 3 cards cost 2 each
+        with pytest.raises(ValueError, match="costs 6, over budget 4"):
+            list(dojo.batches(Split.TRAIN, BatchBudget(4, lambda card: 2)))
 
     def test_max_examples_stops_after_that_many_decks(self) -> None:
         good = ContrastiveBatch(
@@ -251,12 +281,47 @@ class TestBudget:
             card_lookup=CardBinder(),
             holdout=_deck_holdout(),
             strict_version_check=False,
-            decks_per_sample=2,
         )
 
         batches = list(dojo.batches(Split.TRAIN, _BUDGET, max_examples=4))
 
         assert len(batches) == 2
+
+    def test_max_examples_trims_the_last_batch_instead_of_dropping_it(
+        self,
+    ) -> None:
+        # 3 decks per batch; the first 5 decks are 3 + 2
+        constructor = _DeckCountingPairConstructor()
+        dojo = _counting_dojo(constructor, deck_count=9)
+
+        list(dojo.batches(Split.TRAIN, BatchBudget(6, lambda card: 1), 5))
+
+        assert constructor.deck_counts == [3, 2]
+
+    def test_a_budget_larger_than_the_split_yields_one_batch_of_it(self) -> None:
+        # e.g. a small deck box under a large budget, or a capped TEST pass
+        constructor = _DeckCountingPairConstructor()
+        dojo = _counting_dojo(constructor, deck_count=5)
+
+        list(dojo.batches(Split.TRAIN, BatchBudget(200, lambda card: 1), 64))
+
+        assert constructor.deck_counts == [5]
+
+    def test_the_budget_alone_sets_the_decks_per_batch(self) -> None:
+        constructor = _DeckCountingPairConstructor()
+        dojo = _counting_dojo(constructor, deck_count=50)
+
+        list(dojo.batches(Split.TRAIN, BatchBudget(80, lambda card: 1)))
+
+        assert constructor.deck_counts == [40, 10]
+
+    def test_a_lone_trailing_deck_is_dropped(self) -> None:
+        constructor = _DeckCountingPairConstructor()
+        dojo = _counting_dojo(constructor, deck_count=5)
+
+        list(dojo.batches(Split.TRAIN, _BUDGET))
+
+        assert constructor.deck_counts == [2, 2]
 
     def test_satisfies_the_dojo_protocol_and_counts_decks(self) -> None:
         dojo: Dojo = ContrastiveDojo(
@@ -272,27 +337,24 @@ class TestBudget:
 
 
 class TestVersionCheck:
-    def test_raises_when_dealer_has_no_recorded_card_binder_version(self) -> None:
+    def test_raises_when_dealer_has_no_recorded_card_binder_version(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dealer = _dealer_with_decks(2)
+        monkeypatch.setattr(
+            DeckBoxDealer, "card_binder_version", property(lambda self: None)
+        )
         with pytest.raises(ValueError, match="CardBinder"):
             ContrastiveDojo(
-                dealer=_dealer_with_decks(2),
+                dealer=dealer,
                 pair_constructor=_ScriptedPairConstructor([]),
                 card_lookup=CardBinder(),
                 holdout=_deck_holdout(),
             )
 
     def test_passes_when_dealers_recorded_version_matches(self, tmp_path: Path) -> None:
-        binder = CardBinder()
-        box = DeckBox()
-        box.create(_deck())
-        path = tmp_path / "mtg.db"
-        box.save(path, GameId.MTG, binder.version_for(GameId.MTG))
-        dealer = DeckBoxDealer(
-            DeckBox.load([path]),
-            GameId.MTG,
-            tmp_path / "dealer.db",
-            _deck_holdout(),
-        )
+        binder = binder_with_cards(1)
+        dealer = dealer_over([_deck()], _deck_holdout(), binder, tmp_path)
 
         dojo = ContrastiveDojo(
             dealer=dealer,
@@ -306,17 +368,9 @@ class TestVersionCheck:
     def test_raises_when_dealers_recorded_version_is_stale(
         self, tmp_path: Path
     ) -> None:
-        binder = CardBinder()
-        box = DeckBox()
-        box.create(_deck())
-        path = tmp_path / "mtg.db"
-        box.save(path, GameId.MTG, "stale-version")
-        dealer = DeckBoxDealer(
-            DeckBox.load([path]),
-            GameId.MTG,
-            tmp_path / "dealer.db",
-            _deck_holdout(),
-        )
+        binder = binder_with_cards(1)
+        dealer = dealer_over([_deck()], _deck_holdout(), binder, tmp_path)
+        binder.create(_card("added after the snapshot"))
 
         with pytest.raises(ValueError, match="CardBinder"):
             ContrastiveDojo(
@@ -381,7 +435,6 @@ class TestMods:
             card_lookup=CardBinder(),
             holdout=_deck_holdout((1, 1, 0)),
             strict_version_check=False,
-            decks_per_sample=2,
             mod_pipeline=ModPipeline(mods),
         )
 
@@ -403,11 +456,20 @@ class TestMods:
         batch = next(dojo.batches(Split.TEST, _BUDGET))
         assert batch.inputs == original.inputs
 
-    def test_no_mods_yields_the_batch_itself(self) -> None:
+    def test_no_mods_yields_the_batch_cards_unchanged(self) -> None:
         original = self._batch()
         dojo = self._dojo(original, [])
-        assert next(dojo.batches(Split.TRAIN, _BUDGET)) is original
+        batch = next(dojo.batches(Split.TRAIN, _BUDGET))
+        assert batch.inputs is original.inputs
         assert dojo.mod_tallies() == {}
+
+    def test_yielded_batches_carry_their_baseline(self) -> None:
+        dojo = self._dojo(self._batch(), [RandomKeyMaskMod(rng_seed=0)])
+
+        batch = next(dojo.batches(Split.TRAIN, _BUDGET))
+
+        # 4 single cards in cliques of 2: each anchor has 2 negatives
+        assert batch.baseline == pytest.approx(math.log(3))
 
 
 class TestBaselineLoss:
@@ -425,6 +487,22 @@ class TestBaselineLoss:
             positive_cliques=[[0, 1], [2, 3], [4, 5]],
         )
         assert dojo.baseline_loss(batch) == pytest.approx(math.log(5))
+
+    def test_reads_a_carried_baseline_without_recomputing(self) -> None:
+        dojo = ContrastiveDojo(
+            dealer=_dealer_with_decks(1),
+            pair_constructor=_ScriptedPairConstructor([]),
+            card_lookup=CardBinder(),
+            holdout=_deck_holdout(),
+            strict_version_check=False,
+        )
+        batch = ContrastiveBatch(
+            inputs=[_card() for _ in range(6)],
+            identities=[(uuid4(),) for _ in range(6)],
+            positive_cliques=[[0, 1], [2, 3], [4, 5]],
+            baseline=1.25,
+        )
+        assert dojo.baseline_loss(batch) == 1.25
 
     def test_rejects_a_foreign_batch(self) -> None:
         dojo = ContrastiveDojo(

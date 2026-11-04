@@ -18,7 +18,8 @@ import torch
 import torch.nn as nn
 
 from src.dojos.generic.pooling import EmbeddingPooler, MeanEmbeddingPooler
-from src.schema.type_hints import BatchedMultiGroupEmbedding, MultiGroupEmbedding
+from src.dojos.generic.group_batching import pooled_group_pair
+from src.schema.type_hints import BatchedMultiGroupEmbedding
 
 
 class MultiGroupRegressionDecoderHead(nn.Module):
@@ -45,16 +46,17 @@ class MultiGroupRegressionDecoderHead(nn.Module):
         Output: none (constructor).
         Side effects: registers this module's layers (nn.Module state),
             including a learned "empty second group" placeholder
-            parameter (see forward_single()'s docstring).
+            parameter (see pooled_group_pair).
         Exceptions: none expected.
         """
         super().__init__()
         self.pooler = pooler or MeanEmbeddingPooler()
+        self._width = card_embedding_size
         # A learned stand-in for group 1 (e.g. "no blockers") when it's
         # empty, rather than a plain zero vector - lets the model learn
         # what an absent second group should mean in the shared
         # embedding space instead of assuming the origin is neutral.
-        # See forward_single()'s docstring.
+        # See pooled_group_pair.
         self.empty_second_group = nn.Parameter(torch.zeros(card_embedding_size))
         # Same width/depth as MultiCardRegressionDecoderHead's MLP,
         # doubled on the input side for the concatenated pair.
@@ -81,30 +83,8 @@ class MultiGroupRegressionDecoderHead(nn.Module):
             >>> head([[[torch.randn(4)], []]]).shape
             torch.Size([1])
         """
-        predictions = [self.forward_single(group) for group in embeddings]
-        return torch.stack(predictions)
-
-    def forward_single(self, embeddings: MultiGroupEmbedding) -> torch.Tensor:
-        """Decode one example's [group_0, group_1] pair to its scalar
-        prediction, unbatched.
-
-        Inputs:
-            embeddings: one example's [group_0_embeddings,
-                group_1_embeddings] pair. group_1_embeddings may be
-                empty (e.g. an unblocked attack has no blocker group) -
-                self.empty_second_group stands in for it rather than
-                calling self.pooler.pool([]) (undefined for an empty
-                list - see MeanEmbeddingPooler's own docstring).
-        Output: a scalar tensor.
-        Side effects: none.
-        Exceptions: none expected.
-        """
-        group_0_embeddings, group_1_embeddings = embeddings
-        pooled_0 = self.pooler.pool(group_0_embeddings)
-        pooled_1 = (
-            self.pooler.pool(group_1_embeddings)
-            if group_1_embeddings
-            else self.empty_second_group
+        # Pool both groups for the whole batch, then one MLP call
+        pairs = pooled_group_pair(
+            embeddings, self.pooler, self.empty_second_group, self._width
         )
-        combined = torch.cat([pooled_0, pooled_1])
-        return self.network(combined).squeeze(-1)
+        return self.network(pairs).squeeze(-1)

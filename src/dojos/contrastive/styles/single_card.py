@@ -3,7 +3,6 @@
 import logging
 import random
 from dataclasses import dataclass
-from typing import cast
 from uuid import UUID
 
 import torch
@@ -11,12 +10,13 @@ import torch
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.dojos.contrastive.contrastive_batch import ContrastiveBatch
 from src.dojos.contrastive.contrastive_loss import (
+    ComparisonMasks,
     ContrastiveLoss,
     check_item_embeddings,
-    mean_anchor_loss,
-    mean_constant_logit_loss,
-    pairwise_cosine_similarity,
-    identity_negative_mask,
+    clique_positive_mask,
+    constant_logit_baseline,
+    info_nce_loss,
+    info_nce_masks,
 )
 from src.dojos.contrastive.pair_constructor import (
     ContrastivePairConstructor,
@@ -25,11 +25,8 @@ from src.dojos.contrastive.pair_constructor import (
 )
 from src.dojos.contrastive.staple_subsampling import StapleSubsampling
 from src.schema.card import GenericCard, GenericDeck
-from src.schema.type_hints import (
-    BatchedModelOutput,
-    BatchedSingleCardEmbedding,
-    InputShape,
-)
+from src.schema.padded_embeddings import PaddedEmbeddings
+from src.schema.type_hints import InputShape
 
 _logger = logging.getLogger(__name__)
 
@@ -134,13 +131,12 @@ class SingleCardPairConstructor:
 
 class SingleCardInfoNCELoss:
     """Concrete ContrastiveLoss for the single-card slice: single-positive
-    InfoNCE over cosine similarity, computed once across the whole flat
-    item pool (so every A-B/A-C/B-C deck-pair comparison falls out of
-    one pairwise similarity matrix, never special-cased per deck pair).
-    Exact-identity duplicates (see ContrastiveBatch.identities) are
-    excluded from a given anchor's negative pool at this step, per the
-    plan's deferred-to-loss-time policy - never precomputed or stored
-    on the batch itself."""
+    InfoNCE over cosine similarity, computed once across the whole item
+    pool (so every A-B/A-C/B-C deck-pair comparison falls out of one
+    similarity matrix, never special-cased per deck pair). Exact-identity
+    duplicates (see ContrastiveBatch.identities) are excluded from every
+    anchor's negatives at loss time - never precomputed or stored on the
+    batch itself."""
 
     def __init__(self, temperature: float = 0.07) -> None:
         """
@@ -158,47 +154,37 @@ class SingleCardInfoNCELoss:
 
     def calculate(
         self,
-        item_embeddings: BatchedModelOutput,
+        item_embeddings: PaddedEmbeddings,
         identities: list[tuple[UUID, ...]],
         positive_cliques: list[list[int]],
     ) -> torch.Tensor:
         """Mean anchor-wise single-positive InfoNCE loss over the batch.
 
         Inputs: see ContrastiveLoss.calculate(). item_embeddings must be
-            single-card-shaped (one bare Embedding per item).
+            SINGLE_CARD. Each identity is a key of any non-empty length:
+            the card's own (uuid,), or a composite loss's item key (a
+            pooled slice's sorted uuids, an anchor's (uuid,)).
         Output: a scalar loss tensor - the mean, over every item that
             has at least one positive, of that item's own InfoNCE loss
-            (its true positive scored against every valid negative -
-            every other item, excluding itself and any exact-identity
+            (its positives scored against every valid negative - every
+            other item, excluding itself and any exact-identity
             duplicate).
         Side effects: none.
-        Exceptions: ValueError if len(item_embeddings) != len(identities),
-            if item_embeddings isn't single-card-shaped, or if no item
-            in the batch has a positive pair (loss is undefined).
+        Exceptions: ValueError if item_embeddings and identities disagree
+            or item_embeddings isn't SINGLE_CARD; DegenerateBatchError if
+            no item has a positive pair (loss is undefined).
 
         Example:
             >>> loss_fn = SingleCardInfoNCELoss()
             >>> loss_fn.calculate(item_embeddings, identities, positive_cliques)
         """
+        # Validate inputs
         check_item_embeddings(
             item_embeddings, identities, InputShape.SINGLE_CARD, "SingleCardInfoNCELoss"
         )
-        # Runtime shape already validated above - narrow the wide
-        # ContrastiveLoss.calculate() parameter type back to the
-        # concrete shape this class actually handles.
-        single_card_embeddings = cast(BatchedSingleCardEmbedding, item_embeddings)
-
-        similarity = pairwise_cosine_similarity(single_card_embeddings)
-        valid_negative_mask = identity_negative_mask(identities, similarity.device)
-        positives_by_anchor = self._positives_by_anchor(positive_cliques)
-
-        # Average each anchor's own InfoNCE loss - an anchor with no
-        # positive in this batch contributes nothing. No item has an
-        # "excluded" group of its own in the single-card shape (unlike
-        # CrossSliceCardInfoNCELoss's own-item siblings), so none is passed.
-        return mean_anchor_loss(
-            positives_by_anchor, {}, similarity, valid_negative_mask, self._temperature
-        )
+        # One unit per item: its one card
+        masks = self._masks(identities, positive_cliques)
+        return info_nce_loss(item_embeddings.cards[:, 0], masks, self._temperature)
 
     def constant_logit_loss(
         self,
@@ -214,40 +200,20 @@ class SingleCardInfoNCELoss:
             ...     identities, [[0, 1], [2, 3], [4, 5]])
             1.609...
         """
-        result: float
-        # Same anchor -> positives expansion calculate() uses
-        positives_by_anchor = self._positives_by_anchor(positive_cliques)
-        result = mean_constant_logit_loss(identities, positives_by_anchor, {})
-        return result
+        return constant_logit_baseline(self._masks(identities, positive_cliques))
 
-    def _positives_by_anchor(
-        self, positive_cliques: list[list[int]]
-    ) -> dict[int, list[int]]:
-        """Expand positive_cliques into a per-anchor positives mapping.
+    def _masks(
+        self, identities: list[tuple[UUID, ...]], positive_cliques: list[list[int]]
+    ) -> ComparisonMasks:
+        """Every same-clique item is a positive; no extra exclusions.
 
-        Private helper - callers are calculate() and
-        constant_logit_loss(). Every index in a
-        clique is a positive for every other index in that same clique -
-        each clique is a mutually-positive group, not a directed
-        relation, so this is a pure expansion, not a derivation from
-        any pairwise data.
-
-        Inputs:
-            positive_cliques: see calculate().
-        Output: a mapping from anchor index to the list of item indices
-            that are positives for that anchor. An index whose clique
-            has no other member (size-1 clique) is simply absent as a
-            key.
-        Side effects: none.
-        Exceptions: none.
+        Private helper - callers are calculate() and constant_logit_loss().
+        Inputs: identities, positive_cliques - see calculate().
+        Output: ComparisonMasks over the items.
+        Side effects: none. Exceptions: as clique_positive_mask.
         """
-        result: dict[int, list[int]] = {}
-        for group in positive_cliques:
-            for index in group:
-                other_indices = [other for other in group if other != index]
-                if other_indices:
-                    result[index] = other_indices
-        return result
+        positive = clique_positive_mask(positive_cliques, len(identities))
+        return info_nce_masks(positive, identities, None)
 
 
 @dataclass(frozen=True)

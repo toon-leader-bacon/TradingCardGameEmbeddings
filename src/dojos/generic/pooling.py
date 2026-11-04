@@ -1,7 +1,7 @@
 """Shared pooling strategy for multi-card generic dojo cells.
 
-Collapses one deck's variable-length list of card embeddings into a
-single fixed-size vector. Originally written inside
+Collapses each deck's variable-length set of card embeddings into a
+single fixed-size vector, for a whole padded batch at once. Originally written inside
 multi_card_regression/decoder_head.py; moved here once a second
 multi-card cell (multi_card_binary_classification) needed the exact
 same pooling step ahead of a differently-shaped MLP/loss - genuinely
@@ -14,30 +14,28 @@ from typing import Protocol
 
 import torch
 
-from src.schema.type_hints import MultiCardEmbedding
+from src.schema.padded_embeddings import PaddedEmbeddings
 
 
 class EmbeddingPooler(Protocol):
-    """Strategy: collapses one deck's variable-length list of card
-    embeddings into a single fixed-size vector. A multi-card decoder
-    head owns one of these privately and delegates to it - swapping
-    pooling behavior never requires touching a decoder head's own MLP
-    or its owning dojo's constructor shape."""
+    """Strategy: collapses each deck's variable-length set of card
+    embeddings into a single fixed-size vector, for a whole padded batch
+    at once. A multi-card decoder head owns one of these privately and
+    delegates to it - swapping pooling behavior never requires touching a
+    decoder head's own MLP or its owning dojo's constructor shape."""
 
-    def pool(self, embeddings: MultiCardEmbedding) -> torch.Tensor:
-        """Collapse one deck's card embeddings into one vector.
+    def pool(self, embeddings: PaddedEmbeddings) -> torch.Tensor:
+        """Collapse each example's card embeddings into one vector.
 
         Inputs:
-            embeddings: one deck's card embeddings, length equal to that
-                deck's card count (varies deck to deck).
-        Output: a single (card_embedding_size,) tensor representing the
-            whole deck.
-        Side effects: implementation-defined (expected: none for a pure
-            pooling function; a future learned pooler may hold
+            embeddings: a MULTI_CARD batch (lengths vary per example).
+        Output: an (examples, d) tensor, one row per example, same order.
+            An empty example's row is implementation-defined; a head that
+            must treat "empty" specially checks embeddings.lengths.
+        Side effects: implementation-defined (expected: none for a
+            pure pooling function; a future learned pooler may hold
             parameters but must still not mutate embeddings).
-        Exceptions: implementation-defined (expected: none for a
-            non-empty embeddings list - a decoder head's callers are
-            responsible for never passing an empty deck).
+        Exceptions: implementation-defined (expected: none).
         """
         ...
 
@@ -50,20 +48,19 @@ class MeanEmbeddingPooler:
     class in this same file and passed to a multi-card dojo's pooler=
     - no other file needs to change."""
 
-    def pool(self, embeddings: MultiCardEmbedding) -> torch.Tensor:
-        """Mean-pool one deck's card embeddings.
+    def pool(self, embeddings: PaddedEmbeddings) -> torch.Tensor:
+        """Mean-pool every example's card embeddings.
 
         Inputs:
-            embeddings: one deck's card embeddings (non-empty).
-        Output: the elementwise mean, as a (card_embedding_size,)
-            tensor.
+            embeddings: a MULTI_CARD batch.
+        Output: (examples, d), embeddings.mean_per_example(); an empty
+            example gives zeros.
         Side effects: none.
-        Exceptions: none expected for a non-empty embeddings list (an
-            empty list makes torch.stack raise - not this pooler's
-            concern to guard against, see class docstring).
+        Exceptions: none.
 
         Example:
-            >>> MeanEmbeddingPooler().pool([torch.ones(4), torch.zeros(4)])
-            tensor([0.5, 0.5, 0.5, 0.5])
+            >>> MeanEmbeddingPooler().pool(PaddedEmbeddings.from_nested(
+            ...     [[torch.ones(4), torch.zeros(4)]], InputShape.MULTI_CARD, 4))
+            tensor([[0.5000, 0.5000, 0.5000, 0.5000]])
         """
-        return torch.stack(embeddings).mean(dim=0)
+        return embeddings.mean_per_example()

@@ -1,11 +1,14 @@
+import dataclasses
 import inspect
 import random
+import sqlite3
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.deck_box.deck_box import DeckBox
 from src.dojos.contrastive.styles.card_in_contexts import CardInContextsStyle
 from src.dojos.contrastive.styles.cross_slice_card import CrossSliceCardStyle
 from src.dojos.contrastive.styles.missing_card import (
@@ -43,6 +46,7 @@ from src.data_refinement.metrics.cross_game.rarity.rarity_tier_metric import (
     RarityTierMetric,
 )
 from src.dojos.mods.mod_specs import (
+    AugmentationRates,
     CardDropoutSpec,
     DuplicateCollapseSpec,
     ShuffleKeysSpec,
@@ -159,6 +163,13 @@ class _RecordingShelf(CardShelf):
     def deck_box(self, path: Path) -> Any:
         self.requested_boxes.append(path)
         return f"box:{path.name}"
+
+    def deck_snapshot(self, game: GameId, deck_box_path: Path) -> Any:
+        self.requested_boxes.append(deck_box_path)
+        return f"snapshot:{game.value}"
+
+    def deck_split_index(self, snapshot: Any, holdout: Any) -> Any:
+        return f"split index:{snapshot}"
 
 
 def _stub_dojo(name: str, mods: list | None = None) -> GenericDojo:
@@ -406,6 +417,15 @@ class TestCardShelf:
         with pytest.raises(FileNotFoundError):
             CardShelf().deck_box(tmp_path / "missing.db")
 
+    def test_deck_box_is_opened_read_only(self, tmp_path: Path) -> None:
+        path = tmp_path / "decks.db"
+        DeckBox.load([path]).flush()
+
+        box = CardShelf().deck_box(path)
+
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            box.save(path, GameId.MTG, "binder-v1")
+
     def test_missing_binder_raises(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -553,7 +573,7 @@ class TestAugmentationPipeline:
             "contrastive.gwent", GameId.GWENT, self._context()
         )
         names = [type(mod).__name__ for mod in pipeline.mods]
-        assert names == ["ShuffleKeysMod", "WeightedFieldMaskMod", "RandomKeyMaskMod"]
+        assert names == ["WeightedFieldMaskMod", "RandomKeyMaskMod"]
 
     def test_an_override_replaces_the_defaults(self) -> None:
         context = self._context({"contrastive.gwent": (ShuffleKeysSpec(),)})
@@ -561,6 +581,28 @@ class TestAugmentationPipeline:
             "contrastive.gwent", GameId.GWENT, context
         )
         assert [type(mod).__name__ for mod in pipeline.mods] == ["ShuffleKeysMod"]
+
+    def test_default_rates_rewrite_the_game_defaults(self) -> None:
+        context = dataclasses.replace(
+            self._context(),
+            default_augmentation=AugmentationRates(probability=0.1, variants=4),
+        )
+        pipeline = build_augmentation_pipeline(
+            "contrastive.gwent", GameId.GWENT, context
+        )
+        mods: list = pipeline.mods
+        rates = [(mod.probability, mod.variants) for mod in mods]
+        assert rates == [(0.1, 4), (0.1, 4)]
+
+    def test_default_rates_leave_an_override_alone(self) -> None:
+        context = dataclasses.replace(
+            self._context({"contrastive.gwent": (ShuffleKeysSpec(),)}),
+            default_augmentation=AugmentationRates(probability=0.1, variants=4),
+        )
+        (mod,) = build_augmentation_pipeline(
+            "contrastive.gwent", GameId.GWENT, context
+        ).mods
+        assert (mod.probability, mod.variants) == (1.0, -1)  # type: ignore[attr-defined]
 
     def test_an_empty_override_turns_augmentation_off(self) -> None:
         context = self._context({"contrastive.gwent": ()})
@@ -675,7 +717,6 @@ class TestMetricDojoAugmentations:
         mods = dojo.data_mod_pipeline.mods
         assert mods[0] is task_mod and not mods[0].train_only
         assert [type(mod).__name__ for mod in mods[1:]] == [
-            "ShuffleKeysMod",
             "WeightedFieldMaskMod",
             "RandomKeyMaskMod",
         ]

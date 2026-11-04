@@ -62,10 +62,9 @@ def _cached_card_uuid(card_lookup: CardLookup, card_name_text: str) -> UUID | No
     unmatched name once per lookup.
 
     Private helper - single consumer is card_uuid_for_quantity_name().
-    Every CardBinder name lookup deep-copies the card (measured at ~70%
-    of a scan's runtime), and a partial deck is rebuilt from scratch for
-    every player-turn of every metric, so the same few hundred names are
-    looked up millions of times. Logging on a cache miss (not per call)
+    A partial deck is rebuilt from scratch for every player-turn of every
+    metric, so the same few hundred names are looked up millions of
+    times; the memo skips the name matching after the first. Logging on a cache miss (not per call)
     also keeps one unmatched name from logging once per later turn.
     Hazard: a None result is cached too, so a binder must be fully
     ingested before it is first queried through this module - metrics

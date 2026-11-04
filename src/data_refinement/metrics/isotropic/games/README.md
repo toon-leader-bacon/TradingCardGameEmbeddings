@@ -58,7 +58,7 @@ mid-game metrics are all streaming `Metric[GameLog]`.
 - `partial_deck.py` - `partial_deck_card_uuids()` (a player's deck just
   before their turn T: 7 Copper + 3 Estate + gains - trashes),
   `expand_card_quantity()`, `distinct_card_uuids()`. Name lookups are
-  memoized (a CardBinder lookup deep-copies the card).
+  memoized (the same names recur on every player-turn).
 - `row_utils.py` - `winner_player()` (the `GameHeaderPlayer` matching
   `header.winner_nick`), `is_single_pile_ending()`, and
   `pile_card_uuid_for_name()` - the last one is NOT a plain

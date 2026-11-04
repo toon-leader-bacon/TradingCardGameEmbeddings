@@ -15,7 +15,8 @@ import torch
 import torch.nn as nn
 
 from src.dojos.generic.pooling import EmbeddingPooler, MeanEmbeddingPooler
-from src.schema.type_hints import BatchedMultiGroupEmbedding, MultiGroupEmbedding
+from src.dojos.generic.group_batching import pooled_group_pair
+from src.schema.type_hints import BatchedMultiGroupEmbedding
 
 
 class MultiGroupBinaryClassificationDecoderHead(nn.Module):
@@ -38,6 +39,7 @@ class MultiGroupBinaryClassificationDecoderHead(nn.Module):
         """
         super().__init__()
         self.pooler = pooler or MeanEmbeddingPooler()
+        self._width = card_embedding_size
         # Stands in for an empty group 1 (pooling an empty list is undefined)
         self.empty_second_group = nn.Parameter(torch.zeros(card_embedding_size))
         self.network = nn.Sequential(
@@ -59,24 +61,9 @@ class MultiGroupBinaryClassificationDecoderHead(nn.Module):
             >>> head([[[torch.randn(4)], [torch.randn(4)]]]).shape
             torch.Size([1])
         """
-        logits = [self.forward_single(group) for group in embeddings]
-        return torch.stack(logits)
-
-    def forward_single(self, embeddings: MultiGroupEmbedding) -> torch.Tensor:
-        """One example's [group_0, group_1] pair -> its raw logit.
-
-        Inputs: embeddings, one example's pair; group_1 may be empty
-            (self.empty_second_group stands in for it).
-        Output: a scalar tensor (raw logit).
-        Side effects: none. Exceptions: none.
-        """
-        group_0_embeddings, group_1_embeddings = embeddings
-        # Pool each side; an empty group 1 uses the learned placeholder
-        pooled_0 = self.pooler.pool(group_0_embeddings)
-        pooled_1 = (
-            self.pooler.pool(group_1_embeddings)
-            if group_1_embeddings
-            else self.empty_second_group
+        # Pool both groups for the whole batch (group 0 then group 1: the
+        # order carries meaning), then one MLP call
+        pairs = pooled_group_pair(
+            embeddings, self.pooler, self.empty_second_group, self._width
         )
-        # Fixed order: group 0 then group 1 (order carries meaning)
-        return self.network(torch.cat([pooled_0, pooled_1])).squeeze(-1)
+        return self.network(pairs).squeeze(-1)

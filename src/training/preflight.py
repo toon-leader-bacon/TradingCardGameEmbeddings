@@ -12,14 +12,21 @@ seconds instead of after the first round of an unattended run.
 
 import dataclasses
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any, Mapping, Union
 
 import torch
 
 from src.dojos.dojo import BatchBudget, Dojo, require_usable_baseline
 from src.dojos.mods.mod import ModTally
 from src.schema.card import GenericCard
+from src.schema.padded_embeddings import ModelEmbeddings, PaddedEmbeddings
 from src.schema.splits import Split
+from src.schema.type_hints import (
+    BatchedTrainingInput,
+    InputShape,
+    TrainingInput,
+    batched_input_shape_of,
+)
 
 
 @dataclass(frozen=True)
@@ -55,20 +62,53 @@ class PreflightResult:
         return self.error is None
 
 
-def random_embeddings_like(inputs: Any, card_embedding_size: int) -> Any:
-    """Random tensors nested exactly like `inputs`, replacing each
-    GenericCard leaf with one torch.randn(card_embedding_size).
+def random_embeddings_like(
+    inputs: BatchedTrainingInput, card_embedding_size: int
+) -> ModelEmbeddings:
+    """Random embeddings shaped exactly as CardEncoderModel.forward would
+    return them for inputs, without running any encoder.
 
-    This is the same one-embedding-per-card shape SingleCardModel/
-    MultiCardModel produce for a real forward pass (single card -> a
-    tensor, multi-card/multi-group -> the matching nested list) - see
-    src/schema/type_hints.py's shape taxonomy - so a dojo's compute_loss
-    sees embeddings shaped the way it always does, without running any
-    encoder at all.
+    The one stand-in builder for preflight, scripts/survey_dojo_baselines.py
+    and head/dojo tests, so a dojo's compute_loss sees the same types as in
+    training.
+    Inputs: inputs (a non-empty batch of any shape), card_embedding_size.
+    Output: ModelEmbeddings - PaddedEmbeddings (SINGLE_CARD or MULTI_CARD)
+        of torch.randn cards, zero at padding; for multi-group inputs, the
+        nested lists with one torch.randn(card_embedding_size) per card.
+    Side effects: draws from torch's global RNG.
+    Exceptions: as batched_input_shape_of for a malformed batch.
+
+    Example:
+        >>> random_embeddings_like([[card_a, card_b], [card_c]], 32).lengths
+        (2, 1)
+    """
+    # Classify one example, like the model does
+    shape = batched_input_shape_of(inputs)
+
+    # Multi-group stays nested; the padded shapes pack through from_nested
+    if shape is InputShape.MULTI_GROUP:
+        return _random_nested(inputs, card_embedding_size)
+    nested = _random_nested(inputs, card_embedding_size)
+    return PaddedEmbeddings.from_nested(nested, shape, card_embedding_size)
+
+
+def _random_nested(
+    inputs: Union[TrainingInput, BatchedTrainingInput], card_embedding_size: int
+) -> Any:
+    """Random tensors nested exactly like inputs: one
+    torch.randn(card_embedding_size) per GenericCard leaf.
+
+    Private helper - single caller is random_embeddings_like. Recursive,
+    like iter_cards: the nesting is at most three lists deep.
+    Inputs: inputs (a GenericCard or list nesting of them), width.
+    Output: the matching nesting of tensors (a Tensor or nested lists of
+        them; Any because the depth is only known at runtime, and the
+        caller narrows by the shape it classified).
+    Side effects: draws from torch's global RNG. Exceptions: none.
     """
     if isinstance(inputs, GenericCard):
         return torch.randn(card_embedding_size)
-    return [random_embeddings_like(item, card_embedding_size) for item in inputs]
+    return [_random_nested(item, card_embedding_size) for item in inputs]
 
 
 def preflight_dojo(

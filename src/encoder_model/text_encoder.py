@@ -8,9 +8,10 @@ that swapping the pooling (mean, attention, ...; see pooling/) never
 requires touching this contract.
 """
 
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List
+from typing import Callable, List
 
 import torch
 import torch.nn as nn
@@ -23,7 +24,7 @@ from transformers import AutoModel, AutoTokenizer
 # a raw model's own limit both truncates any future noisy source safely
 # and keeps a forward pass cheap (attention cost grows with sequence
 # length - see src/training/Notes.md section 2).
-_DEFAULT_MAX_LENGTH = 384
+DEFAULT_MAX_LENGTH = 384
 
 # Splits an encode() call into same-checkpoint sub-batches of at most this
 # many texts, sorted by (character-length) size first, so each sub-batch
@@ -33,7 +34,7 @@ _DEFAULT_MAX_LENGTH = 384
 # (HardwareLimits.max_batch_cost, expected to start ~32) so bucketing
 # actually activates; the right value is hardware- and batch-size-
 # dependent and worth re-tuning once real training numbers are in.
-_DEFAULT_LENGTH_BUCKET_SIZE = 16
+DEFAULT_LENGTH_BUCKET_SIZE = 16
 
 
 @dataclass
@@ -50,8 +51,40 @@ class TokenEncoding:
     attention_mask: torch.Tensor
 
 
+@dataclass(frozen=True)
+class TextEncoderSource:
+    """Where a text encoder's weights came from: everything that fixes the
+    numbers it produces for a text (part of a feature cache's
+    fingerprint).
+
+    checkpoint: the Hugging Face model id or local path.
+    revision: the commit hash the checkpoint resolved to; None for a local
+        path (its weights can change under the same name).
+    max_length: the tokenizer's truncation length.
+    model_kwargs: the from_pretrained keyword arguments, as sorted
+        (name, repr(value)) pairs.
+    """
+
+    checkpoint: str
+    revision: str | None
+    max_length: int
+    model_kwargs: tuple[tuple[str, str], ...]
+
+
 class TextEncoder(nn.Module, ABC):
     """Strategy interface: batch of card text in, per-token embeddings out."""
+
+    def source(self) -> TextEncoderSource | None:
+        """Where this encoder's weights came from, or None when it has no
+        fixed source (e.g. one trained from scratch). Inputs: none.
+        Output: TextEncoderSource or None. Side effects: none.
+        Exceptions: none.
+
+        Example:
+            >>> StaticEmbeddingTextEncoder("answerdotai/ModernBERT-base", 64).source() is None
+            True
+        """
+        return None
 
     @property
     @abstractmethod
@@ -77,6 +110,77 @@ class TextEncoder(nn.Module, ABC):
         raise NotImplementedError
 
 
+class LayeredTextEncoder(TextEncoder):
+    """A TextEncoder made of a stack of layers that can be run in two
+    parts, split after any layer: what a token-level feature cache needs
+    (it stores the states after layer k, and the rest runs live).
+
+    encode(texts) == encode_from(encode_through(texts, k), k) for every k,
+    up to floating-point noise.
+
+    Contract for caching: a frozen layer must behave the same in train
+    and eval mode, so an implementation keeps its frozen layers in eval
+    whatever train() is given (keep_frozen_layers_in_eval), and a cache
+    never stores train-mode states.
+    """
+
+    @property
+    @abstractmethod
+    def layer_count(self) -> int:
+        """The layers a split may fall after (0 to layer_count). Inputs:
+        none. Output: int. Side effects: none. Exceptions: none."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def encode_through(self, texts: List[str], layer: int) -> TokenEncoding:
+        """Tokenize texts and run the stack's first `layer` layers. Runs
+        without autograd when everything it uses is frozen.
+
+        Inputs: texts (non-empty, serialized cards), layer (0 to
+            layer_count).
+        Output: TokenEncoding of the states after `layer` layers (not
+            normalized), one row per text, in order.
+        Side effects: none beyond autograd.
+        Exceptions: ValueError for a layer out of range; whatever the
+            tokenizer or model raise.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def encode_from(self, encoding: TokenEncoding, layer: int) -> TokenEncoding:
+        """Run layers [layer, layer_count) and whatever ends the stack on
+        encode_through's output for the same layer.
+
+        Inputs: encoding (as encode_through returns it, or rebuilt from a
+            cache), layer.
+        Output: TokenEncoding, as encode would return.
+        Side effects: none beyond autograd (its trainable layers
+            accumulate gradients).
+        Exceptions: ValueError for a layer out of range.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def keep_frozen_layers_in_eval(self) -> None:
+        """Return every frozen layer to eval mode (train() calls it, and a
+        cut calls it after the pipeline's train()). Inputs: none.
+        Output: none. Side effects: sets those layers' modes.
+        Exceptions: none."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def is_frozen_through(self, layer: int) -> bool:
+        """Whether every parameter encode_through(..., layer) uses is
+        frozen: the condition for caching its output. Inputs: layer.
+        Output: bool. Side effects: none. Exceptions: ValueError for a
+        layer out of range."""
+        raise NotImplementedError
+
+
+# (input_ids (N, L), attention_mask (N, L)) -> hidden states (N, L, W)
+TokenForward = Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
+
+
 class PretrainedTextEncoder(TextEncoder):
     """Wraps a pretrained HuggingFace transformers model as a TextEncoder.
 
@@ -97,9 +201,9 @@ class PretrainedTextEncoder(TextEncoder):
         self,
         checkpoint: str,
         trainable: bool = False,
-        max_length: int = _DEFAULT_MAX_LENGTH,
+        max_length: int = DEFAULT_MAX_LENGTH,
         model_kwargs: dict | None = None,
-        length_bucket_size: int | None = _DEFAULT_LENGTH_BUCKET_SIZE,
+        length_bucket_size: int | None = DEFAULT_LENGTH_BUCKET_SIZE,
     ):
         """
         Inputs:
@@ -127,8 +231,12 @@ class PretrainedTextEncoder(TextEncoder):
         self.trainable = trainable
         self.max_length = max_length
         self.length_bucket_size = length_bucket_size
+        self.model_kwargs: dict = dict(model_kwargs or {})
+        # A fast tokenizer changes its padding/truncation state per call
+        # and raises "Already borrowed" when two threads use it at once
+        self._tokenizer_lock = threading.Lock()
         self.tokenizer = AutoTokenizer.from_pretrained(checkpoint)
-        self.model = AutoModel.from_pretrained(checkpoint, **(model_kwargs or {}))
+        self.model = AutoModel.from_pretrained(checkpoint, **self.model_kwargs)
 
         if not trainable:
             self.model.eval()
@@ -140,6 +248,21 @@ class PretrainedTextEncoder(TextEncoder):
         """The wrapped model's hidden size. Inputs: none. Output: int.
         Side effects: none. Exceptions: none."""
         return int(self.model.config.hidden_size)
+
+    def source(self) -> TextEncoderSource:
+        """The checkpoint, the commit hash it resolved to (None for a local
+        path), max_length and the model_kwargs. Inputs: none.
+        Output: TextEncoderSource. Side effects: none. Exceptions: none.
+
+        Example:
+            >>> encoder.source().revision
+            '8949b909ec900327062f0ebf497f51aef5e6f0c8'
+        """
+        revision = getattr(self.model.config, "_commit_hash", None)
+        kwargs = tuple(
+            sorted((name, repr(value)) for name, value in self.model_kwargs.items())
+        )
+        return TextEncoderSource(self.checkpoint, revision, self.max_length, kwargs)
 
     def train(self, mode: bool = True) -> "PretrainedTextEncoder":
         """Set train/eval mode, but keep a frozen LM in eval so its dropout
@@ -165,42 +288,67 @@ class PretrainedTextEncoder(TextEncoder):
             >>> encoder.encode(["{\\"name\\": \\"Bolt\\"}", "{\\"name\\": \\"Shock\\"}"])
             TokenEncoding(hidden_states=..., attention_mask=...)
         """
-        if self.length_bucket_size is None or len(texts) <= self.length_bucket_size:
-            return self._encode_batch(texts)
-        return self._encode_bucketed(texts)
+        return self._encode_with(texts, self._forward_whole_model)
 
-    def _encode_batch(self, texts: List[str]) -> TokenEncoding:
+    def _forward_whole_model(
+        self, input_ids: torch.Tensor, attention_mask: torch.Tensor
+    ) -> torch.Tensor:
+        """The model's own forward: last_hidden_state, without autograd
+        unless the model is trainable.
+
+        Private helper - encode's TokenForward.
+        Inputs: input_ids, attention_mask (N, L). Output: (N, L, hidden).
+        Side effects: none beyond autograd. Exceptions: the model's.
+        """
+        with torch.set_grad_enabled(torch.is_grad_enabled() and self.trainable):
+            return self.model(
+                input_ids=input_ids, attention_mask=attention_mask
+            ).last_hidden_state
+
+    def _encode_with(self, texts: List[str], forward: TokenForward) -> TokenEncoding:
+        """Tokenize texts and run forward on them, in length buckets when
+        the batch is longer than length_bucket_size.
+
+        Protected - encode's path, and a subclass's for other forwards
+        (ModernBertTextEncoder.encode_through).
+        Inputs: texts, forward. Output: TokenEncoding in texts' order.
+        Side effects: none beyond autograd. Exceptions: as forward and the
+            tokenizer raise.
+        """
+        if self.length_bucket_size is None or len(texts) <= self.length_bucket_size:
+            return self._encode_batch(texts, forward)
+        return self._encode_bucketed(texts, forward)
+
+    def _encode_batch(self, texts: List[str], forward: TokenForward) -> TokenEncoding:
         """Tokenize and forward the whole given batch in one call, padded
         to its own longest text.
 
-        Private helper - called directly by encode() for a batch at or
+        Private helper - called directly by _encode_with for a batch at or
         under length_bucket_size, and once per bucket from
         _encode_bucketed() for a larger one.
         """
         device = next(self.model.parameters()).device
-        tokenized = self.tokenizer(
-            texts,
-            padding=True,
-            truncation=True,
-            max_length=self.max_length,
-            return_tensors="pt",
-        ).to(device)
+        with self._tokenizer_lock:
+            tokenized = self.tokenizer(
+                texts,
+                padding=True,
+                truncation=True,
+                max_length=self.max_length,
+                return_tensors="pt",
+            ).to(device)
 
-        if self.trainable:
-            model_out = self.model(**tokenized)
-        else:
-            with torch.no_grad():
-                model_out = self.model(**tokenized)
-
+        attention_mask = tokenized["attention_mask"]
         return TokenEncoding(
-            hidden_states=model_out.last_hidden_state,
-            attention_mask=tokenized["attention_mask"],
+            hidden_states=forward(tokenized["input_ids"], attention_mask),
+            attention_mask=attention_mask,
         )
 
-    def _encode_bucketed(self, texts: List[str]) -> TokenEncoding:
+    def _encode_bucketed(
+        self, texts: List[str], forward: TokenForward
+    ) -> TokenEncoding:
         """Encode a batch as several shorter, length-sorted sub-batches.
 
-        Private helper - single consumer is encode(), for a batch longer
+        Private helper - single consumer is _encode_with, for a batch longer
         than length_bucket_size. Sorting by raw character length (rather
         than tokenizing every text up front just to measure it) is a
         cheap proxy for token length that is good enough to group similar
@@ -221,7 +369,8 @@ class PretrainedTextEncoder(TextEncoder):
             for start in range(0, len(order), bucket_size)
         ]
         encodings = [
-            self._encode_batch([texts[index] for index in bucket]) for bucket in buckets
+            self._encode_batch([texts[index] for index in bucket], forward)
+            for bucket in buckets
         ]
         return _merge_bucketed_encodings(encodings, buckets, len(texts))
 
@@ -288,7 +437,7 @@ class StaticEmbeddingTextEncoder(TextEncoder):
         self,
         tokenizer_checkpoint: str,
         embedding_dim: int,
-        max_length: int = _DEFAULT_MAX_LENGTH,
+        max_length: int = DEFAULT_MAX_LENGTH,
     ):
         super().__init__()
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_checkpoint)

@@ -55,6 +55,10 @@ CREATE TABLE IF NOT EXISTS metadata (
 # docstring for why this exists instead of SQLite's own RANDOM().
 _SEEDED_ORDER_FUNCTION_NAME = "deckbox_seeded_order"
 
+# Bound parameters per IN (...) query: under SQLite's oldest default
+# SQLITE_MAX_VARIABLE_NUMBER (999), so any linked SQLite accepts it
+_MAX_IN_PARAMETERS = 500
+
 _UPSERT_METADATA_SQL = (
     "INSERT OR REPLACE INTO metadata (source_game, card_binder_version) VALUES (?, ?)"
 )
@@ -109,6 +113,22 @@ def deck_from_row(row: sqlite3.Row, card_nocab_uuids: list[UUID]) -> GenericDeck
         card_nocab_uuids=card_nocab_uuids,
         provenance=provenance,
     )
+
+
+def _distinct_strings(nocab_uuids: list[UUID]) -> list[str]:
+    """nocab_uuids as strings, first occurrences only, in order."""
+    return list(dict.fromkeys(str(nocab_uuid) for nocab_uuid in nocab_uuids))
+
+
+def _chunks(values: list[str]) -> Iterator[list[str]]:
+    """values in consecutive slices of at most _MAX_IN_PARAMETERS."""
+    for start in range(0, len(values), _MAX_IN_PARAMETERS):
+        yield values[start : start + _MAX_IN_PARAMETERS]
+
+
+def _placeholders(values: list[str]) -> str:
+    """One "?" per value, comma-joined, for an IN (...) clause."""
+    return ", ".join("?" * len(values))
 
 
 def _deck_row_values(deck: GenericDeck) -> tuple:
@@ -222,7 +242,7 @@ class DeckTables:
         Side effects: none. Exceptions: none.
         """
         cursor = self._connection.execute(
-            "SELECT card_uuid, count FROM deck_cards WHERE deck_uuid = ?",
+            "SELECT card_uuid, count FROM deck_cards WHERE deck_uuid = ? ORDER BY rowid",
             (str(nocab_uuid),),
         )
         card_nocab_uuids: list[UUID] = []
@@ -230,16 +250,50 @@ class DeckTables:
             card_nocab_uuids.extend([UUID(row["card_uuid"])] * row["count"])
         return card_nocab_uuids
 
-    def deck_rows(
-        self, source_game: GameId | None, *, ordered_by_uuid: bool = False
-    ) -> Iterator[sqlite3.Row]:
+    def deck_rows_by_uuids(self, nocab_uuids: list[UUID]) -> dict[UUID, sqlite3.Row]:
+        """The decks rows for nocab_uuids, keyed by uuid; absent uuids
+        have no key. One query per _MAX_IN_PARAMETERS uuids.
+
+        Inputs: nocab_uuids (duplicates allowed). Output: dict.
+        Side effects: none. Exceptions: none.
+        """
+        rows: dict[UUID, sqlite3.Row] = {}
+        for chunk in _chunks(_distinct_strings(nocab_uuids)):
+            cursor = self._connection.execute(
+                f"SELECT * FROM decks WHERE nocab_uuid IN ({_placeholders(chunk)})",
+                chunk,
+            )
+            for row in cursor:
+                rows[UUID(row["nocab_uuid"])] = row
+        return rows
+
+    def deck_cards_by_uuids(self, nocab_uuids: list[UUID]) -> dict[UUID, list[UUID]]:
+        """Each of nocab_uuids' card multisets, expanded as deck_cards()
+        does and in the same order; a uuid with no deck_cards rows has no
+        key. One query per _MAX_IN_PARAMETERS uuids.
+
+        Inputs: nocab_uuids (duplicates allowed). Output: dict.
+        Side effects: none. Exceptions: none.
+        """
+        cards: dict[str, list[UUID]] = {}
+        for chunk in _chunks(_distinct_strings(nocab_uuids)):
+            # The deck_uuid index yields this order with no sort; rowid
+            # within a deck is the order deck_cards() returns
+            cursor = self._connection.execute(
+                "SELECT deck_uuid, card_uuid, count FROM deck_cards "
+                f"WHERE deck_uuid IN ({_placeholders(chunk)}) "
+                "ORDER BY deck_uuid, rowid",
+                chunk,
+            )
+            for deck_uuid, card_uuid, count in cursor:
+                cards.setdefault(deck_uuid, []).extend([UUID(card_uuid)] * count)
+        return {UUID(deck_uuid): deck_cards for deck_uuid, deck_cards in cards.items()}
+
+    def deck_rows(self, source_game: GameId | None) -> Iterator[sqlite3.Row]:
         """Every decks row, filtered by source_game if given, lazily.
 
-        Inputs:
-            source_game: filter, or None for every game.
-            ordered_by_uuid: sort by nocab_uuid (for content hashing);
-                otherwise no guaranteed order.
-        Output: Iterator[sqlite3.Row].
+        Inputs: source_game: filter, or None for every game.
+        Output: Iterator[sqlite3.Row], in no guaranteed order.
         Side effects: none. Exceptions: none.
         """
         sql = "SELECT * FROM decks"
@@ -247,9 +301,59 @@ class DeckTables:
         if source_game is not None:
             sql += " WHERE source_game = ?"
             params = (source_game.value,)
-        if ordered_by_uuid:
-            sql += " ORDER BY nocab_uuid"
         yield from self._connection.execute(sql, params)
+
+    def deck_card_rows_in_storage_order(self) -> Iterator[tuple[str, str, int]]:
+        """Every deck_cards row, every game, as (deck_uuid, card_uuid,
+        count), lazily, in rowid order: one sequential pass over the table.
+        insert_deck_cards writes a deck's rows in one statement, so each
+        deck's rows are adjacent.
+
+        Inputs: none. Output: Iterator of raw (str, str, int) tuples.
+        Side effects: none. Exceptions: none.
+        """
+        yield from self._connection.execute(
+            "SELECT deck_uuid, card_uuid, count FROM deck_cards ORDER BY rowid"
+        )
+
+    def deck_uuids_outside(self, source_game: GameId) -> set[str]:
+        """The stored uuids of every deck not of source_game (empty for a
+        one-game box, the usual case).
+
+        Inputs: source_game. Output: set[str].
+        Side effects: none. Exceptions: none.
+        """
+        cursor = self._connection.execute(
+            "SELECT nocab_uuid FROM decks WHERE source_game != ?",
+            (source_game.value,),
+        )
+        return {deck_uuid for (deck_uuid,) in cursor}
+
+    def card_less_deck_uuids(self, source_game: GameId) -> Iterator[str]:
+        """The stored uuids of source_game's decks with no deck_cards rows,
+        lazily (one index probe per deck).
+
+        Inputs: source_game. Output: Iterator[str].
+        Side effects: none. Exceptions: none.
+        """
+        cursor = self._connection.execute(
+            "SELECT nocab_uuid FROM decks d WHERE source_game = ? AND NOT EXISTS "
+            "(SELECT 1 FROM deck_cards c WHERE c.deck_uuid = d.nocab_uuid)",
+            (source_game.value,),
+        )
+        for (deck_uuid,) in cursor:
+            yield deck_uuid
+
+    def deck_count(self, source_game: GameId) -> int:
+        """How many decks rows source_game has.
+
+        Inputs: source_game. Output: int.
+        Side effects: none. Exceptions: none.
+        """
+        cursor = self._connection.execute(
+            "SELECT COUNT(*) FROM decks WHERE source_game = ?", (source_game.value,)
+        )
+        return cursor.fetchone()[0]
 
     def ranked_deck_rows(
         self, source_game: GameId, seed: int | None
@@ -340,7 +444,9 @@ class DeckTables:
 
     def insert_deck_cards(self, deck_uuid: UUID, card_nocab_uuids: list[UUID]) -> None:
         """Insert deck_uuid's card multiset into deck_cards, one
-        (deck_uuid, card_uuid, count) row per distinct card.
+        (deck_uuid, card_uuid, count) row per distinct card, in one
+        statement: a deck's rows must be one adjacent run for
+        DeckBox.deck_card_counts, so keep every write path that way.
 
         Inputs: deck_uuid, card_nocab_uuids. Output: none.
         Side effects: INSERTs, uncommitted. Exceptions: none.
@@ -378,7 +484,9 @@ class DeckTables:
         metadata into this connection. A deck path also provides has
         its existing deck_cards rows cleared first, since INSERT OR
         REPLACE into decks alone wouldn't remove card rows path's
-        version doesn't have.
+        version doesn't have. The copy is one statement in path's rowid
+        order, so each deck's rows stay one adjacent run (see
+        insert_deck_cards).
 
         Inputs: path, a DeckBox SQLite file. Output: none.
         Side effects: ATTACHes path read-only, writes and commits into

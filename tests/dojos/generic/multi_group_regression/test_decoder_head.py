@@ -11,7 +11,7 @@ class _StubPooler:
     stack/MLP wiring from MeanEmbeddingPooler's actual math."""
 
     def pool(self, embeddings):
-        return torch.zeros(embeddings[0].shape[0])
+        return torch.zeros(len(embeddings), embeddings.width)
 
 
 class TestForward:
@@ -39,14 +39,14 @@ class TestForwardSingle:
     def test_returns_scalar(self) -> None:
         head = MultiGroupRegressionDecoderHead(card_embedding_size=4)
 
-        result = head.forward_single([[torch.randn(4)], [torch.randn(4)]])
+        result = head([[[torch.randn(4)], [torch.randn(4)]]])[0]
 
         assert result.shape == ()
 
     def test_empty_second_group_does_not_raise(self) -> None:
         head = MultiGroupRegressionDecoderHead(card_embedding_size=4)
 
-        result = head.forward_single([[torch.randn(4), torch.randn(4)], []])
+        result = head([[[torch.randn(4), torch.randn(4)], []]])[0]
 
         assert result.shape == ()
 
@@ -54,8 +54,8 @@ class TestForwardSingle:
         head = MultiGroupRegressionDecoderHead(card_embedding_size=4)
         group_0 = [torch.randn(4)]
 
-        with_empty_group_1 = head.forward_single([group_0, []])
-        with_nonempty_group_1 = head.forward_single([group_0, [torch.randn(4)]])
+        with_empty_group_1 = head([[group_0, []]])[0]
+        with_nonempty_group_1 = head([[group_0, [torch.randn(4)]]])[0]
 
         # Different group-1 content must change the prediction - the
         # placeholder isn't silently ignored.
@@ -71,7 +71,7 @@ class TestEmptySecondGroupParameter:
     def test_receives_a_gradient_when_group_1_is_empty(self) -> None:
         head = MultiGroupRegressionDecoderHead(card_embedding_size=4)
 
-        result = head.forward_single([[torch.randn(4)], []])
+        result = head([[[torch.randn(4)], []]])[0]
         result.backward()
 
         assert head.empty_second_group.grad is not None

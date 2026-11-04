@@ -1,6 +1,6 @@
 """Decoder head for the multi-group-option-selection generic dojo cell.
 
-Ragged pack-option card embeddings PLUS a second (pool) card group in
+Pack-option card embeddings PLUS a second (pool) card group in
 (MultiGroupEmbedding = [option_embeddings, pool_embeddings] - **group 0
 is always the pack options, group 1 is always the pool** - see
 src/dojos/generic/data_constructors.py's PoolConditionedPickDataConstructor
@@ -15,7 +15,7 @@ instead of always None. With learns_skip_option, one learned "pick none"
 embedding is scored as a last extra option, so the logits run one longer.
 """
 
-from typing import List
+from typing import cast
 
 import torch
 import torch.nn as nn
@@ -25,7 +25,14 @@ from src.dojos.generic.option_scoring import (
     OptionScoringHead,
 )
 from src.dojos.generic.pooling import EmbeddingPooler, MeanEmbeddingPooler
-from src.schema.type_hints import BatchedMultiGroupEmbedding, MultiGroupEmbedding
+from src.dojos.generic.group_batching import padded_group
+from src.schema.padded_embeddings import PaddedEmbeddings, mask_from_lengths
+from src.schema.type_hints import BatchedMultiGroupEmbedding
+from src.utils.device_copy import host_tensor
+
+# Fixed group positions; see the module docstring
+_OPTIONS_GROUP = 0
+_POOL_GROUP = 1
 
 
 class MultiGroupOptionSelectionDecoderHead(nn.Module):
@@ -68,6 +75,7 @@ class MultiGroupOptionSelectionDecoderHead(nn.Module):
             card_embedding_size
         )
         self.pooler = pooler or MeanEmbeddingPooler()
+        self._width = card_embedding_size
         # The learned stand-in for "pick none of them"; None when the
         # cell has no skip option
         self.skip_embedding: nn.Parameter | None = (
@@ -76,44 +84,68 @@ class MultiGroupOptionSelectionDecoderHead(nn.Module):
             else None
         )
 
-    def forward(self, embeddings: BatchedMultiGroupEmbedding) -> List[torch.Tensor]:
-        """One ragged logits tensor per example in the batch.
+    def forward(self, embeddings: BatchedMultiGroupEmbedding) -> torch.Tensor:
+        """Every example's option logits, padded.
 
         Inputs:
             embeddings: one [option_embeddings, pool_embeddings] group
-                pair per training example in the batch (see class
-                docstring for why the group order is fixed).
-        Output: a List[torch.Tensor], one 1-D logits tensor per
-            example - see MultiCardOptionSelectionDecoderHead.forward()
-            for why this needs no further stacking.
+                pair per training example in the batch (see the module
+                docstring for why the group order is fixed). A pool may be
+                empty (a drafter's first pick has no pool yet).
+        Output: (examples, max_options) logits, -inf at padding, where
+            max_options counts the skip option when this head learns one.
+            The skip sits right after each example's real options, before
+            its padding, so a skip's label is still len(options).
         Side effects: none.
         Exceptions: none expected.
-        """
-        return [self.forward_single(group) for group in embeddings]
 
-    def forward_single(self, embeddings: MultiGroupEmbedding) -> torch.Tensor:
-        """Decode one example's [option_embeddings, pool_embeddings] to
-        its option logits, unbatched.
-
-        Inputs:
-            embeddings: one example's [option_embeddings,
-                pool_embeddings] group pair. pool_embeddings may be
-                empty (a drafter's first pick of a draft has no pool
-                yet) - see the empty-pool guard below.
-        Output: a (len(option_embeddings),) tensor of logits, or
-            (len(option_embeddings) + 1,) when this head learns a skip
-            option (the skip's logit is last).
-        Side effects: none.
-        Exceptions: none expected.
+        Example:
+            >>> head(embeddings).shape
+            torch.Size([2, 16])
         """
-        option_embeddings, pool_embeddings = embeddings
+        # Pack each group across the batch
+        options = padded_group(embeddings, _OPTIONS_GROUP, self._width)
+        pools = padded_group(embeddings, _POOL_GROUP, self._width)
+
         # The skip option scores like one more card, after the real ones
+        option_cards, option_mask = options.cards, options.mask
         if self.skip_embedding is not None:
-            option_embeddings = [*option_embeddings, self.skip_embedding]
-        # An empty pool (first pick of a draft) has nothing to pool -
-        # score with no conditioning context at all, same as
-        # multi_card_option_selection's unconditioned case, rather than
-        # calling self.pooler.pool([]) (undefined for an empty list -
-        # see MeanEmbeddingPooler's own docstring).
-        context = self.pooler.pool(pool_embeddings) if pool_embeddings else None
-        return self.scoring_head.score(option_embeddings, context=context)
+            option_cards, option_mask = self._with_skip_option(options)
+
+        # An empty pool (first pick) is scored as unconditioned
+        context = self.pooler.pool(pools)
+        context_mask = pools.has_cards()
+        return self.scoring_head.score(option_cards, option_mask, context, context_mask)
+
+    def _with_skip_option(
+        self, options: PaddedEmbeddings
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """options with skip_embedding written at each example's position
+        lengths[b], one column wider.
+
+        Private helper - single caller is forward.
+        Inputs: options, a MULTI_CARD batch; skip_embedding is not None.
+        Output: (cards (examples, max_options + 1, d), mask), still
+            left-aligned. Positions come from host lengths; the write is
+            out of place, so skip_embedding gets every row's gradient.
+        Side effects: none beyond autograd; non-blocking host-to-device
+            copies of the positions and mask (no device sync).
+        Exceptions: none.
+        """
+        skip = cast(nn.Parameter, self.skip_embedding)
+        examples, max_options, width = options.cards.shape
+
+        # One column wider; the skip goes right after each example's real options
+        positions = host_tensor(options.lengths, torch.long, options.cards.device)
+        widened = torch.cat(
+            [options.cards, options.cards.new_zeros((examples, 1, width))], dim=1
+        )
+        columns = torch.arange(max_options + 1, device=options.cards.device)
+        at_skip = columns.unsqueeze(0) == positions.unsqueeze(1)
+
+        # Out-of-place write, so skip_embedding gets every row's gradient
+        cards = torch.where(at_skip.unsqueeze(2), skip.to(widened.dtype), widened)
+        mask = mask_from_lengths(
+            [length + 1 for length in options.lengths], cards.device
+        )
+        return cards, mask

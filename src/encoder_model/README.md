@@ -23,8 +23,25 @@ so each card's embedding is contextualized by the rest of its group.
   (token states plus attention mask), with `output_dim` (the token
   width). `PretrainedTextEncoder` wraps a Hugging Face model
   (ModernBERT-base by default, `max_length=384`, optionally frozen) and
-  batches texts by length to limit padding. `StaticEmbeddingTextEncoder`
-  is a small from-scratch alternative.
+  batches texts by length to limit padding. `LayeredTextEncoder` is a
+  TextEncoder that can run in two parts, split after any layer
+  (`layer_count`, `encode_through(texts, layer)`, `encode_from(encoding,
+  layer)`, `is_frozen_through(layer)`, `keep_frozen_layers_in_eval()`): what a
+  token cut inside the encoder needs; its frozen layers stay in eval
+  mode, so a cache never stores train-mode states. `StaticEmbeddingTextEncoder` is a small from-scratch
+  alternative.
+- `modernbert_text_encoder.py` - `ModernBertTextEncoder(checkpoint,
+  trainable_top_layers=0)`, the `LayeredTextEncoder` for ModernBERT
+  checkpoints: frozen except its top `trainable_top_layers` layers and
+  final norm (the frozen layers stay in eval mode). Its `encode` runs
+  split at that boundary, so every use takes one forward path.
+  `load_text_encoder(checkpoint, trainable_top_layers)` picks it for a
+  ModernBERT checkpoint and a frozen `PretrainedTextEncoder` otherwise.
+- `modernbert_layer_stack.py` - `ModernBertLayerStack(model)`, an Adapter
+  that replays `ModernBertModel.forward` in two halves (`run_through`,
+  `run_from`), with the same masks, rotary tables and positions; the
+  halves reproduce the whole model exactly. Supports the `sdpa` and
+  `eager` attention implementations.
 - `enrichment/` - `TokenEnrichment` Strategy, `TokenEncoding` ->
   `TokenEncoding` (same mask, width may change), the pipeline's optional
   slot. `TokenWhitening(stats)`: `(x - mean) @ projection` on every token,
@@ -66,32 +83,55 @@ so each card's embedding is contextualized by the rest of its group.
   embedding scale cannot drift; the multi-card model's self-attention
   stack ends in the same norm.
 - `card_embedding_pipeline.py` - `CardEmbeddingPipeline(text_encoder,
-  enrichment, pooling, embedding_head)`: the one place the stages are
-  chained. `embed(cards)` serializes, encodes, enriches (when an
-  enrichment is given), pools and projects; every card is independent.
-  Every stage reports `input_dim`/`output_dim` (the text encoder only
+  enrichment, pooling, embedding_head, feature_cache=None)`: the one
+  place the stages are chained. `embed(cards)` serializes, encodes,
+  enriches (when an enrichment is given), pools and projects; every card
+  is independent. With a `feature_cache` (see `feature_cache/`), the
+  stages before the cache's cut run only on texts the cache has not
+  seen, and `warm(cards, precision)` fills it ahead of time. The
+  constructor refuses a cache when a stage before its cut is trainable.
+  Every
+  stage reports `input_dim`/`output_dim` (the text encoder only
   `output_dim`), and the constructor raises `ValueError` if adjacent
   widths differ. Its `output_dim` is the one source of a model's
   embedding width.
-- `card_encoder_model.py` - `CardEncoderModel`, the Template Method base
-  of both models. A subclass supplies `embed_together(cards)`, for cards
-  of one group that may see each other, and `embed_apart(cards)`, for
-  unrelated cards in one batched pass. The base maps every input shape
-  in `src/schema/type_hints.py` onto those two. It has one explicit
-  method per shape (`forward_single_card`, `forward_multi_card`,
-  `forward_multi_group`, `forward_batched_single_card`,
-  `forward_batched_multi_card`, `forward_batched_multi_group`) plus the
-  canonical `forward`. Also `embedding_dim` and
+- `pipeline_cut.py` - `PipelineCut` Strategy, the pipeline split in two
+  where a cache stands in: `encode_before_cut(texts)` (what the cache
+  stores) and `pool_after_cut(features)` (the rest, up to the pooled
+  vector). `PooledCut` (everything before the head; also the no-cache
+  path), `EncoderOutputCut` (any text encoder's whole token output) and
+  `LayerCut(k)` (a `LayeredTextEncoder`'s states after layer k; its
+  layers above k, the enrichment and the pooling run live and may
+  train).
+  `build_pipeline_cut(cut_point, ...)` builds the one the cache's
+  `CutPoint` names.
+- `feature_cache/` - `FrozenFeatureCache`, what the stages before a cut
+  make of each card text (a pooled vector, or ragged token states), kept
+  in a chain of tiers. The VRAM and pinned-RAM tiers are
+  slabs under a swappable `SlotPolicy` (LRU by default). The disk tier
+  is SQLite, one row set per frozen-stage fingerprint, so runs share
+  encodes. The cache is keyed by the serialized text, so modded cards
+  get their own entries, and it is never part of `state_dict()`.
+- `card_encoder_model.py` - `CardEncoderModel(card_pipeline)`, the
+  Template Method base of both models; it owns the `card_pipeline` and
+  exposes `warm(cards, precision)` and `feature_cache_stats()`.
+  `forward` runs one batched path for every input shape: flatten the
+  batch's cards, one `card_pipeline.embed` call, scatter into a padded
+  `(sequences, max_cards, d)` tensor, the subclass's
+  `contextualize(cards, mask)`, then zero the padding. A subclass
+  supplies only `contextualize`, in which a card may depend only on the
+  real cards of its own sequence. Also `embedding_dim` and
   `isolated_embeddings(cards, precision)`: every card embedded on its
   own, as a float32 `(N, embedding_dim)` CPU tensor, deterministically
   (eval mode) - the context-free view evaluation stores and analyses.
 - `single_card_model.py` - `SingleCardModel(card_pipeline)`: every card
-  embedded on its own by the pipeline, so `embed_together` and
-  `embed_apart` are the same.
+  embedded on its own by the pipeline; `contextualize` is the identity.
 - `multi_card_model.py` - `MultiCardModel(card_pipeline, num_heads,
   num_layers, ...)`: the pipeline, then a Transformer encoder at the
-  pipeline's `output_dim`. `embed_together` attends across the group;
-  `embed_apart` attends over length-one sequences.
+  pipeline's `output_dim`. `contextualize` is one self-attention call
+  over every padded sequence, with a key padding mask; an empty sequence
+  gets one unmasked dummy slot (a fully masked row would give NaN), which
+  `forward` zeroes.
 - `precision.py` - `Precision` (`"fp32"`/`"fp16"`/`"bf16"`),
   `autocast_for(model, precision)`, and `inference_context(model,
   precision)` (eval mode + no_grad + autocast, prior mode restored). Shared
@@ -112,12 +152,23 @@ so each card's embedding is contextualized by the rest of its group.
 ## Input shapes
 
 `model(x)` (`forward`) always reads `x` as a batch, which is what
-`Trainer` and the dojos pass. A flat list of cards is a batch of single
-cards, and each is embedded without seeing the others, even in
-`MultiCardModel`. A list of lists is a batch of multi-card examples,
-each contextualized on its own. A bare `GenericCard` is not a batch and
-raises `TypeError`. Code that holds one unbatched example calls the
-explicit method for its shape.
+`Trainer` and the dojos pass, and returns `ModelEmbeddings`
+(`src/schema/padded_embeddings.py`):
+
+| input | each example is | returned |
+|---|---|---|
+| list of cards | one card, its own length-one sequence | `PaddedEmbeddings`, `SINGLE_CARD`, `max_cards == 1` |
+| list of card lists | one sequence, contextualized on its own | `PaddedEmbeddings`, `MULTI_CARD` |
+| list of lists of card lists | one sequence per group | nested lists, one tensor per card (`[]` for an empty group) |
+
+So in `MultiCardModel` a batch of single cards never sees each other.
+`PaddedEmbeddings` holds `cards (examples, max_cards, d)`, a device
+`mask`, its `shape` and host `lengths`. Cards are left-aligned in input
+order, padding slots are exactly zero, and `max_cards` is this batch's
+longest example. An example may be empty, except the first: the shape
+is read from it. A bare `GenericCard` is not a batch and raises
+`TypeError`; code that holds one example wraps it in a one-example
+batch.
 
 ## How to run
 
@@ -125,8 +176,7 @@ explicit method for its shape.
 from src.encoder_model.reference_singlecard_models import LinearProjectionCardModel
 
 model = LinearProjectionCardModel(card_embedding_size=256)
-embeddings = model([card_a, card_b])        # batch of single cards -> one tensor each
-embedding = model.forward_single_card(card)  # one unbatched card -> one tensor
-deck = model.forward_multi_card([a, b, c])   # one deck, cards contextualized together
+embeddings = model([card_a, card_b])  # PaddedEmbeddings; .cards is (2, 1, 256)
+decks = model([[a, b, c], [d]])       # PaddedEmbeddings; .cards is (2, 3, 256), lengths (3, 1)
 table = model.isolated_embeddings(cards, "fp16")  # (len(cards), 256) float32, no context
 ```

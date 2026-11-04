@@ -4,6 +4,7 @@ from src.dojos.generic.multi_card_fixed_classification.decoder_head import (
     MultiCardFixedClassificationDecoderHead,
 )
 from src.dojos.generic.pooling import MeanEmbeddingPooler
+from tests.dojos.padding import padded
 
 
 class _StubPooler:
@@ -11,7 +12,7 @@ class _StubPooler:
     stack/MLP wiring from MeanEmbeddingPooler's actual math."""
 
     def pool(self, embeddings):
-        return torch.zeros(embeddings[0].shape[0])
+        return torch.zeros(len(embeddings), embeddings.width)
 
 
 class TestForward:
@@ -24,7 +25,7 @@ class TestForward:
             [torch.randn(4)],  # a 1-card deck - decks vary in size
         ]
 
-        output = head(embeddings)
+        output = head(padded(embeddings))
 
         assert output.shape == (2, 3)
 
@@ -37,14 +38,3 @@ class TestForward:
         )
         assert isinstance(default_head.pooler, MeanEmbeddingPooler)
         assert isinstance(stub_head.pooler, _StubPooler)
-
-
-class TestForwardSingle:
-    def test_returns_num_classes_vector(self) -> None:
-        head = MultiCardFixedClassificationDecoderHead(
-            card_embedding_size=4, num_classes=3
-        )
-
-        result = head.forward_single([torch.randn(4), torch.randn(4)])
-
-        assert result.shape == (3,)

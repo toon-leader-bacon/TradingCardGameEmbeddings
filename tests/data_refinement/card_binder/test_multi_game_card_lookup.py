@@ -61,6 +61,17 @@ class TestMultiGameCardLookup:
         assert lookup.get_by_uuid(mtg.nocab_uuid) == mtg
         assert lookup.get_by_uuid(uuid4()) is None
 
+    def test_source_games_of_checks_every_game(
+        self, lookup: MultiGameCardLookup, cards: tuple[GenericCard, GenericCard]
+    ) -> None:
+        gwent, mtg = cards
+        unknown = uuid4()
+
+        assert lookup.source_games_of([mtg.nocab_uuid, unknown, gwent.nocab_uuid]) == {
+            mtg.nocab_uuid: GameId.MTG,
+            gwent.nocab_uuid: GameId.GWENT,
+        }
+
     def test_game_keyed_calls_go_to_that_games_lookup(
         self, lookup: MultiGameCardLookup, cards: tuple[GenericCard, GenericCard]
     ) -> None:

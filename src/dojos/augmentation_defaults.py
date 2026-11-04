@@ -21,7 +21,6 @@ from src.dojos.mods.card_field_mods import FieldMask
 from src.dojos.mods.mod_specs import (
     ModSpec,
     RandomKeyMaskSpec,
-    ShuffleKeysSpec,
     WeightedFieldMaskSpec,
 )
 from src.schema.game_id import GameId
@@ -141,14 +140,15 @@ _HEARTHSTONE_MASKS: DropTable[FieldMask] = DropTable.of(
 
 
 def _standard_augmentations(masks: DropTable[FieldMask]) -> tuple[ModSpec, ...]:
-    """Key-order shuffle, then the game's weighted masks, then a small
-    chance of one more random key masked.
+    """The game's weighted masks, then a small chance of one more random
+    key masked. No key-order shuffle: every shuffled card is a new text,
+    stamped do-not-cache, so it defeated the feature cache (see
+    src/dojos/TODO.md for a bounded, cacheable shuffle).
 
     Inputs: masks. Output: tuple of ModSpec. Side effects: none.
     Exceptions: none.
     """
     return (
-        ShuffleKeysSpec(),
         WeightedFieldMaskSpec(masks),
         RandomKeyMaskSpec(probability=0.1),
     )
@@ -173,6 +173,6 @@ def default_augmentations_for(game: GameId) -> tuple[ModSpec, ...]:
 
     Example:
         >>> [type(spec).__name__ for spec in default_augmentations_for(GameId.GWENT)]
-        ['ShuffleKeysSpec', 'WeightedFieldMaskSpec', 'RandomKeyMaskSpec']
+        ['WeightedFieldMaskSpec', 'RandomKeyMaskSpec']
     """
     return DEFAULT_AUGMENTATIONS.get(game, ())

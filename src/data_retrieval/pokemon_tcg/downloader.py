@@ -25,11 +25,12 @@ _ARCHIVE_FILENAME = "pokemon-tcg-data.zip"  # zipball URLs carry no filename
 # of their own to derive one from
 _CARDS_PATH_SUFFIX = "cards/en"
 _DECKS_PATH_SUFFIX = "decks/en"
+_SETS_PATH_SUFFIX = "sets"  # one file, sets/en.json
 
 
 @dataclass
 class PokemonTcgDataDownloadResult:
-    """Paths to the two directories a completed fetch leaves on disk.
+    """Paths to the three directories a completed fetch leaves on disk.
 
     Inputs: none (data holder).
     Output: n/a.
@@ -39,6 +40,7 @@ class PokemonTcgDataDownloadResult:
 
     cards_dir: Path  # extracted *.json files from the repo's cards/en/
     decks_dir: Path  # extracted *.json files from the repo's decks/en/
+    sets_dir: Path  # the repo's sets/en.json (set codes, release dates)
 
 
 class PokemonTcgDataDownloader(Downloader):
@@ -73,8 +75,8 @@ class PokemonTcgDataDownloader(Downloader):
 
     def _run_phase_1(self) -> Path:
         """Download the repo zip, then extract it, returning
-        raw_data_dir — the extraction produces two equally-important
-        sibling directories (cards/, decks/), so there's no single
+        raw_data_dir — the extraction produces three
+        sibling directories (cards/, decks/, sets/), so there's no single
         primary artifact to return instead.
 
         Composed of download() followed by extract() — no additional
@@ -119,23 +121,26 @@ class PokemonTcgDataDownloader(Downloader):
         return destination_path
 
     def extract(self, zip_path: Path) -> PokemonTcgDataDownloadResult:
-        """Extract cards/en/*.json and decks/en/*.json from the zipball.
+        """Extract cards/en/*.json, decks/en/*.json and sets/en.json from
+        the zipball.
 
         A GitHub zipball wraps the whole repo under one variable,
         commit-specific top-level folder (e.g.
         "PokemonTCG-pokemon-tcg-data-<sha>/"), so members are matched
         by their path *suffix* (".../cards/en/<file>.json", ".../decks/en/<file>.json"),
         not an exact path. Delegates the actual per-directory copy to
-        _extract_matching_members so the cards/en and decks/en cases
-        share one implementation rather than two near-identical ones.
+        _extract_matching_members so the cards/en, decks/en and sets
+        cases share one implementation. sets/en.json maps each set id to
+        its PTCGL set code; deck sources that name cards by set code
+        need it (deck_box/limitless_play/card_index.py).
 
         Inputs:
             zip_path: path to a .zip file (e.g. one returned by
                 download()).
-        Output: PokemonTcgDataDownloadResult with both extracted
+        Output: PokemonTcgDataDownloadResult with the three extracted
             directory paths.
         Side effects: writes one .json file per matched zip member,
-            into raw_data_dir/cards/ and raw_data_dir/decks/.
+            into raw_data_dir/cards/, decks/ and sets/.
         Exceptions: raises if zip_path doesn't exist, isn't a valid
             zip file, no members match a given prefix (e.g. the repo's
             layout changed since this was written), or a file can't be
@@ -152,8 +157,13 @@ class PokemonTcgDataDownloader(Downloader):
             decks_dir = self._extract_matching_members(
                 zip_file, _DECKS_PATH_SUFFIX, self.raw_data_dir / "decks"
             )
+            sets_dir = self._extract_matching_members(
+                zip_file, _SETS_PATH_SUFFIX, self.raw_data_dir / "sets"
+            )
 
-        return PokemonTcgDataDownloadResult(cards_dir=cards_dir, decks_dir=decks_dir)
+        return PokemonTcgDataDownloadResult(
+            cards_dir=cards_dir, decks_dir=decks_dir, sets_dir=sets_dir
+        )
 
     def _extract_matching_members(
         self, zip_file: zipfile.ZipFile, path_suffix: str, destination_dir: Path

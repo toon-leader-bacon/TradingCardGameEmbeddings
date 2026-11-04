@@ -81,27 +81,83 @@ Top level:
   (`HoldoutSpec.card_tier_key`; the deck split does not matter) before any
   dojo is built, and copies the stats file into the run directory as
   `whitening_stats.pt`; the recorded `run_config.yaml` points at that
-  copy.
-- [model_spec.py](model_spec.py): `ModelSpec` and the pooling, enrichment
-  and group-attention specs inside it, the frozen form of the `model:`
-  section above.
+  copy. An optional `model.feature_cache:` caches what the frozen stages
+  make of each card text, so they run once per distinct text
+  (`../encoder_model/feature_cache/README.md`):
+
+  ```yaml
+  feature_cache:
+    cut: pooled                               # pooled (default) | tokens
+    cut_layer: 20                             # tokens only; absent = the encoder's output
+    storage_dtype: fp16                       # fp32 (default) | fp16 | bf16
+    vram: {capacity_mib: 512, policy: lru}    # lru | fifo | lfu | fill_until_full
+    ram:  {capacity_mib: 4096, admission: first_offer}  # | second_offer
+    disk: {path: data/feature_cache/features.sqlite, capacity_mib: 20480,
+           write: warm_only}                  # warm_only | all
+  ```
+
+  - An empty section means a single 512 MiB VRAM tier. Naming any tier
+    gives exactly the tiers named.
+  - `cut: pooled` caches the pooled vector and needs `pooling: {kind:
+    mean}`, because attention and transformer pooling are trainable.
+  - `cut: tokens` caches token states (one row per token, so tier
+    budgets hold far fewer cards); everything after the cut runs live,
+    so any pooling works. With `cut_layer: k` (ModernBERT only) the
+    encoder's layers above k run live too, and
+    `model.trainable_text_layers: n` (n <= layer_count - k; default 0)
+    trains its top n layers.
+  - A disk tier needs a Hugging Face checkpoint (one with a commit
+    hash). The disk stores only warm-ups unless `write: all`.
+  - The top-level `warm_feature_cache: [gwent, mtg]` (it requires the
+    cache) encodes every card of those games before the first step, at
+    `hardware.precision`, at roughly 200 cards/s on the RX 6800 (under
+    a second when they are already on disk).
+  - `scripts/warm_feature_cache.py <config>` does the same without
+    training, to fill the disk.
+  - The driver logs each tier's totals after warming and after training,
+    and closes the cache however the run ends.
+  - `policy` picks a memory tier's eviction (`fifo` suits the RAM tier,
+    which never sees VRAM's hits), and `admission: second_offer` stores
+    a text only the second time it misses.
+  - Random mods (key shuffle, random key mask, weighted field mask)
+    stamp the cards they change as do-not-cache: those texts are encoded
+    every time and never stored, so cached runs can keep their default
+    mods, and `write: all` is safe with them on.
+- [model_spec.py](model_spec.py): `ModelSpec` and the pooling, enrichment,
+  feature-cache and group-attention specs inside it, the frozen form of
+  the `model:` section above. `pooling_label(spec)` gives a pooling's
+  stable name for a feature cache fingerprint.
+- [feature_cache_assembly.py](feature_cache_assembly.py): a
+  `FeatureCacheSpec` -> the `FrozenFeatureCache` it describes.
+  `build_fingerprint` names the frozen stages' rows, and
+  `assemble_feature_cache` chains the VRAM, RAM and disk tiers it sets.
+  `scripts/run_training.py`'s `build_card_pipeline` calls both.
+- [binder_mods.py](binder_mods.py) and
+  [binder_mods_spec.py](binder_mods_spec.py): the optional `binder_mods:`
+  section (`BinderModsSpec`), a card-field mod pipeline applied once to
+  every card of each game before any dojo is built. `modded_binder(game,
+  spec)` returns a `ModdedCardBinder` whose `version_for(game)` answers
+  the clean binder's version, so card snapshots, metric dojos and the
+  contrastive dojo accept it unchanged. See "Binder mods" under How to run.
 - [config_parsing/](config_parsing/): the parsers `run_config.py` delegates
   to. `config_section.py` holds `ConfigSection`, the typed, key-checked
   reader of one mapping (every getter records its key, so unread keys
   raise) and the shared scalar checks; `diet_parsing.py`,
-  `model_parsing.py` and `mod_parsing.py` parse the `diet:`, `model:` and
-  `mods:` sections.
+  `model_parsing.py` and `mod_parsing.py` parse the `diet:`, `model:`,
+  `mods:` and `binder_mods:` sections.
 - [dojo_catalog.py](dojo_catalog.py): `DOJO_CATALOG`, every dojo a config
   can name, keyed `"<metric source>.<metric stem>"` (e.g.
   `gwent_one.color_mask`). The key becomes the dojo's `name`, so same-stem
   metrics from different games cannot collide. `build_dojos()` loads each
-  game's binder (and deck box) once, through a `CardShelf`. The 17lands
+  game's binder (and deck box, card and deck snapshots, and deck split
+  index) once, through a `CardShelf`. The 17lands
   keys (`seventeenlands_<family>.<stem>`) each train on their metric's
   all-sets, all-formats slice file. Contrastive
   entries (`contrastive.gwent`, `contrastive.flesh_and_blood`,
-  `contrastive.slay_the_spire_2`) read the game's final deck box directly
-  (positives: two cards from the same deck; split index under
-  `data/splits/contrastive/`). Every dojo, contrastive or metric, takes
+  `contrastive.slay_the_spire_2`) read the game's deck snapshot, checked
+  against its final deck box when the dojo is built (positives: two cards
+  from the same deck; split index under `data/splits/contrastive/`). Run
+  `scripts/build_training_snapshots.py` after deck box ingestion. Every dojo, contrastive or metric, takes
   the game's default augmentation mods, or a run config's per-dojo
   replacement (`mods:`); a metric dojo runs them after its own task mods.
   Deck mods are opt-in, for the dojos and groups in `DECK_MOD_GROUPS`.
@@ -123,6 +179,8 @@ Top level:
 - [TODO.md](TODO.md): the checklist to a first real training run.
   [Notes.md](Notes.md): the dated findings behind it (hardware, GPU
   measurements, serialization analysis).
+  [ENV_SIZING.md](ENV_SIZING.md): this machine's VRAM, RAM and feature
+  cache numbers, the suggested cache budgets, and step time by batch size.
 
 Subdirectories:
 
@@ -208,7 +266,7 @@ that overfit before saturating stays out instead of flip-flopping.
 sequenceDiagram
     participant T as Trainer
     participant S as DietSampler
-    participant B as DojoBatchStream
+    participant B as BatchFeed
     participant M as Encoder model
     participant D as Dojo
     participant E as evaluate_split_losses
@@ -216,13 +274,14 @@ sequenceDiagram
     participant C as Checkpointer / Listeners
 
     loop each Phase
-        T->>T: open phase (optimizer, tracker, sampler, streams)
+        T->>T: open phase (optimizer, tracker, sampler, batch feed)
         loop each Round (until phase_done or max_rounds)
             T->>K: active_dojo_names()
-            loop steps_per_round
-                T->>S: next_dojo(active)
-                S-->>T: dojo
-                T->>B: next_batch()
+            T->>S: next_dojo(active) x steps_per_round
+            S-->>T: round schedule
+            T->>B: begin_round(schedule)
+            loop each scheduled step
+                T->>B: next_batch(dojo.name)
                 B->>D: batches(TRAIN, budget)
                 B-->>T: batch
                 T->>M: model(batch.inputs)
@@ -230,6 +289,7 @@ sequenceDiagram
                 T->>D: compute_loss(embeddings, batch)
                 D-->>T: loss (backward + optimizer step)
             end
+            T->>B: end_round() (worker idle)
             T->>E: TEST losses, ALL dojos
             E-->>T: per-dojo loss
             T->>K: record_round(losses)
@@ -241,7 +301,25 @@ sequenceDiagram
 
 Points worth knowing:
 
-- The diet is re-decided only at round boundaries, from the ACTIVE dojos.
+- The diet is re-decided only at round boundaries, from the ACTIVE dojos:
+  each round's dojo order is drawn up front as a `RoundSchedule`. A
+  quarantine mid-round redraws the rest of the round.
+- Batches come from a `BatchFeed` (`diet/batch_feed.py`), one per phase,
+  in schedule order (see `diet/README.md`, "Prefetch").
+  - `hardware.torch_cpu_threads` (default 1) sets torch's intra-op CPU
+    threads at startup. A step's CPU side is many small tensor operations;
+    one thread per core spent the CPU spinning idle threads (2026-10-29
+    throughput shake-out).
+  - With `hardware.prefetch_depth: N` (default 0), a worker thread builds
+    the next N scheduled steps while the GPU trains.
+    `scripts/run_training.py` passes a `batch_warmer` that pins and warms
+    their cards in the model's feature cache, if it has one.
+  - The feed's round ends before each evaluation; the worker never
+    builds past a round, so it is already idle. Runs are reproducible
+    across depths.
+  - The feed is closed when the phase ends.
+  - A feed error (a dead worker, a call out of schedule order) ends the
+    run early ("batch feed failed"), never blaming a dojo.
 - One `BatchBudget` (from `HardwareLimits.max_batch_cost` and `cost_of`)
   is passed to every dojo, so no dojo owns a batch size.
 - Held-out dojos (`TrainingPlan.held_out_dojos`) are evaluated every round
@@ -294,7 +372,7 @@ Points worth knowing:
   rollback to the best checkpoint after divergence.
 - Not built: gradient accumulation, GradCache, several tasks per step,
   per-dojo step size on the shared encoder, staged partial unfreezing,
-  cached card encodings while the LM is frozen, token-aware `cost_of`,
+  token-aware `cost_of`,
   saving `GradScaler` state for resume, Hugging Face export.
 
 ## How to run
@@ -315,12 +393,17 @@ The script builds the model and the config's dojos, preflights every dojo
 logs each augmentation mod's tally over its one batch (cards changed,
 failed) and warns on a mod that changed nothing or failed; that never
 stops the run. A config's optional `mods:` section replaces a dojo's
-default augmentations (see `configs/training/gwent_contrastive.yaml`);
+default augmentations (see `configs/training/gwent_contrastive.yaml`).
+An optional top-level `default_augmentation: {probability, variants}`
+rewrites those rates on every game-default card-field mod, leaving dojos
+named in `mods:` alone (`AugmentationRates`, `mods/mod_specs.py`);
 dojo names contain ".", so `--set` cannot reach them (nor `loss_weights:`). The run
 directory must not already exist; it receives `run_config.yaml` (the
 config with overrides applied and dojo patterns expanded to names;
 defaults it left out are not written),
-`rounds.csv`, `checkpoints.csv`, the checkpoint directories and `run.log`,
+`rounds.csv`, `checkpoints.csv`, `samples.csv` (VRAM and feature cache
+stats every 10 s while training, `recording/run_sampler.py`), the
+checkpoint directories and `run.log`,
 the script's full log from its first line (see `src/run_logging.py`;
 `--log-file` and `--log-level` adjust it). Batch cost
 is one per card, for preflight and training alike (`card_cost`).
@@ -328,6 +411,45 @@ is one per card, for preflight and training alike (`card_cost`).
 built (their heads, dropout) and, separately, the model's initial weights:
 `build_model(spec, seed=plan.seed)` rebuilds a run's starting weights
 exactly, which is what an untrained control needs.
+
+### Binder mods
+
+An optional top-level `binder_mods:` section changes every card once,
+before any dojo is built, so TRAIN, VALIDATION and TEST all see the
+changed cards. Dojo `mods:` still run on top, per draw.
+
+```yaml
+binder_mods:
+  pipeline:                    # card-field entries, as in mods:; non-empty
+    - {kind: shuffle_keys}
+  seed: 0                      # optional; the bake's own seed, not the run's
+  save_directory: data/cache/binder_mods/shuffled   # optional; "" = don't save
+```
+
+- **What a card goes through.** Every card but the game's Unknown sentinel,
+  in `nocab_uuid` order with a fixed seed, so even an unbounded mod gives
+  the same binder every time. `train_only` is ignored and
+  `default_augmentation` never rewrites this pipeline. A baked card is
+  cacheable: it is the one text for its uuid for the whole run.
+- **Saved bakes.** With `save_directory`, each game is written as
+  `<game>.jsonl`, its alias ledger and `<game>.stamp.json` (format
+  version, clean binder version, a sha256 of `repr(pipeline)`, seed). The
+  stamp is moved into place last and marks the bake complete. A later run
+  whose spec matches loads the file without loading the clean binder; a
+  different pipeline or seed aborts with `BinderModsMismatchError`. The
+  stamp does not cover mod code or a re-ingested clean binder: delete the
+  directory after changing either.
+- **When it runs.** `run_training.py` checks the save directory is writable
+  right after parsing the config. The bake happens lazily inside
+  `build_dojos`, on the first dojo of each game, so `--check` is the cheap
+  way to bake ahead of an experiment's arms. `warm_feature_cache.py`
+  passes the same spec, so it warms the baked texts.
+- **Order.** The bake runs before every dojo mod and before label
+  extraction, so a binder mod that renames or moves keys (`key_case`,
+  `flatten_keys`) stops a dojo's field masks from matching (see the note
+  in `../dojos/mods/mod_pipeline.py`).
+- **Not covered.** `fit_whitening.py`, `survey_dojo_baselines.py` and
+  `run_evaluation.py` take no run config and always use the clean cards.
 
 Directly from code, assuming `model` is a `SingleCardModel`/`MultiCardModel`
 and `dojos` is a list of constructed `Dojo`s:

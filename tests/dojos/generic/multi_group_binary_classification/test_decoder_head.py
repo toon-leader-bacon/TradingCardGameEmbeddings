@@ -8,7 +8,7 @@ from src.dojos.generic.pooling import MeanEmbeddingPooler
 
 class _StubPooler:
     def pool(self, embeddings):
-        return torch.zeros(embeddings[0].shape[0])
+        return torch.zeros(len(embeddings), embeddings.width)
 
 
 class TestForward:
@@ -33,19 +33,19 @@ class TestForwardSingle:
     def test_returns_scalar(self) -> None:
         head = MultiGroupBinaryClassificationDecoderHead(card_embedding_size=4)
 
-        assert head.forward_single([[torch.randn(4)], [torch.randn(4)]]).shape == ()
+        assert head([[[torch.randn(4)], [torch.randn(4)]]])[0].shape == ()
 
     def test_group_order_matters(self) -> None:
         torch.manual_seed(0)
         head = MultiGroupBinaryClassificationDecoderHead(card_embedding_size=4)
         a, b = [torch.randn(4)], [torch.randn(4)]
 
-        assert head.forward_single([a, b]).item() != head.forward_single([b, a]).item()
+        assert head([[a, b]])[0].item() != head([[b, a]])[0].item()
 
     def test_empty_second_group_uses_learned_placeholder(self) -> None:
         head = MultiGroupBinaryClassificationDecoderHead(card_embedding_size=4)
 
-        head.forward_single([[torch.randn(4)], []]).backward()
+        head([[[torch.randn(4)], []]])[0].backward()
 
         assert head.empty_second_group.grad is not None
         assert any(p is head.empty_second_group for p in head.parameters())

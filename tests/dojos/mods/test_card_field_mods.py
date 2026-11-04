@@ -1,12 +1,15 @@
+import dataclasses
 import copy
 import logging
+import random
 from collections import Counter
 from datetime import datetime, timezone
-from uuid import uuid4
+from typing import Callable
 
 import pytest
 
 from src.dojos.mods.card_field_mods import (
+    UNBOUNDED_VARIANTS,
     CardFieldMod,
     FieldMask,
     RandomKeyMaskMod,
@@ -14,15 +17,22 @@ from src.dojos.mods.card_field_mods import (
     WeightedFieldMaskMod,
 )
 from src.dojos.mods.mod import MASK_TOKEN, ModTally
+from src.dojos.mods.variant_seeds import (
+    MAX_VARIANTS,
+    VARIANT_SEEDS,
+    card_variant_rng,
+    mod_salt,
+)
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 from src.utils.drop_table import DropTable
+from tests.dojos.mods.card_ids import content_uuid
 
 
 def _card(raw_content: dict) -> GenericCard:
     return GenericCard(
-        nocab_uuid=uuid4(),
+        nocab_uuid=content_uuid(raw_content),
         source_game=GameId.GWENT,
         name="Test Card",
         raw_content=raw_content,
@@ -44,7 +54,7 @@ def _gwent_card() -> GenericCard:
 
 
 class _ExplodingMod(CardFieldMod):
-    def modified_card(self, card: GenericCard) -> GenericCard:
+    def modified_card(self, card: GenericCard, rng: random.Random) -> GenericCard:
         raise RuntimeError("boom")
 
 
@@ -168,7 +178,7 @@ class TestShuffleKeysMod:
         mod = ShuffleKeysMod(rng_seed=0)
         orders = set()
         for _ in range(30):
-            shuffled = mod.modified_card(card)
+            shuffled = mod.modified_card(card, mod.rng)
             assert shuffled.raw_content == card.raw_content
             orders.add(tuple(shuffled.raw_content))
         assert len(orders) > 1
@@ -177,13 +187,15 @@ class TestShuffleKeysMod:
     def test_counts_only_real_reorders_as_changes(self) -> None:
         mod = ShuffleKeysMod(rng_seed=0)
         single = _card({"name": "x"})
-        assert mod.modified_card(single) is single
+        assert mod.modified_card(single, mod.rng) is single
         mod.apply_single((single, 0))
         assert mod.tally.cards_changed == 0
 
     def test_empty_card_is_unchanged(self) -> None:
         empty = _card({})
-        assert ShuffleKeysMod(rng_seed=0).modified_card(empty) is empty
+        assert (
+            ShuffleKeysMod(rng_seed=0).modified_card(empty, random.Random(0)) is empty
+        )
 
 
 class TestRandomKeyMaskMod:
@@ -194,7 +206,7 @@ class TestRandomKeyMaskMod:
 
     def test_masks_exactly_one_top_level_key(self) -> None:
         card = _gwent_card()
-        masked = RandomKeyMaskMod(rng_seed=0).modified_card(card)
+        masked = RandomKeyMaskMod(rng_seed=0).modified_card(card, random.Random(0))
         changed = [k for k in card.raw_content if masked.raw_content[k] == MASK_TOKEN]
         assert len(changed) == 1
 
@@ -204,7 +216,7 @@ class TestRandomKeyMaskMod:
         hits = Counter(
             next(
                 k
-                for k, v in mod.modified_card(card).raw_content.items()
+                for k, v in mod.modified_card(card, mod.rng).raw_content.items()
                 if v == MASK_TOKEN
             )
             for _ in range(400)
@@ -214,11 +226,13 @@ class TestRandomKeyMaskMod:
     def test_probability_zero_never_masks(self) -> None:
         card = _gwent_card()
         mod = RandomKeyMaskMod(probability=0.0, rng_seed=0)
-        assert all(mod.modified_card(card) is card for _ in range(50))
+        assert all(mod.apply_single((card, 0))[0] is card for _ in range(50))
 
     def test_empty_card_is_unchanged(self) -> None:
         empty = _card({})
-        assert RandomKeyMaskMod(rng_seed=0).modified_card(empty) is empty
+        assert (
+            RandomKeyMaskMod(rng_seed=0).modified_card(empty, random.Random(0)) is empty
+        )
 
 
 class TestWeightedFieldMaskMod:
@@ -230,13 +244,20 @@ class TestWeightedFieldMaskMod:
 
     def test_masks_what_the_table_pulls(self) -> None:
         table = DropTable.of([(1, FieldMask.of_keys("faction"))])
-        masked = WeightedFieldMaskMod(table, rng_seed=0).modified_card(_gwent_card())
+        masked = WeightedFieldMaskMod(table, rng_seed=0).modified_card(
+            _gwent_card(), random.Random(0)
+        )
         assert masked.raw_content["faction"] == MASK_TOKEN
 
     def test_an_empty_mask_row_means_nothing(self) -> None:
         card = _gwent_card()
         table = DropTable.of([(1, FieldMask())])
-        assert WeightedFieldMaskMod(table, rng_seed=0).modified_card(card) is card
+        assert (
+            WeightedFieldMaskMod(table, rng_seed=0).modified_card(
+                card, random.Random(0)
+            )
+            is card
+        )
 
     def test_weight_for_missing_fields_moves_to_present_ones(self) -> None:
         # back_face is absent, so every pull must land on faction
@@ -246,11 +267,13 @@ class TestWeightedFieldMaskMod:
         mod = WeightedFieldMaskMod(table, rng_seed=0)
         card = _gwent_card()
         for _ in range(20):
-            assert mod.modified_card(card).raw_content["faction"] == MASK_TOKEN
+            assert mod.modified_card(card, mod.rng).raw_content["faction"] == MASK_TOKEN
 
     def test_a_partly_present_mask_masks_what_exists(self) -> None:
         table = DropTable.of([(1, FieldMask.of_keys("faction", "faction-duo"))])
-        masked = WeightedFieldMaskMod(table, rng_seed=0).modified_card(_gwent_card())
+        masked = WeightedFieldMaskMod(table, rng_seed=0).modified_card(
+            _gwent_card(), random.Random(0)
+        )
         assert masked.raw_content["faction"] == MASK_TOKEN
         assert "faction-duo" not in masked.raw_content
 
@@ -258,7 +281,7 @@ class TestWeightedFieldMaskMod:
         card = _gwent_card()
         table = DropTable.of([(1, FieldMask.of_keys("back_face"))])
         mod = WeightedFieldMaskMod(table, rng_seed=0)
-        assert mod.modified_card(card) is card
+        assert mod.modified_card(card, mod.rng) is card
         mod.apply_single((card, 0))
         assert mod.tally.cards_failed == 0 and mod.tally.cards_changed == 0
 
@@ -269,9 +292,214 @@ class TestWeightedFieldMaskMod:
         table = DropTable.of([(1, meta)])
         mod = WeightedFieldMaskMod(table, rng_seed=0)
         results = {
-            str(mod.modified_card(_gwent_card()).raw_content["meta"]) for _ in range(40)
+            str(mod.modified_card(_gwent_card(), mod.rng).raw_content["meta"])
+            for _ in range(40)
         }
         assert results == {
             MASK_TOKEN,
             str({"armor": MASK_TOKEN, "tags": ["Human", "Blindeyes"]}),
         }
+
+
+class TestDoNotCacheStamp:
+    def test_a_changed_card_is_stamped(self) -> None:
+        mod = RandomKeyMaskMod(rng_seed=0)
+        masked, _ = mod.apply_single((_gwent_card(), 0))
+        assert masked.cacheable is False
+
+    def test_an_unchanged_card_is_not_stamped(self) -> None:
+        card = _gwent_card()
+        mod = RandomKeyMaskMod(probability=0.0, rng_seed=0)
+        passed, _ = mod.apply_single((card, 0))
+        assert passed is card and passed.cacheable is True
+
+    def test_every_card_field_mod_is_random_by_default(self) -> None:
+        table = DropTable.of([(1, FieldMask.of_keys("faction"))])
+        for mod in (ShuffleKeysMod(), RandomKeyMaskMod(), WeightedFieldMaskMod(table)):
+            assert mod.deterministic_cards is False
+
+
+def _text(card: GenericCard) -> str:
+    # Key order matters: a reorder is a different text
+    return repr(list(card.raw_content.items()))
+
+
+def _wide_card(copy_index: int = 0) -> GenericCard:
+    # Same content every time; copy_index gives a distinct, fixed card id
+    card = _card({f"key_{index}": index for index in range(8)})
+    if copy_index == 0:
+        return card
+    return dataclasses.replace(card, nocab_uuid=content_uuid(f"wide {copy_index}"))
+
+
+_FOUR_ROWS = DropTable.of(
+    [(1, FieldMask.of_keys(f"key_{index}")) for index in range(4)]
+)
+
+_BOUNDED_MODS: dict[str, Callable[[int, int], CardFieldMod]] = {
+    "shuffle_keys": lambda seed, n: ShuffleKeysMod(rng_seed=seed, variants=n),
+    "random_key_mask": lambda seed, n: RandomKeyMaskMod(rng_seed=seed, variants=n),
+    "weighted_field_mask": lambda seed, n: WeightedFieldMaskMod(
+        _FOUR_ROWS, rng_seed=seed, variants=n
+    ),
+}
+
+
+class TestBoundedVariants:
+    @pytest.mark.parametrize("make_mod", _BOUNDED_MODS.values(), ids=_BOUNDED_MODS)
+    def test_at_most_n_texts_per_card(
+        self, make_mod: Callable[[int, int], CardFieldMod]
+    ) -> None:
+        card = _wide_card()
+        mod = make_mod(0, 3)
+        texts = {_text(mod.apply_single((card, 0))[0]) for _ in range(200)}
+        assert 1 < len(texts) <= 3
+
+    @pytest.mark.parametrize("make_mod", _BOUNDED_MODS.values(), ids=_BOUNDED_MODS)
+    def test_every_run_seed_shares_the_same_variants(
+        self, make_mod: Callable[[int, int], CardFieldMod]
+    ) -> None:
+        card = _wide_card()
+        texts = {
+            _text(make_mod(seed, 2).apply_single((card, 0))[0])
+            for seed in range(20)
+            for _ in range(10)
+        }
+        assert len(texts) <= 2
+
+    def test_one_variant_still_differs_across_cards(self) -> None:
+        # The card's uuid is in the seed, so variant 0 is not one draw corpus-wide
+        mod = WeightedFieldMaskMod(_FOUR_ROWS, rng_seed=0, variants=1)
+        masked_keys = {
+            next(
+                k
+                for k, v in mod.apply_single((_wide_card(copy), 0))[
+                    0
+                ].raw_content.items()
+                if v == MASK_TOKEN
+            )
+            for copy in range(40)
+        }
+        assert len(masked_keys) > 1
+
+    def test_mod_classes_get_different_salts(self) -> None:
+        salts = {
+            mod_salt(cls)
+            for cls in (ShuffleKeysMod, RandomKeyMaskMod, WeightedFieldMaskMod)
+        }
+        assert len(salts) == 3
+
+    @pytest.mark.parametrize("make_mod", _BOUNDED_MODS.values(), ids=_BOUNDED_MODS)
+    def test_bounded_cards_are_not_stamped(
+        self, make_mod: Callable[[int, int], CardFieldMod]
+    ) -> None:
+        mod = make_mod(0, 4)
+        results = [mod.apply_single((_wide_card(), 0))[0] for _ in range(20)]
+        assert mod.deterministic_cards is True
+        assert mod.tally.cards_changed > 0
+        assert all(card.cacheable for card in results)
+
+    def test_a_stamped_card_stays_stamped(self) -> None:
+        # An unbounded mod upstream makes the text one of many again
+        shuffled, _ = ShuffleKeysMod(rng_seed=0).apply_single((_wide_card(), 0))
+        bounded = RandomKeyMaskMod(rng_seed=0, variants=4)
+        masked, _ = bounded.apply_single((shuffled, 0))
+        assert shuffled.cacheable is False
+        assert masked is not shuffled and masked.cacheable is False
+
+    @pytest.mark.parametrize("make_mod", _BOUNDED_MODS.values(), ids=_BOUNDED_MODS)
+    def test_zero_variants_turns_the_mod_off(
+        self, make_mod: Callable[[int, int], CardFieldMod]
+    ) -> None:
+        card = _wide_card()
+        mod = make_mod(0, 0)
+        assert all(mod.apply_single((card, 0))[0] is card for _ in range(20))
+        assert mod.tally.cards_seen == 20 and mod.tally.cards_changed == 0
+
+    @pytest.mark.parametrize("make_mod", _BOUNDED_MODS.values(), ids=_BOUNDED_MODS)
+    def test_negative_variants_draw_fresh_and_stamp(
+        self, make_mod: Callable[[int, int], CardFieldMod]
+    ) -> None:
+        card = _wide_card()
+        mod = make_mod(0, UNBOUNDED_VARIANTS)
+        results = [mod.apply_single((card, 0))[0] for _ in range(200)]
+        changed = [result for result in results if result is not card]
+        assert len({_text(result) for result in results}) >= 4
+        assert changed and not any(result.cacheable for result in changed)
+
+    @pytest.mark.parametrize("make_mod", _BOUNDED_MODS.values(), ids=_BOUNDED_MODS)
+    def test_rejects_more_variants_than_seeds(
+        self, make_mod: Callable[[int, int], CardFieldMod]
+    ) -> None:
+        with pytest.raises(ValueError, match="at most"):
+            make_mod(0, MAX_VARIANTS + 1)
+
+
+class TestVariantSeeds:
+    def test_one_hundred_distinct_seeds(self) -> None:
+        assert MAX_VARIANTS == 100 == len(set(VARIANT_SEEDS))
+
+    def test_same_inputs_same_draws(self) -> None:
+        card_uuid = content_uuid("variant test card")
+        first = card_variant_rng(5, card_uuid, 7)
+        second = card_variant_rng(5, card_uuid, 7)
+        assert [first.random() for _ in range(5)] == [second.random() for _ in range(5)]
+
+    def test_variant_card_and_salt_each_change_the_draws(self) -> None:
+        card_uuid = content_uuid("variant test card")
+        base = card_variant_rng(5, card_uuid, 7).random()
+        assert card_variant_rng(6, card_uuid, 7).random() != base
+        assert card_variant_rng(5, content_uuid("another card"), 7).random() != base
+        assert card_variant_rng(5, card_uuid, 8).random() != base
+
+    @pytest.mark.parametrize("variant", [-1, MAX_VARIANTS])
+    def test_rejects_a_variant_outside_the_table(self, variant: int) -> None:
+        with pytest.raises(IndexError):
+            card_variant_rng(variant, content_uuid("card"), 0)
+
+
+_GATED_MODS: dict[str, Callable[[float, int], CardFieldMod]] = {
+    "shuffle_keys": lambda p, n: ShuffleKeysMod(rng_seed=0, variants=n, probability=p),
+    "random_key_mask": lambda p, n: RandomKeyMaskMod(
+        probability=p, rng_seed=0, variants=n
+    ),
+    "weighted_field_mask": lambda p, n: WeightedFieldMaskMod(
+        _FOUR_ROWS, rng_seed=0, variants=n, probability=p
+    ),
+}
+
+
+class TestProbabilityGate:
+    @pytest.mark.parametrize("make_mod", _GATED_MODS.values(), ids=_GATED_MODS)
+    @pytest.mark.parametrize("variants", [UNBOUNDED_VARIANTS, 4])
+    def test_acts_on_about_probability_of_the_cards(
+        self, make_mod: Callable[[float, int], CardFieldMod], variants: int
+    ) -> None:
+        card = _wide_card()
+        mod = make_mod(0.1, variants)
+        changed = sum(mod.apply_single((card, 0))[0] is not card for _ in range(2000))
+        assert 120 <= changed <= 280  # about 10% of 2,000
+
+    @pytest.mark.parametrize("make_mod", _GATED_MODS.values(), ids=_GATED_MODS)
+    def test_zero_probability_never_acts(
+        self, make_mod: Callable[[float, int], CardFieldMod]
+    ) -> None:
+        card = _wide_card()
+        mod = make_mod(0.0, 4)
+        assert all(mod.apply_single((card, 0))[0] is card for _ in range(50))
+
+    def test_gated_bounded_draws_stay_within_n_texts(self) -> None:
+        # The gate is on the mod's own state, so a card that fires still
+        # lands on one of its n fixed variants
+        card = _wide_card()
+        mod = ShuffleKeysMod(rng_seed=0, variants=2, probability=0.5)
+        texts = {_text(mod.apply_single((card, 0))[0]) for _ in range(300)}
+        assert len(texts) <= 3  # the unchanged card plus at most 2 variants
+
+    @pytest.mark.parametrize("make_mod", _GATED_MODS.values(), ids=_GATED_MODS)
+    @pytest.mark.parametrize("probability", [-0.1, 1.1, float("nan")])
+    def test_rejects_a_bad_probability(
+        self, make_mod: Callable[[float, int], CardFieldMod], probability: float
+    ) -> None:
+        with pytest.raises(ValueError, match="probability"):
+            make_mod(probability, 4)

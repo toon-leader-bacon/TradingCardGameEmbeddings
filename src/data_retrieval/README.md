@@ -26,12 +26,16 @@ One subdirectory per source:
 | `cardvault_fabtcg/` | Flesh and Blood | cardvault.fabtcg.com's full card CSV |
 | `dominiontabs/` | Dominion | dominiontabs' card database (fields + English text) |
 | `fabtcg_decklists/` | Flesh and Blood | fabtcg.com decklist pages |
+| `fabtcgmeta_online_decks/` | Flesh and Blood | fabtcgmeta.com's Talishar online decklists: 8,192 static JSON shards, ~800k decks with card lists (source survey: `fab_deck_sources.md`) |
 | `gwent_one/` | Gwent | gwent.one card search results (HTML fragments) |
 | `hearthstonejson/` | Hearthstone | one `cards.json` per Hearthstone build |
+| `hearthstonetopdecks/` | Hearthstone | hearthstonetopdecks.com deck page URLs (the deck listing pages) and each page's title, deck code and details block |
+| `zenodo_hearthstone_decks/` | Hearthstone | Zenodo record 10198504's `decks.csv` and `cards.csv` (852k decks, 2013-2020, CC BY 4.0), MD5-checked |
 | `isotropic/` | Dominion | Wayback-archived isotropic.org game logs |
 | `pitchstack/` | Flesh and Blood | pitchstack.gg deck ids and card lists (`pitchstack.md`: unimplemented endpoints) |
+| `limitless_play/` | Pokemon | play.limitlesstcg.com API: PTCG tournament list and each tournament's standings with decklists (paced at 9/min, the server's keyless limit) |
 | `play_gwent/` | Gwent | playgwent.com deck guides |
-| `pokemon_tcg/` | Pokemon | the pokemon-tcg-data repo's card and deck JSON |
+| `pokemon_tcg/` | Pokemon | the pokemon-tcg-data repo's card and deck JSON, and `sets/en.json` (set codes) |
 | `scryfall/` | MTG | Scryfall oracle-cards and default-cards (every printing) bulk files |
 | `seventeenlands/` | MTG | 17lands per-set/per-format draft, game and replay CSVs (own [README](seventeenlands/README.md)) |
 | `spire_codex/` | Slay the Spire 2 | spire-codex `cards.json` and its paginated run export |

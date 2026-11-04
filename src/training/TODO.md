@@ -150,6 +150,24 @@ install) is in `Notes.md`.
   overfitting or as a TRAIN/TEST label shift (2026-10-11_model_by_diet_r2,
   Corrections).
 
+## Binder mods
+
+- [ ] **Check mod order at load time.** Reject a config whose
+  `binder_mods` renames or moves keys (`key_case`, `flatten_keys`) while
+  a dojo uses a mod that finds fields by name or path
+  (`MaskTargetKeyMod`, `WeightedFieldMaskMod`, label extraction). Today
+  this is only documented.
+- [ ] **Deck mods in a bake.** Decide what a deck-level pipeline applied
+  once to a deck box would mean. Only card mods for now.
+- [ ] **Whitening, baselines and evaluation see clean cards.**
+  `scripts/fit_whitening.py` and `scripts/survey_dojo_baselines.py` build
+  `CardShelf()` without a run config, and `scripts/run_evaluation.py`
+  loads `--binder_path`. Pointing evaluation at a saved bake works, but
+  that file loads as a plain `CardBinder` with its own version.
+- [ ] **A stamp from another format version** reads as a malformed stamp
+  (`ValueError`), not `BinderModsMismatchError`, once the layout changes.
+  Read `format_version` first when `BINDER_MODS_FORMAT_VERSION` is bumped.
+
 ## Housekeeping
 
 - [ ] **Document the ROCm torch install in `requirements.txt`** (command in

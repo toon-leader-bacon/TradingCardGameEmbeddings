@@ -3,7 +3,6 @@
 import logging
 import random
 from dataclasses import dataclass
-from typing import cast
 from uuid import UUID
 
 import torch
@@ -11,14 +10,15 @@ import torch
 from src.data_refinement.card_binder.card_lookup import CardLookup
 from src.dojos.contrastive.contrastive_batch import ContrastiveBatch
 from src.dojos.contrastive.contrastive_loss import (
+    ComparisonMasks,
     ContrastiveLoss,
     DegenerateBatchError,
     check_item_embeddings,
-    mean_anchor_loss,
-    mean_constant_logit_loss,
-    mean_item_embeddings,
-    pairwise_cosine_similarity,
-    identity_negative_mask,
+    clique_positive_mask,
+    constant_logit_baseline,
+    info_nce_loss,
+    info_nce_masks,
+    same_key_mask,
 )
 from src.dojos.contrastive.pair_constructor import (
     ContrastivePairConstructor,
@@ -28,11 +28,8 @@ from src.dojos.contrastive.pair_constructor import (
 )
 from src.dojos.contrastive.staple_subsampling import StapleSubsampling
 from src.schema.card import GenericDeck
-from src.schema.type_hints import (
-    BatchedModelOutput,
-    BatchedMultiCardEmbedding,
-    InputShape,
-)
+from src.schema.padded_embeddings import PaddedEmbeddings
+from src.schema.type_hints import InputShape
 
 _logger = logging.getLogger(__name__)
 
@@ -164,11 +161,11 @@ class MissingCardInfoNCELoss:
     one embedding. Every unit is an anchor. A context's positive is its
     own card and its negatives are the other cards; the other contexts
     are excluded (never compared). The same holds with the roles
-    swapped. So the loss reduces to the shared anchor_loss with
-    same-role units as excluded_indices. Two decks missing the same card
-    are each other's right answers too, so each excludes the other's card
-    and context as well (identity_negative_mask can't see this: a context
-    and a card never share an identity).
+    swapped. So the loss reduces to the shared info_nce_loss with
+    same-role units excluded. Two decks missing the same card are each
+    other's right answers too, so each excludes the other's card and
+    context as well (identity duplicates can't catch this: a context and
+    a card never share an identity).
     """
 
     def __init__(self, temperature: float = 0.07) -> None:
@@ -186,50 +183,36 @@ class MissingCardInfoNCELoss:
 
     def calculate(
         self,
-        item_embeddings: BatchedModelOutput,
+        item_embeddings: PaddedEmbeddings,
         identities: list[tuple[UUID, ...]],
         positive_cliques: list[list[int]],
     ) -> torch.Tensor:
         """Mean anchor-wise InfoNCE over every context and every card.
 
         Inputs: see ContrastiveLoss.calculate(). item_embeddings must be
-            multi-card-shaped; positive_cliques must be ordered
-            [context, card] pairs whose card item holds one card (the
+            MULTI_CARD; positive_cliques must be ordered [context, card]
+            pairs whose card item holds one card (the
             MissingCardPairConstructor layout).
         Output: a scalar loss tensor: the mean over all 2 x (pair count)
             anchors of each anchor's own InfoNCE loss.
         Side effects: none.
-        Exceptions: ValueError on a length mismatch, a non-multi-card
-            shape, a clique that isn't a [context, one-card item] pair,
-            or a batch with no pair.
+        Exceptions: ValueError on a length mismatch, a non-MULTI_CARD
+            shape, or a clique that isn't a [context, one-card item]
+            pair; DegenerateBatchError for a batch with no pair.
 
         Example:
             >>> loss_fn = MissingCardInfoNCELoss()
             >>> loss_fn.calculate(item_embeddings, identities, [[0, 1], [2, 3]])
         """
-        # Validate inputs and parse the cliques into typed pairs
+        # Validate inputs and build the masks from the parsed pairs
         check_item_embeddings(
             item_embeddings, identities, InputShape.MULTI_CARD, "MissingCardInfoNCELoss"
         )
-        pairs = self._context_card_pairs(positive_cliques, identities)
-        multi_card_embeddings = cast(BatchedMultiCardEmbedding, item_embeddings)
+        masks = self._masks(positive_cliques, identities)
 
         # One unit per item: a context's mean embedding, a card's own
-        unit_embeddings = mean_item_embeddings(multi_card_embeddings)
-        similarity = pairwise_cosine_similarity(unit_embeddings)
-        valid_negative_mask = identity_negative_mask(identities, similarity.device)
-        positives_by_anchor, excluded_by_anchor = self._positives_and_exclusions(
-            pairs, identities
-        )
-
-        # Every context and every card is an anchor
-        return mean_anchor_loss(
-            positives_by_anchor,
-            excluded_by_anchor,
-            similarity,
-            valid_negative_mask,
-            self._temperature,
-        )
+        units = item_embeddings.mean_per_example()
+        return info_nce_loss(units, masks, self._temperature)
 
     def constant_logit_loss(
         self,
@@ -245,16 +228,30 @@ class MissingCardInfoNCELoss:
             ...     identities, [[0, 1], [2, 3], [4, 5]])
             1.098...
         """
-        result: float
-        # Same parse and expansion calculate() uses
+        return constant_logit_baseline(self._masks(positive_cliques, identities))
+
+    def _masks(
+        self, positive_cliques: list[list[int]], identities: list[tuple[UUID, ...]]
+    ) -> ComparisonMasks:
+        """Each context's positive is its own card and vice versa. Every
+        same-role unit is excluded (contexts are never compared with
+        contexts, nor cards with cards), and so is the other role of
+        every pair missing the same card (a right answer, not a negative).
+
+        Private helper - callers are calculate() and constant_logit_loss().
+        Inputs: positive_cliques, identities.
+        Output: ComparisonMasks over the items: positive from the cliques;
+            excluded = same_key_mask(role) | same_key_mask(missing card);
+            built from per-item keys, no per-anchor loop.
+        Side effects: none.
+        Exceptions: as _context_card_pairs.
+        """
         pairs = self._context_card_pairs(positive_cliques, identities)
-        positives_by_anchor, excluded_by_anchor = self._positives_and_exclusions(
-            pairs, identities
+        positive = clique_positive_mask(positive_cliques, len(identities))
+        excluded = same_key_mask(_roles(pairs, len(identities))) | same_key_mask(
+            _missing_cards(pairs, identities)
         )
-        result = mean_constant_logit_loss(
-            identities, positives_by_anchor, excluded_by_anchor
-        )
-        return result
+        return info_nce_masks(positive, identities, excluded)
 
     def _context_card_pairs(
         self,
@@ -297,49 +294,37 @@ class MissingCardInfoNCELoss:
             result.append(_ContextCardPair(context_index, card_index))
         return result
 
-    def _positives_and_exclusions(
-        self,
-        pairs: list[_ContextCardPair],
-        identities: list[tuple[UUID, ...]],
-    ) -> tuple[dict[int, list[int]], dict[int, set[int]]]:
-        """Each anchor's positive and exclusions.
 
-        Private helper - callers are calculate() and constant_logit_loss().
-        Inputs: pairs, identities (to find decks missing the same card).
-        Output: (positives_by_anchor, excluded_by_anchor), keyed by item
-            index. A context's positive is [its card]; it excludes every
-            other context, and every other deck's card that is the same
-            card as its own (a right answer, not a negative). A card's
-            positive is [its context]; it excludes every other card, and
-            every other context missing the same card.
-        Side effects: none.
-        Exceptions: none.
-        """
-        positives_by_anchor: dict[int, list[int]] = {}
-        excluded_by_anchor: dict[int, set[int]] = {}
-        context_indices = {pair.context_index for pair in pairs}
-        card_indices = {pair.card_index for pair in pairs}
+def _roles(pairs: list[_ContextCardPair], item_count: int) -> list[bool]:
+    """Each item's role: True for a context slice, False for a card.
 
-        # Pairs grouped by their missing card: two decks missing the same
-        # card are each other's right answers too, so neither a negative
-        pairs_by_missing_card: dict[tuple[UUID, ...], list[_ContextCardPair]] = {}
-        for pair in pairs:
-            pairs_by_missing_card.setdefault(identities[pair.card_index], []).append(
-                pair
-            )
+    Private helper - single caller is MissingCardInfoNCELoss._masks.
+    Inputs: pairs (covering every item once), item_count.
+    Output: list[bool], one per item. Side effects: none.
+    Exceptions: none.
+    """
+    result = [False] * item_count
+    for pair in pairs:
+        result[pair.context_index] = True
+    return result
 
-        # Each pair gives two anchors, its context and its card
-        for pair in pairs:
-            twins = pairs_by_missing_card[identities[pair.card_index]]
-            positives_by_anchor[pair.context_index] = [pair.card_index]
-            excluded_by_anchor[pair.context_index] = (
-                context_indices - {pair.context_index}
-            ) | {twin.card_index for twin in twins if twin != pair}
-            positives_by_anchor[pair.card_index] = [pair.context_index]
-            excluded_by_anchor[pair.card_index] = (card_indices - {pair.card_index}) | {
-                twin.context_index for twin in twins if twin != pair
-            }
-        return positives_by_anchor, excluded_by_anchor
+
+def _missing_cards(
+    pairs: list[_ContextCardPair], identities: list[tuple[UUID, ...]]
+) -> list[tuple[UUID, ...]]:
+    """Each item's pair's missing card, for both the context and the card.
+
+    Private helper - single caller is MissingCardInfoNCELoss._masks.
+    Inputs: pairs, identities.
+    Output: one key per item: identities[pair.card_index] for both items
+        of each pair. Side effects: none. Exceptions: none.
+    """
+    result: list[tuple[UUID, ...]] = [()] * len(identities)
+    for pair in pairs:
+        missing = identities[pair.card_index]
+        result[pair.context_index] = missing
+        result[pair.card_index] = missing
+    return result
 
 
 @dataclass(frozen=True)
@@ -349,7 +334,11 @@ class MissingCardStyle:
     slice). See plans/multi_card_contrastive_dojos.md, style D.
 
     slice_size: cards in each context slice (>= 2); a deck then costs
-        slice_size + 1 cards of the batch budget.
+        slice_size + 1 cards of the batch budget. Padding overhead: the
+        one-card item is padded to slice_size, so a deck holds
+        2 x slice_size padded slots for slice_size + 1 real cards, under
+        2x. ContrastiveDojo budgets real cards, so this overhead is not
+        charged (see plans/tensor_native_batches.md, section 3).
     """
 
     slice_size: int = 8

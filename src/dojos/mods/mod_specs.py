@@ -14,15 +14,32 @@ lists and are opt-in per dojo, for the groups the catalog allows
 (src/training/dojo_catalog.py, DECK_MOD_GROUPS).
 """
 
+import dataclasses
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any, ClassVar, Generic
 
 from src.dojos.mods.card_field_mods import (
+    UNBOUNDED_VARIANTS,
     CardFieldMod,
+    check_card_field_rates,
     FieldMask,
     RandomKeyMaskMod,
     ShuffleKeysMod,
     WeightedFieldMaskMod,
+)
+from src.dojos.mods.content_style_mods import (
+    BoolSpelling,
+    BoolToStringMod,
+    FlattenKeysMod,
+    KeyCase,
+    KeyCaseMod,
+    ListToStringMod,
+    NumberToStringMod,
+    StyleChoiceMod,
+    StyleT,
+    ValueCase,
+    ValueCaseMod,
 )
 from src.dojos.mods.deck_mods import (
     CardDropoutMod,
@@ -59,51 +76,221 @@ class ModSpec(ABC):
 
 
 @dataclass(frozen=True)
-class ShuffleKeysSpec(ModSpec):
-    """Builds a ShuffleKeysMod.
+class AugmentationRates:
+    """A run-wide rewrite of the game default augmentations' rates
+    (src/dojos/augmentation_defaults.py); None keeps each spec's own.
+
+    probability: chance each card-field mod acts on a card, in [0, 1];
+        it replaces each spec's own (it does not multiply it).
+    variants: texts per card for each card-field mod (see
+        src/dojos/mods/card_field_mods.py).
 
     Example:
-        >>> ShuffleKeysSpec().build(rng_seed=0)
+        >>> AugmentationRates(probability=0.1, variants=4)
     """
 
-    def build(self, rng_seed: int | None) -> CardFieldMod:
-        """See ModSpec.build."""
-        return ShuffleKeysMod(rng_seed=rng_seed)
+    probability: float | None = None
+    variants: int | None = None
+
+    def __post_init__(self) -> None:
+        # Validate inputs with the mods' own rules; a None keeps a spec's own
+        check_card_field_rates(
+            1.0 if self.probability is None else self.probability,
+            UNBOUNDED_VARIANTS if self.variants is None else self.variants,
+        )
+
+
+class CardFieldModSpec(ModSpec):
+    """A recipe for one card-field mod. Subclasses are frozen dataclasses
+    declaring the two fields below, which with_rates rewrites.
+
+    probability: chance the mod acts on a card, in [0, 1].
+    variants: texts per card (see src/dojos/mods/card_field_mods.py).
+    """
+
+    probability: float
+    variants: int
+
+    def with_rates(self, rates: AugmentationRates) -> "CardFieldModSpec":
+        """This spec with rates' non-None fields in place of its own.
+
+        Inputs: rates. Output: a new spec (self when rates changes nothing).
+        Side effects: none.
+        Exceptions: ValueError as the mod's constructor, for a rate it
+            rejects.
+
+        Example:
+            >>> RandomKeyMaskSpec(0.5).with_rates(AugmentationRates(variants=4))
+            RandomKeyMaskSpec(probability=0.5, variants=4)
+        """
+        changes: dict[str, Any] = {}
+        if rates.probability is not None:
+            changes["probability"] = rates.probability
+        if rates.variants is not None:
+            changes["variants"] = rates.variants
+        if not changes:
+            return self
+        # Every subclass is a frozen dataclass with both fields
+        return dataclasses.replace(self, **changes)  # type: ignore[type-var]
 
 
 @dataclass(frozen=True)
-class RandomKeyMaskSpec(ModSpec):
+class ShuffleKeysSpec(CardFieldModSpec):
+    """Builds a ShuffleKeysMod.
+
+    variants: texts per card (negative: unbounded; 0: off; N > 0: at most
+        N, cacheable); see src/dojos/mods/card_field_mods.py.
+    probability: chance a card is shuffled at all, in [0, 1].
+
+    Example:
+        >>> ShuffleKeysSpec(variants=4).build(rng_seed=0)
+    """
+
+    variants: int = UNBOUNDED_VARIANTS
+    probability: float = 1.0
+
+    def build(self, rng_seed: int | None) -> CardFieldMod:
+        """See ModSpec.build."""
+        return ShuffleKeysMod(
+            probability=self.probability, rng_seed=rng_seed, variants=self.variants
+        )
+
+
+@dataclass(frozen=True)
+class RandomKeyMaskSpec(CardFieldModSpec):
     """Builds a RandomKeyMaskMod.
 
     probability: chance a card gets one key masked, in [0, 1].
+    variants: as ShuffleKeysSpec.
 
     Example:
         >>> RandomKeyMaskSpec(probability=0.1).build(rng_seed=0)
     """
 
     probability: float
+    variants: int = UNBOUNDED_VARIANTS
 
     def build(self, rng_seed: int | None) -> CardFieldMod:
         """See ModSpec.build."""
-        return RandomKeyMaskMod(probability=self.probability, rng_seed=rng_seed)
+        return RandomKeyMaskMod(
+            probability=self.probability, rng_seed=rng_seed, variants=self.variants
+        )
 
 
 @dataclass(frozen=True)
-class WeightedFieldMaskSpec(ModSpec):
+class WeightedFieldMaskSpec(CardFieldModSpec):
     """Builds a WeightedFieldMaskMod.
 
     table: the DropTable of FieldMasks (immutable, so shared safely
         across every mod built from this spec).
+    variants: as ShuffleKeysSpec.
+    probability: chance a mask is pulled for a card at all, in [0, 1]
+        (a pulled mask may still be the empty one).
 
     Example:
         >>> WeightedFieldMaskSpec(DropTable.of([(1, FieldMask.of_keys("name"))]))
     """
 
     table: DropTable[FieldMask]
+    variants: int = UNBOUNDED_VARIANTS
+    probability: float = 1.0
 
     def build(self, rng_seed: int | None) -> CardFieldMod:
         """See ModSpec.build."""
-        return WeightedFieldMaskMod(self.table, rng_seed=rng_seed)
+        return WeightedFieldMaskMod(
+            self.table,
+            probability=self.probability,
+            rng_seed=rng_seed,
+            variants=self.variants,
+        )
+
+
+@dataclass(frozen=True)
+class StyleChoiceSpec(CardFieldModSpec, Generic[StyleT]):
+    """Template Method base for the content style specs
+    (src/dojos/mods/content_style_mods.py): the fields and build() are
+    shared, each subclass names only its MOD_CLASS.
+
+    styles: the styles one is drawn from per card (None: the mod's
+        DEFAULT_STYLES).
+    variants, probability: as ShuffleKeysSpec.
+
+    Example:
+        >>> KeyCaseSpec(styles=(KeyCase.CAMEL,)).build(rng_seed=0)
+    """
+
+    MOD_CLASS: ClassVar[type[StyleChoiceMod[Any]]]
+
+    styles: tuple[StyleT, ...] | None = None
+    variants: int = UNBOUNDED_VARIANTS
+    probability: float = 1.0
+
+    def build(self, rng_seed: int | None) -> CardFieldMod:
+        """See ModSpec.build."""
+        return type(self).MOD_CLASS(
+            styles=self.styles,
+            probability=self.probability,
+            rng_seed=rng_seed,
+            variants=self.variants,
+        )
+
+
+@dataclass(frozen=True)
+class KeyCaseSpec(StyleChoiceSpec[KeyCase]):
+    """Builds a KeyCaseMod; see StyleChoiceSpec."""
+
+    MOD_CLASS = KeyCaseMod
+
+
+@dataclass(frozen=True)
+class FlattenKeysSpec(StyleChoiceSpec[str]):
+    """Builds a FlattenKeysMod (styles are separators); see StyleChoiceSpec."""
+
+    MOD_CLASS = FlattenKeysMod
+
+
+@dataclass(frozen=True)
+class ValueCaseSpec(StyleChoiceSpec[ValueCase]):
+    """Builds a ValueCaseMod; see StyleChoiceSpec."""
+
+    MOD_CLASS = ValueCaseMod
+
+
+@dataclass(frozen=True)
+class BoolToStringSpec(StyleChoiceSpec[BoolSpelling]):
+    """Builds a BoolToStringMod; see StyleChoiceSpec."""
+
+    MOD_CLASS = BoolToStringMod
+
+
+@dataclass(frozen=True)
+class ListToStringSpec(StyleChoiceSpec[str]):
+    """Builds a ListToStringMod (styles are separators); see StyleChoiceSpec."""
+
+    MOD_CLASS = ListToStringMod
+
+
+@dataclass(frozen=True)
+class NumberToStringSpec(CardFieldModSpec):
+    """Builds a NumberToStringMod (src/dojos/mods/content_style_mods.py).
+
+    No styles: one fixed spelling, so variants only switches it off at 0.
+    variants, probability: as ShuffleKeysSpec.
+
+    Example:
+        >>> NumberToStringSpec(probability=0.5).build(rng_seed=0)
+    """
+
+    variants: int = UNBOUNDED_VARIANTS
+    probability: float = 1.0
+
+    def build(self, rng_seed: int | None) -> CardFieldMod:
+        """See ModSpec.build."""
+        return NumberToStringMod(
+            probability=self.probability,
+            rng_seed=rng_seed,
+            variants=self.variants,
+        )
 
 
 class DeckModSpec(ModSpec):

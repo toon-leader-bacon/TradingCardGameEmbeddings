@@ -47,6 +47,16 @@ def test_train_view_sees_only_train_tier() -> None:
     assert view.get_by_uuid(by_tier[CardTier.VALIDATION].nocab_uuid) is None
 
 
+def test_source_games_of_hides_cards_outside_the_view() -> None:
+    binder, spec, by_tier = _binder_with_one_card_per_tier()
+    view = VisibleCardLookup(binder, spec, Split.TRAIN)
+    uuids = [card.nocab_uuid for card in by_tier.values()]
+
+    assert view.source_games_of(uuids) == {
+        by_tier[CardTier.TRAIN].nocab_uuid: GameId.MTG
+    }
+
+
 def test_validation_view_sees_everything() -> None:
     binder, spec, by_tier = _binder_with_one_card_per_tier()
     view = VisibleCardLookup(binder, spec, Split.VALIDATION)

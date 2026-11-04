@@ -20,7 +20,6 @@ which is read next to a context-sensitivity measure (src/evaluation/TODO.md).
 
 import random
 from dataclasses import dataclass
-from typing import cast
 from uuid import UUID
 
 import torch
@@ -30,6 +29,7 @@ from src.dojos.contrastive.contrastive_batch import ContrastiveBatch
 from src.dojos.contrastive.contrastive_loss import (
     ContrastiveLoss,
     check_item_embeddings,
+    require_card_aligned_identities,
 )
 from src.dojos.contrastive.pair_constructor import (
     ContrastivePairConstructor,
@@ -40,12 +40,8 @@ from src.dojos.contrastive.pair_constructor import (
 from src.dojos.contrastive.staple_subsampling import StapleSubsampling
 from src.dojos.contrastive.styles.single_card import SingleCardInfoNCELoss
 from src.schema.card import GenericDeck
-from src.schema.type_hints import (
-    BatchedModelOutput,
-    BatchedMultiCardEmbedding,
-    Embedding,
-    InputShape,
-)
+from src.schema.padded_embeddings import PaddedEmbeddings
+from src.schema.type_hints import InputShape
 
 # Where each item's anchor sits; the constructor and loss both read this
 _ANCHOR_POSITION = 0
@@ -179,18 +175,20 @@ class AnchorCardLoss:
 
     def calculate(
         self,
-        item_embeddings: BatchedModelOutput,
+        item_embeddings: PaddedEmbeddings,
         identities: list[tuple[UUID, ...]],
         positive_cliques: list[list[int]],
     ) -> torch.Tensor:
         """The inner loss over each item's anchor embedding.
 
         Inputs: see ContrastiveLoss.calculate(); item_embeddings must be
-            multi-card-shaped, every item non-empty with its anchor first.
+            MULTI_CARD, every item non-empty with its anchor first (the
+            left-aligned layout keeps input order, so position 0).
         Output: the inner loss's scalar tensor.
         Side effects: none.
-        Exceptions: ValueError on a shape or length mismatch; whatever the
-            inner loss raises.
+        Exceptions: ValueError on a shape or length mismatch, or an item
+            whose card count differs from its identity's (the anchor might
+            not be first); whatever the inner loss raises.
 
         Example:
             >>> AnchorCardLoss(SingleCardInfoNCELoss()).calculate(
@@ -200,7 +198,10 @@ class AnchorCardLoss:
         check_item_embeddings(
             item_embeddings, identities, InputShape.MULTI_CARD, "AnchorCardLoss"
         )
-        anchors = _first_card_embeddings(item_embeddings)
+        require_card_aligned_identities(item_embeddings, identities, "AnchorCardLoss")
+        anchors = PaddedEmbeddings.from_single_cards(
+            item_embeddings.cards[:, _ANCHOR_POSITION]
+        )
         return self._inner.calculate(
             anchors, _anchor_identities(identities), positive_cliques
         )
@@ -221,19 +222,6 @@ class AnchorCardLoss:
         return self._inner.constant_logit_loss(
             _anchor_identities(identities), positive_cliques
         )
-
-
-def _first_card_embeddings(item_embeddings: BatchedModelOutput) -> list[Embedding]:
-    """Each multi-card item's anchor embedding (_ANCHOR_POSITION).
-
-    Private helper - single caller is AnchorCardLoss.calculate().
-    Inputs: item_embeddings (multi-card-shaped, already checked).
-    Output: list[Embedding], one per item.
-    Side effects: none beyond autograd.
-    Exceptions: none expected.
-    """
-    multi_card_embeddings = cast(BatchedMultiCardEmbedding, item_embeddings)
-    return [item[_ANCHOR_POSITION] for item in multi_card_embeddings]
 
 
 def _anchor_identities(

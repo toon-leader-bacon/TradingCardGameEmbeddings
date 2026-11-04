@@ -18,12 +18,27 @@ exist but are not yet compared; see `README.md` and
   `trust_remote_code`), ModernBERT-large if VRAM allows, and a small
   decoder model's hidden states. Re-run `scripts/report_card_content.py`
   for token counts under any new tokenizer.
-- [ ] **Cache frozen token states for the trainable poolings.**
-  `AttentionPooling` and `TransformerPooling` read every card's token
-  states each step. With the LM frozen those never change, so caching
-  them makes pooling training far faster (fp16 token states: gwent
-  ~175 MB, MTG ~9 GB; not built yet). Caching only covers cards the dojo passes through unmodified;
-  mods that change card text (masking, key shuffles) bypass it.
+- [ ] **Measure the token cut in training.** `feature_cache: {cut:
+  tokens}` exists (with `cut_layer` and `trainable_text_layers` for
+  ModernBERT). Not yet measured in a real run: step time with attention
+  pooling, VRAM/RAM tier sizing (fp16 token states: gwent ~175 MB, MTG
+  ~9 GB), hit rates under the mixed diet. Random noise mods (key
+  shuffle, random key mask) give a new text on nearly every draw, so
+  they gain nothing from any cache.
+- [ ] **Bucket the live upper half by length.** After a token-cut
+  lookup, `RaggedTokenStates.to_encoding` pads the whole batch to its
+  longest card before the encoder's layers above the cut run; sorting
+  into length buckets first (as `PretrainedTextEncoder` does) would cut
+  wasted attention, which matters once layers above the cut train.
+- [ ] **A disk tier for encoders without a pinned source.** The disk tier
+  refuses a fingerprint whose text encoder has no checkpoint revision,
+  so an encoder trained here (or a local path) only gets the memory
+  tiers. A weights digest as the source would let it use the disk.
+- [ ] **Split other architectures.** Only ModernBERT is a
+  `LayeredTextEncoder` (`ModernBertLayerStack`). Another Hugging Face
+  architecture needs its own small adapter; any `TextEncoder` can
+  already be cached at its whole output (`cut: tokens`, no
+  `cut_layer`).
 - [ ] **Whitening after pooling.** `TokenWhitening` whitens
   tokens before pooling only. Offline, whitening the mean-pooled card
   vector instead scored best (`experiments/2026-10-10_pooling_probe/NOTEBOOK.md`). After a
@@ -33,6 +48,24 @@ exist but are not yet compared; see `README.md` and
   rounds, at phase boundaries, or a running estimate (BatchNorm-style).
   Decide the cadence, and whether a trainable head right after it makes
   it redundant.
+- [ ] **Shrink the disk tier's rows.** `SqliteFeatureStore`'s file runs
+  about 3x its row payload: every `features` row repeats the 64-character
+  fingerprint digest as `TEXT`, and the default 4 KiB page holds only
+  about two 1.5 KB pooled rows. A row should hold little more than a
+  small integer row-set id (a foreign key into `row_sets`, which keeps
+  the digest once), the 16-byte text key and the vector, plus a larger
+  `page_size`. Optionally add the card's `nocab_uuid` as a plain column,
+  so a row's text can be recovered from the card binder later. It cannot
+  replace the text key: a mod keeps the uuid and changes the text, so one
+  uuid has many rows. Storing it means threading uuids through
+  `FrozenFeatureCache.features` and `FeatureStore.put_many`, which take
+  texts and keys only today.
+- [ ] **Avoid the round trip on a disk hit with a RAM tier.** A disk hit is
+  decoded on the CPU, moved to the caller's device, and then promotion
+  copies it back to the pinned RAM slab: CPU -> GPU -> CPU per hit.
+  Cheap at pooled widths (1.5 KB a row), but it grows with v1.3's
+  token-level cuts (~400 KB a card). `TieredFeatureStore` could promote
+  host-side rows to host tiers before the copy to `device`.
 - [ ] **A card encoder that reads the token sequence directly.** Shelved
   2026-10-10 when the model was split into text
   encoder -> optional token enrichment -> token pooling -> embedding

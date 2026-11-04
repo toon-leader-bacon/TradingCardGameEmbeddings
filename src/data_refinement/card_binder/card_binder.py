@@ -21,7 +21,6 @@ PLUS a privately owned AliasLedger — callers never see AliasLedger
 directly, only CardBinder's own get_by_alias()/register_alias().
 """
 
-import copy
 import hashlib
 import json
 import re
@@ -239,13 +238,12 @@ class CardBinder:
 
         Inputs:
             nocab_uuid: identity to look up.
-        Output: a deep copy of the matching GenericCard, or None if no
-            card has this nocab_uuid. A copy, not this binder's own
-            stored object, so a caller mutating raw_content on what it
-            gets back (see GenericCard's docstring - frozen doesn't
-            protect raw_content's contents) can't corrupt this binder's
-            canonical copy or any other caller's independently-returned
-            copy.
+        Output: the matching GenericCard, or None if no card has this
+            nocab_uuid. This binder's own stored object, not a copy:
+            callers must never mutate its raw_content in place (see
+            GenericCard's docstring - frozen doesn't protect
+            raw_content's contents). Mods build new cards instead
+            (tests/dojos/mods/test_mods_leave_binder_unchanged.py).
         Side effects: none.
         Exceptions: none.
 
@@ -253,8 +251,31 @@ class CardBinder:
             >>> binder = CardBinder.load([Path("data/final/cards/mtg.jsonl")])
             >>> binder.get_by_uuid(some_uuid)
         """
-        card = self._cards_by_uuid.get(nocab_uuid)
-        return copy.deepcopy(card) if card is not None else None
+        return self._cards_by_uuid.get(nocab_uuid)
+
+    def source_games_of(self, nocab_uuids: Iterable[UUID]) -> dict[UUID, GameId]:
+        """Which of nocab_uuids this binder holds, each with its card's
+        game: an existence check over a batch.
+
+        Inputs:
+            nocab_uuids: identities to check, any number; duplicates and
+                unknown uuids allowed.
+        Output: dict from each held uuid to its card's source_game, in
+            first-seen order; an unknown uuid is absent, so
+            `uuid in result` is the existence test.
+        Side effects: none.
+        Exceptions: none.
+
+        Example:
+            >>> binder.source_games_of([known_uuid, uuid4()])
+            {UUID('...'): <GameId.MTG: 'mtg'>}
+        """
+        result: dict[UUID, GameId] = {}
+        for nocab_uuid in nocab_uuids:
+            card = self._cards_by_uuid.get(nocab_uuid)
+            if card is not None:
+                result[nocab_uuid] = card.source_game
+        return result
 
     def get_by_name(self, source_game: GameId, name: str) -> list[GenericCard]:
         """Look up every card with a given name.
@@ -267,10 +288,10 @@ class CardBinder:
         Inputs:
             source_game: which game's name namespace to look in.
             name: card name to look up.
-        Output: a deep copy of every GenericCard registered under this
-            (source_game, name), in no particular guaranteed order.
-            Empty list if none match. Copies, not this binder's own
-            stored objects - see get_by_uuid()'s docstring.
+        Output: every GenericCard registered under this (source_game,
+            name), in no particular guaranteed order. Empty list if none
+            match. This binder's own stored objects - see
+            get_by_uuid()'s docstring.
         Side effects: none.
         Exceptions: none.
 
@@ -279,7 +300,7 @@ class CardBinder:
             >>> binder.get_by_name(GameId.SLAY_THE_SPIRE_2, "Strike")
         """
         uuids = self._uuids_by_name.get((source_game, name), set())
-        return [copy.deepcopy(self._cards_by_uuid[nocab_uuid]) for nocab_uuid in uuids]
+        return [self._cards_by_uuid[nocab_uuid] for nocab_uuid in uuids]
 
     def get_by_name_single(
         self, source_game: GameId, name: str, strict: bool = True
@@ -333,10 +354,9 @@ class CardBinder:
             source_game: which game's cards to search.
             pattern: a regular expression, matched against each
                 candidate card's name via re.match(pattern, name).
-        Output: a deep copy of every GenericCard in source_game whose
-            name matches pattern, in no particular guaranteed order.
-            Copies, not this binder's own stored objects - see
-            get_by_uuid()'s docstring.
+        Output: every GenericCard in source_game whose name matches
+            pattern, in no particular guaranteed order. This binder's
+            own stored objects - see get_by_uuid()'s docstring.
         Side effects: none.
         Exceptions: raises re.error if pattern is not a valid regular
             expression.
@@ -346,7 +366,7 @@ class CardBinder:
             >>> binder.get_by_name_regex(GameId.MTG, r"^Bruce Banner( //.*)?$")
         """
         return [
-            copy.deepcopy(card)
+            card
             for card in self._cards_by_uuid.values()
             if card.source_game == source_game and re.match(pattern, card.name)
         ]
@@ -411,9 +431,9 @@ class CardBinder:
 
         Inputs:
             source_game: which game's cards to enumerate.
-        Output: a deep copy of every GenericCard in source_game, in no
-            particular guaranteed order. Copies, not this binder's own
-            stored objects - see get_by_uuid()'s docstring.
+        Output: every GenericCard in source_game, in no particular
+            guaranteed order. This binder's own stored objects - see
+            get_by_uuid()'s docstring.
         Side effects: none.
         Exceptions: none.
 
@@ -422,7 +442,7 @@ class CardBinder:
             >>> list(binder.all_cards(GameId.MTG))
         """
         return [
-            copy.deepcopy(card)
+            card
             for card in self._cards_by_uuid.values()
             if card.source_game == source_game
         ]
@@ -507,9 +527,9 @@ class CardBinder:
         Inputs:
             source_game: which game's Unknown sentinel to fetch or
                 create.
-        Output: a deep copy of the existing or newly created GenericCard
-            named UNKNOWN_CARD_NAME for source_game - not this binder's
-            own stored object, see get_by_uuid()'s docstring.
+        Output: the existing or newly created GenericCard named
+            UNKNOWN_CARD_NAME for source_game - this binder's own stored
+            object, see get_by_uuid()'s docstring.
         Side effects: if no such card exists yet, creates one via
             self.create() (mutates this binder's in-memory indices).
         Exceptions: none.
@@ -544,7 +564,7 @@ class CardBinder:
             ),
         )
         self.create(card)
-        return copy.deepcopy(card)
+        return card
 
     # endregion Card Getters
 
@@ -633,6 +653,18 @@ class CardBinder:
             >>> empty_binder = CardBinder.load([])
         """
         binder = CardBinder()
+        binder._add_files(paths)
+        return binder
+
+    def _add_files(self, paths: list[Path]) -> None:
+        """Add every card and alias in paths to this binder, as load()
+        describes (last-path-wins). Shared by load() and subclasses that
+        construct themselves first.
+
+        Inputs: paths. Output: none.
+        Side effects: reads each path and its alias ledger; mutates this
+            binder. Exceptions: as load().
+        """
         for path in paths:
             with open(path, "r", encoding="utf-8") as binder_file:
                 for line in binder_file:
@@ -650,7 +682,7 @@ class CardBinder:
                             ),
                         ),
                     )
-                    binder._upsert_card(card)
+                    self._upsert_card(card)
 
             alias_ledger_path = CardBinder._alias_ledger_path(path)
             if alias_ledger_path.exists():
@@ -658,16 +690,15 @@ class CardBinder:
                     for line in ledger_file:
                         alias_row = json.loads(line)
                         nocab_uuid = UUID(alias_row["nocab_uuid"])
-                        aliased_card = binder.get_by_uuid(nocab_uuid)
+                        aliased_card = self.get_by_uuid(nocab_uuid)
                         if aliased_card is None:
                             continue
-                        binder.register_alias(
+                        self.register_alias(
                             aliased_card.source_game,
                             DataSource(alias_row["data_source"]),
                             alias_row["source_id"],
                             nocab_uuid,
                         )
-        return binder
 
     @staticmethod
     def default_output_path(source_game: GameId) -> Path:
@@ -693,6 +724,26 @@ class CardBinder:
         return CardBinder.DEFAULT_OUTPUT_DIR / CardBinder.DEFAULT_OUTPUT_NAME.format(
             game=source_game.value
         )
+
+    @staticmethod
+    def existing_output_path(source_game: GameId) -> Path:
+        """default_output_path(source_game), checked to exist, for a
+        reader that needs the published binder (training).
+
+        Inputs: source_game. Output: Path. Side effects: none.
+        Exceptions: FileNotFoundError naming the ingestion script.
+
+        Example:
+            >>> CardBinder.existing_output_path(GameId.GWENT)
+            PosixPath('data/final/cards/gwent.jsonl')
+        """
+        path = CardBinder.default_output_path(source_game)
+        if not path.exists():
+            raise FileNotFoundError(
+                f"no {source_game.value} card binder at {path}; run "
+                "scripts/run_card_binder_ingestion.py first"
+            )
+        return path
 
     def save(self, path: Path, source_game: GameId) -> None:
         """Write this binder's cards for one game to path, as JSONL.

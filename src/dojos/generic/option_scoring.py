@@ -2,8 +2,8 @@
 and multi_group_option_selection generic dojo cells (see
 src/dojos/generic/README.md).
 
-Both cells convert a ragged set of pack-option card embeddings into one
-logit per option (see PickPredictionCrossEntropyLoss, src/dojos/loss/
+Both cells convert a padded batch of pack-option card embeddings into
+one logit per option (see PickPredictionCrossEntropyLoss, src/dojos/loss/
 pick_prediction_cross_entropy_loss.py - the loss both cells consume
 unchanged). How an option's embedding becomes its logit - and how much
 it's allowed to be nudged by an optional pooled conditioning context
@@ -32,13 +32,11 @@ from typing import Protocol, runtime_checkable
 import torch
 import torch.nn as nn
 
-from src.schema.type_hints import MultiCardEmbedding
-
 
 @runtime_checkable
 class OptionScoringHead(Protocol):
-    """Strategy: scores one example's ragged pack-option embeddings,
-    optionally conditioned on a single pooled context vector.
+    """Strategy: scores a padded batch of pack-option embeddings, each
+    example optionally conditioned on one pooled context vector.
 
     A concrete implementation that holds learnable weights (like
     BilinearOptionScoringHead) must also subclass torch.nn.Module, so
@@ -50,26 +48,30 @@ class OptionScoringHead(Protocol):
     the same way EmbeddingPooler's own Protocol doesn't."""
 
     def score(
-        self, option_embeddings: MultiCardEmbedding, context: torch.Tensor | None
+        self,
+        options: torch.Tensor,
+        mask: torch.Tensor,
+        context: torch.Tensor | None,
+        context_mask: torch.Tensor | None,
     ) -> torch.Tensor:
         """
         Inputs:
-            option_embeddings: one example's pack-option card
-                embeddings, ragged length (varies example to example,
-                never empty - a pick always comes from a non-empty
-                pack).
-            context: a single pooled conditioning vector (e.g. the
-                drafter's pool-so-far, already mean-pooled - see
-                multi_group_option_selection/decoder_head.py), or None
-                for a cell/example with no conditioning group (e.g.
-                every multi_card_option_selection call).
-        Output: one 1-D tensor of per-option logits, same length and
-            order as option_embeddings.
+            options: (examples, max_options, d) option embeddings,
+                left-aligned; every example has at least one real option
+                (a pick always comes from a non-empty pack).
+            mask: (examples, max_options) bool, True = real option.
+            context: (examples, d) pooled conditioning vectors (e.g. the
+                drafter's pool-so-far), or None when no example is
+                conditioned (every multi_card_option_selection call).
+            context_mask: (examples,) bool, True = that example's context
+                row is real. None = every row is real. A False row is
+                scored exactly as if context were None for that example
+                (e.g. a first pick with an empty pool), whatever values
+                the row holds. Ignored when context is None.
+        Output: (examples, max_options) logits; padding slots are -inf.
         Side effects: implementation-defined (expected: none beyond
             ordinary nn.Module forward-pass gradient tracking).
-        Exceptions: implementation-defined (expected: none for a
-            non-empty option_embeddings - callers never pass an empty
-            pack).
+        Exceptions: implementation-defined.
         """
         ...
 
@@ -94,38 +96,63 @@ class BilinearOptionScoringHead(nn.Module):
         """
         super().__init__()
         # A per-option linear term (always applied) plus a bilinear
-        # option-context interaction term (added only when a context
-        # vector is given) - see score()'s docstring for how the two
-        # combine.
+        # option-context interaction term (added only where a context
+        # row is real) - see score()'s docstring for how the two combine.
         self.option_term = nn.Linear(card_embedding_size, 1, bias=True)
         self.context_projection = nn.Linear(
             card_embedding_size, card_embedding_size, bias=False
         )
 
     def score(
-        self, option_embeddings: MultiCardEmbedding, context: torch.Tensor | None
+        self,
+        options: torch.Tensor,
+        mask: torch.Tensor,
+        context: torch.Tensor | None,
+        context_mask: torch.Tensor | None,
     ) -> torch.Tensor:
         """self.option_term(option) + option . self.context_projection(context)
-        when context is given, else just self.option_term(option) alone,
-        for every option in option_embeddings.
+        where the example's context is real, else self.option_term(option)
+        alone, for every option; -inf at padding.
 
-        Inputs:
-            option_embeddings: see OptionScoringHead.score().
-            context: see OptionScoringHead.score() - None for
-                multi_card_option_selection (no conditioning group).
-        Output: a (len(option_embeddings),) tensor of logits, one per
-            option, same order as option_embeddings.
+        Inputs: see OptionScoringHead.score().
+        Output: (examples, max_options) logits, -inf at padding.
         Side effects: none beyond ordinary autograd tracking.
-        Exceptions: none expected for a non-empty option_embeddings.
+        Exceptions: none expected.
 
         Example:
             >>> head = BilinearOptionScoringHead(card_embedding_size=4)
-            >>> head.score([torch.randn(4), torch.randn(4)], context=None).shape
-            torch.Size([2])
+            >>> head.score(torch.randn(2, 3, 4), mask, None, None).shape
+            torch.Size([2, 3])
         """
-        stacked_options = torch.stack(option_embeddings)
-        logits = self.option_term(stacked_options).squeeze(-1)
+        logits = self.option_term(options).squeeze(-1)  # (examples, max_options)
+
+        # Add the bilinear term only on examples whose context is real
         if context is not None:
-            projected_context = self.context_projection(context)
-            logits = logits + stacked_options @ projected_context
-        return logits
+            interaction = torch.einsum(
+                "eod,ed->eo", options, self.context_projection(context)
+            )
+            logits = logits + _masked_interaction(interaction, context_mask)
+
+        # Padding can never be picked
+        return logits.masked_fill(~mask, float("-inf"))
+
+
+def _masked_interaction(
+    interaction: torch.Tensor, context_mask: torch.Tensor | None
+) -> torch.Tensor:
+    """interaction with the rows of unreal contexts zeroed.
+
+    Private helper - single caller is BilinearOptionScoringHead.score.
+    Inputs: interaction (examples, max_options); context_mask (examples,)
+        bool or None (every row real).
+    Output: (examples, max_options); a False row is exactly 0, so neither
+        its value nor its gradient depends on that context row. Uses
+        torch.where, not multiplication, so a non-finite garbage row
+        cannot leak NaN.
+    Side effects: none. Exceptions: none.
+    """
+    if context_mask is None:
+        return interaction
+    return torch.where(
+        context_mask.unsqueeze(1), interaction, torch.zeros_like(interaction)
+    )

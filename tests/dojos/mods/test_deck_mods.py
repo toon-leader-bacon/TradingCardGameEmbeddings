@@ -1,7 +1,6 @@
 import copy
 import logging
 from datetime import datetime, timezone
-from uuid import uuid4
 
 import pytest
 
@@ -14,11 +13,12 @@ from src.dojos.mods.deck_mods import (
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
+from tests.dojos.mods.card_ids import content_uuid
 
 
 def _card(name: str) -> GenericCard:
     return GenericCard(
-        nocab_uuid=uuid4(),
+        nocab_uuid=content_uuid(name),
         source_game=GameId.DOMINION,
         name=name,
         raw_content={"name": name},

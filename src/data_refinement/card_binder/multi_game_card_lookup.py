@@ -50,6 +50,22 @@ class MultiGameCardLookup:
                 return card
         return None
 
+    def source_games_of(self, nocab_uuids: Iterable[UUID]) -> dict[UUID, GameId]:
+        """See CardLookup.source_games_of(); like get_by_uuid, the first
+        game that holds a uuid answers for it."""
+        remaining = list(nocab_uuids)
+        result: dict[UUID, GameId] = {}
+        # Ask each game only about the uuids no earlier game held
+        for lookup in self._lookups.values():
+            if not remaining:
+                break
+            found = lookup.source_games_of(remaining)
+            result.update(found)
+            remaining = [
+                nocab_uuid for nocab_uuid in remaining if nocab_uuid not in found
+            ]
+        return result
+
     def get_by_name(self, source_game: GameId, name: str) -> list[GenericCard]:
         """See CardLookup.get_by_name()."""
         lookup = self._lookups.get(source_game)

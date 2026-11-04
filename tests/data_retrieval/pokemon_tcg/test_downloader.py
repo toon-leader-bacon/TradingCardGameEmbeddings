@@ -91,6 +91,7 @@ class TestExtract:
                 "cards/en/base2.json": b'[{"id": "base2-1"}]',
                 "cards/en/README.md": b"not json, should be skipped",
                 "decks/en/starter1.json": b'{"cards": []}',
+                "sets/en.json": b'[{"id": "base1"}]',
                 "other/unrelated.json": b'{"irrelevant": true}',
             },
         )
@@ -98,7 +99,9 @@ class TestExtract:
         result = downloader.extract(zip_path)
 
         assert result == PokemonTcgDataDownloadResult(
-            cards_dir=tmp_path / "cards", decks_dir=tmp_path / "decks"
+            cards_dir=tmp_path / "cards",
+            decks_dir=tmp_path / "decks",
+            sets_dir=tmp_path / "sets",
         )
         assert (
             tmp_path / "cards" / "base1.json"
@@ -109,6 +112,7 @@ class TestExtract:
         assert not (tmp_path / "cards" / "README.md").exists()
         assert (tmp_path / "decks" / "starter1.json").read_bytes() == b'{"cards": []}'
         assert not (tmp_path / "decks" / "unrelated.json").exists()
+        assert (tmp_path / "sets" / "en.json").read_bytes() == b'[{"id": "base1"}]'
 
     def test_raises_on_missing_file(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)
@@ -180,7 +184,9 @@ class TestPhase1:
         downloader = _make_downloader(tmp_path)
         zip_path = tmp_path / "pokemon-tcg-data.zip"
         extract_result = PokemonTcgDataDownloadResult(
-            cards_dir=tmp_path / "cards", decks_dir=tmp_path / "decks"
+            cards_dir=tmp_path / "cards",
+            decks_dir=tmp_path / "decks",
+            sets_dir=tmp_path / "sets",
         )
 
         with patch.object(

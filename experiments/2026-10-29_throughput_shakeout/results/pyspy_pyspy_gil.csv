@@ -1,0 +1,227 @@
+run,thread,kind,function,samples,share_of_thread
+pyspy_gil,batch-prefetch,inclusive,run (threading.py:1012),4436,0.9799
+pyspy_gil,batch-prefetch,inclusive,_bootstrap (threading.py:1032),4436,0.9799
+pyspy_gil,batch-prefetch,inclusive,_bootstrap_inner (threading.py:1075),4436,0.9799
+pyspy_gil,batch-prefetch,inclusive,_run_worker (src\training\diet\prefetching_batch_streams.py:424),4428,0.9781
+pyspy_gil,batch-prefetch,inclusive,next_batch (src\training\diet\dojo_batch_stream.py:41),3486,0.77
+pyspy_gil,batch-prefetch,inclusive,_produce (src\training\diet\prefetching_batch_streams.py:500),3485,0.7698
+pyspy_gil,batch-prefetch,inclusive,batches (src\dojos\contrastive\dojo.py:152),1996,0.4409
+pyspy_gil,batch-prefetch,inclusive,build (src\dojos\contrastive\styles\single_card.py:112),1464,0.3234
+pyspy_gil,batch-prefetch,inclusive,candidate_uuids (src\dojos\contrastive\pair_constructor.py:248),1323,0.2922
+pyspy_gil,batch-prefetch,inclusive,_reserve_cards (src\training\diet\prefetching_batch_streams.py:520),942,0.2081
+pyspy_gil,batch-prefetch,inclusive,_produce (src\training\diet\prefetching_batch_streams.py:503),940,0.2076
+pyspy_gil,batch-prefetch,inclusive,reserve (src\encoder_model\card_encoder_model.py:100),834,0.1842
+pyspy_gil,batch-prefetch,inclusive,reserve (src\training\diet\prefetching_batch_streams.py:726),832,0.1838
+pyspy_gil,batch-prefetch,inclusive,known_card_uuids (src\dojos\contrastive\pair_constructor.py:53),828,0.1829
+pyspy_gil,batch-prefetch,inclusive,_has_usable_baseline (src\dojos\contrastive\dojo.py:273),819,0.1809
+pyspy_gil,batch-prefetch,inclusive,constant_logit_loss (src\dojos\contrastive\styles\single_card.py:203),819,0.1809
+pyspy_gil,batch-prefetch,inclusive,batches (src\dojos\contrastive\dojo.py:153),816,0.1803
+pyspy_gil,batch-prefetch,inclusive,_masks (src\dojos\contrastive\styles\single_card.py:215),762,0.1683
+pyspy_gil,batch-prefetch,inclusive,batches (src\dojos\contrastive\dojo.py:142),508,0.1122
+pyspy_gil,batch-prefetch,inclusive,reserve (src\encoder_model\card_embedding_pipeline.py:203),506,0.1118
+pyspy_gil,batch-prefetch,inclusive,known_card_uuids (src\dojos\contrastive\pair_constructor.py:49),499,0.1102
+pyspy_gil,batch-prefetch,inclusive,decks_for (src\dojos\file_managers\deck_box_dealer.py:152),492,0.1087
+pyspy_gil,batch-prefetch,inclusive,serialize_card_to_json (src\encoder_model\card_serialization.py:35),490,0.1082
+pyspy_gil,batch-prefetch,inclusive,source_games_of (src\data_refinement\card_binder\visible_card_lookup.py:58),472,0.1043
+pyspy_gil,batch-prefetch,inclusive,clique_positive_mask (src\dojos\contrastive\contrastive_loss.py:149),468,0.1034
+pyspy_gil,batch-prefetch,inclusive,dumps (json\__init__.py:238),432,0.0954
+pyspy_gil,batch-prefetch,inclusive,source_games_of (src\data_refinement\card_binder\card_binder.py:275),416,0.0919
+pyspy_gil,batch-prefetch,inclusive,full_draw (src\dojos\contrastive\pair_constructor.py:331),403,0.089
+pyspy_gil,batch-prefetch,inclusive,iterencode (json\encoder.py:258),337,0.0744
+pyspy_gil,batch-prefetch,inclusive,encode (json\encoder.py:200),327,0.0722
+pyspy_gil,batch-prefetch,inclusive,reserve (src\encoder_model\card_embedding_pipeline.py:204),315,0.0696
+pyspy_gil,batch-prefetch,inclusive,build (src\dojos\contrastive\styles\single_card.py:117),313,0.0691
+pyspy_gil,batch-prefetch,inclusive,clique_positive_mask (src\dojos\contrastive\contrastive_loss.py:151),284,0.0627
+pyspy_gil,batch-prefetch,inclusive,source_games_of (src\data_refinement\card_binder\card_binder.py:277),223,0.0493
+pyspy_gil,batch-prefetch,inclusive,source_games_of (src\data_refinement\card_binder\visible_card_lookup.py:61),218,0.0482
+pyspy_gil,batch-prefetch,inclusive,_thinned (src\dojos\contrastive\pair_constructor.py:269),202,0.0446
+pyspy_gil,batch-prefetch,inclusive,_deck_at (src\dojos\file_managers\deck_box_dealer.py:213),199,0.044
+pyspy_gil,batch-prefetch,inclusive,__hash__ (uuid.py:269),181,0.04
+pyspy_gil,batch-prefetch,inclusive,batches (src\dojos\contrastive\dojo.py:161),149,0.0329
+pyspy_gil,batch-prefetch,inclusive,reserve (src\encoder_model\feature_cache\pooled_feature_cache.py:261),144,0.0318
+pyspy_gil,batch-prefetch,self,clique_positive_mask (src\dojos\contrastive\contrastive_loss.py:149),468,0.1034
+pyspy_gil,batch-prefetch,self,known_card_uuids (src\dojos\contrastive\pair_constructor.py:53),406,0.0897
+pyspy_gil,batch-prefetch,self,source_games_of (src\data_refinement\card_binder\card_binder.py:275),400,0.0884
+pyspy_gil,batch-prefetch,self,iterencode (json\encoder.py:258),337,0.0744
+pyspy_gil,batch-prefetch,self,clique_positive_mask (src\dojos\contrastive\contrastive_loss.py:151),284,0.0627
+pyspy_gil,batch-prefetch,self,source_games_of (src\data_refinement\card_binder\card_binder.py:277),219,0.0484
+pyspy_gil,batch-prefetch,self,_deck_at (src\dojos\file_managers\deck_box_dealer.py:213),177,0.0391
+pyspy_gil,batch-prefetch,self,draw (src\dojos\contrastive\pair_constructor.py:307),118,0.0261
+pyspy_gil,batch-prefetch,self,__hash__ (uuid.py:269),117,0.0258
+pyspy_gil,batch-prefetch,self,<genexpr> (src\encoder_model\feature_cache\tensor_feature_slab.py:229),84,0.0186
+pyspy_gil,batch-prefetch,self,_thinned (src\dojos\contrastive\pair_constructor.py:269),77,0.017
+pyspy_gil,batch-prefetch,self,_deck_at (src\dojos\file_managers\deck_box_dealer.py:220),75,0.0166
+pyspy_gil,batch-prefetch,self,of_text (src\encoder_model\feature_cache\card_text_key.py:57),72,0.0159
+pyspy_gil,batch-prefetch,self,_is_visible_uuid (src\data_refinement\card_binder\visible_card_lookup.py:112),67,0.0148
+pyspy_gil,batch-prefetch,self,uuid5 (uuid.py:733),65,0.0144
+pyspy_gil,batch-prefetch,self,dumps (json\__init__.py:238),65,0.0144
+pyspy_gil,batch-prefetch,self,source_games_of (src\data_refinement\card_binder\visible_card_lookup.py:61),62,0.0137
+pyspy_gil,batch-prefetch,self,input_shape_of (src\schema\type_hints.py:90),62,0.0137
+pyspy_gil,batch-prefetch,self,_deck_at (src\dojos\file_managers\deck_box_dealer.py:216),57,0.0126
+pyspy_gil,batch-prefetch,self,draw (src\dojos\contrastive\pair_constructor.py:313),56,0.0124
+pyspy_gil,batch-prefetch,self,_deck_at (src\dojos\file_managers\deck_box_dealer.py:217),48,0.0106
+pyspy_gil,batch-prefetch,self,_fold_duplicates (src\encoder_model\feature_cache\pooled_feature_cache.py:443),42,0.0093
+pyspy_gil,batch-prefetch,self,source_game (src\data_refinement\snapshots\deck_snapshot.py:90),39,0.0086
+pyspy_gil,batch-prefetch,self,source_games_of (src\data_refinement\card_binder\visible_card_lookup.py:57),35,0.0077
+pyspy_gil,batch-prefetch,self,__eq__ (uuid.py:242),35,0.0077
+pyspy_gil,batch-prefetch,self,encode (json\encoder.py:200),34,0.0075
+pyspy_gil,batch-prefetch,self,_wrapfunc (numpy\_core\fromnumeric.py:54),31,0.0068
+pyspy_gil,batch-prefetch,self,_move_up_a_bucket (src\encoder_model\feature_cache\slot_policy.py:343),27,0.006
+pyspy_gil,batch-prefetch,self,_move_up_a_bucket (src\encoder_model\feature_cache\slot_policy.py:339),25,0.0055
+pyspy_gil,batch-prefetch,self,_is_visible_uuid (src\data_refinement\card_binder\visible_card_lookup.py:116),23,0.0051
+pyspy_gil,batch-prefetch,self,source_games_of (src\data_refinement\card_binder\visible_card_lookup.py:56),23,0.0051
+pyspy_gil,batch-prefetch,self,same_key_mask (src\dojos\contrastive\contrastive_loss.py:117),23,0.0051
+pyspy_gil,batch-prefetch,self,__hash__ (uuid.py:268),21,0.0046
+pyspy_gil,batch-prefetch,self,of_text (src\encoder_model\feature_cache\card_text_key.py:55),21,0.0046
+pyspy_gil,batch-prefetch,self,batches (src\dojos\contrastive\dojo.py:142),21,0.0046
+pyspy_gil,batch-prefetch,self,apply_single (src\dojos\mods\card_field_mods.py:220),20,0.0044
+pyspy_gil,batch-prefetch,self,source_games_of (src\data_refinement\card_binder\card_binder.py:274),19,0.0042
+pyspy_gil,batch-prefetch,self,lookup (src\encoder_model\feature_cache\tensor_feature_slab.py:119),19,0.0042
+pyspy_gil,batch-prefetch,self,tier_stats (src\encoder_model\feature_cache\tensor_feature_slab.py:229),19,0.0042
+pyspy_gil,batch-prefetch,self,serialize_card_to_json (src\encoder_model\card_serialization.py:35),19,0.0042
+pyspy_gil,MainThread,inclusive,<module> (run_training.py:835),3166,0.9406
+pyspy_gil,MainThread,inclusive,main (run_training.py:287),2988,0.8877
+pyspy_gil,MainThread,inclusive,train (run_training.py:729),2988,0.8877
+pyspy_gil,MainThread,inclusive,run (src\training\trainer.py:247),2988,0.8877
+pyspy_gil,MainThread,inclusive,_run_phase (src\training\trainer.py:280),2917,0.8666
+pyspy_gil,MainThread,inclusive,_train_round (src\training\trainer.py:475),2916,0.8663
+pyspy_gil,MainThread,inclusive,_attempt_step (src\training\trainer.py:507),2915,0.866
+pyspy_gil,MainThread,inclusive,_take_step (src\training\trainer.py:564),1710,0.508
+pyspy_gil,MainThread,inclusive,_masks (src\dojos\contrastive\styles\single_card.py:215),1355,0.4026
+pyspy_gil,MainThread,inclusive,forward (src\encoder_model\card_encoder_model.py:239),1216,0.3613
+pyspy_gil,MainThread,inclusive,_call_impl (torch\nn\modules\module.py:1787),1213,0.3604
+pyspy_gil,MainThread,inclusive,_wrapped_call_impl (torch\nn\modules\module.py:1776),1203,0.3574
+pyspy_gil,MainThread,inclusive,_loss_of (src\training\trainer.py:643),1196,0.3553
+pyspy_gil,MainThread,inclusive,constant_logit_loss (src\dojos\contrastive\styles\single_card.py:203),1024,0.3042
+pyspy_gil,MainThread,inclusive,baseline_loss (src\dojos\contrastive\dojo.py:223),1020,0.303
+pyspy_gil,MainThread,inclusive,scale_for (src\training\loss_weighting.py:73),1016,0.3018
+pyspy_gil,MainThread,inclusive,_take_step (src\training\trainer.py:557),1015,0.3015
+pyspy_gil,MainThread,inclusive,_loss_scale_for (src\training\trainer.py:639),1015,0.3015
+pyspy_gil,MainThread,inclusive,_padded_sequences (src\encoder_model\card_encoder_model.py:270),831,0.2469
+pyspy_gil,MainThread,inclusive,clique_positive_mask (src\dojos\contrastive\contrastive_loss.py:149),825,0.2451
+pyspy_gil,MainThread,inclusive,embed (src\encoder_model\card_embedding_pipeline.py:114),532,0.1581
+pyspy_gil,MainThread,inclusive,serialize_card_to_json (src\encoder_model\card_serialization.py:35),524,0.1557
+pyspy_gil,MainThread,inclusive,_loss_of (src\training\trainer.py:644),514,0.1527
+pyspy_gil,MainThread,inclusive,compute_loss (src\dojos\contrastive\dojo.py:197),508,0.1509
+pyspy_gil,MainThread,inclusive,clique_positive_mask (src\dojos\contrastive\contrastive_loss.py:151),494,0.1468
+pyspy_gil,MainThread,inclusive,calculate (src\dojos\contrastive\styles\single_card.py:186),466,0.1384
+pyspy_gil,MainThread,inclusive,dumps (json\__init__.py:238),440,0.1307
+pyspy_gil,MainThread,inclusive,iterencode (json\encoder.py:258),336,0.0998
+pyspy_gil,MainThread,inclusive,encode (json\encoder.py:200),333,0.0989
+pyspy_gil,MainThread,inclusive,embed (src\encoder_model\card_embedding_pipeline.py:118),269,0.0799
+pyspy_gil,MainThread,inclusive,_look_up_or_encode (src\encoder_model\feature_cache\pooled_feature_cache.py:336),133,0.0395
+pyspy_gil,MainThread,inclusive,features (src\encoder_model\feature_cache\pooled_feature_cache.py:206),131,0.0389
+pyspy_gil,MainThread,inclusive,_call_with_frames_removed (<frozen importlib._bootstrap>:488),128,0.038
+pyspy_gil,MainThread,inclusive,_find_and_load_unlocked (<frozen importlib._bootstrap>:1331),128,0.038
+pyspy_gil,MainThread,inclusive,exec_module (<frozen importlib._bootstrap_external>:999),128,0.038
+pyspy_gil,MainThread,inclusive,_find_and_load (<frozen importlib._bootstrap>:1360),128,0.038
+pyspy_gil,MainThread,inclusive,_load_unlocked (<frozen importlib._bootstrap>:935),128,0.038
+pyspy_gil,MainThread,inclusive,features (src\encoder_model\feature_cache\pooled_feature_cache.py:205),126,0.0374
+pyspy_gil,MainThread,inclusive,lookup (src\encoder_model\feature_cache\tiered_feature_store.py:67),120,0.0357
+pyspy_gil,MainThread,inclusive,_masks (src\dojos\contrastive\styles\single_card.py:216),118,0.0351
+pyspy_gil,MainThread,self,clique_positive_mask (src\dojos\contrastive\contrastive_loss.py:149),825,0.2451
+pyspy_gil,MainThread,self,clique_positive_mask (src\dojos\contrastive\contrastive_loss.py:151),494,0.1468
+pyspy_gil,MainThread,self,iterencode (json\encoder.py:258),336,0.0998
+pyspy_gil,MainThread,self,forward (src\encoder_model\card_encoder_model.py:239),272,0.0808
+pyspy_gil,MainThread,self,same_key_mask (src\dojos\contrastive\contrastive_loss.py:117),77,0.0229
+pyspy_gil,MainThread,self,dumps (json\__init__.py:238),73,0.0217
+pyspy_gil,MainThread,self,of_text (src\encoder_model\feature_cache\card_text_key.py:57),55,0.0163
+pyspy_gil,MainThread,self,cpu (torch\storage.py:264),54,0.016
+pyspy_gil,MainThread,self,serialize_card_to_json (src\encoder_model\card_serialization.py:35),44,0.0131
+pyspy_gil,MainThread,self,decode (json\decoder.py:338),39,0.0116
+pyspy_gil,MainThread,self,encode (json\encoder.py:200),37,0.011
+pyspy_gil,MainThread,self,of_text (src\encoder_model\feature_cache\card_text_key.py:55),30,0.0089
+pyspy_gil,MainThread,self,_fold_duplicates (src\encoder_model\feature_cache\pooled_feature_cache.py:443),30,0.0089
+pyspy_gil,MainThread,self,_group_tensors_by_device_and_dtype (torch\utils\_foreach_utils.py:47),27,0.008
+pyspy_gil,MainThread,self,_move_up_a_bucket (src\encoder_model\feature_cache\slot_policy.py:343),25,0.0074
+pyspy_gil,MainThread,self,lookup (src\encoder_model\feature_cache\tensor_feature_slab.py:119),21,0.0062
+pyspy_gil,MainThread,self,__init__ (<string>:2),20,0.0059
+pyspy_gil,MainThread,self,_move_up_a_bucket (src\encoder_model\feature_cache\slot_policy.py:339),19,0.0056
+pyspy_gil,MainThread,self,_add_files (src\data_refinement\card_binder\card_binder.py:681),16,0.0048
+pyspy_gil,MainThread,self,forward (torch\nn\modules\linear.py:134),15,0.0045
+pyspy_gil,MainThread,self,same_key_mask (src\dojos\contrastive\contrastive_loss.py:116),15,0.0045
+pyspy_gil,MainThread,self,_holds (src\encoder_model\feature_cache\slot_policy.py:292),14,0.0042
+pyspy_gil,MainThread,self,clique_positive_mask (src\dojos\contrastive\contrastive_loss.py:144),13,0.0039
+pyspy_gil,MainThread,self,_create_fn (dataclasses.py:473),12,0.0036
+pyspy_gil,MainThread,self,_attempt_step (src\training\trainer.py:507),11,0.0033
+pyspy_gil,MainThread,self,_compile_bytecode (<frozen importlib._bootstrap_external>:757),10,0.003
+pyspy_gil,MainThread,self,__post_init__ (src\dojos\contrastive\contrastive_loss.py:77),9,0.0027
+pyspy_gil,MainThread,self,clique_positive_mask (src\dojos\contrastive\contrastive_loss.py:143),9,0.0027
+pyspy_gil,MainThread,self,unpin (src\encoder_model\feature_cache\tensor_feature_slab.py:219),9,0.0027
+pyspy_gil,MainThread,self,iterencode (json\encoder.py:224),8,0.0024
+pyspy_gil,MainThread,self,__hash__ (uuid.py:269),8,0.0024
+pyspy_gil,MainThread,self,embed (src\encoder_model\card_embedding_pipeline.py:114),8,0.0024
+pyspy_gil,MainThread,self,record_hits (src\encoder_model\feature_cache\slot_policy.py:286),8,0.0024
+pyspy_gil,MainThread,self,_reconstruct (copy.py:261),8,0.0024
+pyspy_gil,MainThread,self,<module> (<string>),8,0.0024
+pyspy_gil,MainThread,self,__call__ (torch\_ops.py:1209),7,0.0021
+pyspy_gil,MainThread,self,layer_norm (torch\nn\functional.py:2936),7,0.0021
+pyspy_gil,MainThread,self,<genexpr> (src\schema\padded_embeddings.py:83),7,0.0021
+pyspy_gil,MainThread,self,mask_from_lengths (src\schema\padded_embeddings.py:322),7,0.0021
+pyspy_gil,MainThread,self,_assemble_distinct (src\encoder_model\feature_cache\pooled_feature_cache.py:470),7,0.0021
+pyspy_gil,ThreadPoolExecutor-0_1,inclusive,_worker (concurrent\futures\thread.py:93),6,1.0
+pyspy_gil,ThreadPoolExecutor-0_1,inclusive,run (threading.py:1012),6,1.0
+pyspy_gil,ThreadPoolExecutor-0_1,inclusive,_bootstrap (threading.py:1032),6,1.0
+pyspy_gil,ThreadPoolExecutor-0_1,inclusive,_job (transformers\core_model_loading.py:1262),6,1.0
+pyspy_gil,ThreadPoolExecutor-0_1,inclusive,_materialize_copy (transformers\core_model_loading.py:1238),6,1.0
+pyspy_gil,ThreadPoolExecutor-0_1,inclusive,run (concurrent\futures\thread.py:59),6,1.0
+pyspy_gil,ThreadPoolExecutor-0_1,inclusive,_bootstrap_inner (threading.py:1075),6,1.0
+pyspy_gil,ThreadPoolExecutor-0_1,self,_materialize_copy (transformers\core_model_loading.py:1238),6,1.0
+pyspy_gil,ThreadPoolExecutor-0_2,inclusive,_worker (concurrent\futures\thread.py:93),5,1.0
+pyspy_gil,ThreadPoolExecutor-0_2,inclusive,run (threading.py:1012),5,1.0
+pyspy_gil,ThreadPoolExecutor-0_2,inclusive,_bootstrap (threading.py:1032),5,1.0
+pyspy_gil,ThreadPoolExecutor-0_2,inclusive,_job (transformers\core_model_loading.py:1262),5,1.0
+pyspy_gil,ThreadPoolExecutor-0_2,inclusive,_materialize_copy (transformers\core_model_loading.py:1238),5,1.0
+pyspy_gil,ThreadPoolExecutor-0_2,inclusive,run (concurrent\futures\thread.py:59),5,1.0
+pyspy_gil,ThreadPoolExecutor-0_2,inclusive,_bootstrap_inner (threading.py:1075),5,1.0
+pyspy_gil,ThreadPoolExecutor-0_2,self,_materialize_copy (transformers\core_model_loading.py:1238),5,1.0
+pyspy_gil,run-sampler,inclusive,run (threading.py:1012),4,1.0
+pyspy_gil,run-sampler,inclusive,_bootstrap (threading.py:1032),4,1.0
+pyspy_gil,run-sampler,inclusive,_run (src\training\recording\run_sampler.py:154),4,1.0
+pyspy_gil,run-sampler,inclusive,_write_row (src\training\recording\run_sampler.py:166),4,1.0
+pyspy_gil,run-sampler,inclusive,_bootstrap_inner (threading.py:1075),4,1.0
+pyspy_gil,run-sampler,inclusive,<genexpr> (src\encoder_model\feature_cache\tiered_feature_store.py:125),3,0.75
+pyspy_gil,run-sampler,inclusive,tier_stats (src\encoder_model\feature_cache\tensor_feature_slab.py:229),3,0.75
+pyspy_gil,run-sampler,inclusive,<genexpr> (src\encoder_model\feature_cache\tensor_feature_slab.py:229),3,0.75
+pyspy_gil,run-sampler,inclusive,_row (src\training\recording\run_sampler.py:185),2,0.5
+pyspy_gil,run-sampler,inclusive,stats (src\encoder_model\feature_cache\pooled_feature_cache.py:306),2,0.5
+pyspy_gil,run-sampler,inclusive,tier_stats (src\encoder_model\feature_cache\tiered_feature_store.py:125),2,0.5
+pyspy_gil,run-sampler,inclusive,feature_cache_stats (src\encoder_model\card_encoder_model.py:125),2,0.5
+pyspy_gil,run-sampler,inclusive,__init__ (<string>:7),1,0.25
+pyspy_gil,run-sampler,inclusive,write (src\training\recording\csv_table.py:54),1,0.25
+pyspy_gil,run-sampler,inclusive,<lambda> (run_training.py:721),1,0.25
+pyspy_gil,run-sampler,inclusive,_row (src\training\recording\run_sampler.py:183),1,0.25
+pyspy_gil,run-sampler,self,<genexpr> (src\encoder_model\feature_cache\tensor_feature_slab.py:229),3,0.75
+pyspy_gil,run-sampler,self,<lambda> (run_training.py:721),1,0.25
+pyspy_gil,tqdm_monitor,inclusive,_bootstrap (threading.py:1032),2,0.6667
+pyspy_gil,tqdm_monitor,inclusive,_bootstrap_inner (threading.py:1075),2,0.6667
+pyspy_gil,tqdm_monitor,inclusive,wait (threading.py:655),1,0.3333
+pyspy_gil,tqdm_monitor,inclusive,run (tqdm\_monitor.py:69),1,0.3333
+pyspy_gil,tqdm_monitor,inclusive,wait (threading.py:359),1,0.3333
+pyspy_gil,tqdm_monitor,inclusive,_is_owned (threading.py:319),1,0.3333
+pyspy_gil,tqdm_monitor,inclusive,get_lock (tqdm\std.py:771),1,0.3333
+pyspy_gil,tqdm_monitor,inclusive,run (tqdm\_monitor.py:78),1,0.3333
+pyspy_gil,tqdm_monitor,self,_is_owned (threading.py:319),1,0.3333
+pyspy_gil,tqdm_monitor,self,get_lock (tqdm\std.py:771),1,0.3333
+pyspy_gil,ThreadPoolExecutor-0_0,inclusive,_worker (concurrent\futures\thread.py:93),3,1.0
+pyspy_gil,ThreadPoolExecutor-0_0,inclusive,run (threading.py:1012),3,1.0
+pyspy_gil,ThreadPoolExecutor-0_0,inclusive,_bootstrap (threading.py:1032),3,1.0
+pyspy_gil,ThreadPoolExecutor-0_0,inclusive,_job (transformers\core_model_loading.py:1262),3,1.0
+pyspy_gil,ThreadPoolExecutor-0_0,inclusive,_materialize_copy (transformers\core_model_loading.py:1238),3,1.0
+pyspy_gil,ThreadPoolExecutor-0_0,inclusive,run (concurrent\futures\thread.py:59),3,1.0
+pyspy_gil,ThreadPoolExecutor-0_0,inclusive,_bootstrap_inner (threading.py:1075),3,1.0
+pyspy_gil,ThreadPoolExecutor-0_0,self,_materialize_copy (transformers\core_model_loading.py:1238),3,1.0
+pyspy_gil,thread (22828),inclusive,_find_and_load (<frozen importlib._bootstrap>:1360),1,1.0
+pyspy_gil,thread (22828),inclusive,find_spec (<frozen importlib._bootstrap_external>:1605),1,1.0
+pyspy_gil,thread (22828),inclusive,_find_and_load_unlocked (<frozen importlib._bootstrap>:1331),1,1.0
+pyspy_gil,thread (22828),inclusive,_call_with_frames_removed (<frozen importlib._bootstrap>:488),1,1.0
+pyspy_gil,thread (22828),inclusive,find_spec (<frozen importlib._bootstrap_external>:1532),1,1.0
+pyspy_gil,thread (22828),inclusive,_load_unlocked (<frozen importlib._bootstrap>:935),1,1.0
+pyspy_gil,thread (22828),inclusive,_get_spec (<frozen importlib._bootstrap_external>:1506),1,1.0
+pyspy_gil,thread (22828),inclusive,<module> (run_training.py:42),1,1.0
+pyspy_gil,thread (22828),inclusive,<module> (torch\__init__.py:24),1,1.0
+pyspy_gil,thread (22828),inclusive,_find_and_load_unlocked (<frozen importlib._bootstrap>:1322),1,1.0
+pyspy_gil,thread (22828),inclusive,_path_join (<frozen importlib._bootstrap_external>:105),1,1.0
+pyspy_gil,thread (22828),inclusive,_find_spec (<frozen importlib._bootstrap>:1262),1,1.0
+pyspy_gil,thread (22828),inclusive,exec_module (<frozen importlib._bootstrap_external>:999),1,1.0
+pyspy_gil,thread (22828),self,_path_join (<frozen importlib._bootstrap_external>:105),1,1.0

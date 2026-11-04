@@ -88,12 +88,11 @@ for the exact same deck, always.
 """
 
 import hashlib
-import json
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import ClassVar, Iterator
+from typing import ClassVar, Iterator, Sequence
 from uuid import UUID
 
 from src.data_refinement.deck_box._deck_tables import (
@@ -101,6 +100,7 @@ from src.data_refinement.deck_box._deck_tables import (
     deck_from_row,
     stamp_metadata_at,
 )
+from src.data_refinement.deck_box.deck_lookup import DeckCardCounts
 from src.schema.card import GenericDeck, Provenance
 from src.schema.game_id import GameId
 
@@ -410,6 +410,34 @@ class DeckBox:
             return None
         return deck_from_row(deck_row, self._tables.deck_cards(nocab_uuid))
 
+    def get_by_uuids(self, nocab_uuids: Sequence[UUID]) -> list[GenericDeck | None]:
+        """get_by_uuid() for many uuids at once, in two queries per 500
+        uuids rather than two per uuid.
+
+        Inputs:
+            nocab_uuids: identities to look up; duplicates allowed.
+        Output: one entry per input, same order: a freshly-constructed
+            GenericDeck (a distinct object even for a repeated uuid), or
+            None where no deck has that nocab_uuid.
+        Side effects: none.
+        Exceptions: none.
+
+        Example:
+            >>> box.get_by_uuids([uuid_a, uuid_b])
+            [GenericDeck(...), None]
+        """
+        uuids = list(nocab_uuids)
+        rows = self._tables.deck_rows_by_uuids(uuids)
+        cards = self._tables.deck_cards_by_uuids(list(rows))
+        return [
+            (
+                deck_from_row(rows[nocab_uuid], list(cards.get(nocab_uuid, [])))
+                if nocab_uuid in rows
+                else None
+            )
+            for nocab_uuid in uuids
+        ]
+
     def all_uuids(self, source_game: GameId | None = None) -> Iterator[UUID]:
         """Every nocab_uuid currently stored in this box.
 
@@ -449,16 +477,86 @@ class DeckBox:
         """
         yield from self._decks_from_rows(self._tables.deck_rows(source_game))
 
-    def version_for(self, source_game: GameId) -> str:
-        """A content hash over every currently-held source_game deck.
+    def deck_card_counts(self, source_game: GameId) -> Iterator[DeckCardCounts]:
+        """Every source_game deck's distinct cards and copy counts, each
+        deck once, in storage order (no guaranteed order), streamed in one
+        sequential pass over deck_cards.
 
-        Derived, not stored - mirrors CardBinder.version_for()'s
-        reasoning. provenance is excluded for the same reason.
+        For bulk readers (the level-2 deck snapshot build): no GenericDeck
+        is built and the multiset is never expanded. Sequential, because a
+        read in deck uuid order is one random seek per deck (hours over
+        MTG's 40 GB box). Each deck's rows are adjacent (every write puts
+        a deck's cards in one statement), so a deck is grouped from
+        consecutive rows. A deck with no deck_cards rows is yielded last,
+        with no card counts. Assumes every deck_cards row has a decks row
+        (delete removes both together).
 
         Inputs:
-            source_game: which game's decks to hash.
-        Output: a sha256 hex digest (64 hex chars). A game with no
-            decks yet still produces a fixed digest, not an error.
+            source_game: which game's decks.
+        Output: a lazy generator of DeckCardCounts.
+        Side effects: none.
+        Exceptions: none.
+
+        Example:
+            >>> for deck in box.deck_card_counts(GameId.MTG):
+            ...     deck.nocab_uuid, deck.card_counts
+        """
+        other_games = self._tables.deck_uuids_outside(source_game)
+        # One UUID per distinct card, not per row (161M rows on MTG)
+        card_uuid_of: dict[str, UUID] = {}
+        current_key: str | None = None
+        card_counts: list[tuple[UUID, int]] = []
+        yielded = 0
+        for (
+            deck_uuid,
+            card_uuid,
+            count,
+        ) in self._tables.deck_card_rows_in_storage_order():
+            if deck_uuid in other_games:
+                continue
+            # A new deck starts (compared as stored text): hand back the last
+            if deck_uuid != current_key:
+                if current_key is not None:
+                    yield DeckCardCounts(UUID(current_key), card_counts)
+                    yielded += 1
+                current_key, card_counts = deck_uuid, []
+            card = card_uuid_of.get(card_uuid)
+            if card is None:
+                card = card_uuid_of[card_uuid] = UUID(card_uuid)
+            card_counts.append((card, count))
+        if current_key is not None:
+            yield DeckCardCounts(UUID(current_key), card_counts)
+            yielded += 1
+
+        # Decks without cards have no deck_cards rows; look only if any exist
+        if yielded < self._tables.deck_count(source_game):
+            for deck_uuid in self._tables.card_less_deck_uuids(source_game):
+                yield DeckCardCounts(UUID(deck_uuid), [])
+
+    def version_for(self, source_game: GameId) -> str | None:
+        """A cheap version of this box's source_game decks: a hash of the
+        CardBinder version they were minted against
+        (card_binder_version_for) and how many decks the game holds.
+
+        Computed on every call (one metadata read and one COUNT), never
+        stored, so it costs about the same on a 6.9M-deck box as on an
+        empty one. A different deck count, or a re-stamp against another
+        binder, gives a new version.
+
+        KNOWN BLIND SPOT: a change that keeps the deck count (a deck's
+        cards edited in place by update()/replace(), or a re-extraction
+        that rewrites contents one for one) keeps the version, so
+        anything keyed on it (e.g. a derived snapshot) is not
+        invalidated. Accepted: this project rebuilds deck boxes rarely
+        and wholesale, and the cost of missing such a change is training
+        on slightly different data than the box now holds.
+
+        Inputs:
+            source_game: which game's decks to version.
+        Output: a sha256 hex digest (64 hex chars), or None when
+            card_binder_version_for(source_game) is None (never stamped,
+            or a mutating run has not finished its save()). Callers treat
+            None as stale, as they do for card_binder_version_for.
         Side effects: none.
         Exceptions: none.
 
@@ -467,14 +565,13 @@ class DeckBox:
             >>> box.version_for(GameId.GWENT)
             '7a91e0...'
         """
-        digest = hashlib.sha256()
-
-        # nocab_uuid order, so the hash reflects content only, never
-        # incidental row order.
-        ordered_rows = self._tables.deck_rows(source_game, ordered_by_uuid=True)
-        for deck in self._decks_from_rows(ordered_rows):
-            digest.update(_hashable_deck_bytes(deck))
-        return digest.hexdigest()
+        card_binder_version = self.card_binder_version_for(source_game)
+        if card_binder_version is None:
+            return None
+        deck_count = self._tables.deck_count(source_game)
+        return hashlib.sha256(
+            f"{card_binder_version}:{deck_count}".encode("utf-8")
+        ).hexdigest()
 
     def card_binder_version_for(self, source_game: GameId) -> str | None:
         """The CardBinder version this box's source_game decks were
@@ -506,8 +603,8 @@ class DeckBox:
     ) -> Iterator[tuple[UUID, int, int]]:
         """Rank every source_game deck by a one-time randomized order.
 
-        Exists specifically so a caller (DeckBoxDealer) can assign an
-        exact-ratio train/test/validation split without ever
+        Exists so a caller (the held-out-deck-card metric) can sample decks
+        in a reproducible random order without ever
         materializing this game's full uuid list in Python, or
         knowing this class's table/column names - the ranking runs
         entirely inside this connection. A plain read (no side
@@ -592,6 +689,44 @@ class DeckBox:
         if len(paths) == 1:
             return DeckBox._connect_direct(paths[0], commit_batch_size)
         return DeckBox._merge_into_memory(paths, commit_batch_size)
+
+    @staticmethod
+    def open_read_only(path: Path) -> "DeckBox":
+        """Connect to an existing deck box file that this box can never
+        write, for readers such as training.
+
+        Unlike load([path]), a stray mutating call fails loudly instead
+        of changing the file, and nothing is created when path is
+        missing. The connection may be used from any thread, one thread
+        at a time (SQLite here is built serialized), so a box built on
+        one thread can be read by a prefetch worker on another.
+
+        Inputs:
+            path: an existing data/final/decks/<game>.db-shaped file.
+        Output: a DeckBox connected to path in SQLite's read-only mode.
+        Side effects: opens a read-only connection to path.
+        Exceptions: FileNotFoundError if path does not exist. Every
+            mutating call (create/update/replace/delete/save) on the
+            returned box raises sqlite3.OperationalError ("attempt to
+            write a readonly database").
+
+        Example:
+            >>> box = DeckBox.open_read_only(Path("data/final/decks/mtg.db"))
+            >>> box.get_by_uuid(some_uuid)
+        """
+        if not path.exists():
+            raise FileNotFoundError(f"open_read_only: no deck box at {path}")
+        box = DeckBox()
+        box._connection.close()
+        box._connection = sqlite3.connect(
+            f"{path.resolve().as_uri()}?mode=ro", uri=True, check_same_thread=False
+        )
+        # Not create_schema(): its DDL and commit are writes. The file
+        # already holds the schema; only the row factory is needed.
+        box._connection.row_factory = sqlite3.Row
+        box._tables = DeckTables(box._connection)
+        box._path = path
+        return box
 
     def save(self, path: Path, source_game: GameId, card_binder_version: str) -> None:
         """Ensure path holds this box's current source_game content,
@@ -785,27 +920,10 @@ class DeckBox:
     def _decks_from_rows(self, rows: Iterator[sqlite3.Row]) -> Iterator[GenericDeck]:
         """Each decks row joined with its deck_cards, as GenericDecks.
 
-        Private helper - consumers are all_decks()/version_for().
+        Private helper - single consumer is all_decks().
         """
         for row in rows:
             card_nocab_uuids = self._tables.deck_cards(UUID(row["nocab_uuid"]))
             yield deck_from_row(row, card_nocab_uuids)
 
     # endregion Private Helpers
-
-
-def _hashable_deck_bytes(deck: GenericDeck) -> bytes:
-    """deck's content, serialized for digest.update() - nocab_uuid/
-    name/a SORTED card_nocab_uuids (a multiset, so incidental order
-    must not affect the hash), provenance excluded.
-
-    Private helper - single consumer is DeckBox.version_for().
-    """
-    return json.dumps(
-        {
-            "nocab_uuid": str(deck.nocab_uuid),
-            "name": deck.name,
-            "card_nocab_uuids": sorted(str(uuid) for uuid in deck.card_nocab_uuids),
-        },
-        sort_keys=True,
-    ).encode("utf-8")

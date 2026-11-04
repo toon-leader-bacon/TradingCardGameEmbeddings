@@ -1,0 +1,68 @@
+=== contrastive.dominion: 3.7s
+         5407816 function calls (5317178 primitive calls) in 3.700 seconds
+
+   Ordered by: cumulative time
+   List reduced from 210 to 25 due to restriction <25>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    3.701    3.701 G:\Projects\TradingCardGameEmbeddings\src\training\dojo_catalog.py:745(build_dojos)
+        1    0.000    0.000    3.701    3.701 G:\Projects\TradingCardGameEmbeddings\src\training\dojo_recipes\contrastive_dojo_recipe.py:47(build)
+        1    0.000    0.000    3.410    3.410 G:\Projects\TradingCardGameEmbeddings\src\dojos\file_managers\deck_box_dealer.py:81(__init__)
+        1    0.192    0.192    3.409    3.409 G:\Projects\TradingCardGameEmbeddings\src\dojos\file_managers\deck_box_dealer.py:276(_box_deck_set_digest)
+   531676    0.429    0.000    3.218    0.000 G:\Projects\TradingCardGameEmbeddings\src\data_refinement\deck_box\deck_box.py:441(all_uuids)
+   533310    1.214    0.000    1.851    0.000 C:\Users\ender\AppData\Local\Programs\Python\Python312\Lib\uuid.py:139(__init__)
+   531676    0.945    0.000    0.945    0.000 G:\Projects\TradingCardGameEmbeddings\src\data_refinement\deck_box\_deck_tables.py:292(deck_rows)
+  1599955    0.359    0.000    0.359    0.000 {method 'replace' of 'str' objects}
+69383/1635    0.096    0.000    0.234    0.000 C:\Users\ender\AppData\Local\Programs\Python\Python312\Lib\copy.py:118(deepcopy)
+9810/1635    0.022    0.000    0.223    0.000 C:\Users\ender\AppData\Local\Programs\Python\Python312\Lib\copy.py:247(_reconstruct)
+6540/1635    0.018    0.000    0.208    0.000 C:\Users\ender\AppData\Local\Programs\Python\Python312\Lib\copy.py:217(_deepcopy_dict)
+        1    0.000    0.000    0.166    0.166 G:\Projects\TradingCardGameEmbeddings\src\training\dojo_recipes\card_shelf.py:21(card_binder)
+        1    0.008    0.008    0.166    0.166 G:\Projects\TradingCardGameEmbeddings\src\data_refinement\card_binder\card_binder.py:620(load)
+      817    0.001    0.000    0.125    0.000 G:\Projects\TradingCardGameEmbeddings\src\data_refinement\card_binder\card_binder.py:237(get_by_uuid)
+        1    0.000    0.000    0.124    0.124 G:\Projects\TradingCardGameEmbeddings\src\dojos\contrastive\dojo.py:48(__init__)
+        1    0.000    0.000    0.124    0.124 G:\Projects\TradingCardGameEmbeddings\src\dojos\contrastive\dojo.py:319(_check_deck_box_version)
+        1    0.001    0.001    0.123    0.123 G:\Projects\TradingCardGameEmbeddings\src\data_refinement\card_binder\card_binder.py:455(version_for)
+   533310    0.113    0.000    0.113    0.000 {method 'count' of 'list' objects}
+        1    0.001    0.001    0.112    0.112 G:\Projects\TradingCardGameEmbeddings\src\data_refinement\card_binder\card_binder.py:431(all_cards)
+   533310    0.103    0.000    0.103    0.000 {method 'strip' of 'str' objects}
+   534958    0.062    0.000    0.062    0.000 {built-in method builtins.len}
+24525/14715    0.008    0.000    0.056    0.000 C:\Users\ender\AppData\Local\Programs\Python\Python312\Lib\copy.py:252(<genexpr>)
+   150217    0.027    0.000    0.028    0.000 {method 'get' of 'dict' objects}
+    16349    0.009    0.000    0.014    0.000 C:\Users\ender\AppData\Local\Programs\Python\Python312\Lib\copy.py:231(_keep_alive)
+   105351    0.014    0.000    0.014    0.000 {built-in method builtins.id}
+
+
+=== contrastive_cross_slice.dominion: 3.3s
+         4785394 function calls in 3.320 seconds
+
+   Ordered by: cumulative time
+   List reduced from 132 to 25 due to restriction <25>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    3.320    3.320 G:\Projects\TradingCardGameEmbeddings\src\training\dojo_catalog.py:745(build_dojos)
+        1    0.000    0.000    3.320    3.320 G:\Projects\TradingCardGameEmbeddings\src\training\dojo_recipes\contrastive_dojo_recipe.py:47(build)
+        1    0.000    0.000    3.320    3.320 G:\Projects\TradingCardGameEmbeddings\src\dojos\file_managers\deck_box_dealer.py:81(__init__)
+        1    0.186    0.186    3.319    3.319 G:\Projects\TradingCardGameEmbeddings\src\dojos\file_managers\deck_box_dealer.py:276(_box_deck_set_digest)
+   531676    0.414    0.000    3.133    0.000 G:\Projects\TradingCardGameEmbeddings\src\data_refinement\deck_box\deck_box.py:441(all_uuids)
+   531675    1.172    0.000    1.798    0.000 C:\Users\ender\AppData\Local\Programs\Python\Python312\Lib\uuid.py:139(__init__)
+   531676    0.920    0.000    0.920    0.000 G:\Projects\TradingCardGameEmbeddings\src\data_refinement\deck_box\_deck_tables.py:292(deck_rows)
+  1595036    0.353    0.000    0.353    0.000 {method 'replace' of 'str' objects}
+   531675    0.111    0.000    0.111    0.000 {method 'count' of 'list' objects}
+   531675    0.102    0.000    0.102    0.000 {method 'strip' of 'str' objects}
+   531679    0.061    0.000    0.061    0.000 {built-in method builtins.len}
+        1    0.000    0.000    0.001    0.001 G:\Projects\TradingCardGameEmbeddings\src\dojos\file_managers\deck_box_dealer.py:254(_connect_index)
+        4    0.000    0.000    0.000    0.000 {method 'execute' of 'sqlite3.Connection' objects}
+        1    0.000    0.000    0.000    0.000 {method 'executescript' of 'sqlite3.Connection' objects}
+        1    0.000    0.000    0.000    0.000 G:\Projects\TradingCardGameEmbeddings\src\dojos\file_managers\deck_box_dealer.py:293(_index_is_current)
+        1    0.000    0.000    0.000    0.000 G:\Projects\TradingCardGameEmbeddings\src\training\dojo_recipes\augmentations.py:14(build_augmentation_pipeline)
+        1    0.000    0.000    0.000    0.000 {built-in method _sqlite3.connect}
+        1    0.000    0.000    0.000    0.000 G:\Projects\TradingCardGameEmbeddings\src\dojos\contrastive\dojo.py:48(__init__)
+        1    0.000    0.000    0.000    0.000 C:\Users\ender\AppData\Local\Programs\Python\Python312\Lib\pathlib.py:1306(mkdir)
+        4    0.000    0.000    0.000    0.000 C:\Users\ender\AppData\Local\Programs\Python\Python312\Lib\random.py:126(__init__)
+        1    0.000    0.000    0.000    0.000 G:\Projects\TradingCardGameEmbeddings\src\dojos\contrastive\dojo.py:319(_check_deck_box_version)
+        4    0.000    0.000    0.000    0.000 C:\Users\ender\AppData\Local\Programs\Python\Python312\Lib\random.py:135(seed)
+        1    0.000    0.000    0.000    0.000 G:\Projects\TradingCardGameEmbeddings\src\training\dojo_recipes\card_shelf.py:56(deck_box)
+        1    0.000    0.000    0.000    0.000 G:\Projects\TradingCardGameEmbeddings\src\dojos\file_managers\deck_box_dealer.py:148(card_binder_version)
+        1    0.000    0.000    0.000    0.000 G:\Projects\TradingCardGameEmbeddings\src\data_refinement\deck_box\deck_box.py:507(card_binder_version_for)
+
+

@@ -194,6 +194,42 @@ class TestGetByUuid:
         assert binder.get_by_uuid(uuid4()) is None
 
 
+class TestSourceGamesOf:
+    def test_held_uuids_map_to_their_game_and_unknown_ones_are_absent(
+        self,
+    ) -> None:
+        binder = CardBinder()
+        bolt = binder.create(_card("Bolt", "src-1", {"a": 1}))
+        ember = binder.create(_card("Ember", "src-2", {}, GameId.GWENT))
+        unknown = uuid4()
+
+        found = binder.source_games_of(
+            [bolt.nocab_uuid, unknown, ember.nocab_uuid, bolt.nocab_uuid]
+        )
+
+        assert found == {bolt.nocab_uuid: GameId.MTG, ember.nocab_uuid: GameId.GWENT}
+        assert unknown not in found
+
+
+class TestReadsShareTheStoredCard:
+    def test_every_getter_returns_the_stored_object(self) -> None:
+        # No copies: callers share the binder's card and must not mutate it
+        binder = CardBinder()
+        bolt = binder.create(_card("Bolt", "src-1", {"a": {"b": [1]}}))
+
+        assert binder.get_by_uuid(bolt.nocab_uuid) is bolt
+        assert binder.get_by_name(GameId.MTG, "Bolt")[0] is bolt
+        assert binder.get_by_name_single(GameId.MTG, "Bolt") is bolt
+        assert binder.get_by_name_regex(GameId.MTG, "^Bo")[0] is bolt
+        assert list(binder.all_cards(GameId.MTG))[0] is bolt
+
+    def test_unknown_card_is_the_stored_object(self) -> None:
+        binder = CardBinder()
+        unknown = binder.ensure_unknown_card(GameId.GWENT)
+
+        assert binder.ensure_unknown_card(GameId.GWENT) is unknown
+
+
 class TestGetByName:
     def test_found(self) -> None:
         binder = CardBinder()

@@ -5,6 +5,9 @@ dojo presents one interface to the trainer, the `Dojo` Protocol
 (`dojo.py`): `batches(split, budget, max_examples)` yields `DojoBatch`es
 (`inputs` for the encoder, `__len__` = example count) whose card cost
 fits the trainer's `BatchBudget`; `compute_loss(embeddings, batch)`
+takes the encoder's output for `batch.inputs` (`ModelEmbeddings`:
+`PaddedEmbeddings` for single-card and multi-card dojos, nested lists
+for multi-group dojos; see `src/schema/padded_embeddings.py`) and
 returns a scalar per-example mean loss; `baseline_loss(batch)` returns
 the loss an input-ignoring predictor gets on that batch, never depending
 on the encoder or head; `example_count(split)`, `trainable_parameters()`
@@ -44,7 +47,11 @@ rows never straddle TRAIN and TEST.
 - `batch.py` - `Batch`, the (inputs, labels) container generic dojos
   yield.
 - `budgeted_batching.py` - `group_by_budget`, packs examples into
-  batches within a `BatchBudget`.
+  batches within a `BatchBudget`, charging each batch its
+  `padded_cost`: example count times the costliest example, since every
+  example is padded to the longest. An outlier deck therefore keeps its
+  batch small instead of padding a crowd of small decks. Generic dojos
+  batch through it.
 
 ## Subdirectories
 
@@ -89,10 +96,49 @@ rows never straddle TRAIN and TEST.
   (empty, or at least one of its paths present; a partly present mask
   masks the paths that exist), so weight meant for fields a card lacks
   moves to masks that do something.
+  Each takes `variants` (spec and config field too): negative, the
+  default, draws fresh every time and stamps each changed card
+  do-not-cache; 0 turns the mod off; N > 0 (at most 100) lets the mod's
+  own random state pick a variant v in [0, N) per card and modifies the
+  card with a fixed random state seeded from `VARIANT_SEEDS[v]`, the
+  card's `nocab_uuid` and the mod class (`variant_seeds.py`). A card then
+  has at most N texts per mod, the same in every dojo and run, so they
+  are not stamped and the feature cache keeps them. `Mod.deterministic_cards`
+  is True for such a mod.
+  Each also takes `probability` (default 1.0; `RandomKeyMaskMod`
+  requires it): the chance the mod acts on a card at all, rolled on the
+  mod's own random state before any variant is picked, so with N > 0 a
+  card is modified on about that share of its draws, always into one of
+  its N texts.
   Best effort: while applying, a card the mod cannot edit passes through
   unchanged and training continues; constructor arguments are validated.
   Each such mod keeps a `ModTally` (cards seen, changed, failed, and the
   first failure) so a mod that never fires or keeps failing is visible.
+  `content_style_mods.py` holds more card-field mods (same `variants`,
+  `probability`, best effort and tally). These change how a card is
+  written, not what it says, aimed at transfer to games whose schemas
+  differ from ours. Each applies one style to the whole card at every
+  depth, picked per card from its `styles` (a `DEFAULT_STYLES` ClassVar
+  when not given):
+  - `KeyCaseMod` re-cases every key (snake, upper_snake, camel, pascal,
+    kebab or title). A key with other characters (`{R}`) is kept, and a
+    card whose keys collide after renaming passes through.
+  - `FlattenKeysMod` joins nested object paths into top-level keys with a
+    separator. Lists stay lists, with their objects flattened in place.
+  - `ValueCaseMod` upper- or lower-cases string values, skipping
+    `MASK_TOKEN`.
+  - `BoolToStringMod`, `ListToStringMod` (joins lists of scalars with a
+    separator) and `NumberToStringMod` turn values into strings.
+  A mod with one style draws nothing, so its cards are deterministic,
+  never stamped, whatever `variants` says. With probability below 1 such
+  a card has two texts: the original and the restyle. `NumberToStringMod`
+  has no styles and is always deterministic. The tree walks are in
+  `content_rewrite.py` (a `ContentRewrite` Strategy: one rule each for
+  keys, scalars and whole lists).
+  **Order matters.** These mods rename keys or change value types, so
+  anything that finds fields by name or path (`MaskTargetKeyMod`,
+  `WeightedFieldMaskMod`, label extraction) must run before them. Run
+  after, it finds nothing and the label leaks silently (see `ModPipeline`).
   `deck_mods.py` holds train-only deck mods that thin the card lists of a
   multi-card or multi-group input (a `DeckThinningMod` Template Method
   base): `CardDropoutMod` drops each card with a probability,
@@ -119,7 +165,17 @@ rows never straddle TRAIN and TEST.
   (`1:PerGameMod/gwent/0:ShuffleKeysMod`).
   `MASK_TOKEN` (`mod.py`) is the one mask string every masking mod writes,
   and `ModTally` lives there too (`Mod.tally` is None for mods that keep
-  none). `mod_specs.py` holds `ModSpec`s: frozen, shareable recipes, one
+  none). **The do-not-cache stamp.** Every mod that builds a card passes
+  it through `Mod.stamped_if_random`, which sets `GenericCard.cacheable`
+  to False (`GenericCardFactory.stamp_do_not_cache`) unless the mod's
+  `deterministic_cards` is True: always for `MaskTargetKeyMod` and
+  `NumberToStringMod`, for a card-field mod with `variants` > 0, and for
+  a content style mod with one style. Otherwise a card-field mod draws
+  at random and stamps every card it changes. Later mods keep the stamp,
+  and a feature cache encodes a stamped card's text without storing it.
+  Mods that build no card (deck mods, `ShuffleDeckMod`, `GroupSwapMod`)
+  never stamp.
+  `mod_specs.py` holds `ModSpec`s: frozen, shareable recipes, one
   per card-field or deck mod (`DeckModSpec` for the latter, carrying its
   `groups`), that each dojo builds into its own mods (a mod's
   random state and tally are per dojo, so mod objects are never shared).
@@ -140,14 +196,17 @@ rows never straddle TRAIN and TEST.
   metadata `nocab_split_order: uniform_shuffle`; `splits_exist()` treats
   a file without it as missing, so splits written before this rule are
   rebuilt on the next construction.
-  `DeckBoxDealer` does the same for a `DeckBox`: each deck's split is the
-  `HoldoutSpec`'s (`deck_split_of`, a hash, so approximate ratios and
-  stable as the box grows), cached in its own small SQLite index that is
-  rebuilt when the spec's deck split or the box's deck set changes (the
-  contrastive recipe names it `data/splits/contrastive/<dojo>.<split
-  tag>.db`, so runs under different holdouts keep separate files), and
-  fixed-size deck samples per split read straight from SQLite (fixed order:
-  by deck uuid).
+  `DeckBoxDealer` does the same for a deck box, read through its
+  level-2 `DeckSnapshot` (`../data_refinement/snapshots/`). Each deck's
+  split is the `HoldoutSpec`'s (`deck_split_of`, a hash, so approximate
+  ratios and stable as the box grows), held by a `DeckSplitIndex`: a
+  uint8 code per snapshot row, cached as
+  `<cache dir>/<game>.<split tag>.deck_splits.arrow` with the snapshot
+  stamp it numbers and rebuilt when that stamp or the deck split changes.
+  Decks are dealt as fixed-size samples per split, rebuilt from the
+  snapshot's arrays (name `""`, no provenance): TEST and VALIDATION in
+  deck uuid order, TRAIN in a fresh permutation per pass from a generator
+  seeded at construction, so a run's epochs are reproducible.
   `GameBalancedChunkReader` reads one split file as a pass of rows drawn
   evenly across the values of a column (a game), optionally dropping rows
   first (`keep_row`); a dojo returns it from `GenericDojo._chunks` to
@@ -196,7 +255,7 @@ rows never straddle TRAIN and TEST.
 ## `contrastive/` - InfoNCE over deck co-occurrence
 
 Trains embeddings directly on how cards sit together in decks, sourced
-from a `DeckBox` through a `DeckBoxDealer`: no metric, no parquet file, no
+from a deck snapshot through a `DeckBoxDealer`: no metric, no parquet file, no
 learned decoder head. It doesn't fit the generic cells because InfoNCE
 needs every item's embedding in a batch jointly, not a row-independent
 `(output, label) -> loss`.
@@ -290,7 +349,14 @@ outcome-labelled deck dojos.
 Batch budget: a deck costs its style's cards per deck (single card 2,
 missing card 9, odd one out 8, cross-slice and slice match 8, card in
 contexts 16), and `ContrastiveDojo` fits as many decks as `max_batch_cost`
-allows, up to 16 and never fewer than 2.
+allows, never fewer than 2. The budget is the only batch-size setting: a
+split's last batch holds whatever decks are left (so a deck box smaller
+than one batch still yields one), and a lone leftover deck is dropped.
+Contrastive batches are sized by real cards, not padded slots, so their
+composition (and the number of negatives) does not depend on padding.
+Their padding is fixed by each style's item layout: missing card pads
+its one-card item to the slice size (under 2x the real cards), and every
+other style's items are equal-length (no padding).
 
 Files:
 
@@ -347,10 +413,18 @@ Files:
 - `contrastive_loss.py` - the `ContrastiveLoss` Protocol (Strategy,
   batch-level, unlike `NocabLoss`), `DegenerateBatchError` (a well-formed
   batch whose loss is undefined: no positive, or no negative), and the
-  shared InfoNCE math every InfoNCE style reduces to:
-  `pairwise_cosine_similarity`, `identity_negative_mask`, `anchor_loss`,
-  `mean_anchor_loss`, `mean_item_embeddings`, `check_item_embeddings` and
-  `mean_constant_logit_loss`. Each loss's
+  shared InfoNCE math every InfoNCE style reduces to. A style picks its
+  comparison units from the `PaddedEmbeddings` it is given (single card
+  and card in contexts: `cards[:, 0]`; slice match and missing card:
+  `mean_per_example()`; cross-slice: `flat_cards()`) and builds one
+  `ComparisonMasks` (which pairs are positives, which are valid
+  negatives) on the CPU from identities and cliques, with
+  `same_key_mask`, `clique_positive_mask` and `info_nce_masks`.
+  `info_nce_loss(units, masks, temperature)` scores every anchor and
+  positive in a few kernels with no device sync (an anchor without
+  negatives contributes 0 with a finite gradient), and
+  `constant_logit_baseline(masks)` reads the same masks. Odd one out
+  scores positions within each padded item instead. Each loss's
   `constant_logit_loss(identities, positive_cliques)` is its loss with
   every similarity equal, computed from the batch shape alone: each
   anchor with a positive scores ln(1 + its valid negatives), averaged over
@@ -359,7 +433,9 @@ Files:
   odd one out: ln(item size)).
 - `dojo.py` - `ContrastiveDojo`: wires dealer + pair constructor + card
   lookup into `Dojo`. An example is one source deck, so the budget
-  becomes a deck count per batch. A batch whose loss is undefined (the
+  becomes a deck count per batch, and `max_examples` keeps a pass to the
+  split's first N decks, trimming its last batch (the `Dojo.batches`
+  contract, as in the generic dojos). A batch whose loss is undefined (the
   loss raises `DegenerateBatchError`, e.g. one surviving deck) is skipped
   and logged, so training and evaluation never see one; a malformed batch
   (any other error from the loss) still raises. It has no trainable
@@ -375,8 +451,11 @@ Files:
 
 Augmentation defaults: `augmentation_defaults.py` (at the top of
 `dojos/`) holds each game's default train-only augmentations as
-`ModSpec`s (`mods/mod_specs.py`): a key shuffle, a `DropTable` of
-`FieldMask`s, and a small random-key mask. The tables name each game's
+`ModSpec`s (`mods/mod_specs.py`): a `DropTable` of `FieldMask`s and a
+small random-key mask, all unbounded (`variants` -1). The key shuffle is
+no longer a default: each shuffle is a new, uncacheable text, which
+defeated the feature cache (2026-10-21); a run config can still add
+`{kind: shuffle_keys}`, bounded with `variants: N` to keep it cacheable. The tables name each game's
 `raw_content` keys, so they follow the game's card-binder ingestion stage;
 each mainly masks the field that nearly identifies a card's deck (Gwent
 `faction`, STS2 `color`), so same-deck positives cannot be matched on that

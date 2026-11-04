@@ -30,6 +30,15 @@ hooks for observers.
   and refuses (`ValueError`) to append to a CSV whose header differs, e.g.
   one written before a column was added.
 
+- [run_sampler.py](run_sampler.py): `RunSampler`, a daemon thread that
+  writes `samples.csv` into the run directory every 10 s while training:
+  torch's allocated, reserved and peak VRAM, the feature cache's running
+  totals and each tier's hits, rows, pins and evictions. Reading the
+  cache totals across rows gives a hit rate over time. A failing row is
+  logged and skipped; sampling never stops a run. See [TODO.md](TODO.md).
+- [csv_table.py](csv_table.py): `CsvTable`, a fixed-header CSV written
+  under a lock and flushed every row, so a crashed run keeps its rows.
+
 ## How it works
 
 After each round `Trainer` builds a `RoundReport`, notifies every listener,

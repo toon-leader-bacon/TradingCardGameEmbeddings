@@ -28,7 +28,7 @@ import torch
 import yaml
 
 from src.dojos.loss.regression_objective import RegressionLossKind
-from src.dojos.mods.mod_specs import ModSpec
+from src.dojos.mods.mod_specs import AugmentationRates, ModSpec
 from src.schema.game_id import GameId
 from src.schema.holdout import DEFAULT_DECK_SPLIT_RATIOS, HoldoutSpec
 from src.training.config_parsing.config_section import (
@@ -38,10 +38,15 @@ from src.training.config_parsing.config_section import (
     construct_at,
 )
 from src.training.config_parsing.diet_parsing import parse_diet
-from src.training.config_parsing.mod_parsing import parse_mod_overrides
+from src.training.config_parsing.mod_parsing import (
+    parse_binder_mods,
+    parse_default_augmentation,
+    parse_mod_overrides,
+)
 from src.training.config_parsing.model_parsing import parse_model
 from src.training.learning_rate_schedule import LearningRateSchedule
 from src.training.loss_weighting import DEFAULT_BASELINE_FLOOR, LossWeighting
+from src.training.binder_mods_spec import BinderModsSpec
 from src.training.model_spec import ModelSpec
 from src.training.plan import (
     DietRule,
@@ -84,6 +89,16 @@ class RunConfig:
     regression_loss: the loss every regression dojo trains with (mse,
         today's, or huber); the run's DojoBuildContext carries the matching
         RegressionObjective.
+    warm_feature_cache: games whose every card is encoded into the model's
+        feature cache before training (top-level `warm_feature_cache:
+        [gwent, mtg]`); empty by default. Needs model.feature_cache.
+    default_augmentation: rates rewriting every game default card-field
+        mod (top-level `default_augmentation: {probability, variants}`);
+        dojos named in mod_overrides are not touched. Nothing by default.
+    binder_mods: the mod pipeline applied once to every card of each
+        game the run loads, before any dojo is built (top-level
+        `binder_mods:`, see binder_mods.py); None means cards are used as
+        the binder holds them.
     """
 
     run_directory: Path
@@ -95,6 +110,9 @@ class RunConfig:
     mod_overrides: Mapping[str, tuple[ModSpec, ...]] = field(default_factory=dict)
     staple_thresholds: Mapping[str, float] = field(default_factory=dict)
     regression_loss: RegressionLossKind = RegressionLossKind.MSE
+    warm_feature_cache: tuple[GameId, ...] = ()
+    default_augmentation: AugmentationRates = AugmentationRates()
+    binder_mods: BinderModsSpec | None = None
 
     def __post_init__(self) -> None:
         # No duplicate dojos (the Trainer keys dojos by name and would
@@ -120,6 +138,9 @@ class RunConfig:
             raise ValueError(
                 f"staple_subsampling names {unknown_thresholds}, not in dojos"
             )
+        # Warming needs a cache to warm
+        if self.warm_feature_cache and self.model.feature_cache is None:
+            raise ValueError("warm_feature_cache needs a model.feature_cache section")
 
 
 def read_config_document(path: Path) -> ConfigDocument:
@@ -184,11 +205,14 @@ def parse_run_config(
     Expected top-level keys: run_directory, device, seed, model, dojos,
     held_out_dojos (optional), holdout, hardware, eval_examples_per_dojo,
     phases, faults (optional), mods (optional: dojo name -> list of mod
-    entries, see config_parsing/mod_parsing.py), staple_subsampling (optional: dojo name
+    entries, see config_parsing/mod_parsing.py), default_augmentation
+    (optional: {probability, variants}, see
+    mod_parsing.parse_default_augmentation), staple_subsampling (optional: dojo name
     -> t, see _parse_staple_thresholds), loss_weights (optional: dojo name
     -> multiplier), baseline_floor and weight_by_baseline (optional; see
-    _parse_loss_weighting), and regression_loss (optional: mse or huber;
-    see _parse_regression_loss).
+    _parse_loss_weighting), regression_loss (optional: mse or huber;
+    see _parse_regression_loss), and binder_mods (optional: see
+    mod_parsing.parse_binder_mods).
     A phase without a "dojos" key trains every run dojo that is not held out.
 
     Inputs: document (ConfigDocument), catalog_names (every dojo name a
@@ -250,8 +274,20 @@ def parse_run_config(
     limits = build_flat_dataclass(HardwareLimits, top.required_section("hardware"))
     regression_loss = _parse_regression_loss(top)
     mod_overrides = parse_mod_overrides(top.optional_section("mods"))
+    default_augmentation = parse_default_augmentation(
+        top.optional_section("default_augmentation")
+    )
     staple_thresholds = _parse_staple_thresholds(
         top.optional_section("staple_subsampling")
+    )
+    binder_mods = (
+        parse_binder_mods(top.required_section("binder_mods"))
+        if top.has("binder_mods")
+        else None
+    )
+    warm_feature_cache = tuple(
+        _parse_game(value, top.location_of("warm_feature_cache"))
+        for value in top.optional_str_list("warm_feature_cache")
     )
     top.reject_unread_keys()
     result = construct_at(
@@ -266,6 +302,9 @@ def parse_run_config(
             mod_overrides=mod_overrides,
             staple_thresholds=staple_thresholds,
             regression_loss=regression_loss,
+            warm_feature_cache=warm_feature_cache,
+            default_augmentation=default_augmentation,
+            binder_mods=binder_mods,
         ),
     )
     return result
@@ -484,14 +523,9 @@ def _parse_regression_loss(top: ConfigSection) -> RegressionLossKind:
     Exceptions: ValueError, naming the key's config location, for a value
         that is not one of the kind names.
     """
-    text = top.optional("regression_loss", str, RegressionLossKind.MSE.value)
-    try:
-        return RegressionLossKind(text)
-    except ValueError:
-        wanted = [kind.value for kind in RegressionLossKind]
-        raise ValueError(
-            f"{top.location_of('regression_loss')} is {text!r}, want one of {wanted}"
-        ) from None
+    return top.optional_choice(
+        "regression_loss", RegressionLossKind, RegressionLossKind.MSE
+    )
 
 
 def _parse_loss_weighting(top: ConfigSection) -> LossWeighting | None:

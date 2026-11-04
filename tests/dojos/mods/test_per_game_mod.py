@@ -2,7 +2,6 @@
 
 from datetime import datetime, timezone
 from typing import Any
-from uuid import uuid4
 
 import pytest
 
@@ -13,11 +12,12 @@ from src.dojos.mods.per_game_mod import PerGameMod
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
+from tests.dojos.mods.card_ids import content_uuid
 
 
 def _card(game: GameId, raw_content: dict[str, Any]) -> GenericCard:
     return GenericCard(
-        nocab_uuid=uuid4(),
+        nocab_uuid=content_uuid(raw_content),
         source_game=game,
         name="Card",
         raw_content=raw_content,

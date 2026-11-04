@@ -22,6 +22,7 @@ from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
 from src.schema.type_hints import TrainingDatum
+from tests.dojos.padding import padded
 
 _BUDGET = BatchBudget(max_cost=1000, cost_of=lambda card: 1)
 
@@ -135,7 +136,7 @@ class TestSingleCardRegressionDojoComputeLoss:
                 output_directory=tmp_path / "splits",
             ),
         )
-        embeddings = [torch.randn(4), torch.randn(4)]
+        embeddings = padded([torch.randn(4), torch.randn(4)])
         labels = [1.0, 2.0]
 
         loss = dojo.compute_loss(embeddings, Batch([card] * len(labels), labels))
@@ -160,7 +161,7 @@ class TestSingleCardRegressionDojoComputeLoss:
         )
 
         try:
-            dojo.compute_loss([torch.randn(4)], Batch([card, card], [1.0, 2.0]))
+            dojo.compute_loss(padded([torch.randn(4)]), Batch([card, card], [1.0, 2.0]))
             assert False, "expected ValueError"
         except ValueError:
             pass

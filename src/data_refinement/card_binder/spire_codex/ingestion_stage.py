@@ -63,11 +63,11 @@ from tqdm import tqdm
 from src.data_refinement.card_binder import merge_strategies
 from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.lean_content import (
-    JsonObject,
     map_strings,
     order_keys,
     strip_noise,
 )
+from src.schema.json_types import JsonObject
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId

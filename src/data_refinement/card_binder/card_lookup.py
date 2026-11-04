@@ -1,6 +1,6 @@
 """The read-only view of CardBinder, for consumers that must never write.
 
-CardLookup is CardBinder's own read surface (get_by_uuid, get_by_name,
+CardLookup is CardBinder's own read surface (get_by_uuid, source_games_of, get_by_name,
 get_by_name_single, get_by_alias, get_by_name_regex, all_uuids,
 all_cards) minus its write surface (create, update, replace, delete,
 register_alias, load, save) — not a new capability, just that subset
@@ -37,6 +37,10 @@ class CardLookup(Protocol):
 
     def get_by_uuid(self, nocab_uuid: UUID) -> GenericCard | None:
         """See CardBinder.get_by_uuid()."""
+        ...
+
+    def source_games_of(self, nocab_uuids: Iterable[UUID]) -> dict[UUID, GameId]:
+        """See CardBinder.source_games_of()."""
         ...
 
     def get_by_name(self, source_game: GameId, name: str) -> list[GenericCard]:

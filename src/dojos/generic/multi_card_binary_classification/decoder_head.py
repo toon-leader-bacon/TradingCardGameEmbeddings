@@ -23,13 +23,13 @@ single_card_fixed_classification/decoder_head.py already being kept
 separate.
 """
 
-from typing import List
-
 import torch
 import torch.nn as nn
 
+from src.schema.padded_embeddings import PaddedEmbeddings
+from src.schema.type_hints import InputShape
+
 from src.dojos.generic.pooling import EmbeddingPooler, MeanEmbeddingPooler
-from src.schema.type_hints import BatchedMultiCardEmbedding, MultiCardEmbedding
 
 
 class MultiCardBinaryClassificationDecoderHead(nn.Module):
@@ -63,33 +63,21 @@ class MultiCardBinaryClassificationDecoderHead(nn.Module):
             nn.Linear(512, 1),
         )
 
-    def forward(self, embeddings: BatchedMultiCardEmbedding) -> torch.Tensor:
+    def forward(self, embeddings: PaddedEmbeddings) -> torch.Tensor:
         """One raw logit per deck in the batch, as a single (N,) tensor.
 
         Inputs:
-            embeddings: one deck's card embeddings per training example
-                in the batch (each deck's own list may be a different
-                length).
+            embeddings: a MULTI_CARD batch, one deck per example.
         Output: a (batch_size,) tensor of raw logits (no sigmoid
             applied), same order as embeddings.
         Side effects: none.
         Exceptions: none expected.
         """
-        pooled_decks: List[torch.Tensor] = [
-            self.pooler.pool(deck_embeddings) for deck_embeddings in embeddings
-        ]
-        batched_embeddings = torch.stack(pooled_decks)
+        embeddings.require_shape(
+            InputShape.MULTI_CARD, "MultiCardBinaryClassificationDecoderHead"
+        )
+        # Pool every deck at once (this is what handles decks of varying
+        # card count: each row is now one fixed-size vector), then the MLP
+        batched_embeddings = self.pooler.pool(embeddings)
         decoder_output = self.network(batched_embeddings)
         return decoder_output.squeeze(-1)
-
-    def forward_single(self, embeddings: MultiCardEmbedding) -> torch.Tensor:
-        """Decode one deck's card embeddings to its raw logit, unbatched.
-
-        Inputs:
-            embeddings: one deck's card embeddings.
-        Output: a scalar tensor (a raw logit, no sigmoid applied).
-        Side effects: none.
-        Exceptions: none expected.
-        """
-        pooled_deck = self.pooler.pool(embeddings)
-        return self.network(pooled_deck).squeeze(-1)

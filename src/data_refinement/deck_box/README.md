@@ -82,17 +82,37 @@ metrics too.
     recur), `update` (overwrites only the fields given), `replace`,
     `delete`, `get_by_uuid`; lazy `all_uuids`/`all_decks` generators,
     so a box larger than memory reads the same as a small one.
-  - `version_for(game)`: a derived content hash, like
-    `CardBinder.version_for()`. `card_binder_version_for(game)`: the
-    stamped version, or `None` when never stamped or cleared by an
-    unfinished run; callers treat `None` as stale.
+  - `deck_card_counts(game)`: every deck once as `DeckCardCounts`
+    (uuid plus distinct `(card uuid, count)` pairs), streamed from one
+    sequential pass over `deck_cards` in storage order. This is the bulk
+    read the level-2 deck snapshot is built from (`../snapshots/`). It
+    relies on every write putting a deck's card rows in one statement,
+    so they are adjacent.
+  - `card_binder_version_for(game)`: the stamped binder version the
+    decks were minted against, or `None` when never stamped or cleared
+    by an unfinished run; callers treat `None` as stale.
+  - `version_for(game)`: a cheap version, a hash of
+    `card_binder_version_for(game)` and the game's deck count, computed
+    per call (`None` when the stamp is `None`). A new deck count or a
+    re-stamp against another binder changes it.
+    - **Known blind spot:** a change that keeps the deck count (decks
+      edited in place, or a re-extraction that rewrites contents one
+      for one) keeps the version, so nothing keyed on it notices. This
+      is accepted: deck boxes are rebuilt rarely and wholesale here, and
+      missing such a change only means training on slightly different
+      data than the box now holds.
+    - Unlike `CardBinder.version_for()`, it is not a content hash: on
+      MTG's 40 GB box that would scan 161M rows per call.
   - `uuids_ranked_randomly(game, seed)`: a seeded, reproducible ranking
     computed inside SQLite (the held-out-deck-card metric samples decks
     with it). Training's deck splits come from the `HoldoutSpec` instead
-    (`src/dojos/file_managers/deck_box_dealer.py`).
+    (`src/dojos/file_managers/deck_split_index.py`).
   - `load([])` opens an empty in-memory box; `load([path])` connects
     straight to `path`; `load([p1, p2, ...])` merges read-only into
-    memory, last path wins. `save()` commits any pending writes and
+    memory, last path wins. `open_read_only(path)` opens an existing
+    file in SQLite's read-only mode, so any write raises; its connection
+    may be read from any one thread at a time. Training opens deck boxes
+    this way (`CardShelf.deck_box`). `save()` commits any pending writes and
     stamps the version (copying the box to `path` first if it isn't
     already connected there).
   - Batched commits: each mutating call is atomic on its own (a
@@ -108,13 +128,23 @@ metrics too.
     on every stage deriving deterministic deck ids (see
     `extraction.py`). The module docstring has the details.
 - `deck_lookup.py` — `DeckLookup`, `DeckBox`'s read-only surface as a
-  Protocol (the `CardLookup` counterpart). Dojos, their data
-  constructors and `DeckBoxDealer` take a `DeckLookup`, so a reader
+  Protocol (the `CardLookup` counterpart), and `DeckCardCounts`. Dojos,
+  their data constructors and the snapshot builder take a `DeckLookup`,
+  so a reader
   cannot write through a box that `load()` connected straight to its
-  file.
+  file. The type checker enforces this; a box from `open_read_only()`
+  also refuses writes at runtime.
 - `_deck_tables.py` — `DeckTables`, private to `deck_box.py`: one method
   per SQL statement. Row writes never commit; `create_schema()` and
   `merge_from()` do, so they run only when a box is built.
+- `unknown_card.py` — `require_unknown_card_uuid(card_lookup, game)`:
+  the Unknown sentinel's uuid, raising if the binder lacks it. New
+  stages use it; older ones still carry their own copy of the check.
+- `multiset_deck.py` — `store_multiset_deck(...)`: stores a deck under
+  its copy-count multiset hash once (`create_if_absent()`), returning
+  its uuid only when this call created it. Used by the stages whose
+  identity is the multiset (limitless_play, hearthstonetopdecks,
+  zenodo_hearthstone_decks).
 - `extraction.py` — `DeckExtractionStage`, the Strategy Protocol every
   deck source implements: `extract(self, raw_path, box, card_lookup) ->
   list[UUID]` plus `SOURCE_GAME: ClassVar[GameId]`. A stage reads cards
@@ -139,7 +169,11 @@ card reference it can't match, rather than dropping it.
 | `sts_gg/` | `StsGgDeckExtractionStage` | Slay the Spire 2 | sts_gg `runs.jsonl` | `uuid5(ns, run_id)` |
 | `spire_codex_runs/` | `SpireCodexRunsDeckExtractionStage` | Slay the Spire 2 | spire_codex `runs/page_*.jsonl.gz` | `uuid5(ns, f"{run_hash}:{player_index}")` |
 | `fabtcg_decklists/` | `FabtcgDecklistsExtractionStage` | Flesh and Blood | fabtcg.com decklist HTML (parsed by `fragment_parsing.py`) | `uuid5(ns, deck_slug)` |
+| `fabtcgmeta_online_decks/` | `FabtcgmetaOnlineDecksExtractionStage` | Flesh and Blood | fabtcgmeta.com's Talishar online-deck shards (`archive/` and `recent/`, `{deck hash: deck}`); each card line matched by name, name key or front face, then by pitch | `deck_uuid_from_cards()` over the copy-count multiset |
 | `play_gwent/` | `PlayGwentDeckExtractionStage` | Gwent | playgwent.com `guides.jsonl` | `uuid5(ns, guide_id)` |
+| `limitless_play/` | `LimitlessPlayDeckExtractionStage` | Pokemon | limitless_play `standings.jsonl`: player decklists, cards matched by set code + number via `card_index.py` (needs pokemon_tcg's `sets/en.json`), then by newest same-name card; non-60-card lists skipped | `deck_uuid_from_cards()` over the copy-count multiset; identical lists stored once |
+| `hearthstonetopdecks/` | `HearthstoneTopDecksDeckExtractionStage` | Hearthstone | hearthstonetopdecks `decks.jsonl`: one deck code per page, decoded by `deckstring.py`; each dbfId matched through the binder's HEARTHSTONEJSON alias (cards taken as their current version); heroes and sideboard cards dropped | `deck_uuid_from_cards()` over the copy-count multiset; identical lists stored once |
+| `zenodo_hearthstone_decks/` | `ZenodoHearthstoneDecksExtractionStage` | Hearthstone | the Zenodo dataset's directory: `cards.csv` (one row per card copy, by name) plus `decks.csv` (archetype, for the deck name); names matched exactly, each card taken as its latest version | `deck_uuid_from_cards()` over the copy-count multiset; identical lists stored once (also across `hearthstonetopdecks/`) |
 | `seventeenlands_game_data/` | `SeventeenLandsGameDataDeckExtractionStage` | MTG | 17lands `game_data` CSVs (`deck_<name>` copy-count columns), read with the shared `../seventeenlands/` parser | `deck_uuid_from_cards()` over the full copy-count multiset: every distinct decklist any game played, stored once (an unmatched column counts as the Unknown card) |
 
 ## How it works

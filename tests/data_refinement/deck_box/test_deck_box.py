@@ -1,4 +1,5 @@
 import sqlite3
+import threading
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -6,6 +7,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from src.data_refinement.deck_box import _deck_tables
 from src.data_refinement.deck_box.deck_box import DeckBatchLostError, DeckBox
 from src.schema.card import GenericDeck, Provenance
 from src.schema.data_source import DataSource
@@ -204,6 +206,63 @@ class TestGetByUuid:
         assert box.get_by_uuid(uuid4()) is None
 
 
+class TestGetByUuids:
+    def test_matches_get_by_uuid_in_input_order(self) -> None:
+        box = DeckBox()
+        repeated = uuid4()
+        first = _deck("Burn", [repeated, uuid4(), repeated, uuid4()])
+        second = _deck("Control", [uuid4()], provenance=_provenance())
+        box.create(first)
+        box.create(second)
+        missing = uuid4()
+
+        found = box.get_by_uuids([second.nocab_uuid, missing, first.nocab_uuid])
+
+        assert found == [
+            box.get_by_uuid(second.nocab_uuid),
+            None,
+            box.get_by_uuid(first.nocab_uuid),
+        ]
+        assert found[2] is not None
+        assert sorted(found[2].card_nocab_uuids, key=str) == sorted(
+            first.card_nocab_uuids, key=str
+        )
+
+    def test_empty_input(self) -> None:
+        assert DeckBox().get_by_uuids([]) == []
+
+    def test_a_repeated_uuid_yields_distinct_objects(self) -> None:
+        box = DeckBox()
+        deck = _deck("Burn", [uuid4()])
+        box.create(deck)
+
+        once, twice = box.get_by_uuids([deck.nocab_uuid, deck.nocab_uuid])
+
+        assert once == twice == deck
+        assert once is not twice
+        assert once.card_nocab_uuids is not twice.card_nocab_uuids
+
+    def test_more_uuids_than_one_query_holds(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(_deck_tables, "_MAX_IN_PARAMETERS", 2)
+        box = DeckBox()
+        decks = [_deck(f"deck {index}", [uuid4(), uuid4()]) for index in range(5)]
+        for deck in decks:
+            box.create(deck)
+
+        assert box.get_by_uuids([deck.nocab_uuid for deck in decks]) == decks
+
+    def test_reads_a_saved_box(self, tmp_path: Path) -> None:
+        box = DeckBox()
+        deck = _deck("Burn", [uuid4(), uuid4()])
+        box.create(deck)
+        path = tmp_path / "decks.db"
+        box.save(path, GameId.MTG, "binder-v1")
+
+        assert DeckBox.load([path]).get_by_uuids([deck.nocab_uuid]) == [deck]
+
+
 class TestAllUuids:
     def test_no_filter_returns_every_uuid(self) -> None:
         box = DeckBox()
@@ -240,47 +299,138 @@ class TestAllDecks:
         assert list(box.all_decks(GameId.MTG)) == []
 
 
-class TestVersionFor:
-    def test_empty_game_returns_a_fixed_digest(self) -> None:
+class TestDeckCardCounts:
+    def test_yields_each_decks_distinct_cards_with_counts(self) -> None:
         box = DeckBox()
+        a, b = uuid4(), uuid4()
+        deck = _deck("Pair", [a, a, a, b])
+        box.create(deck)
 
-        assert box.version_for(GameId.MTG) == box.version_for(GameId.MTG)
-        assert isinstance(box.version_for(GameId.MTG), str)
+        (counted,) = box.deck_card_counts(GameId.MTG)
 
-    def test_stable_across_instances_with_the_same_content(self) -> None:
-        deck = _deck("Mono Red", [uuid4(), uuid4()])
-        first_box = DeckBox()
-        first_box.create(replace(deck))
-        second_box = DeckBox()
-        second_box.create(replace(deck))
+        assert counted.nocab_uuid == deck.nocab_uuid
+        assert sorted(counted.card_counts) == sorted([(a, 3), (b, 1)])
 
-        assert first_box.version_for(GameId.MTG) == second_box.version_for(GameId.MTG)
+    def test_each_deck_comes_once(self) -> None:
+        box = DeckBox()
+        decks = [
+            _deck(f"deck {position}", [uuid4(), uuid4()]) for position in range(20)
+        ]
+        for deck in decks:
+            box.create(deck)
 
-    def test_unaffected_by_card_nocab_uuids_order(self) -> None:
-        # card_nocab_uuids is a multiset (unordered, duplicates
-        # meaningful) - the same deck (same nocab_uuid) with its cards
-        # listed in a different order must hash identically.
-        card_a, card_b = uuid4(), uuid4()
-        deck = _deck("Mono Red", [card_a, card_b])
-        reordered_deck = replace(deck, card_nocab_uuids=[card_b, card_a])
-        first_box = DeckBox()
-        first_box.create(deck)
-        second_box = DeckBox()
-        second_box.create(reordered_deck)
+        dealt = [counted.nocab_uuid for counted in box.deck_card_counts(GameId.MTG)]
 
-        assert first_box.version_for(GameId.MTG) == second_box.version_for(GameId.MTG)
+        assert sorted(dealt) == sorted(deck.nocab_uuid for deck in decks)
 
-    def test_changes_when_a_deck_is_added(self) -> None:
+    def test_an_updated_deck_comes_once_with_its_new_cards(self) -> None:
+        box = DeckBox()
+        first, second = _deck("First", [uuid4()]), _deck("Second", [uuid4()])
+        box.create(first)
+        box.create(second)
+        new_card = uuid4()
+        box.update(first.nocab_uuid, card_nocab_uuids=[new_card, new_card])
+
+        counted = {deck.nocab_uuid: deck for deck in box.deck_card_counts(GameId.MTG)}
+
+        assert len(counted) == 2
+        assert counted[first.nocab_uuid].card_counts == [(new_card, 2)]
+
+    def test_a_deck_with_no_cards_is_yielded_empty(self) -> None:
+        box = DeckBox()
+        empty = _deck("Empty", [])
+        box.create(empty)
+
+        assert list(box.deck_card_counts(GameId.MTG)) == [(empty.nocab_uuid, [])]
+
+    def test_card_less_decks_come_with_carded_ones(self) -> None:
+        box = DeckBox()
+        empty, full = _deck("Empty", []), _deck("Full", [uuid4()])
+        box.create(empty)
+        box.create(full)
+        box.create(_deck("Other game, empty", [], source_game=GameId.POKEMON))
+
+        counted = {deck.nocab_uuid: deck for deck in box.deck_card_counts(GameId.MTG)}
+
+        assert set(counted) == {empty.nocab_uuid, full.nocab_uuid}
+        assert counted[empty.nocab_uuid].card_counts == []
+
+    def test_only_the_given_game(self) -> None:
+        box = DeckBox()
+        mtg_deck = _deck("Mono Red", [uuid4()], source_game=GameId.MTG)
+        box.create(mtg_deck)
+        box.create(_deck("Fire Deck", [uuid4()], source_game=GameId.POKEMON))
+
+        counted = list(box.deck_card_counts(GameId.MTG))
+
+        assert [deck.nocab_uuid for deck in counted] == [mtg_deck.nocab_uuid]
+
+
+class TestVersionFor:
+    @staticmethod
+    def _saved_box(
+        path: Path, decks: list[GenericDeck], card_binder_version: str = "binder-v1"
+    ) -> DeckBox:
+        """decks saved to path and stamped, then loaded back from it."""
+        box = DeckBox()
+        for deck in decks:
+            box.create(deck)
+        box.save(path, GameId.MTG, card_binder_version)
+        return DeckBox.load([path])
+
+    def test_none_when_never_stamped(self) -> None:
         box = DeckBox()
         box.create(_deck("Mono Red", [uuid4()]))
-        before = box.version_for(GameId.MTG)
+
+        assert box.version_for(GameId.MTG) is None
+
+    def test_a_stamped_box_has_a_sha256_hex_digest(self, tmp_path: Path) -> None:
+        box = self._saved_box(tmp_path / "mtg.db", [_deck("Mono Red", [uuid4()])])
+
+        version = box.version_for(GameId.MTG)
+
+        assert version is not None
+        assert len(version) == 64
+        assert version == box.version_for(GameId.MTG)
+
+    def test_same_stamp_and_deck_count_give_the_same_version(
+        self, tmp_path: Path
+    ) -> None:
+        # Deck contents are not hashed, only how many decks there are
+        first = self._saved_box(tmp_path / "a.db", [_deck("Mono Red", [uuid4()])])
+        second = self._saved_box(tmp_path / "b.db", [_deck("Mono Blue", [uuid4()])])
+
+        assert first.version_for(GameId.MTG) == second.version_for(GameId.MTG)
+
+    def test_changes_with_the_deck_count(self, tmp_path: Path) -> None:
+        one = self._saved_box(tmp_path / "a.db", [_deck("Mono Red", [uuid4()])])
+        two = self._saved_box(
+            tmp_path / "b.db",
+            [_deck("Mono Red", [uuid4()]), _deck("Mono Blue", [uuid4()])],
+        )
+
+        assert one.version_for(GameId.MTG) != two.version_for(GameId.MTG)
+
+    def test_changes_with_the_card_binder_version(self, tmp_path: Path) -> None:
+        deck = _deck("Mono Red", [uuid4()])
+        first = self._saved_box(tmp_path / "a.db", [replace(deck)], "binder-v1")
+        second = self._saved_box(tmp_path / "b.db", [replace(deck)], "binder-v2")
+
+        assert first.version_for(GameId.MTG) != second.version_for(GameId.MTG)
+
+    def test_none_after_a_mutating_call_until_saved(self, tmp_path: Path) -> None:
+        path = tmp_path / "mtg.db"
+        box = self._saved_box(path, [_deck("Mono Red", [uuid4()])])
 
         box.create(_deck("Mono Blue", [uuid4()]))
 
-        assert box.version_for(GameId.MTG) != before
+        assert box.version_for(GameId.MTG) is None
+        box.save(path, GameId.MTG, "binder-v1")
+        assert box.version_for(GameId.MTG) is not None
 
-    def test_unaffected_by_other_games(self) -> None:
-        box = DeckBox()
+    def test_unaffected_by_other_games(self, tmp_path: Path) -> None:
+        path = tmp_path / "mtg.db"
+        box = self._saved_box(path, [_deck("Mono Red", [uuid4()])])
         before = box.version_for(GameId.MTG)
 
         box.create(_deck("Fire Deck", [uuid4()], source_game=GameId.POKEMON))
@@ -430,6 +580,63 @@ class TestLoad:
         # copy, not a live connection to either input.
         assert len(list(DeckBox.load([first_path]).all_decks(GameId.MTG))) == 1
         assert len(list(DeckBox.load([second_path]).all_decks(GameId.MTG))) == 1
+
+
+class TestOpenReadOnly:
+    def _saved(self, tmp_path: Path) -> tuple[Path, GenericDeck]:
+        path = tmp_path / "mtg.db"
+        deck = _deck("Mono Red", [uuid4(), uuid4()])
+        box = DeckBox.load([path])
+        box.create(deck)
+        box.save(path, GameId.MTG, "binder-v1")
+        return path, deck
+
+    def test_reads_what_was_saved(self, tmp_path: Path) -> None:
+        path, deck = self._saved(tmp_path)
+
+        box = DeckBox.open_read_only(path)
+
+        assert box.get_by_uuid(deck.nocab_uuid) == deck
+        assert box.card_binder_version_for(GameId.MTG) == "binder-v1"
+
+    def test_can_be_read_from_another_thread(self, tmp_path: Path) -> None:
+        path, deck = self._saved(tmp_path)
+        box = DeckBox.open_read_only(path)
+        read: list[GenericDeck | None] = []
+
+        reader = threading.Thread(
+            target=lambda: read.extend(box.get_by_uuids([deck.nocab_uuid]))
+        )
+        reader.start()
+        reader.join(timeout=5)
+
+        assert read == [deck]
+
+    @pytest.mark.parametrize("write", ["create", "delete", "save"])
+    def test_every_write_raises_and_leaves_the_file_unchanged(
+        self, tmp_path: Path, write: str
+    ) -> None:
+        path, deck = self._saved(tmp_path)
+        box = DeckBox.open_read_only(path)
+        writes = {
+            "create": lambda: box.create(_deck("New", [uuid4()])),
+            "delete": lambda: box.delete(deck.nocab_uuid),
+            "save": lambda: box.save(path, GameId.MTG, "binder-v2"),
+        }
+
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            writes[write]()
+
+        reopened = DeckBox.load([path])
+        assert list(reopened.all_uuids()) == [deck.nocab_uuid]
+        assert reopened.card_binder_version_for(GameId.MTG) == "binder-v1"
+
+    def test_a_missing_path_raises_and_creates_nothing(self, tmp_path: Path) -> None:
+        path = tmp_path / "missing" / "mtg.db"
+
+        with pytest.raises(FileNotFoundError):
+            DeckBox.open_read_only(path)
+        assert not path.parent.exists()
 
 
 class TestSaveLoadRoundTrip:

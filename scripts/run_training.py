@@ -11,6 +11,8 @@ run_directory, which must not exist yet:
         checkpoints.csv     one row per best checkpoint written (only the
                             last best per phase is still on disk)
         diet_shares.csv     each phase's expected share of steps per dojo
+        samples.csv         VRAM and feature cache stats every 10 s while
+                            training (src/training/recording/run_sampler.py)
         <phase>_roundNNNN/  the phase's best checkpoint (state.pt, encoder.pt, ...)
         latest/             the most recent round, rewritten every round
         run.log             the full log, from the script's first line
@@ -30,10 +32,12 @@ Usage (from the project root, in the ROCm venv for a GPU run):
 """
 
 import argparse
+import contextlib
 import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
+from typing import Iterator, Mapping
 
 import torch
 import yaml
@@ -48,6 +52,8 @@ from src.encoder_model.embedding_head import (
     LinearEmbeddingHead,
     ResidualMlpEmbeddingHead,
 )
+from src.encoder_model.feature_cache.cut_point import PooledCutPoint
+from src.encoder_model.feature_cache.frozen_feature_cache import FeatureCacheStats
 from src.encoder_model.multi_card_model import MultiCardModel
 from src.encoder_model.pooling.attention_pooling import AttentionPooling
 from src.encoder_model.pooling.mean_pooling import MeanPooling
@@ -55,8 +61,10 @@ from src.encoder_model.pooling.token_pooling import TokenPooling
 from src.encoder_model.pooling.transformer_pooling import TransformerPooling
 from src.encoder_model.enrichment.token_whitening import TokenWhitening
 from src.encoder_model.whitening.whitening_stats import WhiteningStats
+from src.encoder_model.precision import Precision
 from src.encoder_model.single_card_model import SingleCardModel
-from src.encoder_model.text_encoder import PretrainedTextEncoder, TextEncoder
+from src.encoder_model.modernbert_text_encoder import load_text_encoder
+from src.encoder_model.text_encoder import TextEncoder
 from src.run_logging import (
     RUN_LOG_NAME,
     LoggingSettings,
@@ -74,12 +82,23 @@ from src.training.diet.diet_shares import (
     plan_diet_shares,
     write_diet_shares_csv,
 )
+from src.training.diet.prefetching_batch_streams import (
+    BatchWarmer,
+    build_model_warmer,
+    NO_BATCH_WARMING,
+)
+from src.training.binder_mods import require_writable_save_directory
 from src.training.dojo_catalog import DOJO_CATALOG, build_dojos
 from src.training.dojo_recipes.card_shelf import CardShelf
+from src.training.feature_cache_assembly import (
+    assemble_feature_cache,
+    build_fingerprint,
+)
 from src.training.dojo_recipes.dojo_build_context import DojoBuildContext
 from src.training.preflight import preflight_dojo
 from src.training.recording.checkpointer import DirectoryCheckpointer
 from src.training.recording.reports import TrainingResult
+from src.training.recording.run_sampler import RunSampler, SampledSources
 from src.training.recording.run_listener import (
     CsvRunListener,
     LoggingRunListener,
@@ -90,6 +109,7 @@ from src.training.model_spec import (
     EmbeddingHeadKind,
     MeanPoolingSpec,
     ModelSpec,
+    pooling_label,
     PoolingSpec,
     TokenWhiteningSpec,
     TransformerPoolingSpec,
@@ -101,6 +121,7 @@ from src.training.run_config import (
     parse_run_config,
     read_config_document,
 )
+from src.training.plan import HardwareLimits
 from src.training.trainer import Trainer
 
 _CONFIG_COPY_NAME = "run_config.yaml"
@@ -108,6 +129,7 @@ _WHITENING_STATS_COPY_NAME = "whitening_stats.pt"
 _ROUNDS_CSV_NAME = "rounds.csv"
 _CHECKPOINTS_CSV_NAME = "checkpoints.csv"
 _DIET_SHARES_CSV_NAME = "diet_shares.csv"
+_SAMPLES_CSV_NAME = "samples.csv"
 # Added to plan.seed for torch's global RNG, so dojo heads draw a
 # different stream from the model's (seeded with plan.seed itself)
 _DOJO_SEED_OFFSET = 1
@@ -208,24 +230,30 @@ def main() -> int:
         read_config_document(command_line.config), command_line.overrides
     )
     config = parse_run_config(document, tuple(DOJO_CATALOG))
-    _require_device(config.device)
+    require_device(config.device)
     require_whitening_fits_run(config.model, config.plan.holdout)
     if not command_line.check_only:
         _require_new_run_directory(config.run_directory)
+    # A bad save path fails here, before any binder is loaded or modded
+    if config.binder_mods is not None:
+        require_writable_save_directory(config.binder_mods)
     # Dojo heads and dropout draw from torch's global RNG; the model's own
     # initial weights are seeded separately, by build_model with plan.seed.
     # The offset keeps the first dojo head from replaying the model's stream
     torch.manual_seed(config.plan.seed + _DOJO_SEED_OFFSET)
+    # Before any tensor work: see HardwareLimits.torch_cpu_threads
+    torch.set_num_threads(config.limits.torch_cpu_threads)
 
     # Build the dojos and check each one before committing to a run
     context = DojoBuildContext(
-        shelf=CardShelf(),
+        shelf=CardShelf(binder_mods=config.binder_mods),
         holdout=config.plan.holdout,
         card_embedding_size=config.model.card_embedding_size,
         rng_seed=config.plan.seed,
         mod_overrides=config.mod_overrides,
         staple_thresholds=config.staple_thresholds,
         regression_objective=RegressionObjective.for_kind(config.regression_loss),
+        default_augmentation=config.default_augmentation,
     )
     dojos = build_dojos(config.dojo_names, context)
     if not preflight_passes(dojos, config):
@@ -234,29 +262,60 @@ def main() -> int:
     shares = plan_diet_shares(config.plan, dojos)
     for line in format_diet_shares(shares):
         _logger.info("%s", line)
-    model = build_model(config.model, seed=config.plan.seed).to(config.device)
+    model = build_model(
+        config.model, seed=config.plan.seed, compute_precision=config.limits.precision
+    ).to(config.device)
     _logger.info(
         "Model: %s trainable parameters", f"{trainable_parameter_count(model):,}"
     )
-    if command_line.check_only:
-        # Constructing a Trainer validates the plan against the model and
-        # dojos (e.g. a phase with nothing trainable) without training
-        Trainer(model, dojos, config.plan, config.limits, None, [], cost_of=card_cost)
-        _logger.info("Check passed; nothing trained.")
-        return 0
+    with closing_feature_cache(model):
+        if command_line.check_only:
+            # Constructing a Trainer validates the plan against the model and
+            # dojos (e.g. a phase with nothing trainable) without training
+            Trainer(
+                model, dojos, config.plan, config.limits, None, [], cost_of=card_cost
+            )
+            _logger.info("Check passed; nothing trained.")
+            return 0
 
-    # Train, recording into a fresh run directory
-    recorded = _with_run_whitening_stats(_with_expanded_dojos(document, config), config)
-    _create_run_directory(config.run_directory, recorded)
-    mirror_log_into(config.run_directory / RUN_LOG_NAME)
-    _copy_whitening_stats(config)
-    write_diet_shares_csv(shares, config.run_directory / _DIET_SHARES_CSV_NAME)
-    result = train(model, dojos, config)
-    log_summary(result, config.run_directory)
+        # Train, recording into a fresh run directory
+        recorded = _with_run_whitening_stats(
+            _with_expanded_dojos(document, config), config
+        )
+        _create_run_directory(config.run_directory, recorded)
+        mirror_log_into(config.run_directory / RUN_LOG_NAME)
+        _copy_whitening_stats(config)
+        write_diet_shares_csv(shares, config.run_directory / _DIET_SHARES_CSV_NAME)
+        # Fill the feature cache before any step, once run.log records it
+        warm_feature_cache(model, config, context.shelf)
+        result = train(model, dojos, config)
+        log_summary(result, config.run_directory)
+        _log_feature_cache_stats(model.feature_cache_stats(), "after training")
     return 0
 
 
-def build_model(spec: ModelSpec, seed: int | None = None) -> CardEncoderModel:
+@contextlib.contextmanager
+def closing_feature_cache(model: CardEncoderModel) -> Iterator[CardEncoderModel]:
+    """Close the model's feature cache (its database connection) when the
+    body ends, however it ends; nothing without a cache.
+
+    Inputs: model. Output: a context manager yielding model.
+    Side effects: closes the cache on exit. Exceptions: whatever the body
+        raises (the cache is still closed).
+
+    Example:
+        >>> with closing_feature_cache(build_model(spec)) as model:
+        ...     model.warm(cards, "fp32")
+    """
+    try:
+        yield model
+    finally:
+        model.close_feature_cache()
+
+
+def build_model(
+    spec: ModelSpec, seed: int | None = None, compute_precision: Precision = "fp32"
+) -> CardEncoderModel:
     """Construct the model spec describes (on the CPU): a CardEmbeddingPipeline
     (frozen pretrained text encoder, pooling, embedding head) as a
     SingleCardModel, or as a MultiCardModel when spec has group attention.
@@ -264,7 +323,9 @@ def build_model(spec: ModelSpec, seed: int | None = None) -> CardEncoderModel:
     Inputs: spec (ModelSpec); seed (int, or None for torch's current RNG
         state). With a seed, the initial weights depend on spec and seed
         alone, so an untrained control rebuilds a run's starting weights
-        by passing the run's plan.seed.
+        by passing the run's plan.seed. compute_precision: the autocast
+        the model will run under; a feature cache is built for it and
+        refuses any other (training passes config.limits.precision).
     Output: CardEncoderModel.
     Side effects: may download the pretrained checkpoint. A seeded build
         leaves torch's global CPU RNG as it found it.
@@ -274,22 +335,24 @@ def build_model(spec: ModelSpec, seed: int | None = None) -> CardEncoderModel:
         >>> build_model(ModelSpec(EmbeddingHeadKind.RESIDUAL_MLP, "answerdotai/ModernBERT-base", 256), seed=0)
     """
     if seed is None:
-        return _build_unseeded_model(spec)
+        return _build_unseeded_model(spec, compute_precision)
     with torch.random.fork_rng(devices=[]):
         torch.manual_seed(seed)
-        return _build_unseeded_model(spec)
+        return _build_unseeded_model(spec, compute_precision)
 
 
-def _build_unseeded_model(spec: ModelSpec) -> CardEncoderModel:
+def _build_unseeded_model(
+    spec: ModelSpec, compute_precision: Precision
+) -> CardEncoderModel:
     """Private helper - single caller is build_model.
 
-    Inputs: spec (ModelSpec). Output: CardEncoderModel, initialized from
+    Inputs: spec (ModelSpec), compute_precision. Output: CardEncoderModel, initialized from
         torch's current RNG state.
     Side effects: may download the pretrained checkpoint; draws from
         torch's global RNG. Exceptions: see build_model.
     """
-    text_encoder = PretrainedTextEncoder(checkpoint=spec.checkpoint, trainable=False)
-    card_pipeline = build_card_pipeline(spec, text_encoder)
+    text_encoder = load_text_encoder(spec.checkpoint, spec.trainable_text_layers)
+    card_pipeline = build_card_pipeline(spec, text_encoder, compute_precision)
     attention = spec.group_attention
     if attention is None:
         return SingleCardModel(card_pipeline)
@@ -304,7 +367,7 @@ def _build_unseeded_model(spec: ModelSpec) -> CardEncoderModel:
 
 
 def build_card_pipeline(
-    spec: ModelSpec, text_encoder: TextEncoder
+    spec: ModelSpec, text_encoder: TextEncoder, compute_precision: Precision = "fp32"
 ) -> CardEmbeddingPipeline:
     """The CardEmbeddingPipeline spec describes, around the given text
     encoder: spec.enrichment (if any), spec.pooling, then the head
@@ -312,13 +375,16 @@ def build_card_pipeline(
     output_dim, ending at spec.card_embedding_size.
 
     Inputs: spec, text_encoder (built by the caller, so tests can inject a
-        fake). Output: CardEmbeddingPipeline.
+        fake), compute_precision (the feature cache's, when spec has one).
+        Output: CardEmbeddingPipeline.
     Side effects: reads the whitening stats file when spec has token
-        whitening.
+        whitening (twice with a feature cache: it is also hashed).
     Exceptions: ValueError if the whitening stats were fitted on another
         checkpoint than spec.checkpoint, or a stage rejects its width
-        (e.g. transformer heads that do not divide it); FileNotFoundError
-        for a missing stats file.
+        (e.g. transformer heads that do not divide it), or spec has a
+        feature cache and a stage before the head is trainable, a tier's
+        capacity holds no row, or a disk tier's text encoder has no
+        source or revision; FileNotFoundError for a missing stats file.
 
     Example:
         >>> build_card_pipeline(spec, text_encoder).output_dim
@@ -332,7 +398,85 @@ def build_card_pipeline(
         token_width = enrichment.output_dim
     pooling = _build_pooling(spec.pooling, token_width)
     head = _build_head(spec, pooling.output_dim)
-    return CardEmbeddingPipeline(text_encoder, enrichment, pooling, head)
+    # A pooled cut stores the pooling's output, a token cut the encoder's
+    cache = None
+    if spec.feature_cache is not None:
+        cut = spec.feature_cache.cut_point
+        width = (
+            pooling.output_dim
+            if isinstance(cut, PooledCutPoint)
+            else text_encoder.output_dim
+        )
+        fingerprint = build_fingerprint(
+            text_encoder.source(),
+            spec.enrichment,
+            pooling_label(spec.pooling),
+            compute_precision,
+            width,
+            spec.feature_cache.storage_dtype,
+            cut,
+        )
+        cache = assemble_feature_cache(spec.feature_cache, fingerprint)
+    return CardEmbeddingPipeline(text_encoder, enrichment, pooling, head, cache)
+
+
+def warm_feature_cache(
+    model: CardEncoderModel, config: RunConfig, shelf: CardShelf
+) -> None:
+    """Encode every card of each game in config.warm_feature_cache into the
+    model's feature cache, at the run's precision, and log the totals.
+    Does nothing when there are no games to warm.
+
+    Inputs: model (already on config.device), config, shelf (the run's,
+        so binders the dojos loaded are reused).
+    Output: none.
+    Side effects: loads card binders; runs the frozen stages on the
+        model's device; logs the cache's totals.
+    Exceptions: FileNotFoundError for a missing binder; whatever
+        CardEncoderModel.warm raises.
+
+    Example:
+        >>> warm_feature_cache(model, config, context.shelf)
+    """
+    if not config.warm_feature_cache:
+        return
+
+    # Warm one game at a time, logging as each finishes
+    for game in config.warm_feature_cache:
+        cards = list(shelf.card_binder(game).all_cards(game))
+        _logger.info(
+            "Warming the feature cache with %d %s cards", len(cards), game.value
+        )
+        model.warm(cards, config.limits.precision)
+    _log_feature_cache_stats(model.feature_cache_stats(), "after warming")
+
+
+def _log_feature_cache_stats(stats: FeatureCacheStats | None, when: str) -> None:
+    """Log one line of feature cache totals; nothing without a cache.
+
+    Private helper - consumers are warm_feature_cache and main.
+    Inputs: stats (None: the model has no cache), when (e.g. "after
+        warming"). Output: none. Side effects: one INFO log line.
+    Exceptions: none.
+    """
+    if stats is None:
+        return
+    # Totals run from the start, so a warmed run's count includes the warm-up
+    tiers = "; ".join(
+        f"{tier.name} {tier.hits:,} hits, {tier.rows_used:,} / {tier.capacity_rows:,} rows"
+        for tier in stats.tiers
+    )
+    _logger.info(
+        "Feature cache %s (since start): %s texts, %s encoded (%.1f%% avoided), "
+        "%s admitted, %s uncacheable | %s",
+        when,
+        f"{stats.texts:,}",
+        f"{stats.encoded:,}",
+        100 * stats.avoided_fraction,
+        f"{stats.admitted:,}",
+        f"{stats.uncacheable:,}",
+        tiers,
+    )
 
 
 def _build_token_whitening(spec: TokenWhiteningSpec, checkpoint: str) -> TokenWhitening:
@@ -547,11 +691,13 @@ def train(
     model: CardEncoderModel, dojos: list[Dojo], config: RunConfig
 ) -> TrainingResult:
     """Construct the Trainer with a checkpointer and the logging and CSV
-    listeners pointed at config.run_directory, and run it.
+    listeners pointed at config.run_directory, and run it, with a
+    RunSampler writing samples.csv beside them for the length of training.
 
     Inputs: model (already on config.device), dojos, config.
     Output: TrainingResult.
-    Side effects: trains model and dojo heads; writes checkpoints and CSVs.
+    Side effects: trains model and dojo heads; writes checkpoints and CSVs;
+        runs the sampler thread and stops it however training ends.
     Exceptions: ValueError from the Trainer constructor for a plan/dojo
         mismatch; KeyboardInterrupt propagates.
 
@@ -573,8 +719,46 @@ def train(
         checkpointer=DirectoryCheckpointer(run_directory),
         listeners=listeners,
         cost_of=card_cost,
+        batch_warmer=batch_warmer_for(model, config.limits),
     )
-    return trainer.run()
+
+    # Sample VRAM and the cache while training runs; t counts from here
+    started = time.monotonic()
+    sampler = RunSampler(
+        run_directory / _SAMPLES_CSV_NAME,
+        SampledSources(
+            seconds_since_open=lambda: time.monotonic() - started,
+            cache_stats=model.feature_cache_stats,
+            steps_attempted=lambda: trainer.steps_attempted,
+        ),
+    )
+    try:
+        sampler.start()
+    except Exception:  # sampling must never stop a run
+        _logger.warning("run sampler did not start; training without it", exc_info=True)
+    try:
+        return trainer.run()
+    finally:
+        sampler.stop()
+
+
+def batch_warmer_for(model: CardEncoderModel, limits: HardwareLimits) -> BatchWarmer:
+    """How the prefetch worker reserves each built batch's cards: pinned
+    and warmed in model's feature cache, or nothing when the model has no
+    cache or the run does not prefetch.
+
+    Inputs: model (on its training device), limits (precision, prefetch_depth).
+    Output: BatchWarmer.
+    Side effects: none.
+    Exceptions: ValueError from build_model_warmer if the cache was built
+        for another precision.
+
+    Example:
+        >>> Trainer(..., batch_warmer=batch_warmer_for(model, config.limits))
+    """
+    if limits.prefetch_depth == 0 or model.card_pipeline.feature_cache is None:
+        return NO_BATCH_WARMING
+    return build_model_warmer(model, limits.precision)
 
 
 def log_summary(result: TrainingResult, run_directory: Path) -> None:
@@ -603,7 +787,7 @@ def log_summary(result: TrainingResult, run_directory: Path) -> None:
     _logger.info("log: %s", run_directory / RUN_LOG_NAME)
 
 
-def _require_device(device: torch.device) -> None:
+def require_device(device: torch.device) -> None:
     """Fail before loading anything if device cannot be used.
 
     Inputs: device. Output: none. Side effects: none.

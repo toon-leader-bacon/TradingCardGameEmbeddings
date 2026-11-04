@@ -160,9 +160,9 @@ def _counting(encoder: PretrainedTextEncoder) -> tuple[Callable[[list], object],
     calls: list = []
     original = encoder._encode_batch
 
-    def counted(texts: list) -> object:
+    def counted(texts: list, forward: object) -> object:
         calls.append(len(texts))
-        return original(texts)
+        return original(texts, forward)  # type: ignore[arg-type]
 
     encoder._encode_batch = counted  # type: ignore[method-assign]
     return counted, calls
