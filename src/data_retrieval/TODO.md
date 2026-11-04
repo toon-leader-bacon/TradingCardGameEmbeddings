@@ -4,10 +4,9 @@
 
 Player-made decklist sources, surveyed 2026-10-28 (the full write-up is
 in `plans/pokemon_deck_sources.md`, local only). The first,
-the Limitless play API, is built (`limitless_play/`) and was
-downloading when this was written: ~17k tournaments, ~93k decklists
-from the first ~1.8k. `plans/pre_training_data.md` still lists Pokemon decks
-as "nothing more planned" and needs updating.
+the Limitless play API, is built (`limitless_play/`), covering ~17k
+tournaments. `plans/pre_training_data.md` (local only) still lists
+Pokemon decks as "nothing more planned" and needs updating.
 
 - [ ] **Limitless play API key.** Check on the API key application
   (https://play.limitlesstcg.com/account/settings/api). A key lifts the

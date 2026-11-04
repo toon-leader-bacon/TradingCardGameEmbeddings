@@ -54,9 +54,7 @@ docstring.
 - **Paired per-deck comparison across encoders**, from each encoder's
   `per_deck.csv` (same decks within one evaluation run): a per-deck
   difference and its interval says more than two overlapping intervals.
-- **Centered cosine**: subtract the table's mean vector before every
-  cosine analysis (deck AUC included), as one shared vector transform
-  rather than per analysis. Raised by the r2 referee.
+- **Centered cosine**: see "Controls and noise" below.
 
 ## run_evaluation.py: held-out dojos, cards and games
 
@@ -109,4 +107,5 @@ report 1 in its `reviews/`):
 - **Centered-cosine variants** of the cosine-based analyses
   (nearest-centroid, cluster agreement, deck AUC). Encoders differ in
   mean cosine from 0.53 to 0.99, which confounds the cross-encoder
-  comparisons.
+  comparisons. Subtract the table's mean vector as one shared vector
+  transform, not separately in each analysis.

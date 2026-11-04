@@ -25,7 +25,8 @@ pooled cut, now holding student outputs).
 ## v1.4: direction
 
 - D: train from cached features and match an uncached run
-  (`experiments/TODO.md`).
+  (`experiments/TODO.md`). The first comparison is in
+  2026-10-21_cache_shakeout (H4, awaiting review).
 - F: a fixed pool of K augmentations per card, which makes noise mods
   cacheable. Matters most in Stage B, where each draw of a card can be a
   new modded variant.

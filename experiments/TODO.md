@@ -118,7 +118,10 @@ Proposed experiments:
 - [ ] **C. Why metric training collapses.** Smaller heads; per-card
   against run- and deck-level metric dojos, trained separately.
 - [ ] **D. Train from cached frozen features**, for throughput. Check the
-  results match an uncached run.
+  results match an uncached run. Partly run in
+  [2026-10-21_cache_shakeout](2026-10-21_cache_shakeout/NOTEBOOK.md) (H4,
+  awaiting review): the median normalized TEST loss gap between the
+  cached and uncached runs was 0.032, over one seed and 2,000 steps.
 - [ ] **E. Seeds** of `single_contrastive`, `multi_contrastive` and
   `single_mixed`, before any model or diet ranking is trusted.
 - [ ] **F. A finite pool of augmentations (offline augmentation).**
@@ -128,14 +131,16 @@ Proposed experiments:
   (`plans/frozen_feature_cache.md`). The question: how small can K be
   before the regularization benefit is lost? Arms: K = 1, 2, 4, 8, 16
   against fresh-per-draw and against mods off, same diet and steps.
-  Needs D's cache, plus a per-card seed pool in the mods
-  (`src/dojos/mods/`).
+  The per-card seed pool is built (`variants:`,
+  `src/dojos/mods/variant_seeds.py`; see "Bounded mod variants" in
+  `src/dojos/TODO.md`). throughput_shakeout's `three_baked_n4` ran
+  K = 4 for speed only, 18% slower, with the variants still uncached.
 - [ ] Contrastive-only at 10k steps, to separate "metric hurts" from
   "mixed gets half the contrastive steps".
 - [ ] Probe the per-round checkpoints: is the trade between deck AUC and
   linear-cls monotone over training?
 - [ ] Centered-cosine deck AUC and nearest-centroid, to separate offset
-  from collapse.
+  from collapse (code: `src/evaluation/TODO.md`, "Controls and noise").
 - [ ] How deck splits interact across dojos built from the same source
   (contrastive decks against FaB hero-from-deck VALIDATION decks), before
   deck-level results are read as transfer.

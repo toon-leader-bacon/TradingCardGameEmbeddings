@@ -12,7 +12,7 @@ exist but are not yet compared; see `README.md` and
 - [ ] **Consider alternative text encoders.** ModernBERT-base was chosen
   in `src/training/Notes.md` (license, 8k context, code-heavy
   pretraining). Worth comparing, on the same dojos and the evaluation
-  suite (`plans/archive/evaluation.md`): embedding-tuned models
+  suite (`src/evaluation/README.md`): embedding-tuned models
   (`nomic-ai/modernbert-embed-base`, which needs its prefixes;
   `jinaai/jina-embeddings-v2-base-code`, which needs
   `trust_remote_code`), ModernBERT-large if VRAM allows, and a small

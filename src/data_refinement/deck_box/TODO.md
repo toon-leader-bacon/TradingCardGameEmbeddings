@@ -4,7 +4,9 @@
 
 Flat decks only (a `card_nocab_uuids` multiset), per `GenericDeck`'s
 no-metadata design. Built today: `sts_gg/`, `spire_codex_runs/`,
-`fabtcg_decklists/`, `play_gwent/`, `seventeenlands_game_data/`.
+`fabtcg_decklists/`, `fabtcgmeta_online_decks/`, `play_gwent/`,
+`seventeenlands_game_data/`, `limitless_play/`, `pokemon_tcg/`,
+`hearthstonetopdecks/`, `zenodo_hearthstone_decks/`, `isotropic/`.
 
 - **`pitchstack`** - `decks.jsonl` holds deck metadata only, no card
   list. The downloader needs the per-version `/cards` endpoint first

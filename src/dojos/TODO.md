@@ -33,12 +33,12 @@
   on VALIDATION (at most 1,024 examples each) took about 8-10 min per
   frozen encoder, 12 encoders, about 1.5-2 h in all. The GPU only ran the
   embedding head there (frozen text-encoder output was cached per card), so
-  most of the time is probably building deck examples on the CPU. **Not
-  yet profiled.**
-  - **Profile first.** Where does a `ContrastiveDojo.batches()` pass spend
-    its time: dealing decks, pair construction
-    (`contrastive/pair_constructor.py`), staple subsampling, mods,
-    serialization or collation?
+  most of the time is probably building deck examples on the CPU.
+  Training-side profiling is in experiment 2026-10-29_throughput_shakeout
+  (py-spy; awaiting review). It led to the vectorized
+  `clique_positive_mask` (14a101e) and the stream self-wait fix
+  (f85006c). It found the remaining limit is per-card Python work on one
+  core, about 0.15 ms per card, and that `OMP_NUM_THREADS=1` gave +34%.
   - **Build evaluation batches once and reuse them.** A capped
     VALIDATION/TEST pass is deterministic, so every encoder (and every
     training round's TEST pass) rebuilds identical batches. Cache the built
@@ -47,14 +47,15 @@
     skipped and logged on every pass ("Skipping deck ...: N known card(s),
     need M"; 255 lines in that run's log). Filter them when splits are
     assigned, or cache the result.
-  - **Parallelize building:** worker processes or a prefetch thread, so
-    the CPU builds the next batches while the GPU runs the current ones.
-    This applies to training too, where throughput is a stated priority.
-    Measured 2026-10-22 (`../training/ENV_SIZING.md`, "Training step"):
-    with the GPU work down to ~20-50 ms a step, 78% of a training step
-    waits on the next batch, and single-card metric dojos over whole
-    games wait 0.9-2.3 s per step. The prefetch depth of 2 no longer
-    hides building; profile those dojos' builders first.
+  - **Get batch building out of the GIL.** A prefetch worker thread
+    exists (`hardware.prefetch_depth`), but it shares the GIL with the
+    training thread, so a step costs about the batch build plus ~50 ms
+    (throughput_shakeout, "Where the time goes"). Options: a
+    process-based prefetch worker, or index-native batches
+    (`plans/training_snapshots.md` stage 2). Single-card metric dojos over
+    whole games are slower still: 0.9-2.3 s of wait per step, measured
+    2026-10-22 (`../training/ENV_SIZING.md`, "Training step"); profile
+    their builders too.
 - **Padded heads for multi-group dojos.** Multi-group dojos still receive
   nested lists (`ModelEmbeddings`' second arm); their heads pack each group
   with `generic/group_batching.py`. Two follow-ups:
