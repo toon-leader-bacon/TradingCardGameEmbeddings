@@ -1,7 +1,10 @@
+import random
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
 import pytest
+import torch
 
 from src.dojos.generic.dojo_config import SPLIT_DIRECTORY_ENV_VAR
 
@@ -56,3 +59,23 @@ def _isolated_split_directory(
     directory = tmp_path_factory.mktemp("splits")
     monkeypatch.setenv(SPLIT_DIRECTORY_ENV_VAR, str(directory))
     return directory
+
+
+@pytest.fixture(autouse=True)
+def _seeded_global_rngs():
+    """Seed the process-wide random generators before every test, so a test
+    that draws from them (torch.randn, np.random.rand, random.random) sees
+    the same numbers whichever tests ran before it in the same process.
+    Without this, a result can hinge on how pytest-xdist happened to spread
+    the suite over workers.
+
+    Inputs: none.
+    Output: none (fixture).
+    Side effects: seeds torch, numpy's legacy global generator and the
+        random module with 0 before each test.
+    Exceptions: none.
+    """
+    torch.manual_seed(0)
+    np.random.seed(0)
+    random.seed(0)
+    yield

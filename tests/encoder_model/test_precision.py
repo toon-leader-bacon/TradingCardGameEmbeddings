@@ -29,10 +29,10 @@ def test_fp32_is_a_no_op_context() -> None:
 def test_lower_precisions_autocast_on_the_models_device(
     precision: str, dtype: torch.dtype
 ) -> None:
-    context = autocast_for(nn.Linear(2, 2), precision)  # type: ignore[arg-type]
-    assert isinstance(context, torch.autocast)
-    assert context.device == "cpu"
-    assert context.fast_dtype == dtype
+    with autocast_for(nn.Linear(2, 2), precision):  # type: ignore[arg-type]
+        assert torch.is_autocast_enabled("cpu")
+        assert torch.get_autocast_dtype("cpu") == dtype
+    assert not torch.is_autocast_enabled("cpu")
 
 
 def test_weights_stay_float32_while_ops_run_in_bf16() -> None:
@@ -73,3 +73,11 @@ class TestInferenceContext:
         layer = nn.Linear(4, 4)
         with inference_context(layer, "bf16"):
             assert layer(torch.randn(2, 4)).dtype == torch.bfloat16
+
+    def test_an_eval_transformer_layer_runs_at_bf16_on_cpu(self) -> None:
+        # torch 2.4's fused eval-mode kernel ignored CPU autocast and raised
+        # "mat1 and mat2 must have the same dtype" here; fixed in later torch
+        layer = nn.TransformerEncoderLayer(8, nhead=2, batch_first=True)
+        with inference_context(layer, "bf16"):
+            output = layer(torch.randn(2, 3, 8))
+        assert output.shape == (2, 3, 8)
