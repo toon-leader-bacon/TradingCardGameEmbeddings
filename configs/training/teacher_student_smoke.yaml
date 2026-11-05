@@ -1,0 +1,99 @@
+# Teacher-student smoke run: the single-card contrastive dojos trained on
+# teacher-neighbour pseudo-decks (src/dojos/README.md, "Teacher-sourced
+# contrastive dojos") for MTG and FaB, Gwent held out. Model, cache and
+# batch follow experiments/2026-10-29_throughput_shakeout/configs/quickwins.yaml.
+# Checks the loop runs and checkpoints, and that TEST loss (TEST-tier
+# anchors, never trained on) falls below chance; not a quality result.
+# Run with (ROCm venv):
+#   PYTHONPATH=. python scripts/run_training.py configs/training/teacher_student_smoke.yaml
+# Check data, teachers and dojos without training:
+#   ... teacher_student_smoke.yaml --check
+
+run_directory: data/runs/teacher_student_smoke
+device: cuda
+seed: 0
+
+model:
+  embedding_head: residual_mlp
+  checkpoint: answerdotai/ModernBERT-base
+  card_embedding_size: 256
+  mlp_hidden_dim: 512
+  mlp_num_blocks: 3
+  group_attention:
+    num_layers: 2
+    num_heads: 4
+    ffn_dim: 1024
+    dropout: 0.1
+    norm_first: true
+  pooling:
+    kind: mean
+  enrichment:
+    kind: whitening
+    stats_path: data/runs/2026-10-24_scale_profile/mtg_n0/whitening_stats.pt
+  feature_cache:
+    storage_dtype: fp16
+    vram:
+      capacity_mib: 3072
+      policy: lfu
+    ram:
+      capacity_mib: 4096
+      policy: lru
+      admission: first_offer
+    disk:
+      path: data/feature_cache/teacher_student_smoke.sqlite
+      capacity_mib: 20480
+      write: warm_only
+
+dojos:
+  - teacher_contrastive.mtg
+  - teacher_contrastive.flesh_and_blood
+held_out_dojos: []
+
+holdout:
+  seed: 0
+  tier_ratios: [8, 1, 1]
+  held_out_games: [gwent]
+
+# Default views: train = TRAIN decks + TRAIN cards, test = TRAIN + TEST
+# decks + TRAIN + TEST cards. Both teachers per game are already cached
+# under data/teachers/ for this holdout.
+teacher:
+  games: [mtg, flesh_and_blood]
+  method: {kind: ppmi_svd, dim: 128}
+  neighbours: {kind: top_k, k: 32}
+# No student: section, so the defaults apply: 2-card pseudo-decks (anchor + one neighbour)
+
+regression_loss: huber
+
+# 256 pseudo-decks x 2 cards = 512 cards per batch; chance InfoNCE loss is
+# about ln(511) = 6.24
+hardware:
+  max_batch_cost: 512
+  precision: fp16
+  prefetch_depth: 4
+
+eval_examples_per_dojo: 128
+
+# Game-default augmentations (MTG masks set half the time, which counters
+# the 17lands same-set confound), bounded to 4 texts per card so the
+# feature cache keeps them
+default_augmentation:
+  variants: 4
+
+warm_feature_cache: [mtg, flesh_and_blood]
+
+phases:
+  - name: train
+    diet: {rule: uniform}
+    encoder_trainable: true
+    encoder_lr: 1.0e-4
+    head_lr: 1.0e-3
+    # One MTG pass is ~31 steps, FaB ~15; the uniform diet gives each
+    # ~500 of the 1,000 steps: ~16 MTG passes, ~33 FaB passes
+    steps_per_round: 500
+    max_rounds: 2
+    saturation:
+      epsilon: 0.001
+      patience_rounds: 1000
+      reactivation_delta: 0.05
+      target_saturated_fraction: 1.0
