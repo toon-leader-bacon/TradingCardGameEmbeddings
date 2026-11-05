@@ -106,3 +106,8 @@ online decks (~800k, with card lists) are built as
   CSV. Some Talishar card names aren't in it (e.g. "Fire That Burns
   Within", "Knife Through Butter") and map to Unknown; refreshing
   `cardvault_fabtcg` and the FaB binder may pick them up.
+- [ ] **Move older crawlers onto `paced_get`.** `download_utils.paced_get`
+  (404 tolerated, 429 waited out by Retry-After) replaces three local
+  copies: `HearthstoneTopDecksDownloader._get_with_retries
+  (allow_not_found=True)`, `fabtcgmeta_online_decks`' 404 catch (which
+  also retries every 404 three times) and `limitless_play`'s 429 wait.

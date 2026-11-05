@@ -52,6 +52,7 @@ import sys
 from pathlib import Path
 from typing import Callable
 
+from src.data_retrieval.archidekt.downloader import ArchidektDeckDownloader
 from src.data_retrieval.cardvault_fabtcg.card_downloader import (
     CardVaultFabtcgCardDownloader,
 )
@@ -138,6 +139,10 @@ def _run_standard(downloader: Downloader) -> None:
     _logger.info("Done: %s", result_path)
 
 
+def run_archidekt() -> None:
+    _run_standard(ArchidektDeckDownloader())
+
+
 def run_scryfall() -> None:
     # oracle-cards: one row per card. default-cards: one row per printing,
     # which the card stage reads for each card's lowest rarity.
@@ -220,6 +225,7 @@ def run_seventeenlands() -> None:
 
 
 DOWNLOADERS: dict[str, Callable[[], None]] = {
+    "archidekt": run_archidekt,
     "cardvault_fabtcg": run_cardvault_fabtcg,
     "dominiontabs": run_dominiontabs,
     "fabtcg_decklists": run_fabtcg_decklists,

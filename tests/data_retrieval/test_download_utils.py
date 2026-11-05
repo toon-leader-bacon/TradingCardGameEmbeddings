@@ -4,10 +4,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
+from src.data_retrieval.rate_limiter import RateLimiter
 from src.data_retrieval.download_utils import (
     append_with_manifest,
     download_to_file,
     download_to_string,
+    paced_get,
     read_manifest,
 )
 
@@ -226,3 +228,101 @@ class TestAppendWithManifest:
             append_with_manifest(data_path, manifest_path, "data", "id")
 
         assert write_order == ["data.jsonl", "manifest.txt"]
+
+
+def _status_response(status: int, headers: dict[str, str] | None = None) -> MagicMock:
+    response = MagicMock()
+    response.status_code = status
+    response.headers = headers or {}
+    if status >= 400:
+        response.raise_for_status.side_effect = requests.HTTPError(f"HTTP {status}")
+    else:
+        response.raise_for_status.return_value = None
+    return response
+
+
+def _unlimited() -> RateLimiter:
+    # Effectively unlimited, so wait() never sleeps in tests
+    return RateLimiter(requests_per_minute=1_000_000_000)
+
+
+class TestPacedGet:
+    def test_returns_a_2xx_response(self) -> None:
+        response = _status_response(200)
+        with patch("requests.get", return_value=response):
+            assert paced_get("https://x.test", rate_limiter=_unlimited()) is response
+
+    def test_returns_a_tolerated_status_without_retrying(self) -> None:
+        with patch("requests.get", return_value=_status_response(404)) as get:
+            response = paced_get(
+                "https://x.test",
+                rate_limiter=_unlimited(),
+                tolerated_statuses=frozenset({404}),
+            )
+        assert response.status_code == 404
+        get.assert_called_once()
+
+    def test_an_untolerated_status_raises_after_retries(self) -> None:
+        with (
+            patch("requests.get", return_value=_status_response(404)) as get,
+            patch("src.data_retrieval.download_utils.time.sleep"),
+            pytest.raises(requests.HTTPError),
+        ):
+            paced_get("https://x.test", rate_limiter=_unlimited(), max_attempts=2)
+        assert get.call_count == 2
+
+    def test_a_429_is_waited_out_by_retry_after(self) -> None:
+        responses = [_status_response(429, {"Retry-After": "7"}), _status_response(200)]
+        with (
+            patch("requests.get", side_effect=responses),
+            patch("src.data_retrieval.download_utils.time.sleep") as sleep,
+        ):
+            response = paced_get("https://x.test", rate_limiter=_unlimited())
+        assert response.status_code == 200
+        sleep.assert_called_once_with(7.0)
+
+    def test_a_429_without_retry_after_waits_a_minute(self) -> None:
+        responses = [_status_response(429), _status_response(200)]
+        with (
+            patch("requests.get", side_effect=responses),
+            patch("src.data_retrieval.download_utils.time.sleep") as sleep,
+        ):
+            paced_get("https://x.test", rate_limiter=_unlimited())
+        sleep.assert_called_once_with(60.0)
+
+    def test_still_rate_limited_after_every_wait_raises(self) -> None:
+        with (
+            patch("requests.get", return_value=_status_response(429)) as get,
+            patch("src.data_retrieval.download_utils.time.sleep"),
+            pytest.raises(requests.HTTPError, match="still rate limited"),
+        ):
+            paced_get(
+                "https://x.test", rate_limiter=_unlimited(), max_rate_limited_waits=2
+            )
+        assert get.call_count == 3
+
+    def test_a_huge_retry_after_is_capped(self) -> None:
+        responses = [
+            _status_response(429, {"Retry-After": "86400"}),
+            _status_response(200),
+        ]
+        with (
+            patch("requests.get", side_effect=responses),
+            patch("src.data_retrieval.download_utils.time.sleep") as sleep,
+        ):
+            paced_get("https://x.test", rate_limiter=_unlimited())
+        sleep.assert_called_once_with(900.0)
+
+    def test_negative_rate_limited_waits_raise(self) -> None:
+        with pytest.raises(ValueError, match="max_rate_limited_waits"):
+            paced_get(
+                "https://x.test", rate_limiter=_unlimited(), max_rate_limited_waits=-1
+            )
+
+    def test_tolerating_429_raises(self) -> None:
+        with pytest.raises(ValueError, match="429"):
+            paced_get(
+                "https://x.test",
+                rate_limiter=_unlimited(),
+                tolerated_statuses=frozenset({429}),
+            )

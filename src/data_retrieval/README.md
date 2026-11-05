@@ -15,14 +15,16 @@ Shared by every source:
   downloader subclasses (except 17lands, below).
 - `download_utils.py`: stream-to-disk GETs with retries
   (`download_to_file`, `download_to_string`, `call_with_retries`) and
-  manifest-tracked appends for resumable crawls (`read_manifest`,
-  `append_with_manifest`).
+  `paced_get` (a paced GET that returns tolerated statuses such as 404
+  and waits out 429s by Retry-After), and manifest-tracked appends for
+  resumable crawls (`read_manifest`, `append_with_manifest`).
 - `rate_limiter.py`: `RateLimiter`, request pacing.
 
 One subdirectory per source:
 
 | Directory | Game | What it downloads |
 |---|---|---|
+| `archidekt/` | MTG | Archidekt decks via its open read API, one id at a time: the sitemap's ~17.5k decks, then every id up to the newest in a fixed spread order (resumable cursor, sessions; pruned rows, `unlisted` kept as a flag) |
 | `cardvault_fabtcg/` | Flesh and Blood | cardvault.fabtcg.com's full card CSV |
 | `dominiontabs/` | Dominion | dominiontabs' card database (fields + English text) |
 | `fabtcg_decklists/` | Flesh and Blood | fabtcg.com decklist pages |

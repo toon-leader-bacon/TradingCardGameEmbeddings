@@ -47,11 +47,16 @@ every existing caller keeps passing nothing, which still means
 existed.
 """
 
+import logging
 import time
 from pathlib import Path
 from typing import Callable, TypeVar
 
 import requests
+
+from src.data_retrieval.rate_limiter import RateLimiter
+
+_logger = logging.getLogger(__name__)
 
 _DEFAULT_TIMEOUT_SECONDS = 60
 _DEFAULT_CHUNK_SIZE_BYTES = (
@@ -59,6 +64,9 @@ _DEFAULT_CHUNK_SIZE_BYTES = (
 )  # 1 MiB, so large responses never sit fully in memory
 _DEFAULT_MAX_ATTEMPTS = 3  # 1 initial try + up to 2 retries
 _RETRY_BACKOFF_SECONDS = 2.0
+_DEFAULT_MAX_RATE_LIMITED_WAITS = 5
+_DEFAULT_RATE_LIMITED_WAIT_SECONDS = 60.0  # a 429 without Retry-After
+_MAX_RATE_LIMITED_WAIT_SECONDS = 900.0  # caps a huge Retry-After
 
 _AttemptResult = TypeVar("_AttemptResult")
 
@@ -309,3 +317,103 @@ def download_to_string(
         return response.text
 
     return call_with_retries(_attempt, max_attempts=max_attempts)
+
+
+def paced_get(
+    url: str,
+    *,
+    rate_limiter: RateLimiter,
+    headers: dict[str, str] | None = None,
+    timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
+    tolerated_statuses: frozenset[int] = frozenset(),
+    max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
+    max_rate_limited_waits: int = _DEFAULT_MAX_RATE_LIMITED_WAITS,
+) -> requests.Response:
+    """GET url, paced, returning the response when its status is 2xx or
+    in tolerated_statuses; retrying network errors and every other
+    non-2xx status (call_with_retries; a 5xx, but also an untolerated
+    4xx); waiting out a 429 by its Retry-After header.
+
+    For a crawl where a "not found" is an ordinary answer (Archidekt:
+    about half of all deck ids are 404s), so it must not be raised into
+    call_with_retries and retried. A 429 is not retried through
+    call_with_retries either: its fixed backoff falls inside the
+    server's rate-limit window (the reason limitless_play waits 429s
+    out itself). hearthstonetopdecks, fabtcgmeta_online_decks and
+    limitless_play carry older copies of these rules (TODO.md).
+
+    Inputs:
+        url: URL to GET.
+        rate_limiter: waited on before every request, retries included.
+        headers, timeout_seconds: as download_to_string.
+        tolerated_statuses: non-2xx statuses returned, not raised
+            (empty by default). Must not hold 429, which is waited out.
+            A caller that tolerates every permanent answer (Archidekt:
+            all 4xx but 429) knows anything raised is transient.
+        max_attempts: total attempts against network errors and 5xx.
+        max_rate_limited_waits: 429s waited out for this one GET before
+            raising (>= 0). A Retry-After is capped at
+            _MAX_RATE_LIMITED_WAIT_SECONDS.
+    Output: the requests.Response (2xx or a tolerated status).
+    Side effects: one or more paced requests; sleeps on a 429 (the
+        Retry-After seconds, or a minute when absent) and between
+        retries.
+    Exceptions: ValueError if tolerated_statuses holds 429 or
+        max_rate_limited_waits < 0;
+        requests.HTTPError for any other status, or a 429 past
+        max_rate_limited_waits; requests.RequestException once
+        max_attempts attempts have failed.
+
+    Example:
+        >>> response = paced_get(url, rate_limiter=RateLimiter(60),
+        ...                      tolerated_statuses=frozenset({404}))
+        >>> response.status_code
+        404
+    """
+    if 429 in tolerated_statuses:
+        raise ValueError("tolerated_statuses must not hold 429; it is waited out")
+    if max_rate_limited_waits < 0:
+        raise ValueError(
+            f"max_rate_limited_waits must be >= 0, got {max_rate_limited_waits}"
+        )
+
+    def _attempt() -> requests.Response:
+        rate_limiter.wait()
+        response = requests.get(url, timeout=timeout_seconds, headers=headers)
+        # A 429 is returned, not raised: call_with_retries would retry it
+        # after a fixed backoff, inside the server's window
+        if (
+            response.status_code != 429
+            and response.status_code not in tolerated_statuses
+        ):
+            response.raise_for_status()
+        return response
+
+    # Request, waiting out each 429 except the last
+    for waits_so_far in range(max_rate_limited_waits + 1):
+        response = call_with_retries(_attempt, max_attempts=max_attempts)
+        if response.status_code != 429:
+            return response
+        if waits_so_far == max_rate_limited_waits:
+            break
+        wait_seconds = _retry_after_seconds(response)
+        _logger.warning("Rate limited by %s; waiting %.0f s", url, wait_seconds)
+        time.sleep(wait_seconds)
+    raise requests.HTTPError(
+        f"still rate limited after {max_rate_limited_waits} waits: {url}",
+        response=response,
+    )
+
+
+def _retry_after_seconds(response: requests.Response) -> float:
+    """Seconds to wait after a 429: its Retry-After header in seconds
+    (at most _MAX_RATE_LIMITED_WAIT_SECONDS), else
+    _DEFAULT_RATE_LIMITED_WAIT_SECONDS.
+
+    Inputs: response (a 429). Output: seconds. Side effects: none.
+    Exceptions: none.
+    """
+    retry_after = response.headers.get("Retry-After", "").strip()
+    if retry_after.isdigit():
+        return min(float(retry_after), _MAX_RATE_LIMITED_WAIT_SECONDS)
+    return _DEFAULT_RATE_LIMITED_WAIT_SECONDS
