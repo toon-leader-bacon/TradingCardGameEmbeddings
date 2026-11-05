@@ -1073,3 +1073,34 @@ class TestTokenCutConfig:
         document = _with(["model", "feature_cache"], {"cut": "tokens", "cut_layer": 4})
         document["model"]["pooling"] = {"kind": "attention"}  # type: ignore[index]
         assert parse_run_config(document).model.feature_cache is not None
+
+
+class TestTeacherSection:
+    def test_absent_means_no_teacher(self) -> None:
+        assert parse_run_config(_document()).teacher is None
+
+    def test_parses_the_teacher_section(self) -> None:
+        teacher = {
+            "games": ["mtg"],
+            "method": {"kind": "ppmi_svd", "dim": 16},
+            "neighbours": {"kind": "top_k", "k": 4},
+        }
+
+        config = parse_run_config(_with(["teacher"], teacher))
+
+        assert config.teacher is not None
+        assert config.teacher.method.dim == 16
+
+    def test_held_out_teacher_game_raises(self) -> None:
+        document = _with(
+            ["teacher"],
+            {
+                "games": ["gwent"],
+                "method": {"kind": "ppmi_svd", "dim": 16},
+                "neighbours": {"kind": "top_k", "k": 4},
+            },
+        )
+        document["holdout"]["held_out_games"] = ["gwent"]
+
+        with pytest.raises(ValueError, match="held out"):
+            parse_run_config(document)

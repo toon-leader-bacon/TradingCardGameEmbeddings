@@ -7,5 +7,6 @@ torch
 transformers
 beautifulsoup4
 scikit-learn
+scipy
 matplotlib
 pyyaml

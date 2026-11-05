@@ -31,6 +31,7 @@ from src.dojos.loss.regression_objective import RegressionLossKind
 from src.dojos.mods.mod_specs import AugmentationRates, ModSpec
 from src.schema.game_id import GameId
 from src.schema.holdout import DEFAULT_DECK_SPLIT_RATIOS, HoldoutSpec
+from src.teacher.teacher_settings import TeacherSettings
 from src.training.config_parsing.config_section import (
     ConfigSection,
     build_flat_dataclass,
@@ -44,6 +45,7 @@ from src.training.config_parsing.mod_parsing import (
     parse_mod_overrides,
 )
 from src.training.config_parsing.model_parsing import parse_model
+from src.training.config_parsing.teacher_parsing import parse_teacher
 from src.training.learning_rate_schedule import LearningRateSchedule
 from src.training.loss_weighting import DEFAULT_BASELINE_FLOOR, LossWeighting
 from src.training.binder_mods_spec import BinderModsSpec
@@ -99,6 +101,9 @@ class RunConfig:
         game the run loads, before any dojo is built (top-level
         `binder_mods:`, see binder_mods.py); None means cards are used as
         the binder holds them.
+    teacher: how each game's teacher is built (top-level `teacher:`, see
+        config_parsing/teacher_parsing.py); None when the run builds no
+        teacher. No teacher game may be held out.
     """
 
     run_directory: Path
@@ -113,6 +118,7 @@ class RunConfig:
     warm_feature_cache: tuple[GameId, ...] = ()
     default_augmentation: AugmentationRates = AugmentationRates()
     binder_mods: BinderModsSpec | None = None
+    teacher: TeacherSettings | None = None
 
     def __post_init__(self) -> None:
         # No duplicate dojos (the Trainer keys dojos by name and would
@@ -141,6 +147,15 @@ class RunConfig:
         # Warming needs a cache to warm
         if self.warm_feature_cache and self.model.feature_cache is None:
             raise ValueError("warm_feature_cache needs a model.feature_cache section")
+        # A held-out game has no TRAIN decks to build a teacher from
+        if self.teacher is not None:
+            held_out_teachers = sorted(
+                game.value
+                for game in self.teacher.games
+                if game in self.plan.holdout.held_out_games
+            )
+            if held_out_teachers:
+                raise ValueError(f"teacher.games {held_out_teachers} are held out")
 
 
 def read_config_document(path: Path) -> ConfigDocument:
@@ -211,8 +226,9 @@ def parse_run_config(
     -> t, see _parse_staple_thresholds), loss_weights (optional: dojo name
     -> multiplier), baseline_floor and weight_by_baseline (optional; see
     _parse_loss_weighting), regression_loss (optional: mse or huber;
-    see _parse_regression_loss), and binder_mods (optional: see
-    mod_parsing.parse_binder_mods).
+    see _parse_regression_loss), binder_mods (optional: see
+    mod_parsing.parse_binder_mods), and teacher (optional: see
+    config_parsing/teacher_parsing.py).
     A phase without a "dojos" key trains every run dojo that is not held out.
 
     Inputs: document (ConfigDocument), catalog_names (every dojo name a
@@ -289,6 +305,9 @@ def parse_run_config(
         _parse_game(value, top.location_of("warm_feature_cache"))
         for value in top.optional_str_list("warm_feature_cache")
     )
+    teacher = (
+        parse_teacher(top.required_section("teacher")) if top.has("teacher") else None
+    )
     top.reject_unread_keys()
     result = construct_at(
         "config",
@@ -305,6 +324,7 @@ def parse_run_config(
             warm_feature_cache=warm_feature_cache,
             default_augmentation=default_augmentation,
             binder_mods=binder_mods,
+            teacher=teacher,
         ),
     )
     return result

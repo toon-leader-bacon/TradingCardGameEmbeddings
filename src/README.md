@@ -3,7 +3,7 @@
 A generic card embedding model: one shared embedding space for cards
 from any trading card game, trained through many small pluggable tasks
 ("dojos") rather than one. The embedding model is the product; the
-dojos are the teachers. Everything produced or consumed on disk lives
+dojos are its coaches. Everything produced or consumed on disk lives
 under the project's `data/` directory (not in git).
 
 ## How the pieces fit together
@@ -19,6 +19,8 @@ flowchart LR
     CB --> S[snapshots]
     DB --> S
     S -->|data/derived| D
+    S --> TE[teacher]
+    TE -->|data/teachers| T
     M -->|data/metrics/*.parquet| D[dojos]
     CB --> D
     DB --> D
@@ -52,6 +54,7 @@ Two flows hand data between containers as files on disk:
 | [`data_refinement/`](data_refinement/README.md) | in progress | Raw data -> the card binder, the deck box, and metric parquets. |
 | [`encoder_model/`](encoder_model/README.md) | in progress | The embedding model (PyTorch only): text encoder + embedding head, single- and multi-card. |
 | [`dojos/`](dojos/README.md) | in progress | Training tasks: each yields batches within the trainer's budget and scores embeddings with its own small decoder head and loss. |
+| [`teacher/`](teacher/README.md) | in progress (provisional placement) | Per-game teacher vectors from deck co-occurrence (PPMI + SVD, no text), and each card's teacher neighbours, cached per holdout under `data/teachers/`. The student (the encoder) trains to match them. |
 | [`training/`](training/README.md) | in progress | `Trainer`: phases, rounds and steps over a diet of dojos, with saturation-based stopping, fault isolation and checkpointing. Runs from a YAML config via `scripts/run_training.py`, on CPU or GPU. |
 | [`evaluation/`](evaluation/README.md) | in progress ([`plans/archive/evaluation.md`](../plans/archive/evaluation.md)) | Post-training evaluation of encoder checkpoints (intrinsic: embedding-table analyses against card labels; extrinsic: fresh-dojo-head curves on a frozen encoder via `Trainer`). Distinct from a training run's own TEST signal on a trainable encoder. |
 

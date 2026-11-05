@@ -315,6 +315,18 @@ LayerNorm + `encoder_lr` pilot ([2026-10-10_lr_pilot](2026-10-10_lr_pilot/NOTEBO
 - **Token-level head; thawing ModernBERT's top layers**: see
   `src/encoder_model/TODO.md` and series 3.
 
+### Teacher-student
+
+- **Teacher leakage vs student validation** (to discuss after the
+  teacher-student smoke test, `plans/teacher_student_training.md`). How
+  do SotA systems handle it (transductive vs inductive graph embedding,
+  cold-start evaluation in recommenders)? Arms, all config changes:
+  (1) teacher on TRAIN cards only, student validates on a sub-sample of
+  teacher rows; (2) teacher on TRAIN + TEST cards, where TEST cards'
+  deck statistics leak into TRAIN cards' targets; (3) two teachers per
+  card, TRAIN-only and TRAIN + TEST, with TEST cards' rows as held-out
+  student targets.
+
 ### Measuring training
 
 - **Cheaper, less noisy TEST** (config-only). Use fewer, longer rounds

@@ -1,7 +1,7 @@
 # training
 
 Trains the card-embedding encoder (`../encoder_model/`) against a suite of
-dojos (`../dojos/`). The encoder is the product; dojos are the teachers.
+dojos (`../dojos/`). The encoder is the product; dojos are its coaches.
 Status: implemented and tested; run end to end on CPU and on the RX 6800
 against real Gwent dojos. Runs are launched from a YAML config by
 `scripts/run_training.py` (see "How to run").
@@ -132,6 +132,11 @@ Top level:
   `build_fingerprint` names the frozen stages' rows, and
   `assemble_feature_cache` chains the VRAM, RAM and disk tiers it sets.
   `scripts/run_training.py`'s `build_card_pipeline` calls both.
+- [teacher_assembly.py](teacher_assembly.py): `teacher_for(game, shelf,
+  holdout, settings)`, the composition root for `../teacher/`: opens the
+  game's deck snapshot and split index through the `CardShelf`, hands
+  them over as `TeacherInputs`, and loads or builds the game's
+  `Teacher`. `scripts/build_teachers.py` calls it.
 - [binder_mods.py](binder_mods.py) and
   [binder_mods_spec.py](binder_mods_spec.py): the optional `binder_mods:`
   section (`BinderModsSpec`), a card-field mod pipeline applied once to
@@ -143,8 +148,11 @@ Top level:
   to. `config_section.py` holds `ConfigSection`, the typed, key-checked
   reader of one mapping (every getter records its key, so unread keys
   raise) and the shared scalar checks; `diet_parsing.py`,
-  `model_parsing.py` and `mod_parsing.py` parse the `diet:`, `model:`,
-  `mods:` and `binder_mods:` sections.
+  `model_parsing.py`, `mod_parsing.py` and `teacher_parsing.py` parse the
+  `diet:`, `model:`, `mods:`, `binder_mods:` and `teacher:` sections. The
+  optional `teacher:` section becomes `RunConfig.teacher`
+  (`TeacherSettings`, see `../teacher/README.md`); none of its games may
+  be held out.
 - [dojo_catalog.py](dojo_catalog.py): `DOJO_CATALOG`, every dojo a config
   can name, keyed `"<metric source>.<metric stem>"` (e.g.
   `gwent_one.color_mask`). The key becomes the dojo's `name`, so same-stem
