@@ -94,6 +94,11 @@ class DataSource(str, Enum):
     # "Hearthstone Decks Dataset" (record 10198504); source_id is idDeck (see
     # src/data_retrieval/zenodo_hearthstone_decks/downloader.py and
     # src/data_refinement/deck_box/zenodo_hearthstone_decks/extraction_stage.py).
+    MTGJSON_DECKS = "mtgjson_decks"  # MTGJSON's AllDeckFiles (Wizards
+    # precons); source_id is the deck file's stem, e.g. "BoggartFeast_LRW"
+    # (see src/data_retrieval/mtgjson_decks/downloader.py and
+    # src/data_refinement/deck_box/mtgjson_decks/extraction_stage.py)
+    # — distinct from SCRYFALL (that deck's cards' own data source).
     FABTCGMETA_ONLINE_DECKS = "fabtcgmeta_online_decks"  # fabtcgmeta.com's
     # online (Talishar) decklists; source_id is the deck's hash (see
     # src/data_retrieval/fabtcgmeta_online_decks/downloader.py and

@@ -67,6 +67,7 @@ from src.data_retrieval.hearthstonejson.downloader import HearthstoneJsonDownloa
 from src.data_retrieval.hearthstonetopdecks.downloader import (
     HearthstoneTopDecksDownloader,
 )
+from src.data_retrieval.mtgjson_decks.downloader import MtgjsonDeckFilesDownloader
 from src.data_retrieval.zenodo_hearthstone_decks.downloader import (
     ZenodoHearthstoneDecksDownloader,
 )
@@ -162,6 +163,10 @@ def run_zenodo_hearthstone_decks() -> None:
     _run_standard(ZenodoHearthstoneDecksDownloader())
 
 
+def run_mtgjson_decks() -> None:
+    _run_standard(MtgjsonDeckFilesDownloader())
+
+
 def run_spire_codex_cards() -> None:
     _run_standard(SpireCodexCardDownloader())
 
@@ -224,6 +229,7 @@ DOWNLOADERS: dict[str, Callable[[], None]] = {
     "hearthstonetopdecks": run_hearthstonetopdecks,
     "isotropic": run_isotropic,
     "limitless_play": run_limitless_play,
+    "mtgjson_decks": run_mtgjson_decks,
     "pitchstack": run_pitchstack,
     "play_gwent": run_play_gwent,
     "pokemon_tcg": run_pokemon_tcg,
