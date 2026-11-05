@@ -1,4 +1,5 @@
-"""A run's TeacherSettings + CardShelf -> one game's Teacher.
+"""A run's TeacherSettings + CardShelf -> one game's Teacher (or, from
+TeacherViews, one Teacher per student split).
 
 The composition root for the teacher: src/teacher never imports the
 dojos, so the deck split (DeckSplitIndex, kept with the dojos) is turned
@@ -14,7 +15,7 @@ from src.schema.holdout import HoldoutSpec
 from src.schema.splits import Split
 from src.teacher.teacher_cache import Teacher, load_or_build_teacher
 from src.teacher.teacher_inputs import TeacherInputs
-from src.teacher.teacher_settings import TeacherSettings
+from src.teacher.teacher_settings import TeacherSettings, TeacherViews
 from src.training.dojo_recipes.card_shelf import CardShelf
 
 
@@ -58,3 +59,27 @@ def teacher_for(
         holdout=holdout,
     )
     return load_or_build_teacher(inputs, settings)
+
+
+def teachers_for(
+    game: GameId,
+    shelf: CardShelf,
+    holdout: HoldoutSpec,
+    views: TeacherViews,
+    deck_box_path: Path | None = None,
+) -> dict[Split, Teacher]:
+    """game's teacher for each view's split (teacher_for per view).
+
+    Inputs: as teacher_for; views (the run's TeacherViews).
+    Output: dict[Split, Teacher], one per views.by_split key.
+    Side effects: as teacher_for, per view (each view caches separately:
+        its deck_splits and card_tiers are in its fit digest).
+    Exceptions: as teacher_for.
+
+    Example:
+        >>> teachers_for(GameId.MTG, CardShelf(), holdout, config.teacher)[Split.TEST]
+    """
+    return {
+        split: teacher_for(game, shelf, holdout, settings, deck_box_path)
+        for split, settings in views.by_split.items()
+    }

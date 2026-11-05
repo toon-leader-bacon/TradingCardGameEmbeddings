@@ -127,6 +127,9 @@ from src.dojos.sts_gg import deck_label_dojos as sts_decks
 from src.schema.game_id import GameId
 from src.training.dojo_recipes.card_dojo_recipe import CardDojoRecipe
 from src.training.dojo_recipes.contrastive_dojo_recipe import ContrastiveDojoRecipe
+from src.training.dojo_recipes.teacher_contrastive_dojo_recipe import (
+    TeacherContrastiveDojoRecipe,
+)
 from src.training.dojo_recipes.deck_dojo_recipe import DeckDojoRecipe
 from src.training.dojo_recipes.dojo_build_context import DojoBuildContext, DojoRecipe
 from src.training.dojo_recipes.dojo_constructors import (
@@ -168,6 +171,26 @@ def _recipe_for_contrastive(
     ContrastiveDojoRecipe. Side effects: none. Exceptions: none.
     """
     return ContrastiveDojoRecipe(game, DeckBox.default_output_path(game), style)
+
+
+# Each teacher-sourced contrastive style's catalog key prefix: the style
+# deals teacher-neighbour pseudo-decks (NeighbourDealer) instead of real
+# decks. Only single cards in v1: pseudo-decks are small
+_TEACHER_CONTRASTIVE_STYLES: Mapping[str, ContrastiveStyle] = {
+    "teacher_contrastive": SingleCardStyle(),
+}
+
+
+def _recipe_for_teacher_contrastive(
+    game: GameId, style: ContrastiveStyle
+) -> TeacherContrastiveDojoRecipe:
+    """The teacher-sourced contrastive recipe over game's teacher, built
+    from its final deck box at DeckBox.default_output_path(game), in style.
+
+    Inputs: game, style. Output: TeacherContrastiveDojoRecipe.
+    Side effects: none. Exceptions: none.
+    """
+    return TeacherContrastiveDojoRecipe(game, DeckBox.default_output_path(game), style)
 
 
 def _recipe_for_gwent_one(dojo_class: CardDojoConstructor) -> CardDojoRecipe:
@@ -694,6 +717,13 @@ DOJO_CATALOG: Mapping[str, DojoRecipe] = {
         for prefix, style in _CONTRASTIVE_STYLES.items()
         for game in _CONTRASTIVE_GAMES
     },
+    # Teacher-sourced contrastive dojos: "<prefix>.<game>", needing the
+    # run config's teacher: section (see teacher_contrastive_dojo_recipe.py)
+    **{
+        f"{prefix}.{game.value}": _recipe_for_teacher_contrastive(game, style)
+        for prefix, style in _TEACHER_CONTRASTIVE_STYLES.items()
+        for game in _CONTRASTIVE_GAMES
+    },
 }
 
 
@@ -752,8 +782,9 @@ def build_dojos(names: Sequence[str], context: DojoBuildContext) -> list[Dojo]:
         split files do not exist yet writes them (seeded by
         context.rng_seed).
     Exceptions: ValueError naming every unknown key, any
-        context.mod_overrides name that is not in names, or a deck spec
-        DECK_MOD_GROUPS does not allow, raised before any dojo is built
+        context.mod_overrides name that is not in names, a deck spec
+        DECK_MOD_GROUPS does not allow, or a teacher-sourced dojo whose
+        game has no teacher in context.teacher, raised before any dojo is built
         (so a typo does not cost a binder load); whatever a recipe's
         build raises.
 
@@ -770,6 +801,7 @@ def build_dojos(names: Sequence[str], context: DojoBuildContext) -> list[Dojo]:
         raise ValueError(f"unknown dojos {unknown}; see DOJO_CATALOG")
     _require_valid_overrides(context.mod_overrides, names)
     _require_contrastive_thresholds(context.staple_thresholds, names)
+    _require_teacher_games(context, names)
 
     # Build each dojo from its recipe (each attaches its own augmentations)
     for name in names:
@@ -810,6 +842,31 @@ def _require_contrastive_thresholds(
         raise ValueError(
             f"staple_subsampling names {refused}, which are not contrastive "
             "dojos being built"
+        )
+
+
+def _require_teacher_games(context: DojoBuildContext, names: Sequence[str]) -> None:
+    """Every teacher-sourced dojo in names needs its game in
+    context.teacher.games (TeacherContrastiveDojoRecipe repeats the
+    settings check for direct callers).
+
+    Inputs: context, names (the dojos being built). Output: none.
+    Side effects: none.
+    Exceptions: ValueError naming every teacher-sourced dojo when
+        context.teacher is None, or those whose game it does not list.
+    """
+    views = context.teacher
+    games = () if views is None else views.games
+    refused = sorted(
+        name
+        for name in names
+        if isinstance(recipe := DOJO_CATALOG[name], TeacherContrastiveDojoRecipe)
+        and recipe.game not in games
+    )
+    if refused:
+        raise ValueError(
+            f"teacher-sourced dojos {refused} need their game in the run "
+            "config's teacher.games"
         )
 
 

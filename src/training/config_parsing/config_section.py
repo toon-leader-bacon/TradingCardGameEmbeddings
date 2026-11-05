@@ -8,11 +8,11 @@ other config_parsing/ modules).
 
 import dataclasses
 import math
-from enum import StrEnum
+from enum import Enum
 from typing import Any, Callable, Literal, Mapping, TypeVar, cast, get_origin
 
 _T = TypeVar("_T")
-_ChoiceT = TypeVar("_ChoiceT", bound=StrEnum)
+_ChoiceT = TypeVar("_ChoiceT", bound=Enum)  # string-valued: StrEnum or (str, Enum)
 
 
 class ConfigSection:
@@ -73,10 +73,10 @@ class ConfigSection:
     def optional_choice(
         self, key: str, choices: type[_ChoiceT], default: _ChoiceT
     ) -> _ChoiceT:
-        """The string at key read as one of a StrEnum's values, or default
+        """The string at key read as one of a string enum's values, or default
         when key is absent.
 
-        Inputs: key, choices (the StrEnum), default.
+        Inputs: key, choices (a string-valued Enum), default.
         Output: the matching member, or default.
         Side effects: records key as read.
         Exceptions: ValueError naming key's location and the valid values,
@@ -87,13 +87,30 @@ class ConfigSection:
             <FeatureCut.POOLED: 'pooled'>
         """
         text = self.optional(key, str, default.value)
-        try:
-            return choices(text)
-        except ValueError:
-            wanted = [choice.value for choice in choices]
-            raise ValueError(
-                f"{self.location_of(key)} is {text!r}, want one of {wanted}"
-            ) from None
+        return choice_of(text, choices, self.location_of(key))
+
+    def required_choice_list(
+        self, key: str, choices: type[_ChoiceT]
+    ) -> tuple[_ChoiceT, ...]:
+        """The list of strings at key, each read as one of a string enum's
+        values, in the order written.
+
+        Inputs: key, choices (a string-valued Enum).
+        Output: tuple of members.
+        Side effects: records key as read.
+        Exceptions: ValueError if missing, not a list of strings, or an
+            item no member has (naming the item's location and the valid
+            values).
+
+        Example:
+            >>> section.required_choice_list("games", GameId)
+            (<GameId.MTG: 'mtg'>,)
+        """
+        where = self.location_of(key)
+        return tuple(
+            choice_of(text, choices, f"{where}.{index}")
+            for index, text in enumerate(self.required_str_list(key))
+        )
 
     def required_str_list(self, key: str) -> tuple[str, ...]:
         """The list of strings at key.
@@ -309,3 +326,23 @@ def construct_at(where: str, build: Callable[[], _T]) -> _T:
         return build()
     except ValueError as error:
         raise ValueError(f"{where}: {error}") from error
+
+
+def choice_of(text: str, choices: type[_ChoiceT], where: str) -> _ChoiceT:
+    """text read as one of a string enum's values: the one rule every config
+    choice (a single key, a list item, a mapping key) goes through.
+
+    Inputs: text, choices (a string-valued Enum), where (the location, for the
+        message).
+    Output: the matching member. Side effects: none.
+    Exceptions: ValueError naming where, text and the valid values.
+
+    Example:
+        >>> choice_of("train", Split, "config.teacher.views")
+        <Split.TRAIN: 'train'>
+    """
+    try:
+        return choices(text)
+    except ValueError:
+        wanted = [choice.value for choice in choices]
+        raise ValueError(f"{where} is {text!r}, want one of {wanted}") from None

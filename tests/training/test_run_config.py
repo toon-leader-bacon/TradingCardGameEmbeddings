@@ -24,6 +24,8 @@ from src.dojos.mods.mod_specs import (
 )
 from src.schema.game_id import GameId
 from src.schema.holdout import DEFAULT_DECK_SPLIT_RATIOS
+from src.schema.splits import Split
+from src.dojos.file_managers.neighbour_dealer import StudentSettings
 from src.dojos.loss.regression_objective import RegressionLossKind
 from src.training.learning_rate_schedule import LearningRateSchedule
 from src.training.loss_weighting import DEFAULT_BASELINE_FLOOR, LossWeighting
@@ -1089,7 +1091,9 @@ class TestTeacherSection:
         config = parse_run_config(_with(["teacher"], teacher))
 
         assert config.teacher is not None
-        assert config.teacher.method.dim == 16
+        assert config.teacher.games == (GameId.MTG,)
+        assert config.teacher.by_split[Split.TRAIN].method.dim == 16
+        assert set(config.teacher.by_split) == {Split.TRAIN, Split.TEST}
 
     def test_held_out_teacher_game_raises(self) -> None:
         document = _with(
@@ -1103,4 +1107,54 @@ class TestTeacherSection:
         document["holdout"]["held_out_games"] = ["gwent"]
 
         with pytest.raises(ValueError, match="held out"):
+            parse_run_config(document)
+
+    def test_view_keeping_cards_its_split_cannot_see_raises(self) -> None:
+        teacher = {
+            "games": ["mtg"],
+            "method": {"kind": "ppmi_svd", "dim": 16},
+            "neighbours": {"kind": "top_k", "k": 4},
+            "views": {
+                "train": {"deck_splits": ["train"], "card_tiers": ["train", "test"]},
+                "test": {"deck_splits": ["train"], "card_tiers": ["train", "test"]},
+            },
+        }
+
+        with pytest.raises(ValueError, match="cannot see"):
+            parse_run_config(_with(["teacher"], teacher))
+
+
+class TestStudentSection:
+    _TEACHER = {
+        "games": ["mtg"],
+        "method": {"kind": "ppmi_svd", "dim": 16},
+        "neighbours": {"kind": "top_k", "k": 4},
+    }
+
+    def test_absent_takes_the_defaults(self) -> None:
+        assert parse_run_config(_document()).student == StudentSettings()
+
+    def test_parses_beside_a_teacher(self) -> None:
+        document = _with(["teacher"], self._TEACHER)
+        document["student"] = {
+            "min_neighbours_per_deck": 3,
+            "max_neighbours_per_deck": 2,
+        }
+
+        config = parse_run_config(document)
+
+        assert config.student == StudentSettings(3, 2)
+
+    def test_without_a_teacher_raises(self) -> None:
+        document = _document()
+        document["student"] = {"max_neighbours_per_deck": 2}
+
+        with pytest.raises(ValueError, match="teacher"):
+            parse_run_config(document)
+
+    def test_unknown_key_raises(self) -> None:
+        document = _with(["teacher"], self._TEACHER)
+        document["student"] = {"anchor_split_ratios": [8, 1, 1]}
+
+        with pytest.raises(ValueError, match="anchor_split_ratios"):
             parse_run_config(document)

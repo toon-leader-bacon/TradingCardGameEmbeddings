@@ -305,17 +305,7 @@ def _parse_style_choices(
     """
     if not section.has("styles"):
         return None
-    where = section.location_of("styles")
-    result: list[_StyleT] = []
-    for index, text in enumerate(section.required_str_list("styles")):
-        try:
-            result.append(choices(text))
-        except ValueError:
-            wanted = [choice.value for choice in choices]
-            raise ValueError(
-                f"{where}.{index} is {text!r}, want one of {wanted}"
-            ) from None
-    return tuple(result)
+    return section.required_choice_list("styles", choices)
 
 
 def _parse_separators(section: ConfigSection) -> tuple[str, ...] | None:

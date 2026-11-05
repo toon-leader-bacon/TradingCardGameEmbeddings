@@ -31,7 +31,8 @@ from src.dojos.loss.regression_objective import RegressionLossKind
 from src.dojos.mods.mod_specs import AugmentationRates, ModSpec
 from src.schema.game_id import GameId
 from src.schema.holdout import DEFAULT_DECK_SPLIT_RATIOS, HoldoutSpec
-from src.teacher.teacher_settings import TeacherSettings
+from src.dojos.file_managers.neighbour_dealer import StudentSettings
+from src.teacher.teacher_settings import TeacherViews
 from src.training.config_parsing.config_section import (
     ConfigSection,
     build_flat_dataclass,
@@ -45,6 +46,7 @@ from src.training.config_parsing.mod_parsing import (
     parse_mod_overrides,
 )
 from src.training.config_parsing.model_parsing import parse_model
+from src.training.config_parsing.student_parsing import parse_student
 from src.training.config_parsing.teacher_parsing import parse_teacher
 from src.training.learning_rate_schedule import LearningRateSchedule
 from src.training.loss_weighting import DEFAULT_BASELINE_FLOOR, LossWeighting
@@ -101,9 +103,12 @@ class RunConfig:
         game the run loads, before any dojo is built (top-level
         `binder_mods:`, see binder_mods.py); None means cards are used as
         the binder holds them.
-    teacher: how each game's teacher is built (top-level `teacher:`, see
-        config_parsing/teacher_parsing.py); None when the run builds no
-        teacher. No teacher game may be held out.
+    teacher: how each game's teacher per student split is built
+        (top-level `teacher:`, see config_parsing/teacher_parsing.py); None
+        when the run builds no teacher. No teacher game may be held out.
+    student: how teacher-sourced dojos deal pseudo-decks (top-level
+        `student:`, see config_parsing/student_parsing.py); defaults
+        when absent.
     """
 
     run_directory: Path
@@ -118,7 +123,8 @@ class RunConfig:
     warm_feature_cache: tuple[GameId, ...] = ()
     default_augmentation: AugmentationRates = AugmentationRates()
     binder_mods: BinderModsSpec | None = None
-    teacher: TeacherSettings | None = None
+    teacher: TeacherViews | None = None
+    student: StudentSettings = StudentSettings()
 
     def __post_init__(self) -> None:
         # No duplicate dojos (the Trainer keys dojos by name and would
@@ -156,6 +162,7 @@ class RunConfig:
             )
             if held_out_teachers:
                 raise ValueError(f"teacher.games {held_out_teachers} are held out")
+            _require_visible_views(self.teacher, self.plan.holdout)
 
 
 def read_config_document(path: Path) -> ConfigDocument:
@@ -227,8 +234,9 @@ def parse_run_config(
     -> multiplier), baseline_floor and weight_by_baseline (optional; see
     _parse_loss_weighting), regression_loss (optional: mse or huber;
     see _parse_regression_loss), binder_mods (optional: see
-    mod_parsing.parse_binder_mods), and teacher (optional: see
-    config_parsing/teacher_parsing.py).
+    mod_parsing.parse_binder_mods), teacher (optional: see
+    config_parsing/teacher_parsing.py) and student (optional: see
+    config_parsing/student_parsing.py).
     A phase without a "dojos" key trains every run dojo that is not held out.
 
     Inputs: document (ConfigDocument), catalog_names (every dojo name a
@@ -308,6 +316,7 @@ def parse_run_config(
     teacher = (
         parse_teacher(top.required_section("teacher")) if top.has("teacher") else None
     )
+    student = _parse_student_beside(top, teacher)
     top.reject_unread_keys()
     result = construct_at(
         "config",
@@ -325,9 +334,52 @@ def parse_run_config(
             default_augmentation=default_augmentation,
             binder_mods=binder_mods,
             teacher=teacher,
+            student=student,
         ),
     )
     return result
+
+
+def _require_visible_views(views: TeacherViews, holdout: HoldoutSpec) -> None:
+    """Raise unless each view keeps only cards its split may see
+    (card_tiers within holdout.visible_tiers(split)): ContrastiveDojo
+    hides the others, so their pairs would be dropped silently.
+
+    Private helper - single caller is RunConfig.__post_init__.
+    Inputs: views, holdout. Output: None. Side effects: none.
+    Exceptions: ValueError naming each view and its hidden tiers.
+    """
+    # deck_splits are deliberately not limited: which decks a view counts
+    # is an experiment choice (plans/teacher_student_training.md)
+    hidden = {
+        split.value: sorted(
+            tier.value for tier in settings.card_tiers - holdout.visible_tiers(split)
+        )
+        for split, settings in views.by_split.items()
+        if not settings.card_tiers <= holdout.visible_tiers(split)
+    }
+    if hidden:
+        raise ValueError(f"teacher views keep cards their split cannot see: {hidden}")
+
+
+def _parse_student_beside(
+    top: ConfigSection, teacher: TeacherViews | None
+) -> StudentSettings:
+    """The `student:` section, or StudentSettings() when absent.
+
+    Private helper - single caller is parse_run_config.
+    Inputs: top (the whole config), teacher (the parsed `teacher:`).
+    Output: StudentSettings. Side effects: marks the student keys read.
+    Exceptions: ValueError if `student:` is given without `teacher:`
+        (it would be ignored); as parse_student.
+    """
+    if not top.has("student"):
+        return StudentSettings()
+    if teacher is None:
+        raise ValueError(
+            f"{top.location_of('student')}: needs a teacher: section to deal from"
+        )
+    return parse_student(top.required_section("student"))
 
 
 def _parse_phase(section: ConfigSection, default_dojos: tuple[str, ...]) -> Phase:

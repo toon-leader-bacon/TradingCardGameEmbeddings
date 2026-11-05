@@ -1,9 +1,7 @@
-"""The run config's `teacher:` section -> TeacherSettings.
+"""The run config's `teacher:` section -> TeacherViews.
 
     teacher:
       games: [mtg, flesh_and_blood]
-      deck_splits: [train]            # optional, default [train]
-      card_tiers: [train]             # optional, default [train]
       cooccurrence:                   # optional
         copy_count_rule: presence     # presence | copies | log_copies
         deck_size_rule: uniform       # uniform | inverse_size
@@ -12,14 +10,19 @@
         # or {kind: cosine_threshold, min_cosine: 0.4, max_neighbours: 64}
       min_deck_count: 5               # optional
       directory: data/teachers        # optional
+      views:                          # optional; these are the defaults
+        train: {deck_splits: [train], card_tiers: [train]}
+        test: {deck_splits: [train, test], card_tiers: [train, test]}
 
-`method` and `neighbours` are `kind`-tagged (parse_by_kind): a new method
-or rule adds one parser to its table below.
+One teacher per view: each student split deals pseudo-decks from its own
+view's teacher (NeighbourDealer). `method` and `neighbours` are
+`kind`-tagged (parse_by_kind): a new method or rule adds one parser to
+its table below.
 """
 
-from enum import StrEnum
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from dataclasses import replace
+from typing import Callable
 
 from src.schema.game_id import GameId
 from src.schema.holdout import CardTier
@@ -30,91 +33,148 @@ from src.teacher.neighbour_rules import (
     TopKNeighbours,
 )
 from src.teacher.teacher_settings import (
+    DEFAULT_TEACHER_DIRECTORY,
     CooccurrenceOptions,
     CopyCountRule,
     DeckSizeRule,
     PpmiSvdOptions,
     TeacherMethodOptions,
     TeacherSettings,
+    TeacherViews,
 )
 from src.training.config_parsing.config_section import (
     ConfigSection,
+    choice_of,
     construct_at,
     parse_by_kind,
 )
 
-_EnumT = TypeVar("_EnumT", bound=StrEnum)
+# One view: the deck splits counted and the card tiers kept
+_View = tuple[frozenset[Split], frozenset[CardTier]]
+
+# The views when the section names none: the student trains on a
+# TRAIN-only teacher and is tested on TEST cards of a TRAIN + TEST teacher
+_DEFAULT_VIEWS: dict[Split, _View] = {
+    Split.TRAIN: (frozenset({Split.TRAIN}), frozenset({CardTier.TRAIN})),
+    Split.TEST: (
+        frozenset({Split.TRAIN, Split.TEST}),
+        frozenset({CardTier.TRAIN, CardTier.TEST}),
+    ),
+}
 
 
-def parse_teacher(section: ConfigSection) -> TeacherSettings:
-    """A `teacher:` section -> TeacherSettings; an absent optional key
-    keeps TeacherSettings' default (only present keys are passed on).
+def parse_teacher(section: ConfigSection) -> TeacherViews:
+    """A `teacher:` section -> TeacherViews: the shared keys once, then
+    one TeacherSettings per view (default: _DEFAULT_VIEWS). An absent
+    optional key keeps TeacherSettings' default.
 
     Inputs: section ("teacher").
-    Output: TeacherSettings.
-    Side effects: none.
+    Output: TeacherViews.
+    Side effects: marks keys read.
     Exceptions: ValueError naming the location for a missing, unknown or
-        wrongly typed key, an unknown game, split, tier or kind, or what
-        the settings' own validation rejects.
+        wrongly typed key, an unknown game, split, tier or kind, a views
+        section without train, or what the settings' own validation
+        rejects.
 
     Example:
-        >>> parse_teacher(top.required_section("teacher")).method.dim
-        128
+        >>> parse_teacher(top.required_section("teacher")).by_split[Split.TEST].card_tiers
+        frozenset({<CardTier.TRAIN: 'train'>, <CardTier.TEST: 'test'>})
     """
-    # The required keys
-    options: dict[str, Any] = {
-        "games": _enum_values(section, "games", GameId),
-        "method": parse_by_kind(section.required_section("method"), _METHOD_PARSERS),
-        "neighbours": parse_by_kind(
-            section.required_section("neighbours"), _NEIGHBOUR_PARSERS
-        ),
-    }
+    # The fit every view shares, at the default scope
+    base = _parse_shared_settings(section)
 
-    # The optional keys, only when present
-    if section.has("deck_splits"):
-        options["deck_splits"] = frozenset(_enum_values(section, "deck_splits", Split))
-    if section.has("card_tiers"):
-        options["card_tiers"] = frozenset(_enum_values(section, "card_tiers", CardTier))
-    if section.has("cooccurrence"):
-        options["cooccurrence"] = _parse_cooccurrence(
-            section.required_section("cooccurrence")
-        )
-    if section.has("min_deck_count"):
-        options["min_deck_count"] = section.required("min_deck_count", int)
-    if section.has("directory"):
-        options["directory"] = Path(section.required("directory", str))
+    # Each view's deck splits and card tiers over that fit
+    views = (
+        _parse_views(section.required_section("views"))
+        if section.has("views")
+        else _DEFAULT_VIEWS
+    )
     section.reject_unread_keys()
-    return construct_at(section.where, lambda: TeacherSettings(**options))
+    by_split = {
+        split: _view_settings(base, view, f"{section.where}.views.{split.value}")
+        for split, view in views.items()
+    }
+    return construct_at(section.where, lambda: TeacherViews(by_split))
 
 
-def _enum_values(
-    section: ConfigSection, key: str, enum_type: type[_EnumT]
-) -> tuple[_EnumT, ...]:
-    """section[key], a list of strings, as enum_type members in order.
+def _parse_shared_settings(section: ConfigSection) -> TeacherSettings:
+    """The section's keys every view shares, as TeacherSettings at the
+    default scope (each view replaces deck_splits and card_tiers).
 
-    Private helper - callers are parse_teacher (games, splits, tiers).
-    Inputs: section, key, enum_type (a StrEnum). Output: tuple of members.
-    Side effects: marks key read.
-    Exceptions: ValueError naming the location and the valid values for a
-        string no member has.
+    Private helper - single caller is parse_teacher.
+    Inputs: section ("teacher"). Output: TeacherSettings.
+    Side effects: marks the shared keys read.
+    Exceptions: ValueError for a missing, unknown or wrongly typed key or
+        what TeacherSettings rejects.
     """
-    location = section.location_of(key)
-    result: list[_EnumT] = []
-    for text in section.required_str_list(key):
-        try:
-            result.append(enum_type(text))
-        except ValueError:
-            wanted = [member.value for member in enum_type]
-            raise ValueError(f"{location}: {text!r} is not one of {wanted}") from None
-    return tuple(result)
+    games = section.required_choice_list("games", GameId)
+    method = parse_by_kind(section.required_section("method"), _METHOD_PARSERS)
+    neighbours = parse_by_kind(
+        section.required_section("neighbours"), _NEIGHBOUR_PARSERS
+    )
+    cooccurrence = _parse_cooccurrence(section.optional_section("cooccurrence"))
+    min_deck_count = section.optional(
+        "min_deck_count", int, TeacherSettings.min_deck_count
+    )
+    directory = Path(section.optional("directory", str, str(DEFAULT_TEACHER_DIRECTORY)))
+    return construct_at(
+        section.where,
+        lambda: TeacherSettings(
+            games,
+            method,
+            neighbours,
+            cooccurrence=cooccurrence,
+            min_deck_count=min_deck_count,
+            directory=directory,
+        ),
+    )
+
+
+def _view_settings(base: TeacherSettings, view: _View, where: str) -> TeacherSettings:
+    """One view's TeacherSettings: base with the view's scope.
+
+    Private helper - single caller is parse_teacher.
+    Inputs: base (the shared fit), view (deck splits, card tiers), where
+        (the view's location, for messages).
+    Output: TeacherSettings. Side effects: none.
+    Exceptions: ValueError naming where, from TeacherSettings' validation.
+    """
+    deck_splits, card_tiers = view
+    return construct_at(
+        where,
+        lambda: replace(base, deck_splits=deck_splits, card_tiers=card_tiers),
+    )
+
+
+def _parse_views(section: ConfigSection) -> dict[Split, _View]:
+    """`views: {<split>: {deck_splits: [...], card_tiers: [...]}}` -> each
+    named split's (deck splits, card tiers).
+
+    Private helper - single caller is parse_teacher.
+    Inputs: section (the views subsection). Output: dict[Split, _View].
+    Side effects: marks keys read.
+    Exceptions: ValueError for an unknown split, a view missing a key, or
+        an unknown split or tier inside one.
+    """
+    result: dict[Split, _View] = {}
+    for key in section.keys():
+        split = choice_of(key, Split, section.where)
+        view = section.required_section(key)
+        result[split] = (
+            frozenset(view.required_choice_list("deck_splits", Split)),
+            frozenset(view.required_choice_list("card_tiers", CardTier)),
+        )
+        view.reject_unread_keys()
+    section.reject_unread_keys()
+    return result
 
 
 def _parse_cooccurrence(section: ConfigSection) -> CooccurrenceOptions:
     """`{[copy_count_rule], [deck_size_rule]}` -> CooccurrenceOptions
     (optional_choice per rule, defaults from CooccurrenceOptions).
 
-    Private helper - single caller is parse_teacher.
-    Inputs: section (the cooccurrence subsection). Output: CooccurrenceOptions.
+    Private helper - single caller is _parse_shared_settings.
+    Inputs: section (the cooccurrence subsection, empty when absent). Output: CooccurrenceOptions.
     Side effects: marks keys read. Exceptions: ValueError for an unknown
         rule or key.
     """

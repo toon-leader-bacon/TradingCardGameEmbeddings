@@ -5,9 +5,11 @@ from dataclasses import dataclass, field
 from typing import Mapping, Protocol
 
 from src.dojos.dojo import Dojo
+from src.dojos.file_managers.neighbour_dealer import StudentSettings
 from src.dojos.loss.regression_objective import RegressionObjective
 from src.dojos.mods.mod_specs import AugmentationRates, ModSpec
 from src.schema.holdout import HoldoutSpec
+from src.teacher.teacher_settings import TeacherViews
 from src.training.dojo_recipes.card_shelf import CardShelf
 
 
@@ -31,6 +33,10 @@ class DojoBuildContext:
     the three regression cells take it (see bind_regression_objective).
     default_augmentation: rates rewriting every card-field mod of a game's
     default augmentations (not of mod_overrides); none by default.
+    teacher: how each game's teacher per student split is built (the run
+    config's `teacher:` section); None when the run has none, and then a teacher-sourced dojo
+    refuses to build. student: how teacher-sourced dojos deal their
+    pseudo-decks (the `student:` section; defaults when absent).
     """
 
     shelf: CardShelf
@@ -43,6 +49,8 @@ class DojoBuildContext:
         default_factory=RegressionObjective.mse
     )
     default_augmentation: AugmentationRates = AugmentationRates()
+    teacher: TeacherViews | None = None
+    student: StudentSettings = StudentSettings()
 
 
 class DojoRecipe(Protocol):

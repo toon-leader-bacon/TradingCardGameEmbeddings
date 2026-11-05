@@ -207,6 +207,9 @@ rows never straddle TRAIN and TEST.
   snapshot's arrays (name `""`, no provenance): TEST and VALIDATION in
   deck uuid order, TRAIN in a fresh permutation per pass from a generator
   seeded at construction, so a run's epochs are reproducible.
+  `NeighbourDealer` deals teacher-neighbour pseudo-decks instead (see
+  "Teacher-sourced contrastive dojos" below). Both satisfy `DeckSource`
+  (`deck_source.py`), the surface `ContrastiveDojo` deals from.
   `GameBalancedChunkReader` reads one split file as a pass of rows drawn
   evenly across the values of a column (a game), optionally dropping rows
   first (`keep_row`); a dojo returns it from `GenericDojo._chunks` to
@@ -255,8 +258,8 @@ rows never straddle TRAIN and TEST.
 ## `contrastive/` - InfoNCE over deck co-occurrence
 
 Trains embeddings directly on how cards sit together in decks, sourced
-from a deck snapshot through a `DeckBoxDealer`: no metric, no parquet file, no
-learned decoder head. It doesn't fit the generic cells because InfoNCE
+from a deck snapshot through a `DeckBoxDealer` (or from a teacher, below):
+no metric, no parquet file, no learned decoder head. It doesn't fit the generic cells because InfoNCE
 needs every item's embedding in a batch jointly, not a row-independent
 `(output, label) -> loss`.
 
@@ -470,6 +473,42 @@ config's `mods:` replaces a dojo's defaults (an empty list turns them off).
 
 Not built yet: multi-positive SupCon, and mixed contrastive + label-based
 training in one step.
+
+
+### Teacher-sourced contrastive dojos
+
+`teacher_contrastive.<game>` (single-card style, one per game with a deck
+box) trains the same way on pseudo-decks dealt by `NeighbourDealer`
+(`file_managers/neighbour_dealer.py`) from the game's teachers
+(`../teacher/`), one teacher per split (the run config's `teacher.views`):
+
+- **Anchors.** Split S deals one pseudo-deck per row of S's teacher whose
+  card tier is S and that has at least `student.min_neighbours_per_deck`
+  neighbours. With the default views, TRAIN anchors are TRAIN cards of a
+  TRAIN-only teacher, and TEST anchors are TEST cards of a TRAIN + TEST
+  teacher: cards the student never trains on. TRAIN and TEST teachers are
+  required, each must have anchors, and each must have been built under
+  the run's holdout; VALIDATION has no teacher by default and deals
+  nothing.
+- **Pseudo-decks.** The anchor plus `min(student.max_neighbours_per_deck,
+  its neighbour count)` of its neighbours, re-drawn on every deal. The
+  default of 1 makes a 2-card pseudo-deck, so the single-card style's
+  2-card draw always pairs the anchor with a neighbour. TRAIN reshuffles
+  anchors and re-draws neighbours each pass; TEST and VALIDATION deal the
+  same pseudo-decks every pass.
+- **Not offered:** staple subsampling (`build_dojos` refuses a threshold
+  on these dojos).
+
+```yaml
+dojos: [teacher_contrastive.mtg, teacher_contrastive.flesh_and_blood]
+teacher:
+  games: [mtg, flesh_and_blood]
+  method: {kind: ppmi_svd, dim: 128}
+  neighbours: {kind: top_k, k: 32}
+student:                     # optional; these are the defaults
+  min_neighbours_per_deck: 1
+  max_neighbours_per_deck: 1
+```
 
 ## How to run
 

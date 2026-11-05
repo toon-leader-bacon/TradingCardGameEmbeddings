@@ -1,6 +1,7 @@
 """TeacherSettings: everything that chooses how a teacher is built, as
 the run config's `teacher:` section parses it, and the digest of the part
-a fitted table depends on.
+a fitted table depends on; and TeacherViews, one TeacherSettings per
+student split.
 
 Each plug-in choice is a typed value: an enum per counting rule, an
 options dataclass per teacher method (TeacherMethodOptions grows as
@@ -9,10 +10,11 @@ methods are added), and a NeighbourRule Strategy (neighbour_rules.py).
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
-from typing import ClassVar
+from types import MappingProxyType
+from typing import ClassVar, Mapping
 
 from src.schema.game_id import GameId
 from src.schema.holdout import CardTier
@@ -155,3 +157,64 @@ class TeacherSettings:
         # one helper to schema/ in its own change (it renames the
         # dojos' deck split cache files)
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+@dataclass(frozen=True)
+class TeacherViews:
+    """One TeacherSettings per student split: the teacher whose neighbours
+    that split's pseudo-decks come from (the run config's `teacher:`
+    section, see config_parsing/teacher_parsing.py).
+
+    by_split: each view's settings, TRAIN and TEST required (the trainer
+    scores TEST every round), VALIDATION optional. Views may differ only
+    in deck_splits and card_tiers (checked). Held read-only.
+    The default views: TRAIN sees TRAIN decks and cards; TEST sees TRAIN +
+    TEST decks and cards, so the student's TEST anchors are cards it
+    never trained on.
+    """
+
+    by_split: Mapping[Split, TeacherSettings]
+
+    def __post_init__(self) -> None:
+        """Freeze by_split. Raise ValueError without a TRAIN or TEST view,
+        or if a view differs from TRAIN's in anything but deck_splits and
+        card_tiers."""
+        # Validate inputs: the views the trainer needs, one fit
+        missing = sorted(
+            split.value
+            for split in (Split.TRAIN, Split.TEST)
+            if split not in self.by_split
+        )
+        if missing:
+            raise ValueError(f"teacher views need {missing}")
+        _require_one_fit_but_scope(self.by_split)
+        object.__setattr__(self, "by_split", MappingProxyType(dict(self.by_split)))
+
+    @property
+    def games(self) -> tuple[GameId, ...]:
+        """The games every view builds a teacher for.
+
+        Inputs: none. Output: tuple[GameId, ...]. Side effects: none.
+        Exceptions: none.
+        """
+        return self.by_split[Split.TRAIN].games
+
+
+def _require_one_fit_but_scope(by_split: Mapping[Split, TeacherSettings]) -> None:
+    """Raise unless every view equals the TRAIN view once its deck_splits
+    and card_tiers are set to TRAIN's.
+
+    Private helper - single caller is TeacherViews.__post_init__.
+    Inputs: by_split (with a TRAIN view). Output: None. Side effects: none.
+    Exceptions: ValueError naming the first view that differs.
+    """
+    train = by_split[Split.TRAIN]
+    for split, view in by_split.items():
+        rescoped = replace(
+            view, deck_splits=train.deck_splits, card_tiers=train.card_tiers
+        )
+        if rescoped != train:
+            raise ValueError(
+                f"teacher view {split.value} differs from train in more than "
+                "deck_splits and card_tiers"
+            )

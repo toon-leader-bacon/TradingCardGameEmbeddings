@@ -30,22 +30,29 @@ def _section(**overrides: Any) -> ConfigSection:
 
 class TestParseTeacher:
     def test_minimal_section_takes_the_defaults(self) -> None:
-        settings = parse_teacher(_section())
+        views = parse_teacher(_section())
 
-        assert settings.games == (GameId.MTG, GameId.FLESH_AND_BLOOD)
-        assert settings.method == PpmiSvdOptions(dim=128)
-        assert settings.neighbours == TopKNeighbours(32)
-        assert settings.deck_splits == frozenset({Split.TRAIN})
-        assert settings.card_tiers == frozenset({CardTier.TRAIN})
-        assert settings.cooccurrence == CooccurrenceOptions()
-        assert settings.min_deck_count == 5
-        assert settings.directory == DEFAULT_TEACHER_DIRECTORY
+        assert views.games == (GameId.MTG, GameId.FLESH_AND_BLOOD)
+        assert set(views.by_split) == {Split.TRAIN, Split.TEST}
+        train = views.by_split[Split.TRAIN]
+        assert train.method == PpmiSvdOptions(dim=128)
+        assert train.neighbours == TopKNeighbours(32)
+        assert train.deck_splits == frozenset({Split.TRAIN})
+        assert train.card_tiers == frozenset({CardTier.TRAIN})
+        assert train.cooccurrence == CooccurrenceOptions()
+        assert train.min_deck_count == 5
+        assert train.directory == DEFAULT_TEACHER_DIRECTORY
+
+    def test_default_test_view_sees_train_and_test(self) -> None:
+        test = parse_teacher(_section()).by_split[Split.TEST]
+
+        assert test.deck_splits == frozenset({Split.TRAIN, Split.TEST})
+        assert test.card_tiers == frozenset({CardTier.TRAIN, CardTier.TEST})
+        assert test.method == PpmiSvdOptions(dim=128)
 
     def test_every_option(self) -> None:
-        settings = parse_teacher(
+        views = parse_teacher(
             _section(
-                deck_splits=["train", "test"],
-                card_tiers=["train", "test"],
                 cooccurrence={
                     "copy_count_rule": "log_copies",
                     "deck_size_rule": "inverse_size",
@@ -58,18 +65,33 @@ class TestParseTeacher:
                 },
                 min_deck_count=2,
                 directory="elsewhere",
+                views={
+                    "train": {
+                        "deck_splits": ["train", "test"],
+                        "card_tiers": ["train"],
+                    },
+                    "test": {"deck_splits": ["test"], "card_tiers": ["test"]},
+                    "validation": {
+                        "deck_splits": ["validation"],
+                        "card_tiers": ["validation"],
+                    },
+                },
             )
         )
 
-        assert settings.deck_splits == frozenset({Split.TRAIN, Split.TEST})
-        assert settings.card_tiers == frozenset({CardTier.TRAIN, CardTier.TEST})
-        assert settings.cooccurrence == CooccurrenceOptions(
-            CopyCountRule.LOG_COPIES, DeckSizeRule.INVERSE_SIZE
-        )
-        assert settings.method == PpmiSvdOptions(dim=64, context_smoothing=1.0)
-        assert settings.neighbours == CosineThresholdNeighbours(0.4, 64)
-        assert settings.min_deck_count == 2
-        assert settings.directory == Path("elsewhere")
+        assert set(views.by_split) == set(Split)
+        train = views.by_split[Split.TRAIN]
+        assert train.deck_splits == frozenset({Split.TRAIN, Split.TEST})
+        assert train.card_tiers == frozenset({CardTier.TRAIN})
+        assert views.by_split[Split.TEST].card_tiers == frozenset({CardTier.TEST})
+        for settings in views.by_split.values():
+            assert settings.cooccurrence == CooccurrenceOptions(
+                CopyCountRule.LOG_COPIES, DeckSizeRule.INVERSE_SIZE
+            )
+            assert settings.method == PpmiSvdOptions(dim=64, context_smoothing=1.0)
+            assert settings.neighbours == CosineThresholdNeighbours(0.4, 64)
+            assert settings.min_deck_count == 2
+            assert settings.directory == Path("elsewhere")
 
     @pytest.mark.parametrize(
         ("overrides", "message"),
@@ -81,10 +103,63 @@ class TestParseTeacher:
                 "min_cosine",
             ),
             ({"games": ["not_a_game"]}, "not_a_game"),
-            ({"card_tiers": ["middle"]}, "middle"),
             ({"cooccurrence": {"copy_count_rule": "squared"}}, "squared"),
             ({"typo": 1}, "typo"),
             ({"games": []}, "empty"),
+            # The old top-level scope keys now live in views
+            ({"card_tiers": ["train"]}, "card_tiers"),
+            (
+                {
+                    "views": {
+                        "train": {"deck_splits": ["train"], "card_tiers": ["train"]}
+                    }
+                },
+                "test",
+            ),
+            (
+                {
+                    "views": {
+                        "train": {"deck_splits": ["train"], "card_tiers": ["middle"]},
+                        "test": {"deck_splits": ["train"], "card_tiers": ["train"]},
+                    }
+                },
+                "middle",
+            ),
+            (
+                {
+                    "views": {
+                        "train": {"deck_splits": ["train"], "card_tiers": ["train"]},
+                        "later": {"deck_splits": ["train"], "card_tiers": ["train"]},
+                    }
+                },
+                "later",
+            ),
+            (
+                {
+                    "views": {
+                        "train": {"deck_splits": ["train"], "card_tiers": ["train"]},
+                        "test": {"deck_splits": ["train"]},
+                    }
+                },
+                "card_tiers",
+            ),
+            (
+                {
+                    "views": {
+                        "train": {
+                            "deck_splits": ["train"],
+                            "card_tiers": ["train"],
+                            "dim": 3,
+                        },
+                        "test": {"deck_splits": ["train"], "card_tiers": ["train"]},
+                    }
+                },
+                "dim",
+            ),
+            (
+                {"views": {"train": {"deck_splits": [], "card_tiers": ["train"]}}},
+                "empty",
+            ),
         ],
     )
     def test_rejects_bad_sections(self, overrides: dict, message: str) -> None:

@@ -136,7 +136,9 @@ Top level:
   holdout, settings)`, the composition root for `../teacher/`: opens the
   game's deck snapshot and split index through the `CardShelf`, hands
   them over as `TeacherInputs`, and loads or builds the game's
-  `Teacher`. `scripts/build_teachers.py` calls it.
+  `Teacher`. `teachers_for(game, shelf, holdout, views)` does that per
+  view of a `TeacherViews`. `scripts/build_teachers.py` and
+  `dojo_recipes/teacher_contrastive_dojo_recipe.py` call it.
 - [binder_mods.py](binder_mods.py) and
   [binder_mods_spec.py](binder_mods_spec.py): the optional `binder_mods:`
   section (`BinderModsSpec`), a card-field mod pipeline applied once to
@@ -148,11 +150,14 @@ Top level:
   to. `config_section.py` holds `ConfigSection`, the typed, key-checked
   reader of one mapping (every getter records its key, so unread keys
   raise) and the shared scalar checks; `diet_parsing.py`,
-  `model_parsing.py`, `mod_parsing.py` and `teacher_parsing.py` parse the
-  `diet:`, `model:`, `mods:`, `binder_mods:` and `teacher:` sections. The
-  optional `teacher:` section becomes `RunConfig.teacher`
-  (`TeacherSettings`, see `../teacher/README.md`); none of its games may
-  be held out.
+  `model_parsing.py`, `mod_parsing.py`, `teacher_parsing.py` and
+  `student_parsing.py` parse the `diet:`, `model:`, `mods:`,
+  `binder_mods:`, `teacher:` and `student:` sections. The optional
+  `teacher:` section becomes `RunConfig.teacher` (`TeacherViews`, one
+  teacher per student split, see `../teacher/README.md`): none of its
+  games may be held out, and no view may keep card tiers its split cannot
+  see. The optional `student:` section (`StudentSettings`, how
+  teacher-sourced dojos deal pseudo-decks) needs `teacher:`.
 - [dojo_catalog.py](dojo_catalog.py): `DOJO_CATALOG`, every dojo a config
   can name, keyed `"<metric source>.<metric stem>"` (e.g.
   `gwent_one.color_mask`). The key becomes the dojo's `name`, so same-stem
@@ -173,7 +178,8 @@ Top level:
   sampling.
 - [dojo_recipes/](dojo_recipes/): what the catalog is built from. One
   recipe class per file (`CardDojoRecipe`, `DeckDojoRecipe`,
-  `MultiGameCardDojoRecipe`, `ContrastiveDojoRecipe`), the constructor
+  `MultiGameCardDojoRecipe`, `ContrastiveDojoRecipe`,
+  `TeacherContrastiveDojoRecipe`), the constructor
   Protocols they accept (`dojo_constructors.py`, which also binds the
   run's regression objective onto regression dojos), `CardShelf`,
   `DojoBuildContext`, and the augmentation helpers (`augmentations.py`).

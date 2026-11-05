@@ -26,23 +26,23 @@ from src.run_logging import (
     script_logger,
 )
 from src.schema.game_id import GameId
-from src.teacher.teacher_settings import TeacherSettings
+from src.teacher.teacher_settings import TeacherViews
 from src.training.dojo_catalog import DOJO_CATALOG
 from src.training.dojo_recipes.card_shelf import CardShelf
 from src.training.run_config import RunConfig, parse_run_config, read_config_document
-from src.training.teacher_assembly import teacher_for
+from src.training.teacher_assembly import teachers_for
 
 _logger = script_logger(__file__)
 
 
 def build_teachers(config: RunConfig, games: tuple[GameId, ...]) -> list[GameId]:
-    """Build or reuse each game's teacher under config's holdout and
-    teacher settings, isolating one game's failure from the rest.
+    """Build or reuse each game's teacher per view, under config's holdout
+    and teacher views, isolating one game's failure from the rest.
 
     Inputs: config (must have a teacher section); games (a subset of
         config.teacher.games).
     Output: list[GameId], the games that failed (empty on success).
-    Side effects: as teacher_for per game (may count decks and write
+    Side effects: as teachers_for per game (may count decks and write
         data/teachers/<game>/); logs each game's outcome.
     Exceptions: ValueError if config has no teacher section.
 
@@ -50,32 +50,34 @@ def build_teachers(config: RunConfig, games: tuple[GameId, ...]) -> list[GameId]
         >>> build_teachers(config, config.teacher.games)
         []
     """
-    settings = _require_teacher_settings(config)
+    views = _require_teacher_views(config)
     shelf = CardShelf()
     result: list[GameId] = []
 
     # One game at a time; one failure does not stop the rest
     for game in games:
         try:
-            teacher = teacher_for(game, shelf, config.plan.holdout, settings)
-            _logger.info(
-                "%s: %d rows (%d confident), dim %d",
-                game.value,
-                len(teacher.table.card_uuids),
-                int(teacher.table.confident.sum()),
-                teacher.table.dim,
-            )
+            teachers = teachers_for(game, shelf, config.plan.holdout, views)
+            for split, teacher in teachers.items():
+                _logger.info(
+                    "%s %s: %d rows (%d confident), dim %d",
+                    game.value,
+                    split.value,
+                    len(teacher.table.card_uuids),
+                    int(teacher.table.confident.sum()),
+                    teacher.table.dim,
+                )
         except Exception:
             _logger.exception("%s failed", game.value)
             result.append(game)
     return result
 
 
-def _require_teacher_settings(config: RunConfig) -> TeacherSettings:
+def _require_teacher_views(config: RunConfig) -> TeacherViews:
     """config.teacher, or ValueError naming the missing section.
 
     Private helper - single caller is build_teachers.
-    Inputs: config. Output: TeacherSettings. Side effects: none.
+    Inputs: config. Output: TeacherViews. Side effects: none.
     Exceptions: ValueError.
     """
     if config.teacher is None:
@@ -84,18 +86,18 @@ def _require_teacher_settings(config: RunConfig) -> TeacherSettings:
 
 
 def _chosen_games(
-    settings: TeacherSettings, game_text: str | None
+    views: TeacherViews, game_text: str | None
 ) -> tuple[GameId, ...]:
-    """settings.games, or just --game's (which must be one of them).
+    """views.games, or just --game's (which must be one of them).
 
     Private helper - single caller is main.
-    Inputs: settings, game_text (None for all). Output: tuple[GameId, ...].
+    Inputs: views, game_text (None for all). Output: tuple[GameId, ...].
     Side effects: none. Exceptions: ValueError for a game not configured.
     """
     if game_text is None:
-        return settings.games
+        return views.games
     game = GameId(game_text)
-    if game not in settings.games:
+    if game not in views.games:
         raise ValueError(f"--game {game.value} is not one of teacher.games")
     return (game,)
 
@@ -128,7 +130,7 @@ def main() -> None:
 
     # Parse the whole run config: the teacher shares the run's holdout
     config = parse_run_config(read_config_document(args.config), tuple(DOJO_CATALOG))
-    games = _chosen_games(_require_teacher_settings(config), args.game)
+    games = _chosen_games(_require_teacher_views(config), args.game)
     failed = build_teachers(config, games)
     if failed:
         _logger.error("Failed: %s", ", ".join(game.value for game in failed))

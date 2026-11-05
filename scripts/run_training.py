@@ -254,6 +254,8 @@ def main() -> int:
         staple_thresholds=config.staple_thresholds,
         regression_objective=RegressionObjective.for_kind(config.regression_loss),
         default_augmentation=config.default_augmentation,
+        teacher=config.teacher,
+        student=config.student,
     )
     dojos = build_dojos(config.dojo_names, context)
     if not preflight_passes(dojos, config):

@@ -53,7 +53,7 @@ flowchart LR
 ```
 
 1. **Select.** Decks in `deck_splits`, cards in `card_tiers` (both
-   `[train]` by default). A card outside the tiers is dropped from every
+   `[train]` by default in `TeacherSettings`). A card outside the tiers is dropped from every
    deck before counting. The card snapshot's unknown sentinel is always
    dropped.
 2. **Count.** The deck x card incidence X comes from the snapshot's CSR
@@ -76,6 +76,14 @@ flowchart LR
    `card_tier_key()`, and `fit_digest()`. The neighbours file adds the
    rule's tag. A file with another stamp or rule is ignored and rebuilt.
 
+A run builds one teacher per student split (`TeacherViews`, in
+`teacher_settings.py`): the views share every setting but `deck_splits`
+and `card_tiers`. By default the TRAIN view counts TRAIN decks and keeps
+TRAIN cards, and the TEST view counts TRAIN + TEST decks and keeps TRAIN +
+TEST cards, so the student is scored on TEST cards it never trained on
+(see `src/dojos/file_managers/neighbour_dealer.py`). Each view caches
+separately: its scope is in its fit digest.
+
 Teachers are per game: decks never cross games, so each game's space is
 its own, arbitrarily oriented against the others. A held-out game has no
 TRAIN decks, so it gets no teacher.
@@ -83,14 +91,20 @@ TRAIN decks, so it gets no teacher.
 ## How to run
 
 A training run's config carries the section (see
-`src/training/config_parsing/teacher_parsing.py`):
+`src/training/config_parsing/teacher_parsing.py` for every key):
 
 ```yaml
 teacher:
   games: [mtg, flesh_and_blood]
   method: {kind: ppmi_svd, dim: 128}
   neighbours: {kind: top_k, k: 32}
+  views:                    # optional; these are the defaults
+    train: {deck_splits: [train], card_tiers: [train]}
+    test: {deck_splits: [train, test], card_tiers: [train, test]}
 ```
+
+A view may only keep card tiers its split can see
+(`HoldoutSpec.visible_tiers`); the run config rejects any other.
 
 To build or check the cache ahead of a run:
 
@@ -101,6 +115,6 @@ PYTHONPATH=. python3 scripts/build_teachers.py --config <run config yaml> [--gam
 From code:
 
 ```python
-teacher = teacher_for(GameId.MTG, CardShelf(), config.plan.holdout, config.teacher)
-teacher.neighbours.neighbours_of(0)   # teacher rows, most similar first
+teachers = teachers_for(GameId.MTG, CardShelf(), config.plan.holdout, config.teacher)
+teachers[Split.TRAIN].neighbours.neighbours_of(0)   # teacher rows, most similar first
 ```

@@ -26,7 +26,7 @@ from src.dojos.contrastive.contrastive_loss import (
 from src.dojos.contrastive.styles.single_card import SingleCardInfoNCELoss
 from src.dojos.contrastive.pair_constructor import ContrastivePairConstructor
 from src.dojos.dojo import BatchBudget, DojoBatch
-from src.dojos.file_managers.deck_box_dealer import DeckBoxDealer
+from src.dojos.file_managers.deck_source import DeckSource
 from src.dojos.mods.mod import ModTally
 from src.dojos.mods.mod_pipeline import ModPipeline
 from src.schema.holdout import HoldoutSpec
@@ -41,14 +41,14 @@ _MIN_DECKS_PER_SAMPLE = 2
 
 
 class ContrastiveDojo:
-    """Wires a DeckBoxDealer, a ContrastivePairConstructor, and a
+    """Wires a DeckSource, a ContrastivePairConstructor, and a
     CardLookup into the `Dojo` contract. Owns its ContrastiveLoss
     internally (an injected collaborator with a sensible default) - same
     convention as every generic dojo cell."""
 
     def __init__(
         self,
-        dealer: DeckBoxDealer,
+        dealer: DeckSource,
         pair_constructor: ContrastivePairConstructor,
         card_lookup: CardLookup,
         holdout: HoldoutSpec,
@@ -314,7 +314,7 @@ class ContrastiveDojo:
             )
 
     def _require_dealer_split_matches(
-        self, dealer: DeckBoxDealer, holdout: HoldoutSpec
+        self, dealer: DeckSource, holdout: HoldoutSpec
     ) -> None:
         """Raise unless dealer splits decks by holdout: the dojo hides cards
         by holdout and deals decks by the dealer's split, and the two must
@@ -333,7 +333,7 @@ class ContrastiveDojo:
             )
 
     def _check_deck_box_version(
-        self, dealer: DeckBoxDealer, card_lookup: CardLookup, strict_version_check: bool
+        self, dealer: DeckSource, card_lookup: CardLookup, strict_version_check: bool
     ) -> None:
         """Raise if dealer's recorded CardBinder version doesn't match
         card_lookup - see __init__'s own docstring for the exact

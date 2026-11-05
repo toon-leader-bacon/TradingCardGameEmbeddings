@@ -12,6 +12,7 @@ from src.teacher.teacher_settings import (
     CooccurrenceOptions,
     CopyCountRule,
     PpmiSvdOptions,
+    TeacherViews,
 )
 from tests.teacher.teacher_fixtures import binder_and_cards, settings, teacher_inputs
 
@@ -94,3 +95,41 @@ class TestTeacherInputs:
 
         assert not mask[inputs.decks.card_snapshot.unknown_index]
         assert int(mask.sum()) == 3
+
+
+class TestTeacherViews:
+    def _views(self, tmp_path: Path, **overrides: object) -> dict:
+        train = settings(tmp_path)
+        test = replace(
+            train,
+            deck_splits=frozenset({Split.TRAIN, Split.TEST}),
+            card_tiers=frozenset({CardTier.TRAIN, CardTier.TEST}),
+        )
+        views = {Split.TRAIN: train, Split.TEST: test}
+        views.update({Split(key): value for key, value in overrides.items()})
+        return views
+
+    def test_games_come_from_the_views(self, tmp_path: Path) -> None:
+        views = TeacherViews(self._views(tmp_path))
+
+        assert views.games == (GameId.MTG,)
+
+    def test_views_are_read_only(self, tmp_path: Path) -> None:
+        views = TeacherViews(self._views(tmp_path))
+
+        with pytest.raises(TypeError):
+            views.by_split[Split.VALIDATION] = views.by_split[Split.TRAIN]  # type: ignore[index]
+
+    @pytest.mark.parametrize("missing", [Split.TRAIN, Split.TEST])
+    def test_train_and_test_are_required(self, tmp_path: Path, missing: Split) -> None:
+        by_split = self._views(tmp_path)
+        del by_split[missing]
+
+        with pytest.raises(ValueError, match=missing.value):
+            TeacherViews(by_split)
+
+    def test_views_may_differ_only_in_scope(self, tmp_path: Path) -> None:
+        other_fit = replace(settings(tmp_path), method=PpmiSvdOptions(dim=9))
+
+        with pytest.raises(ValueError, match="test differs"):
+            TeacherViews(self._views(tmp_path, test=other_fit))

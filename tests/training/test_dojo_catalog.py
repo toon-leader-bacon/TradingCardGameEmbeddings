@@ -122,6 +122,9 @@ from src.dojos.sts_gg import deck_label_dojos
 from src.schema.game_id import GameId
 from src.schema.holdout import HoldoutSpec
 from src.training.dojo_recipes import contrastive_dojo_recipe
+from src.schema.splits import Split
+from src.teacher.neighbour_rules import TopKNeighbours
+from src.teacher.teacher_settings import PpmiSvdOptions, TeacherSettings, TeacherViews
 from src.training.dojo_catalog import DECK_MOD_GROUPS, DOJO_CATALOG, build_dojos
 from src.training.dojo_recipes.augmentations import (
     build_augmentation_pipeline,
@@ -135,6 +138,9 @@ from src.training.dojo_recipes.contrastive_dojo_recipe import (
 )
 from src.training.dojo_recipes.deck_dojo_recipe import DeckDojoRecipe
 from src.training.dojo_recipes.dojo_build_context import DojoBuildContext
+from src.training.dojo_recipes.teacher_contrastive_dojo_recipe import (
+    TeacherContrastiveDojoRecipe,
+)
 from src.training.dojo_recipes.dojo_constructors import (
     REGRESSION_CELLS,
     bind_regression_objective,
@@ -338,7 +344,7 @@ class TestCatalog:
         sorted(
             k
             for k, r in DOJO_CATALOG.items()
-            if not isinstance(r, ContrastiveDojoRecipe)
+            if not isinstance(r, (ContrastiveDojoRecipe, TeacherContrastiveDojoRecipe))
         ),
     )
     def test_each_key_names_its_metric_file(self, key: str) -> None:
@@ -488,6 +494,25 @@ class TestContrastiveEntries:
             assert game == recipe.game.value
             assert isinstance(recipe.style, prefixes[prefix])
 
+    def test_one_teacher_sourced_single_card_entry_per_game(self) -> None:
+        teacher_sourced = {
+            key: recipe
+            for key, recipe in DOJO_CATALOG.items()
+            if isinstance(recipe, TeacherContrastiveDojoRecipe)
+        }
+        games = {
+            "gwent",
+            "flesh_and_blood",
+            "slay_the_spire_2",
+            "mtg",
+            "pokemon",
+            "dominion",
+        }
+        assert set(teacher_sourced) == {f"teacher_contrastive.{game}" for game in games}
+        for key, recipe in teacher_sourced.items():
+            assert key == f"teacher_contrastive.{recipe.game.value}"
+            assert isinstance(recipe.style, SingleCardStyle)
+
     def test_a_style_reaches_the_dojo_as_a_matched_pair(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -522,9 +547,51 @@ class TestContrastiveEntries:
     def test_every_metric_dojo_is_a_generic_dojo(self) -> None:
         # append_augmentations appends to a GenericDojo's pipeline
         for name, recipe in DOJO_CATALOG.items():
-            if not isinstance(recipe, ContrastiveDojoRecipe):
+            if not isinstance(
+                recipe, (ContrastiveDojoRecipe, TeacherContrastiveDojoRecipe)
+            ):
                 dojo_class = getattr(recipe, "dojo_class")
                 assert issubclass(dojo_class, GenericDojo), name
+
+
+class TestTeacherGameValidation:
+    def _context(self, games: tuple[GameId, ...] | None) -> DojoBuildContext:
+        views = None
+        if games is not None:
+            train = TeacherSettings(
+                games=games,
+                method=PpmiSvdOptions(dim=4),
+                neighbours=TopKNeighbours(k=2),
+            )
+            views = TeacherViews({Split.TRAIN: train, Split.TEST: train})
+        return DojoBuildContext(
+            shelf=_RecordingShelf(),
+            holdout=HoldoutSpec.no_holdout(),
+            card_embedding_size=32,
+            rng_seed=0,
+            teacher=views,
+        )
+
+    def test_no_teacher_section_refuses_before_any_build(self) -> None:
+        context = self._context(None)
+
+        with pytest.raises(ValueError, match="teacher_contrastive.mtg"):
+            build_dojos(["contrastive.gwent", "teacher_contrastive.mtg"], context)
+        assert context.shelf.requested_games == []  # type: ignore[attr-defined]
+
+    def test_game_missing_from_teacher_games_is_refused(self) -> None:
+        context = self._context((GameId.MTG,))
+
+        with pytest.raises(ValueError, match="teacher_contrastive.pokemon"):
+            build_dojos(["teacher_contrastive.pokemon"], context)
+
+    def test_run_without_teacher_dojos_needs_no_teacher(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        recipe = CardDojoRecipe(GameId.GWENT, _RecordingDojoClass())
+        monkeypatch.setitem(DOJO_CATALOG, "test.one", recipe)  # type: ignore[arg-type]
+
+        assert len(build_dojos(["test.one"], self._context(None))) == 1
 
 
 class TestModOverrideValidation:
