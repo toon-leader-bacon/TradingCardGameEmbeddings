@@ -144,7 +144,7 @@ metrics too.
   its copy-count multiset hash once (`create_if_absent()`), returning
   its uuid only when this call created it. Used by the stages whose
   identity is the multiset (limitless_play, hearthstonetopdecks,
-  zenodo_hearthstone_decks).
+  zenodo_hearthstone_decks, mtgjson_decks).
 - `extraction.py` — `DeckExtractionStage`, the Strategy Protocol every
   deck source implements: `extract(self, raw_path, box, card_lookup) ->
   list[UUID]` plus `SOURCE_GAME: ClassVar[GameId]`. A stage reads cards
@@ -174,6 +174,7 @@ card reference it can't match, rather than dropping it.
 | `limitless_play/` | `LimitlessPlayDeckExtractionStage` | Pokemon | limitless_play `standings.jsonl`: player decklists, cards matched by set code + number via `card_index.py` (needs pokemon_tcg's `sets/en.json`), then by newest same-name card; non-60-card lists skipped | `deck_uuid_from_cards()` over the copy-count multiset; identical lists stored once |
 | `hearthstonetopdecks/` | `HearthstoneTopDecksDeckExtractionStage` | Hearthstone | hearthstonetopdecks `decks.jsonl`: one deck code per page, decoded by `deckstring.py`; each dbfId matched through the binder's HEARTHSTONEJSON alias (cards taken as their current version); heroes and sideboard cards dropped | `deck_uuid_from_cards()` over the copy-count multiset; identical lists stored once |
 | `zenodo_hearthstone_decks/` | `ZenodoHearthstoneDecksExtractionStage` | Hearthstone | the Zenodo dataset's directory: `cards.csv` (one row per card copy, by name) plus `decks.csv` (archetype, for the deck name); names matched exactly, each card taken as its latest version | `deck_uuid_from_cards()` over the copy-count multiset; identical lists stored once (also across `hearthstonetopdecks/`) |
+| `mtgjson_decks/` | `MtgjsonDeckExtractionStage` | MTG | the latest complete MTGJSON build's `decks/` directory (one JSON file per Wizards precon; default picked at call time); `mainBoard` + `commander` cards matched by Scryfall oracle id through the binder's SCRYFALL alias; Secret Lair Drop, MTGO Redemption and Bundle Land Pack files skipped | `deck_uuid_from_cards()` over the copy-count multiset; identical lists stored once |
 | `seventeenlands_game_data/` | `SeventeenLandsGameDataDeckExtractionStage` | MTG | 17lands `game_data` CSVs (`deck_<name>` copy-count columns), read with the shared `../seventeenlands/` parser | `deck_uuid_from_cards()` over the full copy-count multiset: every distinct decklist any game played, stored once (an unmatched column counts as the Unknown card) |
 
 ## How it works

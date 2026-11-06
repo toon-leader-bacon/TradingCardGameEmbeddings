@@ -24,6 +24,7 @@ is deleted once extracted. There is no phase 2.
 import hashlib
 import json
 import logging
+import re
 import zipfile
 from pathlib import Path
 from typing import ClassVar
@@ -39,6 +40,8 @@ _ZIP_NAME = "AllDeckFiles.zip"
 _META_NAME = "Meta.json"
 _DECKS_DIR_NAME = "decks"
 _DOWNLOAD_TIMEOUT_SECONDS = 600
+# A build directory's name ends "+<yyyymmdd>" ("5.3.0+20261105")
+_BUILD_DATE = re.compile(r"\+(\d{8})$")
 
 
 class MtgjsonDeckFilesDownloader(Downloader):
@@ -89,7 +92,17 @@ class MtgjsonDeckFilesDownloader(Downloader):
             >>> MtgjsonDeckFilesDownloader.latest_build_decks_dir()
             PosixPath('data/raw/mtgjson_decks/5.3.0+20261105/decks')
         """
-        raise NotImplementedError
+        root = cls.DEFAULT_RAW_DATA_DIR if raw_data_dir is None else raw_data_dir
+        dated_builds: list[tuple[str, str, Path]] = []
+        if root.is_dir():
+            for build_dir in root.iterdir():
+                build_date = _BUILD_DATE.search(build_dir.name)
+                if build_date is None or not (build_dir / _META_NAME).is_file():
+                    continue
+                dated_builds.append((build_date.group(1), build_dir.name, build_dir))
+        if not dated_builds:
+            raise FileNotFoundError(f"no complete MTGJSON build under {root}")
+        return max(dated_builds)[2] / _DECKS_DIR_NAME
 
     def _run_phase_1(self) -> Path:
         """Land the current build's deck files, unless already landed.

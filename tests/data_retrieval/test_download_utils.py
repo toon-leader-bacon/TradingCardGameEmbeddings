@@ -7,9 +7,11 @@ import requests
 from src.data_retrieval.rate_limiter import RateLimiter
 from src.data_retrieval.download_utils import (
     append_with_manifest,
+    require_int,
     download_to_file,
     download_to_string,
     paced_get,
+    pick_keys,
     read_manifest,
 )
 
@@ -326,3 +328,24 @@ class TestPacedGet:
                 rate_limiter=_unlimited(),
                 tolerated_statuses=frozenset({429}),
             )
+
+
+class TestPickKeys:
+    def test_docstring_example(self) -> None:
+        assert pick_keys({"a": 1, "b": 2}, ("b", "c")) == {"b": 2}
+
+    def test_keeps_keys_order(self) -> None:
+        assert list(pick_keys({"a": 1, "b": 2}, ("b", "a"))) == ["b", "a"]
+
+    def test_empty_keys_give_an_empty_dict(self) -> None:
+        assert pick_keys({"a": 1}, ()) == {}
+
+
+class TestRequireInt:
+    def test_an_int_passes(self) -> None:
+        assert require_int(3) == 3
+
+    @pytest.mark.parametrize("value", [True, 1.0, "1", None])
+    def test_other_values_raise(self, value: object) -> None:
+        with pytest.raises(TypeError):
+            require_int(value)

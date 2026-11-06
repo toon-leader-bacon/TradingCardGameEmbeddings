@@ -49,6 +49,9 @@ from src.data_refinement.deck_box.hearthstonetopdecks.extraction_stage import (
 from src.data_refinement.deck_box.limitless_play.extraction_stage import (
     LimitlessPlayDeckExtractionStage,
 )
+from src.data_refinement.deck_box.mtgjson_decks.extraction_stage import (
+    MtgjsonDeckExtractionStage,
+)
 from src.data_refinement.deck_box.play_gwent.extraction_stage import (
     PlayGwentDeckExtractionStage,
 )
@@ -81,7 +84,8 @@ from src.run_logging import (
 _logger = script_logger(__file__)
 
 # One (extraction_stage, default raw_path) pair per source — the
-# default raw_path is each concrete stage's own DEFAULT_RAW_PATH.
+# default raw_path is each concrete stage's own DEFAULT_RAW_PATH (or, for
+# mtgjson_decks, its default_raw_path()).
 _STAGES: dict[str, tuple[DeckExtractionStage, Callable[[], Path]]] = {
     "sts_gg": (
         StsGgDeckExtractionStage(),
@@ -122,6 +126,11 @@ _STAGES: dict[str, tuple[DeckExtractionStage, Callable[[], Path]]] = {
     "spire_codex_runs": (
         SpireCodexRunsDeckExtractionStage(),
         lambda: SpireCodexRunsDeckExtractionStage.DEFAULT_RAW_PATH,
+    ),
+    # MTGJSON lands one dated build per day: the default is picked at call time
+    "mtgjson_decks": (
+        MtgjsonDeckExtractionStage(),
+        MtgjsonDeckExtractionStage.default_raw_path,
     ),
     "seventeenlands_game_data": (
         SeventeenLandsGameDataDeckExtractionStage(),

@@ -56,6 +56,7 @@ from src.data_retrieval.archidekt.downloader import ArchidektDeckDownloader
 from src.data_retrieval.cardvault_fabtcg.card_downloader import (
     CardVaultFabtcgCardDownloader,
 )
+from src.data_retrieval.deckstats.downloader import DeckstatsDeckDownloader
 from src.data_retrieval.dominiontabs.downloader import DominionTabsCardDownloader
 from src.data_retrieval.download_utils import download_to_string
 from src.data_retrieval.downloader import Downloader
@@ -68,6 +69,7 @@ from src.data_retrieval.hearthstonejson.downloader import HearthstoneJsonDownloa
 from src.data_retrieval.hearthstonetopdecks.downloader import (
     HearthstoneTopDecksDownloader,
 )
+from src.data_retrieval.moxfield.downloader import MoxfieldDeckDownloader
 from src.data_retrieval.mtgjson_decks.downloader import MtgjsonDeckFilesDownloader
 from src.data_retrieval.zenodo_hearthstone_decks.downloader import (
     ZenodoHearthstoneDecksDownloader,
@@ -141,6 +143,14 @@ def _run_standard(downloader: Downloader) -> None:
 
 def run_archidekt() -> None:
     _run_standard(ArchidektDeckDownloader())
+
+
+def run_moxfield() -> None:
+    _run_standard(MoxfieldDeckDownloader())
+
+
+def run_deckstats() -> None:
+    _run_standard(DeckstatsDeckDownloader())
 
 
 def run_scryfall() -> None:
@@ -226,6 +236,8 @@ def run_seventeenlands() -> None:
 
 DOWNLOADERS: dict[str, Callable[[], None]] = {
     "archidekt": run_archidekt,
+    "moxfield": run_moxfield,
+    "deckstats": run_deckstats,
     "cardvault_fabtcg": run_cardvault_fabtcg,
     "dominiontabs": run_dominiontabs,
     "fabtcg_decklists": run_fabtcg_decklists,

@@ -50,7 +50,7 @@ existed.
 import logging
 import time
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import Any, Callable, TypeVar
 
 import requests
 
@@ -328,6 +328,7 @@ def paced_get(
     tolerated_statuses: frozenset[int] = frozenset(),
     max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
     max_rate_limited_waits: int = _DEFAULT_MAX_RATE_LIMITED_WAITS,
+    follow_redirects: bool = True,
 ) -> requests.Response:
     """GET url, paced, returning the response when its status is 2xx or
     in tolerated_statuses; retrying network errors and every other
@@ -354,7 +355,11 @@ def paced_get(
         max_rate_limited_waits: 429s waited out for this one GET before
             raising (>= 0). A Retry-After is capped at
             _MAX_RATE_LIMITED_WAIT_SECONDS.
-    Output: the requests.Response (2xx or a tolerated status).
+        follow_redirects: False returns a 3xx as it is (raise_for_status
+            passes 3xx), so a caller can pace the redirect's GET itself;
+            True lets requests follow it, unpaced.
+    Output: the requests.Response (2xx, a tolerated status, or a 3xx
+        when not following redirects).
     Side effects: one or more paced requests; sleeps on a 429 (the
         Retry-After seconds, or a minute when absent) and between
         retries.
@@ -379,7 +384,12 @@ def paced_get(
 
     def _attempt() -> requests.Response:
         rate_limiter.wait()
-        response = requests.get(url, timeout=timeout_seconds, headers=headers)
+        response = requests.get(
+            url,
+            timeout=timeout_seconds,
+            headers=headers,
+            allow_redirects=follow_redirects,
+        )
         # A 429 is returned, not raised: call_with_retries would retry it
         # after a fixed backoff, inside the server's window
         if (
@@ -417,3 +427,49 @@ def _retry_after_seconds(response: requests.Response) -> float:
     if retry_after.isdigit():
         return min(float(retry_after), _MAX_RATE_LIMITED_WAIT_SECONDS)
     return _DEFAULT_RATE_LIMITED_WAIT_SECONDS
+
+
+def pick_keys(source: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
+    """The entries of source under keys, in keys' order, skipping absent
+    ones: the pruning step API crawls use to unwrap a payload.
+
+    Inputs: source, keys. Output: a new dict. Side effects: none.
+    Exceptions: none.
+
+    Example:
+        >>> pick_keys({"a": 1, "b": 2}, ("b", "c"))
+        {'b': 2}
+    """
+    return {key: source[key] for key in keys if key in source}
+
+
+def require_int(value: Any) -> int:
+    """value if it is an int (not a bool): the check for an int read back
+    from JSON a downloader wrote (a cursor, a plan).
+
+    Inputs: value (a parsed JSON value). Output: int. Side effects: none.
+    Exceptions: TypeError otherwise.
+
+    Example:
+        >>> require_int(3)
+        3
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"expected an int, got {value!r}")
+    return value
+
+
+def require_str(value: Any) -> str:
+    """value if it is a str: the check for a string read back from JSON a
+    downloader wrote (a plan's deck paths).
+
+    Inputs: value (a parsed JSON value). Output: str. Side effects: none.
+    Exceptions: TypeError otherwise.
+
+    Example:
+        >>> require_str("325-Burn")
+        '325-Burn'
+    """
+    if not isinstance(value, str):
+        raise TypeError(f"expected a str, got {value!r}")
+    return value

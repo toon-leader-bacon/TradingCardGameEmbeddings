@@ -219,3 +219,44 @@ class TestPhase1Guards:
             pytest.raises(ValueError, match="two members named x.json"),
         ):
             _make_downloader(tmp_path).phase_1()
+
+
+def _land_build(root: Path, name: str, complete: bool = True) -> Path:
+    (root / name / "decks").mkdir(parents=True)
+    if complete:
+        (root / name / "Meta.json").write_text(_META, encoding="utf-8")
+    return root / name / "decks"
+
+
+class TestLatestBuildDecksDir:
+    def test_the_only_build(self, tmp_path: Path) -> None:
+        decks = _land_build(tmp_path, _BUILD)
+        assert MtgjsonDeckFilesDownloader.latest_build_decks_dir(tmp_path) == decks
+
+    def test_newest_by_date_not_by_name(self, tmp_path: Path) -> None:
+        _land_build(tmp_path, "5.10.0+20261101")
+        newest = _land_build(tmp_path, "5.3.0+20261105")
+        assert MtgjsonDeckFilesDownloader.latest_build_decks_dir(tmp_path) == newest
+
+    def test_one_date_is_ordered_by_name(self, tmp_path: Path) -> None:
+        _land_build(tmp_path, "5.3.0+20261105")
+        later = _land_build(tmp_path, "5.3.1+20261105")
+        assert MtgjsonDeckFilesDownloader.latest_build_decks_dir(tmp_path) == later
+
+    def test_an_incomplete_build_is_skipped(self, tmp_path: Path) -> None:
+        complete = _land_build(tmp_path, "5.3.0+20261104")
+        _land_build(tmp_path, "5.3.0+20261105", complete=False)
+        assert MtgjsonDeckFilesDownloader.latest_build_decks_dir(tmp_path) == complete
+
+    def test_an_undated_directory_is_skipped(self, tmp_path: Path) -> None:
+        dated = _land_build(tmp_path, "5.3.0+20261104")
+        _land_build(tmp_path, "scratch")
+        assert MtgjsonDeckFilesDownloader.latest_build_decks_dir(tmp_path) == dated
+
+    @pytest.mark.parametrize("make_root", [False, True])
+    def test_no_complete_build_raises(self, tmp_path: Path, make_root: bool) -> None:
+        root = tmp_path / "raw"
+        if make_root:
+            _land_build(root, _BUILD, complete=False)
+        with pytest.raises(FileNotFoundError):
+            MtgjsonDeckFilesDownloader.latest_build_decks_dir(root)

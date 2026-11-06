@@ -46,11 +46,12 @@ PRECONDITION: card_lookup holds MTG's Unknown sentinel
 before any file is read.
 """
 
+import json
 import logging
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 from uuid import UUID
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
@@ -117,7 +118,15 @@ class _OracleIdMatcher:
         Side effects: counts copies and misses.
         Exceptions: none.
         """
-        raise NotImplementedError
+        result: list[UUID] = []
+        for row in deck.rows:
+            card_uuid = self._uuid_of(row)
+            if card_uuid is None:
+                self.unmatched_names[row.name] += row.count
+                card_uuid = self.unknown_uuid
+            self.copies += row.count
+            result.extend([card_uuid] * row.count)
+        return result
 
     def _uuid_of(self, row: MtgjsonCardRow) -> UUID | None:
         """The binder card for row's oracle id, or None (no oracle id, or
@@ -126,7 +135,12 @@ class _OracleIdMatcher:
         Inputs: row. Output: UUID or None. Side effects: none.
         Exceptions: none.
         """
-        raise NotImplementedError
+        if row.oracle_id is None:
+            return None
+        card = self.card_lookup.get_by_alias(
+            GameId.MTG, DataSource.SCRYFALL, row.oracle_id
+        )
+        return None if card is None else card.nocab_uuid
 
 
 class MtgjsonDeckExtractionStage:
@@ -141,6 +155,10 @@ class MtgjsonDeckExtractionStage:
         Inputs: none. Output: Path.
         Side effects: lists the downloader's raw directory.
         Exceptions: FileNotFoundError if no complete build is landed.
+
+        Example:
+            >>> MtgjsonDeckExtractionStage.default_raw_path()
+            PosixPath('data/raw/mtgjson_decks/5.3.0+20261105/decks')
         """
         return MtgjsonDeckFilesDownloader.latest_build_decks_dir()
 
@@ -156,8 +174,8 @@ class MtgjsonDeckExtractionStage:
         Side effects: reads every *.json under raw_path (sorted by name);
             creates decks on box; logs the tally and the top misses.
         Exceptions: RuntimeError if the Unknown sentinel is missing;
-            FileNotFoundError if raw_path is not a directory; as
-            _read_deck for a malformed file.
+            FileNotFoundError if raw_path is not a directory; ValueError
+            naming the file for a malformed deck file (_read_deck).
 
         Example:
             >>> MtgjsonDeckExtractionStage().extract(None, box, binder)
@@ -208,11 +226,40 @@ def _read_deck(path: Path) -> MtgjsonDeck:
 
     Inputs: path. Output: MtgjsonDeck (source_id = path's stem).
     Side effects: reads path.
-    Exceptions: json.JSONDecodeError; KeyError if "data", its "name" or
-        "type", or a row's "name" or "count" is absent; ValueError for a
+    Exceptions: ValueError naming path for a file that is not JSON, lacks
+        "data", its "name" or "type", or a row's "name" or "count", or has
+        a count that is not a positive int.
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))["data"]
+        rows = tuple(
+            _parse_card_row(card)
+            for board in _PLAYED_BOARDS
+            for card in data.get(board) or []
+        )
+        return MtgjsonDeck(
+            source_id=path.stem, name=data["name"], deck_type=data["type"], rows=rows
+        )
+    except (KeyError, ValueError) as error:
+        # json.JSONDecodeError is a ValueError
+        raise ValueError(
+            f"malformed MTGJSON deck file {path.name}: {error!r}"
+        ) from error
+
+
+def _parse_card_row(card: dict[str, Any]) -> MtgjsonCardRow:
+    """One board entry as a MtgjsonCardRow.
+
+    Inputs: card (an MTGJSON card object with "name" and "count").
+    Output: MtgjsonCardRow. Side effects: none.
+    Exceptions: KeyError if "name" or "count" is absent; ValueError for a
         count that is not a positive int.
     """
-    raise NotImplementedError
+    count = card["count"]
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+        raise ValueError(f"count {count!r} of {card['name']!r} is not a positive int")
+    oracle_id = (card.get("identifiers") or {}).get("scryfallOracleId")
+    return MtgjsonCardRow(name=card["name"], oracle_id=oracle_id, count=count)
 
 
 def _log_summary(tally: _ExtractionTally, matcher: _OracleIdMatcher) -> None:
@@ -222,4 +269,20 @@ def _log_summary(tally: _ExtractionTally, matcher: _OracleIdMatcher) -> None:
     Inputs: tally, matcher. Output: none. Side effects: logs.
     Exceptions: none.
     """
-    raise NotImplementedError
+    _logger.info(
+        "MTGJSON decks: %d files, %d skipped by type, %d empty, %d already "
+        "stored, %d created; %d of %d card copies unmatched",
+        tally.decks_by_type.total(),
+        tally.skipped_by_type,
+        tally.empty,
+        tally.already_stored,
+        tally.created,
+        matcher.unmatched_names.total(),
+        matcher.copies,
+    )
+    _logger.info("decks per type: %s", dict(tally.decks_by_type.most_common()))
+    if matcher.unmatched_names:
+        _logger.warning(
+            "most common unmatched cards (copies): %s",
+            matcher.unmatched_names.most_common(_UNMATCHED_LOG_LIMIT),
+        )
