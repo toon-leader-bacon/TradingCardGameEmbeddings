@@ -29,6 +29,10 @@ class DataSource(str, Enum):
     PRINTED_NAME = "printed_name"  # a name a card is printed or spelled under
     # that differs from its canonical name (MTG: Arena's names for OM1 cards,
     # from Scryfall's printed_name); the id is the name itself.
+    PRINTED_NUMBER = "printed_number"  # a card number as printed on the card,
+    # which deck lists name cards by in games where many cards share a name
+    # (One Piece "OP01-024", Union Arena "UE01BT/BLC-1-041"); the id is the
+    # number itself (see src/data_refinement/card_binder/tcgjson/).
     GATHERER = "gatherer"  # Wizards' Gatherer database id (Scryfall's
     # multiverse_ids field) — added during CardBinder implementation,
     # not present in the original skeleton's enum members; same
@@ -104,6 +108,10 @@ class DataSource(str, Enum):
     # src/data_retrieval/fabtcgmeta_online_decks/downloader.py and
     # src/data_refinement/deck_box/fabtcgmeta_online_decks/extraction_stage.py)
     # — distinct from CARDVAULT_FABTCG (that deck's cards' own data source).
+    TCGJSON = "tcgjson"  # tcgjson's weekly TCGplayer catalog release;
+    # source_id is a TCGplayer productId (one printing) (see
+    # src/data_retrieval/tcgjson/downloader.py and
+    # src/data_refinement/card_binder/tcgjson/ingestion_stage.py).
     SYSTEM = "system"  # minted internally by CardBinder itself for
     # synthetic sentinel cards (e.g. the "Unknown" fallback card — see
     # CardBinder.ensure_unknown_card()), never fetched from an external

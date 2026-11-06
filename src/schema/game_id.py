@@ -37,3 +37,13 @@ class GameId(str, Enum):
     DOMINION = "dominion"  # Dominion, the board/deckbuilding game (see
     # src/data_retrieval/dominiontabs/downloader.py and
     # src/data_refinement/card_binder/dominiontabs/ingestion_stage.py).
+    LORCANA = "lorcana"  # Disney Lorcana (see
+    # src/data_retrieval/tcgjson/downloader.py and
+    # src/data_refinement/card_binder/tcgjson/ingestion_stage.py).
+    # The tcgjson games, like LORCANA (cards from
+    # src/data_refinement/card_binder/tcgjson/; YUGIOH above is one too).
+    DIGIMON = "digimon"
+    ONE_PIECE = "one_piece"
+    STAR_WARS_UNLIMITED = "star_wars_unlimited"
+    UNION_ARENA = "union_arena"
+    RIFTBOUND = "riftbound"

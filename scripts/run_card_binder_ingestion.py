@@ -55,6 +55,15 @@ from src.data_refinement.card_binder.scryfall.ingestion_stage import (
 from src.data_refinement.card_binder.spire_codex.ingestion_stage import (
     SpireCodexCardIngestionStage,
 )
+from src.data_refinement.card_binder.tcgjson.ingestion_stage import (
+    DigimonTcgjsonCardIngestionStage,
+    LorcanaTcgjsonCardIngestionStage,
+    OnePieceTcgjsonCardIngestionStage,
+    RiftboundTcgjsonCardIngestionStage,
+    StarWarsUnlimitedTcgjsonCardIngestionStage,
+    UnionArenaTcgjsonCardIngestionStage,
+    YugiohTcgjsonCardIngestionStage,
+)
 from src.data_retrieval.cardvault_fabtcg.card_downloader import (
     CardVaultFabtcgCardDownloader,
 )
@@ -64,6 +73,7 @@ from src.data_retrieval.hearthstonejson.downloader import HearthstoneJsonDownloa
 from src.data_retrieval.pokemon_tcg.downloader import PokemonTcgDataDownloader
 from src.data_retrieval.scryfall.downloader import ScryfallOracleDownloader
 from src.data_retrieval.spire_codex.card_downloader import SpireCodexCardDownloader
+from src.data_retrieval.tcgjson.downloader import TcgjsonCatalogDownloader
 from src.run_logging import (
     add_logging_arguments,
     configure_logging,
@@ -168,6 +178,36 @@ STAGES: dict[str, tuple[CardIngestionStage, Callable[[], Path]]] = {
     "hearthstonejson": (
         HearthstoneJsonCardIngestionStage(),
         _latest_hearthstone_build,
+    ),
+    # One stage per tcgjson game; each reads its catalog from the newest
+    # complete release directory.
+    "tcgjson_lorcana": (
+        LorcanaTcgjsonCardIngestionStage(),
+        TcgjsonCatalogDownloader.latest_release_dir,
+    ),
+    "tcgjson_yugioh": (
+        YugiohTcgjsonCardIngestionStage(),
+        TcgjsonCatalogDownloader.latest_release_dir,
+    ),
+    "tcgjson_digimon": (
+        DigimonTcgjsonCardIngestionStage(),
+        TcgjsonCatalogDownloader.latest_release_dir,
+    ),
+    "tcgjson_one_piece": (
+        OnePieceTcgjsonCardIngestionStage(),
+        TcgjsonCatalogDownloader.latest_release_dir,
+    ),
+    "tcgjson_star_wars_unlimited": (
+        StarWarsUnlimitedTcgjsonCardIngestionStage(),
+        TcgjsonCatalogDownloader.latest_release_dir,
+    ),
+    "tcgjson_union_arena": (
+        UnionArenaTcgjsonCardIngestionStage(),
+        TcgjsonCatalogDownloader.latest_release_dir,
+    ),
+    "tcgjson_riftbound": (
+        RiftboundTcgjsonCardIngestionStage(),
+        TcgjsonCatalogDownloader.latest_release_dir,
     ),
 }
 

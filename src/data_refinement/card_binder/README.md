@@ -310,6 +310,58 @@ collision policy):
 | `cardvault_fabtcg/` | `CardVaultFabtcgCardIngestionStage` | Flesh and Blood | cardvault `card_id` (+ `print_id` aliases) |
 | `dominiontabs/` | `DominionTabsCardIngestionStage` | Dominion | dominiontabs `card_tag` |
 | `hearthstonejson/` | `HearthstoneJsonCardIngestionStage` | Hearthstone | content-derived: lean content minus set/rarity, so reprints collapse (+ every `dbfId` as an alias); the binder mirrors one build |
+| `tcgjson/` | one subclass of `TcgjsonCardIngestionStage` per game: `Lorcana…`, `Yugioh…`, `Digimon…`, `OnePiece…`, `StarWarsUnlimited…`, `UnionArena…`, `RiftboundTcgjsonCardIngestionStage` | Lorcana, Yu-Gi-Oh, Digimon, One Piece, Star Wars: Unlimited, Union Arena, Riftbound | base name (the TCGplayer product name without its trailing `(...)`/`[...]` printing tags), or the card number for Digimon, One Piece and Union Arena (+ each card number, the identity and every full printed form, as a `PRINTED_NUMBER` alias, the ids their deck lists use); + every `productId` as an alias; the binder mirrors one catalog |
+
+### `tcgjson/`: one pipeline, one spec per game
+
+tcgjson republishes TCGplayer's catalog with the same layout for nine
+games; only `customAttributes`' keys differ. So the stage is generic
+and a game is data: `game_spec.py` holds one `TcgjsonGameSpec` per game
+(which attributes to keep, under which of the game's own key names, of
+which `FieldKind`: TEXT, INT, LIST, FLAG, RULES; the rarity ladder; the
+set-name prefixes and card types that are not deck cards; optionally
+the attribute holding the type, a card-number pattern that makes the
+number the card's identity, and a name suffix to strip), and
+`ingestion_stage.py` one two-line subclass per game setting `SPEC`
+(`__init_subclass__` derives `SOURCE_GAME` from it, since the Protocol
+needs a ClassVar). MTG and Pokemon are tcgjson games too but have
+better sources here (Scryfall, pokemon-tcg-data).
+
+| Game | Cards (weekly-20260831) | Identity | Notes |
+|---|---|---|---|
+| Lorcana | 2,475 | name | Illumineer's Quest (co-op) sets excluded |
+| Yu-Gi-Oh | 14,228 | name | type is `cardTypeB` ("Xyz/Effect Monster"); `cardTypes` is coarse and missing on most Pendulum printings; the Tokens set excluded |
+| Digimon | 4,386 | card number ("BT5-086", rarity suffix dropped) | text only in `description`; inherited and security effects are RULES fields |
+| One Piece | 2,818 | card number ("OP01-024") | DON!! cards excluded |
+| Star Wars: Unlimited | 2,200 | name (it carries the subtitle) | a base's token back (" // Shield") stripped; `epic_action` a RULES field |
+| Union Arena | 2,914 | card number after "/" (shared by reprints) | Action Point cards excluded; `series` kept (deck building is bound to it) |
+| Riftbound | 944 | name (", " and " - " subtitle separators alike) | |
+
+- `catalog.py`: `read_catalog(path) -> TcgjsonCatalog` (sets by id,
+  products as `TcgjsonProduct`), the parse boundary.
+- `printing_groups.py`: `group_printings` (card products only, grouped
+  by base name, compared ignoring case and the subtitle separator, or by
+  card number; the card's name is its printings' most common base
+  name), `representative_printing` (its rarity and set are
+  the card's: lowest on the ladder, then earliest set, then lowest id)
+  and `build_card_content`. TCGplayer types each product's text by hand,
+  so printings of one card disagree (Lorcana: 2,826 distinct contents
+  for 2,548 names); each field is the majority of the printings'
+  normalized values, a tie going to the newest printing, and
+  `(Errata Version)` printings, when present, are the only voters.
+- `rules_text.py`: `clean_rules_text`, TCGplayer's HTML (typo tags
+  included) removed without gluing words, quotes and spacing
+  normalized; `[Exert]` and ability-name brackets kept. Store notes
+  ("Disclaimer: ...", "This product comes in ... serializations") are
+  dropped, whether in a red span or on a line of their own; a red span
+  that highlights errata'd card text keeps its text.
+
+Errata: an `(Errata Version)` printing outvotes the rest (above), so a
+card has its current text; nothing records which version a given deck
+played. Known gaps in TCGplayer's data (weekly-20260831): some Lorcana
+Locations have no rules text in any printing; Bucky - Squirrel Squeak
+Tutor's errata printing omits Ward. A card with the same name and text
+as another under a new number stays two cards (Union Arena: 1 pair).
 
 ## How it works
 
@@ -343,7 +395,9 @@ PYTHONPATH=. python3 scripts/run_card_binder_ingestion.py --source scryfall
 The script knows each source's default raw path (a single file for
 Scryfall, spire-codex and cardvault; a directory for pokemon_tcg,
 gwent.one and dominiontabs; for hearthstonejson, the newest
-`<build id>.json` under `data/raw/hearthstonejson/`). From Python:
+`<build id>.json` under `data/raw/hearthstonejson/`; for each
+`tcgjson_<game>`, the newest complete release directory under
+`data/raw/tcgjson/`). From Python:
 
 ```python
 from pathlib import Path
