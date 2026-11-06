@@ -381,7 +381,11 @@ class TestDownload:
 
         # The failing ref didn't stop the second one from being
         # attempted and succeeding, and the failure was logged as a warning.
-        [written_message] = [record.getMessage() for record in caplog.records]
+        [written_message] = [
+            record.getMessage()
+            for record in caplog.records
+            if record.name == "src.data_retrieval.seventeenlands.downloader"
+        ]
         assert _GAME_MSH_PREMIER.url in written_message
 
     def test_all_refs_failing_returns_all_failures(self, tmp_path: Path) -> None:

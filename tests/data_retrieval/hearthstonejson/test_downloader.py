@@ -257,7 +257,11 @@ class TestDownloadMissingBuilds:
         # succeeding, and the failure was logged as a warning.
         assert not (tmp_path / "111111.json").exists()
         assert (tmp_path / "222222.json").read_bytes() == b"data"
-        [written_message] = [record.getMessage() for record in caplog.records]
+        [written_message] = [
+            record.getMessage()
+            for record in caplog.records
+            if record.name == "src.data_retrieval.hearthstonejson.downloader"
+        ]
         assert "111111" in written_message
         assert "404 Not Found" in written_message
 

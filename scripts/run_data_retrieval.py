@@ -24,6 +24,7 @@ Usage (from the project root):
     PYTHONPATH=. python3 scripts/run_data_retrieval.py --source seventeenlands
     PYTHONPATH=. python3 scripts/run_data_retrieval.py
     PYTHONPATH=. python3 scripts/run_data_retrieval.py --all
+    PYTHONPATH=. python3 scripts/run_data_retrieval.py --source archidekt         --rpm 78 --max-items 1000
 
 With no arguments (equivalently, `--all`), every downloader is spawned
 in its own window and this script returns immediately — it does not
@@ -39,6 +40,13 @@ x-terminal-emulator is on PATH) — only the Windows path has actually
 been exercised. If no terminal emulator can be found, that downloader
 falls back to running inline in the current terminal instead of being
 skipped.
+
+--rpm and --max-items apply only to the resumable deck crawls
+(CRAWL_DOWNLOADERS: archidekt, moxfield, deckstats) and only with
+--source: --rpm sets the session's request rate (default 60/min),
+--max-items caps how many plan items the session fetches (default: walk
+to the end of the plan). A capped session saves its cursor, so the next
+run picks up where it stopped.
 """
 
 import argparse
@@ -49,6 +57,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -76,6 +85,7 @@ from src.data_retrieval.zenodo_hearthstone_decks.downloader import (
 )
 from src.data_retrieval.isotropic.downloader import IsotropicGameLogDownloader
 from src.data_retrieval.pitchstack.downloader import PitchstackDeckDownloader
+from src.data_retrieval.rate_limiter import RateLimiter
 from src.data_retrieval.limitless_play.downloader import LimitlessPlayDownloader
 from src.data_retrieval.play_gwent.downloader import PlayGwentDownloader
 from src.data_retrieval.pokemon_tcg.downloader import PokemonTcgDataDownloader
@@ -141,16 +151,62 @@ def _run_standard(downloader: Downloader) -> None:
     _logger.info("Done: %s", result_path)
 
 
+@dataclass(frozen=True)
+class CrawlSessionOptions:
+    """One crawl session's limits, from --rpm and --max-items.
+
+    requests_per_minute: the RateLimiter's rate; None keeps the
+        Downloader default (60/min).
+    max_items: plan items one session fetches; None walks to the end.
+    """
+
+    requests_per_minute: float | None = None
+    max_items: int | None = None
+
+
+# The resumable deck crawls: each takes a rate_limiter and a
+# max_decks_per_session keyword, so --rpm and --max-items reach them
+CRAWL_DOWNLOADERS: dict[str, Callable[..., Downloader]] = {
+    "archidekt": ArchidektDeckDownloader,
+    "moxfield": MoxfieldDeckDownloader,
+    "deckstats": DeckstatsDeckDownloader,
+}
+
+
+def run_crawl(name: str, options: CrawlSessionOptions) -> None:
+    """Build CRAWL_DOWNLOADERS[name] with options' rate and cap, then run
+    both phases.
+    Inputs: name (a CRAWL_DOWNLOADERS key), options.
+    Output: none. Side effects: the crawl's requests and files.
+    Exceptions: whatever the downloader raises."""
+    rate_limiter = (
+        None
+        if options.requests_per_minute is None
+        else RateLimiter(requests_per_minute=options.requests_per_minute)
+    )
+    _logger.info(
+        "%s session: %s/min, up to %s items",
+        name,
+        options.requests_per_minute or 60,
+        options.max_items or "all",
+    )
+    _run_standard(
+        CRAWL_DOWNLOADERS[name](
+            rate_limiter=rate_limiter, max_decks_per_session=options.max_items
+        )
+    )
+
+
 def run_archidekt() -> None:
-    _run_standard(ArchidektDeckDownloader())
+    run_crawl("archidekt", CrawlSessionOptions())
 
 
 def run_moxfield() -> None:
-    _run_standard(MoxfieldDeckDownloader())
+    run_crawl("moxfield", CrawlSessionOptions())
 
 
 def run_deckstats() -> None:
-    _run_standard(DeckstatsDeckDownloader())
+    run_crawl("deckstats", CrawlSessionOptions())
 
 
 def run_scryfall() -> None:
@@ -327,11 +383,19 @@ def run_all_in_separate_terminals(log_level: str) -> None:
     )
 
 
-def run_one(name: str, *, pause_on_exit: bool) -> None:
+def run_one(
+    name: str,
+    *,
+    pause_on_exit: bool,
+    crawl_options: CrawlSessionOptions | None = None,
+) -> None:
     _logger.info("=== %s ===", name)
     exit_code = 0
     try:
-        DOWNLOADERS[name]()
+        if crawl_options is not None:
+            run_crawl(name, crawl_options)
+        else:
+            DOWNLOADERS[name]()
     except Exception:
         _logger.exception("%s failed", name)
         exit_code = 1
@@ -366,8 +430,31 @@ def parse_args() -> argparse.Namespace:
         "--all spawns, so a finished (or crashed) window stays visible; harmless to "
         "pass by hand too.",
     )
+    parser.add_argument(
+        "--rpm",
+        type=float,
+        help="Requests per minute for this session (crawls only: "
+        f"{', '.join(CRAWL_DOWNLOADERS)}). Default 60.",
+    )
+    parser.add_argument(
+        "--max-items",
+        type=int,
+        help="Stop this session after this many plan items (crawls only). "
+        "Default: walk to the end of the plan.",
+    )
     add_logging_arguments(parser)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.rpm is not None or args.max_items is not None:
+        if args.source not in CRAWL_DOWNLOADERS:
+            parser.error(
+                "--rpm and --max-items need --source with one of: "
+                + ", ".join(CRAWL_DOWNLOADERS)
+            )
+        if args.rpm is not None and args.rpm <= 0:
+            parser.error(f"--rpm must be > 0, got {args.rpm}")
+        if args.max_items is not None and args.max_items < 1:
+            parser.error(f"--max-items must be >= 1, got {args.max_items}")
+    return args
 
 
 def main() -> None:
@@ -387,7 +474,12 @@ def main() -> None:
     configure_logging(logging_settings_from(args, default_log_file))
 
     if args.source:
-        run_one(args.source, pause_on_exit=args.pause_on_exit)
+        crawl_options = None
+        if args.source in CRAWL_DOWNLOADERS:
+            crawl_options = CrawlSessionOptions(args.rpm, args.max_items)
+        run_one(
+            args.source, pause_on_exit=args.pause_on_exit, crawl_options=crawl_options
+        )
         return
 
     run_all_in_separate_terminals(args.log_level)

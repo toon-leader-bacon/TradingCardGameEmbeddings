@@ -347,7 +347,11 @@ class TestPhase2:
 
         # 3 failed attempts for 407608, then 1 successful attempt for 999.
         assert mock_get.call_count == 4
-        [written_message] = [record.getMessage() for record in caplog.records]
+        [written_message] = [
+            record.getMessage()
+            for record in caplog.records
+            if record.name == "src.data_retrieval.play_gwent.downloader"
+        ]
         assert "407608" in written_message
 
         manifest_ids = (
