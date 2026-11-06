@@ -40,25 +40,23 @@ Ideas:
 Card in contexts stays out of every training diet; see the dojo's
 docstring.
 
-## Deck AUC as an intrinsic analysis
+## Deck retrieval AUC follow-ups
 
-Add same-deck retrieval AUC to `analyses/` as an `EmbeddingAnalysis`.
-For a card in a sampled deck: P(cos to a random deck-mate > cos to a
-random same-game card outside the deck), 0.5 = chance. It is the
-contrastive dojos' task with no training, and the main signal they add,
-but today it exists only in experiment scripts
-(`experiments/2026-10-10_pooling_probe/analysis/probe.py`, wrapped by
-`experiments/2026-10-11_model_by_diet_r2/analysis/probe_cells.py`).
+`DeckRetrievalAuc` (`intrinsic/deck_retrieval/deck_retrieval_auc.py`) is built and runs in
+`scripts/run_evaluation.py`. Still open:
 
-Needs, beyond what the other analyses take:
-
-- a deck source (decks from the deck boxes, sampled with a seed), since
-  `EmbeddingTable` holds cards only; a card missing from the table is
-  skipped and counted;
-- scalars: overall AUC, AUC per game, and AUC split by the anchor card's
-  holdout tier (TRAIN vs VALIDATION/TEST), so in-sample and out-of-sample
-  readings are separate;
-- a 95% bootstrap interval over decks, as `probe_cells.py` reports.
+- **Retire the experiment copies**: `deck_auc` in
+  `experiments/2026-10-10_pooling_probe/analysis/probe.py` and its wrapper
+  `experiments/2026-10-11_model_by_diet_r2/analysis/probe_cells.py`, once
+  their runs are re-scored here. Numbers differ slightly from theirs:
+  VALIDATION decks only, every same-game negative instead of a small
+  pool, and ties counted 1/2.
+- **Paired per-deck comparison across encoders**, from each encoder's
+  `per_deck.csv` (same decks within one evaluation run): a per-deck
+  difference and its interval says more than two overlapping intervals.
+- **Centered cosine**: subtract the table's mean vector before every
+  cosine analysis (deck AUC included), as one shared vector transform
+  rather than per analysis. Raised by the r2 referee.
 
 ## run_evaluation.py: held-out dojos, cards and games
 

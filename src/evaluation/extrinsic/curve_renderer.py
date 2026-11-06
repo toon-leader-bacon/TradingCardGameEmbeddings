@@ -25,8 +25,8 @@ from typing import Callable, Literal, Mapping, Sequence
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
-from src.evaluation.chart_canvas import ChartCanvas
-from src.evaluation.chart_theme import ChartTheme
+from src.evaluation.charts.chart_canvas import ChartCanvas
+from src.evaluation.charts.chart_theme import ChartTheme
 from src.training.recording.run_listener import RoundRow
 
 XAxis = Literal["step", "elapsed_seconds"]

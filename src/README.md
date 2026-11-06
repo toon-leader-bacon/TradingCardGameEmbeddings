@@ -57,7 +57,7 @@ Two flows hand data between containers as files on disk:
 | [`dojos/`](dojos/README.md) | in progress | Training tasks: each yields batches within the trainer's budget and scores embeddings with its own small decoder head and loss. |
 | [`teacher/`](teacher/README.md) | in progress (provisional placement) | Per-game teacher vectors from deck co-occurrence (PPMI + SVD, no text), and each card's teacher neighbours, cached per holdout under `data/teachers/`. The student (the encoder) trains on them through the `teacher_contrastive.<game>` dojos. |
 | [`training/`](training/README.md) | in progress | `Trainer`: phases, rounds and steps over a diet of dojos, with saturation-based stopping, fault isolation and checkpointing. Runs from a YAML config via `scripts/run_training.py`, on CPU or GPU. |
-| [`evaluation/`](evaluation/README.md) | in progress ([`plans/archive/evaluation.md`](../plans/archive/evaluation.md)) | Post-training evaluation of encoder checkpoints (intrinsic: embedding-table analyses against card labels; extrinsic: fresh-dojo-head curves on a frozen encoder via `Trainer`). Distinct from a training run's own TEST signal on a trainable encoder. |
+| [`evaluation/`](evaluation/README.md) | in progress | Post-training evaluation of encoder checkpoints (intrinsic: embedding-table analyses against card labels; extrinsic: fresh-dojo-head curves on a frozen encoder via `Trainer`). Distinct from a training run's own TEST signal on a trainable encoder. |
 
 ## Logging
 

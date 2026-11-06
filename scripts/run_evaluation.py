@@ -6,7 +6,8 @@ multi-card checkpoint, and an untrained single-card baseline):
 
 1. Intrinsic: embed a corpus once into an EmbeddingTable, then run the
    three analyses (cluster agreement, label compactness, projection plot)
-   against each label source.
+   against each label source, plus the label-free ones (effective rank,
+   and deck retrieval AUC on VALIDATION decks sampled once per run).
 2. Extrinsic: train fresh dojo heads on the frozen encoder (run_extrinsic),
    reusing the same dojo objects for every encoder so each starts from
    identical heads; then overlay every encoder's learning curves.
@@ -18,7 +19,7 @@ extrinsic run whose output directory already exists is skipped, not redone.
 
 This is a prototype: the corpus (gwent only), label sources, dojos and
 hyperparameters are hard-coded below as a worked example; change them in
-build_encoders / build_label_sources / build_dojos / the spec constants.
+build_encoders / build_groupings / build_dojos / the spec constants.
 
 Usage (from the project root):
 
@@ -34,6 +35,7 @@ Usage (from the project root):
 import argparse
 import itertools
 import math
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +44,7 @@ from typing import Iterator
 import torch
 
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.metrics.gwent_one.faction_mask_metric import FactionMaskMetric
 from src.data_refinement.metrics.gwent_one.rarity_mask_metric import RarityMaskMetric
 from src.dojos.dojo import Dojo
@@ -50,20 +53,26 @@ from src.encoder_model.card_encoder_model import CardEncoderModel
 from src.encoder_model.precision import Precision
 from src.encoder_model.reference_multicard_models import LinearProjectionMultiCardModel
 from src.encoder_model.reference_singlecard_models import LinearProjectionCardModel
-from src.evaluation.analyses.card_sample import PerLabelCap
-from src.evaluation.analyses.cluster_agreement import ClusterAgreement
-from src.evaluation.analyses.effective_rank import EffectiveRank
-from src.evaluation.analyses.embedding_analysis import EmbeddingAnalysis
-from src.evaluation.analyses.label_compactness import LabelCompactness
-from src.evaluation.analyses.projection_plot import ProjectionPlot
-from src.evaluation.embedding.embed_corpus import embed_corpus
-from src.evaluation.embedding.embedding_table import EmbeddingTable
-from src.evaluation.embedding.embedding_table_metadata import EmbeddingTableMetadata
+from src.evaluation.intrinsic.label_agreement.card_sample import PerLabelCap
+from src.evaluation.intrinsic.label_agreement.cluster_agreement import ClusterAgreement
+from src.evaluation.intrinsic.deck_retrieval.deck_retrieval_auc import DeckRetrievalAuc
+from src.evaluation.intrinsic.effective_rank import EffectiveRank
+from src.evaluation.intrinsic.embedding_analysis import EmbeddingAnalysis
+from src.evaluation.intrinsic.label_agreement.label_compactness import LabelCompactness
+from src.evaluation.intrinsic.projection.projection_plot import ProjectionPlot
+from src.evaluation.intrinsic.deck_retrieval.evaluation_decks import (
+    EvaluationDeck,
+    EvaluationDeckSpec,
+    sample_evaluation_decks,
+)
+from src.evaluation.intrinsic.embedding.embed_corpus import embed_corpus
+from src.evaluation.intrinsic.embedding.embedding_table import EmbeddingTable
+from src.evaluation.intrinsic.embedding.embedding_table_metadata import EmbeddingTableMetadata
 from src.evaluation.extrinsic.learning_curves import plot_learning_curves
 from src.evaluation.extrinsic.run_extrinsic import ExtrinsicSpec, run_extrinsic
-from src.evaluation.labels.card_labels import CardLabels, HoldoutTierLabels
-from src.evaluation.labels.metric_parquet_labels import MetricParquetLabels
-from src.evaluation.select_corpus import CorpusSpec, select_corpus
+from src.evaluation.intrinsic.cluster_labels.cluster_labels import ClusterLabels, HoldoutTierClusterLabels
+from src.evaluation.intrinsic.cluster_labels.metric_parquet_cluster_labels import MetricParquetClusterLabels
+from src.evaluation.intrinsic.embedding.select_corpus import CorpusSpec, select_corpus
 from src.run_logging import (
     RUN_LOG_NAME,
     add_logging_arguments,
@@ -73,7 +82,7 @@ from src.run_logging import (
 )
 from src.schema.card import GenericCard
 from src.schema.game_id import GameId
-from src.schema.holdout import HoldoutSpec
+from src.schema.holdout import HoldoutSpec, UnknownDeckSplitError
 from src.training.plan import HardwareLimits, SaturationSpec, Uniform
 from src.training.recording.checkpointer import (
     load_checkpoint_holdout,
@@ -106,6 +115,7 @@ class Budget:
 
     max_cards: int | None  # None = the whole corpus
     per_label_cap: int
+    deck_count: int  # VALIDATION decks per game, for deck retrieval AUC
     embed_batch_size: int
     extrinsic: ExtrinsicSpec
 
@@ -145,15 +155,15 @@ def training_holdout(args: argparse.Namespace) -> HoldoutSpec:
     return HoldoutSpec.no_holdout(seed=_SEED)
 
 
-def build_label_sources(holdout: HoldoutSpec) -> list[CardLabels]:
+def build_groupings(holdout: HoldoutSpec) -> list[ClusterLabels]:
     """What to color, cluster and score the embeddings by. A gwent-only
-    corpus has one game, so GameLabels would be refused (one label);
+    corpus has one game, so GameClusterLabels would be refused (one label);
     within-game labels come from the gwent metrics' parquets."""
     return [
-        MetricParquetLabels("faction", [FactionMaskMetric.DEFAULT_OUTPUT_PATH]),
-        MetricParquetLabels("rarity", [RarityMaskMetric.DEFAULT_OUTPUT_PATH]),
+        MetricParquetClusterLabels("faction", [FactionMaskMetric.DEFAULT_OUTPUT_PATH]),
+        MetricParquetClusterLabels("rarity", [RarityMaskMetric.DEFAULT_OUTPUT_PATH]),
         # Seen in training vs. held out: the domain-shift view
-        HoldoutTierLabels(holdout),
+        HoldoutTierClusterLabels(holdout),
     ]
 
 
@@ -165,6 +175,49 @@ def build_dojos(binder: CardBinder, holdout: HoldoutSpec) -> list[Dojo]:
         FactionMaskDojo(binder, holdout, _EMBED_DIM, rng_seed=_SEED),
         RarityMaskDojo(binder, holdout, _EMBED_DIM, rng_seed=_SEED),
     ]
+
+
+def build_deck_auc(holdout: HoldoutSpec, budget: Budget) -> DeckRetrievalAuc | None:
+    """Deck retrieval AUC over each corpus game's VALIDATION decks, sampled
+    once so every encoder is scored on the same decks. None (logged) when
+    no game has a deck box or a qualifying deck, or the holdout has no deck
+    split (an old checkpoint): the analysis is skipped, not the run. A game
+    whose deck box cannot be read (sqlite3.Error) is logged and skipped."""
+    decks: list[EvaluationDeck] = []
+    spec = EvaluationDeckSpec(count=budget.deck_count, seed=_SEED)
+
+    # Sample each game with a deck box
+    for game in sorted(_GAMES):
+        path = DeckBox.default_output_path(game)
+        if not path.exists():
+            _logger.warning("deck retrieval AUC: no deck box for %s at %s", game.value, path)
+            continue
+        try:
+            decks.extend(_sample_game_decks(path, game, holdout, spec))
+        except UnknownDeckSplitError as error:
+            _logger.warning("deck retrieval AUC skipped: %s", error)
+            return None
+        except sqlite3.Error as error:
+            _logger.warning("deck retrieval AUC: %s unreadable: %s", path, error)
+
+    # Nothing to score is a skip, not an error
+    if not decks:
+        _logger.warning("deck retrieval AUC skipped: no evaluation decks")
+        return None
+    _logger.info("      deck retrieval AUC: %d VALIDATION decks", len(decks))
+    return DeckRetrievalAuc(decks, holdout, seed=_SEED)
+
+
+def _sample_game_decks(
+    path: Path, game: GameId, holdout: HoldoutSpec, spec: EvaluationDeckSpec
+) -> tuple[EvaluationDeck, ...]:
+    """Open one game's deck box (it exists, so DeckBox.load creates nothing)
+    and sample it, reading only. The connection is left to garbage
+    collection (DeckBox has no close). Raises UnknownDeckSplitError (the
+    caller skips the analysis) and sqlite3.Error (the caller skips the
+    game)."""
+    deck_box = DeckBox.load([path])
+    return sample_evaluation_decks(deck_box, game, holdout, spec)
 
 
 def budget_for(smoke: bool) -> Budget:
@@ -180,7 +233,11 @@ def budget_for(smoke: bool) -> Budget:
             seed=_SEED,
         )
         return Budget(
-            max_cards=200, per_label_cap=20, embed_batch_size=16, extrinsic=spec
+            max_cards=200,
+            per_label_cap=20,
+            deck_count=50,
+            embed_batch_size=16,
+            extrinsic=spec,
         )
     spec = ExtrinsicSpec(
         diet_rule=Uniform(),
@@ -194,7 +251,11 @@ def budget_for(smoke: bool) -> Budget:
         seed=_SEED,
     )
     return Budget(
-        max_cards=None, per_label_cap=500, embed_batch_size=64, extrinsic=spec
+        max_cards=None,
+        per_label_cap=500,
+        deck_count=1000,
+        embed_batch_size=64,
+        extrinsic=spec,
     )
 
 
@@ -246,28 +307,33 @@ def embed_encoder(
 def analyze_encoder(
     encoder: EncoderUnderTest,
     table_path: Path,
-    label_sources: list[CardLabels],
+    groupings: list[ClusterLabels],
+    deck_auc: DeckRetrievalAuc | None,
     run_dir: Path,
     budget: Budget,
 ) -> None:
     """Stage 1b: every analysis x every label source, into
     intrinsic/<encoder>/<label source>/<analysis>/, plus the label-free
-    analyses into intrinsic/<encoder>/unlabeled/<analysis>/. Existing
-    results are kept (skipped), so an interrupted run can be resumed."""
+    analyses (deck_auc when not None) into
+    intrinsic/<encoder>/unlabeled/<analysis>/. Existing results are kept
+    (skipped), so an interrupted run can be resumed."""
     with EmbeddingTable.open(table_path) as table:
         unlabeled = run_dir / "intrinsic" / encoder.label / "unlabeled"
-        effective_rank = EffectiveRank()
-        _run_analysis(effective_rank, table, unlabeled / effective_rank.name)
-        for labels in label_sources:
+        label_free: list[EmbeddingAnalysis] = [EffectiveRank()]
+        if deck_auc is not None:
+            label_free.append(deck_auc)
+        for analysis in label_free:
+            _run_analysis(analysis, table, unlabeled / analysis.name)
+        for cluster_labels in groupings:
             sample = PerLabelCap(budget.per_label_cap)
             analyses: list[EmbeddingAnalysis] = [
-                ClusterAgreement(labels, sample, seed=_SEED),
-                LabelCompactness(labels, sample, seed=_SEED),
-                ProjectionPlot(labels, sample, seed=_SEED),
+                ClusterAgreement(cluster_labels, sample, seed=_SEED),
+                LabelCompactness(cluster_labels, sample, seed=_SEED),
+                ProjectionPlot(cluster_labels, sample, seed=_SEED),
             ]
             for analysis in analyses:
                 out = (
-                    run_dir / "intrinsic" / encoder.label / labels.name / analysis.name
+                    run_dir / "intrinsic" / encoder.label / cluster_labels.grouping / analysis.name
                 )
                 _run_analysis(analysis, table, out)
 
@@ -277,7 +343,7 @@ def _run_analysis(
 ) -> None:
     """One analysis, logged and skipped on failure - a label source that
     doesn't fit this corpus (e.g. one label) must not stop the others."""
-    # Log paths from intrinsic/ down: <encoder>/<labels>/<analysis>
+    # Log paths from intrinsic/ down: <encoder>/<grouping>/<analysis>
     shown = out.relative_to(out.parents[3])
     if out.exists() and any(out.iterdir()):
         _logger.info("      skip %s (already done)", shown)
@@ -358,8 +424,9 @@ def main() -> None:
     _logger.info("[2/5] Building encoders, label sources and dojos")
     holdout = training_holdout(args)
     encoders = build_encoders(args)
-    label_sources = build_label_sources(holdout)
+    groupings = build_groupings(holdout)
     dojos = build_dojos(binder, holdout)
+    deck_auc = build_deck_auc(holdout, budget)
     _logger.info("      encoders: %s", [encoder.label for encoder in encoders])
 
     _logger.info("[3/5] Intrinsic: embedding each encoder's corpus")
@@ -370,7 +437,9 @@ def main() -> None:
 
     _logger.info("[4/5] Intrinsic: analyses")
     for encoder in encoders:
-        analyze_encoder(encoder, tables[encoder.label], label_sources, run_dir, budget)
+        analyze_encoder(
+            encoder, tables[encoder.label], groupings, deck_auc, run_dir, budget
+        )
 
     _logger.info(
         "[5/5] Extrinsic: fresh heads on each frozen encoder, then learning curves"
