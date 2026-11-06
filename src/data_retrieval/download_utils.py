@@ -47,6 +47,7 @@ every existing caller keeps passing nothing, which still means
 existed.
 """
 
+import hashlib
 import logging
 import time
 from pathlib import Path
@@ -115,6 +116,10 @@ def call_with_retries(
             return attempt()
         except requests.RequestException as error:
             last_error = error
+            # Logged so a crawl's throttling (5xx, resets) shows in its log
+            _logger.warning(
+                "Attempt %d/%d failed: %s", attempt_index + 1, max_attempts, error
+            )
             if attempt_index < max_attempts - 1:
                 time.sleep(_RETRY_BACKOFF_SECONDS)
 
@@ -473,3 +478,36 @@ def require_str(value: Any) -> str:
     if not isinstance(value, str):
         raise TypeError(f"expected a str, got {value!r}")
     return value
+
+
+def check_sha256(path: Path, expected_sha256: str) -> None:
+    """Delete path and raise if its SHA-256 isn't expected_sha256 (for a
+    source that publishes a digest per file: MTGJSON, tcgjson).
+
+    Inputs: path, expected_sha256 (lowercase hex). Output: none.
+    Side effects: reads path; deletes it on a mismatch.
+    Exceptions: ValueError on a mismatch; OSError if path can't be read.
+
+    Example:
+        >>> check_sha256(Path("data/raw/tcgjson/r/lorcana.full.json.gz"), "b54d...")
+    """
+    actual_sha256 = sha256_of(path)
+    if actual_sha256 != expected_sha256:
+        path.unlink()
+        raise ValueError(
+            f"{path.name}: SHA-256 {actual_sha256}, expected {expected_sha256}; deleted"
+        )
+
+
+def sha256_of(path: Path) -> str:
+    """path's lowercase hex SHA-256, read in chunks.
+
+    Inputs: path. Output: str. Side effects: reads path.
+    Exceptions: OSError if path can't be read.
+
+    Example:
+        >>> sha256_of(Path("data/raw/tcgjson/r/lorcana.full.json.gz"))
+        'b54d0a...'
+    """
+    with open(path, "rb") as file:
+        return hashlib.file_digest(file, "sha256").hexdigest()

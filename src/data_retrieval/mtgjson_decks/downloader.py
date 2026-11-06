@@ -21,7 +21,6 @@ is complete and a re-run on the same build downloads nothing. The zip
 is deleted once extracted. There is no phase 2.
 """
 
-import hashlib
 import json
 import logging
 import re
@@ -29,7 +28,11 @@ import zipfile
 from pathlib import Path
 from typing import ClassVar
 
-from src.data_retrieval.download_utils import download_to_file, download_to_string
+from src.data_retrieval.download_utils import (
+    check_sha256,
+    download_to_file,
+    download_to_string,
+)
 from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.rate_limiter import RateLimiter
 
@@ -145,7 +148,7 @@ class MtgjsonDeckFilesDownloader(Downloader):
             zip_path,
             timeout_seconds=_DOWNLOAD_TIMEOUT_SECONDS,
         )
-        _check_sha256(zip_path, expected_sha256)
+        check_sha256(zip_path, expected_sha256)
         # A rebuild mid-download would land the new zip under the old label
         self.rate_limiter.wait()
         if download_to_string(f"{self.api_url}/{_META_NAME}") != meta_text:
@@ -218,19 +221,3 @@ def _extract_json_members(zip_path: Path, destination_dir: Path) -> None:
     if not written:
         raise ValueError(f"{zip_path.name} holds no JSON files")
     _logger.info("Extracted %d deck files into %s", len(written), destination_dir)
-
-
-def _check_sha256(path: Path, expected_sha256: str) -> None:
-    """Delete path and raise if its SHA-256 isn't expected_sha256.
-
-    Inputs: path, expected_sha256 (lowercase hex). Output: none.
-    Side effects: reads path; deletes it on a mismatch.
-    Exceptions: ValueError on a mismatch; OSError if path can't be read.
-    """
-    with open(path, "rb") as file:
-        actual_sha256 = hashlib.file_digest(file, "sha256").hexdigest()
-    if actual_sha256 != expected_sha256:
-        path.unlink()
-        raise ValueError(
-            f"{path.name}: SHA-256 {actual_sha256}, expected {expected_sha256}; deleted"
-        )
