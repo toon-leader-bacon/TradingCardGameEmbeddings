@@ -18,7 +18,8 @@ Shared by every source:
   `paced_get` (a paced GET that returns tolerated statuses such as 404
   and waits out 429s by Retry-After), manifest-tracked appends for
   resumable crawls (`read_manifest`, `append_with_manifest`), and the
-  pruning helpers `pick_keys` and `require_int`.
+  pruning helpers `pick_keys` and `require_int`, and the digest checks
+  `sha256_of` and `check_sha256` (deletes the file on a mismatch).
 - `rate_limiter.py`: `RateLimiter`, request pacing.
 - `resumable_crawl/`: the one-item-at-a-time crawl the long deck crawls
   (`archidekt/`, `moxfield/`, `deckstats/`) share. `crawl_files.py` holds the on-disk
@@ -61,6 +62,7 @@ One subdirectory per source:
 | `seventeenlands/` | MTG | 17lands per-set/per-format draft, game and replay CSVs (own [README](seventeenlands/README.md)) |
 | `spire_codex/` | Slay the Spire 2 | spire-codex `cards.json` and its paginated run export |
 | `sts_gg/` | Slay the Spire 2 | sts.gg run ids and run detail JSON |
+| `tcgjson/` | Lorcana, Yu-Gi-Oh, Digimon, One Piece, Star Wars: Unlimited, Union Arena, Riftbound | tcgjson's weekly TCGplayer catalog release on GitHub: `bulk-data.json`, then each `CATALOG_SLUGS` game's `<slug>.full.json.gz`, size- and SHA-256-checked, into `data/raw/tcgjson/<generated_at>/`; the manifest is written last, so a directory holding it is complete (`latest_release_dir()`) |
 | `dominion/` | Dominion | not a downloader: research leads (`todo.md`) and a prototype replay scraper |
 
 ## How it works

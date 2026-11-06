@@ -94,6 +94,7 @@ from src.data_retrieval.seventeenlands.downloader import SeventeenLandsDownloade
 from src.data_retrieval.spire_codex.card_downloader import SpireCodexCardDownloader
 from src.data_retrieval.spire_codex.run_downloader import SpireCodexRunDownloader
 from src.data_retrieval.sts_gg.run_downloader import STSGGRunDownloader
+from src.data_retrieval.tcgjson.downloader import TcgjsonCatalogDownloader
 from src.run_logging import (
     add_logging_arguments,
     configure_logging,
@@ -286,6 +287,10 @@ def run_fabtcgmeta_online_decks() -> None:
     _run_standard(FabtcgmetaOnlineDecksDownloader())
 
 
+def run_tcgjson() -> None:
+    _run_standard(TcgjsonCatalogDownloader())
+
+
 def run_seventeenlands() -> None:
     _run_standard(SeventeenLandsDownloader())
 
@@ -312,6 +317,7 @@ DOWNLOADERS: dict[str, Callable[[], None]] = {
     "spire_codex_cards": run_spire_codex_cards,
     "spire_codex_runs": run_spire_codex_runs,
     "sts_gg": run_sts_gg,
+    "tcgjson": run_tcgjson,
     "zenodo_hearthstone_decks": run_zenodo_hearthstone_decks,
 }
 
