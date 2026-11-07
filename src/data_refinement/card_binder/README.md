@@ -310,6 +310,7 @@ collision policy):
 | `cardvault_fabtcg/` | `CardVaultFabtcgCardIngestionStage` | Flesh and Blood | cardvault `card_id` (+ `print_id` aliases) |
 | `dominiontabs/` | `DominionTabsCardIngestionStage` | Dominion | dominiontabs `card_tag` |
 | `hearthstonejson/` | `HearthstoneJsonCardIngestionStage` | Hearthstone | content-derived: lean content minus set/rarity, so reprints collapse (+ every `dbfId` as an alias); the binder mirrors one build |
+| `ygoprodeck/` | `YgoprodeckPasscodeAliasStage` | Yu-Gi-Oh | creates no card: registers each YGOPRODeck passcode (and alternate-artwork passcode) as a `YGOPRODECK` alias of the tcgjson card its name names |
 | `tcgjson/` | one subclass of `TcgjsonCardIngestionStage` per game: `Lorcana…`, `Yugioh…`, `Digimon…`, `OnePiece…`, `StarWarsUnlimited…`, `UnionArena…`, `RiftboundTcgjsonCardIngestionStage` | Lorcana, Yu-Gi-Oh, Digimon, One Piece, Star Wars: Unlimited, Union Arena, Riftbound | base name (the TCGplayer product name without its trailing `(...)`/`[...]` printing tags), or the card number for Digimon, One Piece and Union Arena (+ each card number, the identity and every full printed form, as a `PRINTED_NUMBER` alias, the ids their deck lists use); + every `productId` as an alias; the binder mirrors one catalog |
 
 ### `tcgjson/`: one pipeline, one spec per game
@@ -362,6 +363,28 @@ played. Known gaps in TCGplayer's data (weekly-20260831): some Lorcana
 Locations have no rules text in any printing; Bucky - Squirrel Squeak
 Tutor's errata printing omits Ward. A card with the same name and text
 as another under a new number stays two cards (Union Arena: 1 pair).
+
+### `ygoprodeck/`: passcodes onto tcgjson's Yu-Gi-Oh cards
+
+TCGplayer has no passcodes, and every Yu-Gi-Oh deck source names cards
+by one, so this stage teaches the Yu-Gi-Oh binder its cards' passcodes
+from feregrino's `yugioh-cards` dataset (`cards.csv`,
+`cards_variants.csv`). It creates and changes no card (`ingest()`
+returns `[]`) and adds nothing to the binder's version.
+
+- A `cards.csv` name names one card when exactly one card has that
+  exact name, else when exactly one name is equal ignoring case; no or
+  several candidates give no alias. Measured 2026-11-06: 13,876 of
+  14,653 names; the misses are OCG-only and not-yet-TCG cards, tokens
+  and skill cards, which deck stages read as Unknown.
+- The alias id is `passcode.py`'s `passcode_id()` (digits without
+  leading zeros), which the deck stage also uses.
+- It must run after `tcgjson_yugioh`, against the same binder: the
+  script's `FOLLOW_UP_STAGES` runs it straight after that stage when
+  the cards mirror is on disk. Every run re-registers every match, so
+  a card tcgjson re-mints gets its passcodes back. The alias ledger has
+  no unregister: a passcode that stops matching keeps its earlier alias
+  (to a deleted card it reads as no match).
 
 ## How it works
 

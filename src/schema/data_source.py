@@ -75,6 +75,12 @@ class DataSource(str, Enum):
     # cards.json snapshots; source_id is a card's dbfId (see
     # src/data_retrieval/hearthstonejson/downloader.py and
     # src/data_refinement/card_binder/hearthstonejson/ingestion_stage.py).
+    YGOPRODECK = "ygoprodeck"  # a YGOPRODeck card id: the passcode for
+    # most cards (YGOPRODeck mints ids for cards without one); source_id is
+    # passcode_id() of it (see src/data_refinement/card_binder/ygoprodeck/).
+    YGOPRODECK_DECKS = "ygoprodeck_decks"  # a YGOPRODeck deck_num, from
+    # feregrino/yugioh-decks (see src/data_refinement/deck_box/
+    # ygoprodeck_decks/) — distinct from its cards' YGOPRODECK ids.
     DOMINIONTABS = "dominiontabs"  # sumpfork/dominiontabs' card_db_src
     # JSON files (see src/data_retrieval/dominiontabs/downloader.py and
     # src/data_refinement/card_binder/dominiontabs/ingestion_stage.py).

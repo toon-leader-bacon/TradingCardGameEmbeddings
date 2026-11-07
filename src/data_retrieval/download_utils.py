@@ -72,6 +72,11 @@ _MAX_RATE_LIMITED_WAIT_SECONDS = 900.0  # caps a huge Retry-After
 _AttemptResult = TypeVar("_AttemptResult")
 
 
+# The User-Agent this project's own downloaders send: honest, no contact
+# address (the user's email never goes to an external service)
+RESEARCH_USER_AGENT = "TradingCardGameEmbeddings-research/0.1 (non-commercial)"
+
+
 def call_with_retries(
     attempt: Callable[[], _AttemptResult], *, max_attempts: int
 ) -> _AttemptResult:

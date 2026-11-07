@@ -87,6 +87,13 @@ from src.data_retrieval.hearthstonejson.downloader import HearthstoneJsonDownloa
 from src.data_retrieval.hearthstonetopdecks.downloader import (
     HearthstoneTopDecksDownloader,
 )
+from src.data_retrieval.huggingface_datasets.downloader import (
+    HuggingFaceDatasetDownloader,
+)
+from src.data_retrieval.huggingface_datasets.ygoprodeck_repos import (
+    YGOPRODECK_CARDS_REPO_ID,
+    YGOPRODECK_DECKS_REPO_ID,
+)
 from src.data_retrieval.isotropic.downloader import IsotropicGameLogDownloader
 from src.data_retrieval.limitless_play.downloader import (
     LimitlessGame,
@@ -342,6 +349,15 @@ def run_tcgjson() -> None:
     _run_standard(TcgjsonCatalogDownloader())
 
 
+def run_huggingface_yugioh() -> None:
+    """Mirror feregrino's yugioh-cards, then yugioh-decks (the cards'
+    passcode aliases come before the decks that use them).
+    Inputs: none. Output: none. Side effects: each mirror's requests
+    and files. Exceptions: whatever the downloader raises."""
+    for repo_id in (YGOPRODECK_CARDS_REPO_ID, YGOPRODECK_DECKS_REPO_ID):
+        _run_standard(HuggingFaceDatasetDownloader(repo_id))
+
+
 def run_seventeenlands() -> None:
     _run_standard(SeventeenLandsDownloader())
 
@@ -357,6 +373,7 @@ DOWNLOADERS: dict[str, Callable[[], None]] = {
     "gwent_one": run_gwent_one,
     "hearthstonejson": run_hearthstonejson,
     "hearthstonetopdecks": run_hearthstonetopdecks,
+    "huggingface_yugioh": run_huggingface_yugioh,
     "isotropic": run_isotropic,
     "limitless_play": run_limitless_play,
     "mtgjson_decks": run_mtgjson_decks,

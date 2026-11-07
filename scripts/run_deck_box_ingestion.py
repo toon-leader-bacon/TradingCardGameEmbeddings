@@ -46,6 +46,9 @@ from src.data_refinement.deck_box.fabtcgmeta_online_decks.extraction_stage impor
 from src.data_refinement.deck_box.hearthstonetopdecks.extraction_stage import (
     HearthstoneTopDecksDeckExtractionStage,
 )
+from src.data_refinement.deck_box.isotropic.extraction_stage import (
+    IsotropicDeckExtractionStage,
+)
 from src.data_refinement.deck_box.limitless_play.extraction_stage import (
     LimitlessPlayDeckExtractionStage,
 )
@@ -55,20 +58,20 @@ from src.data_refinement.deck_box.mtgjson_decks.extraction_stage import (
 from src.data_refinement.deck_box.play_gwent.extraction_stage import (
     PlayGwentDeckExtractionStage,
 )
-from src.data_refinement.deck_box.isotropic.extraction_stage import (
-    IsotropicDeckExtractionStage,
-)
 from src.data_refinement.deck_box.pokemon_tcg.extraction_stage import (
     PokemonTcgDeckExtractionStage,
-)
-from src.data_refinement.deck_box.spire_codex_runs.extraction_stage import (
-    SpireCodexRunsDeckExtractionStage,
 )
 from src.data_refinement.deck_box.seventeenlands_game_data.extraction_stage import (
     SeventeenLandsGameDataDeckExtractionStage,
 )
+from src.data_refinement.deck_box.spire_codex_runs.extraction_stage import (
+    SpireCodexRunsDeckExtractionStage,
+)
 from src.data_refinement.deck_box.sts_gg.extraction_stage import (
     StsGgDeckExtractionStage,
+)
+from src.data_refinement.deck_box.ygoprodeck_decks.extraction_stage import (
+    YgoprodeckDecksExtractionStage,
 )
 from src.data_refinement.deck_box.zenodo_hearthstone_decks.extraction_stage import (
     ZenodoHearthstoneDecksExtractionStage,
@@ -118,6 +121,10 @@ _STAGES: dict[str, tuple[DeckExtractionStage, Callable[[], Path]]] = {
     "limitless_play": (
         LimitlessPlayDeckExtractionStage(),
         lambda: LimitlessPlayDeckExtractionStage.DEFAULT_RAW_PATH,
+    ),
+    "ygoprodeck_decks": (
+        YgoprodeckDecksExtractionStage(),
+        lambda: YgoprodeckDecksExtractionStage.DEFAULT_RAW_PATH,
     ),
     "pokemon_tcg": (
         PokemonTcgDeckExtractionStage(),
