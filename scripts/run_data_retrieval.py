@@ -41,6 +41,15 @@ been exercised. If no terminal emulator can be found, that downloader
 falls back to running inline in the current terminal instead of being
 skipped.
 
+--game applies only to limitless_play: a Limitless game id (PTCG, OP,
+DCG, LORCANA, SWU, RB, ...; repeat it for several, run one after
+another), or `all` for every LimitlessGame in its declaration order.
+The default is PTCG. Games always run in series, in one process: the
+server's rate limit is shared by all of them.
+
+    PYTHONPATH=. python3 scripts/run_data_retrieval.py --source limitless_play --game OP --game DCG
+    PYTHONPATH=. python3 scripts/run_data_retrieval.py --source limitless_play --game all
+
 --rpm and --max-items apply only to the resumable deck crawls
 (CRAWL_DOWNLOADERS: archidekt, moxfield, deckstats) and only with
 --source: --rpm sets the session's request rate (default 60/min),
@@ -78,23 +87,26 @@ from src.data_retrieval.hearthstonejson.downloader import HearthstoneJsonDownloa
 from src.data_retrieval.hearthstonetopdecks.downloader import (
     HearthstoneTopDecksDownloader,
 )
+from src.data_retrieval.isotropic.downloader import IsotropicGameLogDownloader
+from src.data_retrieval.limitless_play.downloader import (
+    LimitlessGame,
+    LimitlessPlayDownloader,
+)
 from src.data_retrieval.moxfield.downloader import MoxfieldDeckDownloader
 from src.data_retrieval.mtgjson_decks.downloader import MtgjsonDeckFilesDownloader
-from src.data_retrieval.zenodo_hearthstone_decks.downloader import (
-    ZenodoHearthstoneDecksDownloader,
-)
-from src.data_retrieval.isotropic.downloader import IsotropicGameLogDownloader
 from src.data_retrieval.pitchstack.downloader import PitchstackDeckDownloader
-from src.data_retrieval.rate_limiter import RateLimiter
-from src.data_retrieval.limitless_play.downloader import LimitlessPlayDownloader
 from src.data_retrieval.play_gwent.downloader import PlayGwentDownloader
 from src.data_retrieval.pokemon_tcg.downloader import PokemonTcgDataDownloader
+from src.data_retrieval.rate_limiter import RateLimiter
 from src.data_retrieval.scryfall.downloader import ScryfallOracleDownloader
 from src.data_retrieval.seventeenlands.downloader import SeventeenLandsDownloader
 from src.data_retrieval.spire_codex.card_downloader import SpireCodexCardDownloader
 from src.data_retrieval.spire_codex.run_downloader import SpireCodexRunDownloader
 from src.data_retrieval.sts_gg.run_downloader import STSGGRunDownloader
 from src.data_retrieval.tcgjson.downloader import TcgjsonCatalogDownloader
+from src.data_retrieval.zenodo_hearthstone_decks.downloader import (
+    ZenodoHearthstoneDecksDownloader,
+)
 from src.run_logging import (
     add_logging_arguments,
     configure_logging,
@@ -106,6 +118,9 @@ from src.run_logging import (
 _logger = script_logger(__file__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# --game's value for every LimitlessGame
+_ALL_GAMES = "all"
 
 # Stable, non-dated source URLs these two downloaders require but don't
 # hardcode themselves (their classes are generic over "which repo/host",
@@ -255,8 +270,44 @@ def run_sts_gg() -> None:
     _run_standard(STSGGRunDownloader())
 
 
-def run_limitless_play() -> None:
-    _run_standard(LimitlessPlayDownloader())
+def run_limitless_play(
+    games: tuple[LimitlessGame, ...] = (LimitlessGame.POKEMON_TCG,),
+) -> None:
+    """Download each game's Limitless tournaments, one game after
+    another: the server's rate limit is shared by all games. A game
+    that fails is logged and skipped, so the rest still run.
+    Inputs: games (from --game; Pokemon TCG by default).
+    Output: none. Side effects: each game's requests and files.
+    Exceptions: RuntimeError naming the failed games, after the rest
+        have run."""
+    failed: list[str] = []
+    for game in games:
+        _logger.info("Limitless game %s", game.value)
+        try:
+            _run_standard(LimitlessPlayDownloader(game=game))
+        except Exception:
+            _logger.exception("Limitless game %s failed", game.value)
+            failed.append(game.value)
+    if failed:
+        raise RuntimeError(f"Limitless games failed: {', '.join(failed)}")
+
+
+def limitless_games_from(values: list[str] | None) -> tuple[LimitlessGame, ...]:
+    """The games --game names, in order and without repeats; `all`
+    expands to every LimitlessGame in declaration order.
+    Inputs: values (args.game; None when --game wasn't given).
+    Output: tuple of games, empty for None.
+    Side effects: none. Exceptions: none (argparse checked the choices).
+
+    Example:
+        >>> limitless_games_from(["DCG", "OP", "DCG"])
+        (<LimitlessGame.DIGIMON: 'DCG'>, <LimitlessGame.ONE_PIECE: 'OP'>)
+    """
+    result: list[LimitlessGame] = []
+    for value in values or []:
+        games = list(LimitlessGame) if value == _ALL_GAMES else [LimitlessGame(value)]
+        result.extend(game for game in games if game not in result)
+    return tuple(result)
 
 
 def run_play_gwent() -> None:
@@ -394,12 +445,15 @@ def run_one(
     *,
     pause_on_exit: bool,
     crawl_options: CrawlSessionOptions | None = None,
+    limitless_games: tuple[LimitlessGame, ...] = (),
 ) -> None:
     _logger.info("=== %s ===", name)
     exit_code = 0
     try:
         if crawl_options is not None:
             run_crawl(name, crawl_options)
+        elif limitless_games:
+            run_limitless_play(limitless_games)
         else:
             DOWNLOADERS[name]()
     except Exception:
@@ -448,8 +502,17 @@ def parse_args() -> argparse.Namespace:
         help="Stop this session after this many plan items (crawls only). "
         "Default: walk to the end of the plan.",
     )
+    parser.add_argument(
+        "--game",
+        action="append",
+        choices=[game.value for game in LimitlessGame] + [_ALL_GAMES],
+        help="A Limitless game id, or 'all' (limitless_play only; repeatable; "
+        "games run in series). Default PTCG.",
+    )
     add_logging_arguments(parser)
     args = parser.parse_args()
+    if args.game and args.source != "limitless_play":
+        parser.error("--game needs --source limitless_play")
     if args.rpm is not None or args.max_items is not None:
         if args.source not in CRAWL_DOWNLOADERS:
             parser.error(
@@ -483,8 +546,12 @@ def main() -> None:
         crawl_options = None
         if args.source in CRAWL_DOWNLOADERS:
             crawl_options = CrawlSessionOptions(args.rpm, args.max_items)
+        limitless_games = limitless_games_from(args.game)
         run_one(
-            args.source, pause_on_exit=args.pause_on_exit, crawl_options=crawl_options
+            args.source,
+            pause_on_exit=args.pause_on_exit,
+            crawl_options=crawl_options,
+            limitless_games=limitless_games,
         )
         return
 

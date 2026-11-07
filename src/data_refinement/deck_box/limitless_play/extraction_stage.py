@@ -3,7 +3,7 @@
 See src/data_refinement/deck_box/extraction.py for the shared
 DeckExtractionStage interface.
 
-RAW SHAPE: data/raw/limitless_play/standings.jsonl, written by
+RAW SHAPE: data/raw/limitless_play/ptcg/standings.jsonl, written by
 src/data_retrieval/limitless_play/downloader.py: one line per
 tournament, {"tournament_id", "standings": [row, ...]}; each row's
 decklist is parsed by limitless_decklist.py. A crash-then-resume can
@@ -54,7 +54,10 @@ from src.data_refinement.deck_box.limitless_play.limitless_decklist import (
 )
 from src.data_refinement.deck_box.multiset_deck import store_multiset_deck
 from src.data_refinement.deck_box.unknown_card import require_unknown_card_uuid
-from src.data_retrieval.limitless_play.downloader import LimitlessPlayDownloader
+from src.data_retrieval.limitless_play.downloader import (
+    LimitlessGame,
+    LimitlessPlayDownloader,
+)
 from src.data_retrieval.pokemon_tcg.downloader import PokemonTcgDataDownloader
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
@@ -81,7 +84,7 @@ class LimitlessPlayDeckExtractionStage:
 
     SOURCE_GAME: ClassVar[GameId] = GameId.POKEMON
     DEFAULT_RAW_PATH: ClassVar[Path] = (
-        LimitlessPlayDownloader.DEFAULT_RAW_DATA_DIR
+        LimitlessPlayDownloader.raw_data_dir_for(LimitlessGame.POKEMON_TCG)
         / LimitlessPlayDownloader.STANDINGS_FILENAME
     )
     DEFAULT_SETS_PATH: ClassVar[Path] = (

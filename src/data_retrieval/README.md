@@ -55,7 +55,7 @@ One subdirectory per source:
 | `moxfield/` | MTG | Moxfield decks via api2.moxfield.com's `v3/decks/all/<publicId>`, one deck at a time (`resumable_crawl/`): every deck the sitemap's 1,965 deck sitemaps list (~5.7M), in a fixed seeded shuffle (`crawl_plan.py`, `crawl_plan.tsv`); pruned rows (`pruning.py`), owners dropped. api2's robots.txt disallows all crawlers; the user chose to build it for personal, noncommercial research (see the module docstring). 20 rejects in a row stop a session |
 | `mtgjson_decks/` | MTG | MTGJSON's AllDeckFiles: every Wizards-printed precon as one JSON file, one directory per daily build, SHA-256-checked (source survey: `plans/mtg_deck_sources.md`) |
 | `pitchstack/` | Flesh and Blood | pitchstack.gg deck ids and card lists (`pitchstack.md`: unimplemented endpoints) |
-| `limitless_play/` | Pokemon | play.limitlesstcg.com API: PTCG tournament list and each tournament's standings with decklists (paced at 9/min, the server's keyless limit) |
+| `limitless_play/` | Pokemon (+ any `LimitlessGame`: One Piece, Digimon, Lorcana, Star Wars: Unlimited, Riftbound, ...) | play.limitlesstcg.com API: one game's tournament list and each tournament's standings with decklists, into `limitless_play/<game id>/` (`--game`, repeatable or `all`, run in series; default PTCG; paced at 9/min, the server's keyless limit, shared by all games) |
 | `play_gwent/` | Gwent | playgwent.com deck guides |
 | `pokemon_tcg/` | Pokemon | the pokemon-tcg-data repo's card and deck JSON, and `sets/en.json` (set codes) |
 | `scryfall/` | MTG | Scryfall oracle-cards and default-cards (every printing) bulk files |
