@@ -144,7 +144,15 @@ metrics too.
   its copy-count multiset hash once (`create_if_absent()`), returning
   its uuid only when this call created it. Used by the stages whose
   identity is the multiset (limitless_play, hearthstonetopdecks,
-  zenodo_hearthstone_decks, mtgjson_decks).
+  zenodo_hearthstone_decks, mtgjson_decks, the mtg_crawls sites).
+- `card_matching.py` — `CachedCardMatcher[KeyT]`: a stage's card matcher
+  writes only `_match(key)` (one card reference's lookup steps); this base
+  adds a cache and per-entry match counts for the summary log.
+  `card_uuids_per_copy(...)` turns decklist entries (anything with `count`
+  and `card`) into one uuid per copy, the Unknown card standing in for
+  misses. Used by limitless_play and mtg_crawls.
+- `deck_sizes.py` — `DeckSizes(min_cards, max_cards)`: the full-deck size
+  check (`fits()`), for limitless_play and mtg_crawls.
 - `extraction.py` — `DeckExtractionStage`, the Strategy Protocol every
   deck source implements: `extract(self, raw_path, box, card_lookup) ->
   list[UUID]` plus `SOURCE_GAME: ClassVar[GameId]`. A stage reads cards
@@ -171,11 +179,12 @@ card reference it can't match, rather than dropping it.
 | `fabtcg_decklists/` | `FabtcgDecklistsExtractionStage` | Flesh and Blood | fabtcg.com decklist HTML (parsed by `fragment_parsing.py`) | `uuid5(ns, deck_slug)` |
 | `fabtcgmeta_online_decks/` | `FabtcgmetaOnlineDecksExtractionStage` | Flesh and Blood | fabtcgmeta.com's Talishar online-deck shards (`archive/` and `recent/`, `{deck hash: deck}`); each card line matched by name, name key or front face, then by pitch | `deck_uuid_from_cards()` over the copy-count multiset |
 | `play_gwent/` | `PlayGwentDeckExtractionStage` | Gwent | playgwent.com `guides.jsonl` | `uuid5(ns, guide_id)` |
-| `limitless_play/` | `LimitlessPlayDeckExtractionStage` | Pokemon | limitless_play `standings.jsonl`: player decklists, cards matched by set code + number via `card_index.py` (needs pokemon_tcg's `sets/en.json`), then by newest same-name card; non-60-card lists skipped | `deck_uuid_from_cards()` over the copy-count multiset; identical lists stored once |
+| `limitless_play/` | `LimitlessPlayDeckExtractionStage` | Pokemon | limitless_play `standings.jsonl`: player decklists, cards matched by set code + number via `card_index.py` (needs pokemon_tcg's `sets/en.json`), then by newest same-name card; non-60-card lists skipped. | `deck_uuid_from_cards()` over the copy-count multiset; identical lists stored once |
 | `hearthstonetopdecks/` | `HearthstoneTopDecksDeckExtractionStage` | Hearthstone | hearthstonetopdecks `decks.jsonl`: one deck code per page, decoded by `deckstring.py`; each dbfId matched through the binder's HEARTHSTONEJSON alias (cards taken as their current version); heroes and sideboard cards dropped | `deck_uuid_from_cards()` over the copy-count multiset; identical lists stored once |
 | `ygoprodeck_decks/` | `YgoprodeckDecksExtractionStage` | Yu-Gi-Oh | the `yugioh-decks` Hugging Face mirror's `NNNNNNNN.csv` shards (`../../data_retrieval/huggingface_datasets/`, CC-BY-SA-3.0): main + extra deck passcodes matched through the binder's `YGOPRODECK` alias (`card_binder/ygoprodeck/`); side decks dropped; decks outside main 40-60 / extra 0-15 skipped | `deck_uuid_from_cards()` over the copy-count multiset; identical lists stored once |
 | `zenodo_hearthstone_decks/` | `ZenodoHearthstoneDecksExtractionStage` | Hearthstone | the Zenodo dataset's directory: `cards.csv` (one row per card copy, by name) plus `decks.csv` (archetype, for the deck name); names matched exactly, each card taken as its latest version | `deck_uuid_from_cards()` over the copy-count multiset; identical lists stored once (also across `hearthstonetopdecks/`) |
 | `mtgjson_decks/` | `MtgjsonDeckExtractionStage` | MTG | the latest complete MTGJSON build's `decks/` directory (one JSON file per Wizards precon; default picked at call time); `mainBoard` + `commander` cards matched by Scryfall oracle id through the binder's SCRYFALL alias; Secret Lair Drop, MTGO Redemption and Bundle Land Pack files skipped | `deck_uuid_from_cards()` over the copy-count multiset; identical lists stored once |
+| `archidekt_decks/`, `moxfield_decks/`, `deckstats_decks/` | `ArchidektDeckExtractionStage`, `MoxfieldDeckExtractionStage`, `DeckstatsDeckExtractionStage` | MTG | each site's crawl shards (`../../data_retrieval/<site>/`); one parser per site, one shared loop and card matcher in [`mtg_crawls/`](mtg_crawls/README.md): oracle id, printing id, then name; main deck + command zone only; 20-256 cards; Archidekt unlisted and Moxfield `package` lists skipped | `deck_uuid_from_cards()` over the copy-count multiset; identical lists stored once (also across sites) |
 | `seventeenlands_game_data/` | `SeventeenLandsGameDataDeckExtractionStage` | MTG | 17lands `game_data` CSVs (`deck_<name>` copy-count columns), read with the shared `../seventeenlands/` parser | `deck_uuid_from_cards()` over the full copy-count multiset: every distinct decklist any game played, stored once (an unmatched column counts as the Unknown card) |
 
 ## How it works

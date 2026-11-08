@@ -37,6 +37,12 @@ from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.build import build_or_update_deck_box
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.deck_box.extraction import DeckExtractionStage
+from src.data_refinement.deck_box.archidekt_decks.extraction_stage import (
+    ArchidektDeckExtractionStage,
+)
+from src.data_refinement.deck_box.deckstats_decks.extraction_stage import (
+    DeckstatsDeckExtractionStage,
+)
 from src.data_refinement.deck_box.fabtcg_decklists.extraction_stage import (
     FabtcgDecklistsExtractionStage,
 )
@@ -51,6 +57,12 @@ from src.data_refinement.deck_box.isotropic.extraction_stage import (
 )
 from src.data_refinement.deck_box.limitless_play.extraction_stage import (
     LimitlessPlayDeckExtractionStage,
+)
+from src.data_refinement.deck_box.limitless_play.tcg_extraction_stages import (
+    ALL_TCG_STAGES,
+)
+from src.data_refinement.deck_box.moxfield_decks.extraction_stage import (
+    MoxfieldDeckExtractionStage,
 )
 from src.data_refinement.deck_box.mtgjson_decks.extraction_stage import (
     MtgjsonDeckExtractionStage,
@@ -143,6 +155,27 @@ _STAGES: dict[str, tuple[DeckExtractionStage, Callable[[], Path]]] = {
         SeventeenLandsGameDataDeckExtractionStage(),
         lambda: SeventeenLandsGameDataDeckExtractionStage.DEFAULT_RAW_PATH,
     ),
+    # MTG deck-site crawls (Archidekt unlisted decks excluded by default)
+    "archidekt_decks": (
+        ArchidektDeckExtractionStage(),
+        lambda: ArchidektDeckExtractionStage.DEFAULT_RAW_PATH,
+    ),
+    "moxfield_decks": (
+        MoxfieldDeckExtractionStage(),
+        lambda: MoxfieldDeckExtractionStage.DEFAULT_RAW_PATH,
+    ),
+    "deckstats_decks": (
+        DeckstatsDeckExtractionStage(),
+        lambda: DeckstatsDeckExtractionStage.DEFAULT_RAW_PATH,
+    ),
+    # Limitless's other card games: limitless_one_piece, limitless_lorcana, ...
+    **{
+        f"limitless_{stage_class.SOURCE_GAME.value}": (
+            stage_class(),
+            (lambda path=stage_class.DEFAULT_RAW_PATH: path),
+        )
+        for stage_class in ALL_TCG_STAGES
+    },
 }
 
 

@@ -665,3 +665,74 @@ class TestPrintedNameAliases:
 
         card = binder.get_by_alias(GameId.MTG, DataSource.PRINTED_NAME, "Bespoke B?")
         assert card is not None and card.name == "Bespoke Bō"
+
+
+class TestPrintingAliases:
+    def _ingest(self, tmp_path: Path, printings: list[dict]) -> CardBinder:
+        oracle_path = tmp_path / "oracle-cards.jsonl"
+        _write_jsonl(
+            oracle_path,
+            [
+                {"oracle_id": "o1", "name": "Bolt", "rarity": "common"},
+                {"oracle_id": "o2", "name": "Flip Art", "rarity": "rare"},
+            ],
+        )
+        printings_path = tmp_path / "default-cards.jsonl"
+        _write_jsonl(printings_path, printings)
+        binder = CardBinder()
+        ScryfallCardIngestionStage(lambda: printings_path).ingest(oracle_path, binder)
+        return binder
+
+    def _printing_card(self, binder: CardBinder, printing_id: str) -> str | None:
+        card = binder.get_by_alias(
+            GameId.MTG, DataSource.SCRYFALL_PRINTING, printing_id
+        )
+        return card.name if card is not None else None
+
+    def test_every_printing_id_names_its_oracle_card(self, tmp_path: Path) -> None:
+        binder = self._ingest(
+            tmp_path,
+            [
+                {"id": "p1", "oracle_id": "o1", "rarity": "common"},
+                {"id": "p2", "oracle_id": "o1", "rarity": "uncommon"},
+            ],
+        )
+
+        assert self._printing_card(binder, "p1") == "Bolt"
+        assert self._printing_card(binder, "p2") == "Bolt"
+
+    def test_a_reversible_printing_uses_its_first_faces_oracle_id(
+        self, tmp_path: Path
+    ) -> None:
+        binder = self._ingest(
+            tmp_path,
+            [
+                {
+                    "id": "p3",
+                    "layout": "reversible_card",
+                    "card_faces": [{"oracle_id": "o2"}, {"oracle_id": "o2"}],
+                }
+            ],
+        )
+
+        assert self._printing_card(binder, "p3") == "Flip Art"
+        card = binder.get_by_alias(GameId.MTG, DataSource.SCRYFALL, "o2")
+        assert card is not None and card.raw_content["rarity"] == "rare"
+
+    def test_unknown_cards_excluded_layouts_and_missing_ids_register_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        binder = self._ingest(
+            tmp_path,
+            [
+                {"id": "p4", "oracle_id": "not-in-binder", "rarity": "common"},
+                {"id": "p5", "oracle_id": "o1", "layout": "token", "rarity": "common"},
+                {"oracle_id": "o1", "rarity": "common"},
+                {"id": "p6", "rarity": "common"},
+            ],
+        )
+
+        assert all(
+            self._printing_card(binder, printing_id) is None
+            for printing_id in ("p4", "p5", "p6")
+        )
