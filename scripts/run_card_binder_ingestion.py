@@ -17,12 +17,6 @@ Usage (from the project root):
     PYTHONPATH=. python3 scripts/run_card_binder_ingestion.py \\
         --source spire_codex --raw-path data/raw/spire_codex/cards.json
 
-Some stages only add to another stage's cards, so they must run after
-it: FOLLOW_UP_STAGES. Running tcgjson_yugioh (alone or under --all) also
-runs ygoprodeck_yugioh_passcodes straight after, when the yugioh-cards
-mirror is on disk (a warning otherwise), so the passcode aliases always
-point at the current cards. --all runs a follow-up only that way, once.
-
 `--all` runs every source in this process, one after another (unlike
 run_data_retrieval.py's `--all`, which spawns a terminal per
 downloader for multi-hour crawls — every source here reads data
@@ -34,7 +28,6 @@ run_all()'s own docstring.
 import argparse
 import glob
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -62,6 +55,12 @@ from src.data_refinement.card_binder.scryfall.ingestion_stage import (
 from src.data_refinement.card_binder.spire_codex.ingestion_stage import (
     SpireCodexCardIngestionStage,
 )
+from src.data_refinement.card_binder.tcgcsv.ingestion_stage import (
+    BattleSpiritsSagaTcgcsvCardIngestionStage,
+    DragonBallFusionWorldTcgcsvCardIngestionStage,
+    DragonBallMastersTcgcsvCardIngestionStage,
+    GundamTcgcsvCardIngestionStage,
+)
 from src.data_refinement.card_binder.tcgjson.ingestion_stage import (
     DigimonTcgjsonCardIngestionStage,
     LorcanaTcgjsonCardIngestionStage,
@@ -69,10 +68,9 @@ from src.data_refinement.card_binder.tcgjson.ingestion_stage import (
     RiftboundTcgjsonCardIngestionStage,
     StarWarsUnlimitedTcgjsonCardIngestionStage,
     UnionArenaTcgjsonCardIngestionStage,
-    YugiohTcgjsonCardIngestionStage,
 )
 from src.data_refinement.card_binder.ygoprodeck.ingestion_stage import (
-    YgoprodeckPasscodeAliasStage,
+    YgoprodeckCardIngestionStage,
 )
 from src.data_retrieval.cardvault_fabtcg.card_downloader import (
     CardVaultFabtcgCardDownloader,
@@ -80,12 +78,10 @@ from src.data_retrieval.cardvault_fabtcg.card_downloader import (
 from src.data_retrieval.dominiontabs.downloader import DominionTabsCardDownloader
 from src.data_retrieval.gwent_one.downloader import GwentOneDownloader
 from src.data_retrieval.hearthstonejson.downloader import HearthstoneJsonDownloader
-from src.data_retrieval.huggingface_datasets.downloader import (
-    HuggingFaceDatasetDownloader,
-)
 from src.data_retrieval.pokemon_tcg.downloader import PokemonTcgDataDownloader
 from src.data_retrieval.scryfall.downloader import ScryfallOracleDownloader
 from src.data_retrieval.spire_codex.card_downloader import SpireCodexCardDownloader
+from src.data_retrieval.tcgcsv.downloader import TcgcsvCatalogDownloader
 from src.data_retrieval.tcgjson.downloader import TcgjsonCatalogDownloader
 from src.run_logging import (
     add_logging_arguments,
@@ -198,10 +194,6 @@ STAGES: dict[str, tuple[CardIngestionStage, Callable[[], Path]]] = {
         LorcanaTcgjsonCardIngestionStage(),
         TcgjsonCatalogDownloader.latest_release_dir,
     ),
-    "tcgjson_yugioh": (
-        YugiohTcgjsonCardIngestionStage(),
-        TcgjsonCatalogDownloader.latest_release_dir,
-    ),
     "tcgjson_digimon": (
         DigimonTcgjsonCardIngestionStage(),
         TcgjsonCatalogDownloader.latest_release_dir,
@@ -222,86 +214,30 @@ STAGES: dict[str, tuple[CardIngestionStage, Callable[[], Path]]] = {
         RiftboundTcgjsonCardIngestionStage(),
         TcgjsonCatalogDownloader.latest_release_dir,
     ),
-    # Passcode aliases onto tcgjson's Yu-Gi-Oh cards; a FOLLOW_UP_STAGES
-    # entry, so it runs after tcgjson_yugioh
-    "ygoprodeck_yugioh_passcodes": (
-        YgoprodeckPasscodeAliasStage(),
-        lambda: YgoprodeckPasscodeAliasStage.DEFAULT_RAW_PATH,
+    # One stage per tcgcsv game; each reads its catalog from the newest
+    # complete snapshot directory.
+    "tcgcsv_gundam": (
+        GundamTcgcsvCardIngestionStage(),
+        TcgcsvCatalogDownloader.latest_snapshot_dir,
+    ),
+    "tcgcsv_dragon_ball_fusion_world": (
+        DragonBallFusionWorldTcgcsvCardIngestionStage(),
+        TcgcsvCatalogDownloader.latest_snapshot_dir,
+    ),
+    "tcgcsv_dragon_ball_masters": (
+        DragonBallMastersTcgcsvCardIngestionStage(),
+        TcgcsvCatalogDownloader.latest_snapshot_dir,
+    ),
+    "tcgcsv_battle_spirits_saga": (
+        BattleSpiritsSagaTcgcsvCardIngestionStage(),
+        TcgcsvCatalogDownloader.latest_snapshot_dir,
+    ),
+    # Yu-Gi-Oh: YGOPRODeck's card table, the feregrino/yugioh-cards mirror
+    "ygoprodeck_yugioh": (
+        YgoprodeckCardIngestionStage(),
+        lambda: YgoprodeckCardIngestionStage.DEFAULT_RAW_PATH,
     ),
 }
-
-
-@dataclass(frozen=True)
-class FollowUpStage:
-    """A stage that runs straight after another one, against the same
-    binder file: its STAGES name, and whether its raw input is on disk
-    (checked when it is due; a missing one is a warning, not a failure)."""
-
-    name: str
-    is_raw_input_ready: Callable[[], bool]
-
-
-FOLLOW_UP_STAGES: dict[str, FollowUpStage] = {
-    "tcgjson_yugioh": FollowUpStage(
-        "ygoprodeck_yugioh_passcodes",
-        lambda: HuggingFaceDatasetDownloader.is_complete_mirror(
-            YgoprodeckPasscodeAliasStage.DEFAULT_RAW_PATH
-        ),
-    ),
-}
-
-
-def run_with_follow_up(name: str, raw_path: Path | None) -> None:
-    """run_one(name), then its FOLLOW_UP_STAGES entry, if any, when that
-    stage's raw input is ready.
-    Inputs: name (a STAGES key), raw_path (name's override, None for
-        its default; the follow-up always reads its default).
-    Output: none. Side effects: as run_one, per stage run; a warning
-        when a follow-up's raw input is missing.
-    Exceptions: whatever run_one raises; a follow-up's failure is
-        raised as FollowUpStageError naming it (name itself succeeded
-        and was saved)."""
-    run_one(name, raw_path)
-    follow_up = FOLLOW_UP_STAGES.get(name)
-    if follow_up is None:
-        return
-    if not follow_up.is_raw_input_ready():
-        _logger.warning(
-            "%s: skipping follow-up %s, its raw input isn't on disk "
-            "(run scripts/run_data_retrieval.py first)",
-            name,
-            follow_up.name,
-        )
-        return
-    try:
-        run_one(follow_up.name, raw_path=None)
-    except Exception as error:
-        raise FollowUpStageError(follow_up.name) from error
-
-
-class FollowUpStageError(RuntimeError):
-    """A follow-up stage failed after the stage it follows succeeded.
-
-    stage_name: the follow-up's STAGES name.
-    """
-
-    def __init__(self, stage_name: str) -> None:
-        """
-        Inputs: stage_name. Output: none (constructor).
-        Side effects: none. Exceptions: none.
-        """
-        super().__init__(f"follow-up stage {stage_name} failed")
-        self.stage_name = stage_name
-
-
-def _failed_stage_name(name: str, error: Exception) -> str:
-    """The name to report for run_with_follow_up(name) raising error:
-    the follow-up's own name when it was the follow-up that failed.
-    Inputs: name, error. Output: str. Side effects: none.
-    Exceptions: none."""
-    if isinstance(error, FollowUpStageError):
-        return error.stage_name
-    return name
 
 
 def run_one(name: str, raw_path: Path | None) -> None:
@@ -327,16 +263,12 @@ def run_all() -> None:
     src/data_refinement/metrics/sts_gg/scanner.py) rather than letting
     one bad/missing raw dump abort every other source's run."""
     failed: list[str] = []
-    follow_up_names = {follow_up.name for follow_up in FOLLOW_UP_STAGES.values()}
     for name in sorted(STAGES):
-        if name in follow_up_names:
-            continue  # runs after the stage it follows
         try:
-            run_with_follow_up(name, raw_path=None)
-        except Exception as error:
-            failed_name = _failed_stage_name(name, error)
-            _logger.exception("%s failed", failed_name)
-            failed.append(failed_name)
+            run_one(name, raw_path=None)
+        except Exception:
+            _logger.exception("%s failed", name)
+            failed.append(name)
 
     if failed:
         _logger.error("Failed: %s", ", ".join(failed))
@@ -380,7 +312,7 @@ def main() -> None:
     configure_logging(logging_settings_from(args, script_log_path(__file__)))
 
     if args.source:
-        run_with_follow_up(args.source, raw_path=args.raw_path)
+        run_one(args.source, raw_path=args.raw_path)
         return
 
     run_all()

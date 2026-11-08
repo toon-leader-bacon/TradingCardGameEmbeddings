@@ -1,8 +1,8 @@
 """The two feregrino Hugging Face datasets built from YGOPRODeck's public
 API (github.com/fferegrino/yu-gi-oh, .../yu-gi-oh-decks), CC-BY-SA-3.0.
 
-Any published dataset derived from them (the Yu-Gi-Oh deck box, the
-binder's YGOPRODECK aliases) must credit YGOPRODeck and these datasets
+Any published dataset derived from them (the Yu-Gi-Oh card binder and
+deck box) must credit YGOPRODeck and these datasets
 and carry the same licence.
 
     yugioh-cards (weekly): cards.csv (id = passcode, name, type,

@@ -1,6 +1,6 @@
 """How a Yu-Gi-Oh passcode is spelled as a DataSource.YGOPRODECK alias id.
 
-A neutral module, not the alias stage's: the deck stage
+A neutral module, not the card stage's: the deck stage
 (deck_box/ygoprodeck_decks/) imports it too, so both sides spell ids the
 same without the deck stage depending on a binder stage's
 implementation.

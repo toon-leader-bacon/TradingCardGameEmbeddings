@@ -25,7 +25,9 @@ Shared by every source:
   (`archidekt/`, `moxfield/`, `deckstats/`) share. `crawl_files.py` holds the on-disk
   state: `decks-<nnnnn>.jsonl` shards gzipped once full (`JsonlShards`),
   `rejects.jsonl` (`RejectLog`) and `cursor.json` (`CursorFile`), every
-  append fsynced. `fetch.py` holds `crawl_get` (paced, a plain
+  append fsynced. `read_shard_rows` reads the shards back for
+  data_refinement, read-only, skipping a torn last line; each shard is
+  read whole and closed at once, but run it with the crawl stopped. `fetch.py` holds `crawl_get` (paced, a plain
   User-Agent) and `read_outcome`, which reads one answer as
   `ItemFound`, `ItemNotFound` (404) or `ItemRejected` (another 4xx
   but 429, or an unreadable body). `walk.py` holds
@@ -63,7 +65,8 @@ One subdirectory per source:
 | `seventeenlands/` | MTG | 17lands per-set/per-format draft, game and replay CSVs (own [README](seventeenlands/README.md)) |
 | `spire_codex/` | Slay the Spire 2 | spire-codex `cards.json` and its paginated run export |
 | `sts_gg/` | Slay the Spire 2 | sts.gg run ids and run detail JSON |
-| `tcgjson/` | Lorcana, Yu-Gi-Oh, Digimon, One Piece, Star Wars: Unlimited, Union Arena, Riftbound | tcgjson's weekly TCGplayer catalog release on GitHub: `bulk-data.json`, then each `CATALOG_SLUGS` game's `<slug>.full.json.gz`, size- and SHA-256-checked, into `data/raw/tcgjson/<generated_at>/`; the manifest is written last, so a directory holding it is complete (`latest_release_dir()`) |
+| `tcgjson/` | Lorcana, Digimon, One Piece, Star Wars: Unlimited, Union Arena, Riftbound | tcgjson's weekly TCGplayer catalog release on GitHub: `bulk-data.json`, then each `CATALOG_SLUGS` game's `<slug>.full.json.gz`, size- and SHA-256-checked, into `data/raw/tcgjson/<generated_at>/`; the manifest is written last, so a directory holding it is complete (`latest_release_dir()`) |
+| `tcgcsv/` | Gundam, Dragon Ball Super Fusion World, Dragon Ball Super Masters, Battle Spirits Saga | tcgcsv.com's daily TCGplayer catalog mirror: per `CATEGORY_IDS` game, its groups and each group's products, landed unchanged as `<slug>.json.gz` in `data/raw/tcgcsv/<last-updated stamp>/`; the stamp file is written last, so a directory holding it is complete (`latest_snapshot_dir()`). About 210 requests |
 | `dominion/` | Dominion | not a downloader: research leads (`todo.md`) and a prototype replay scraper |
 
 ## How it works

@@ -277,6 +277,12 @@ good worked examples. Measure a stage with `scripts/report_card_content.py
   `existing.nocab_uuid`: these decide content, never identity.
 - `lean_content.py` — source-independent helpers that keep a card's
   `raw_content` lean (see "What goes in `raw_content`" above).
+- `pool_mirror.py` — the shared steps of a stage whose source is a
+  game's whole card pool: `store_mirrored_card` (create, or merge with
+  `keep_incoming_if_content_differs`) and `delete_cards_except` (drop
+  the game's cards no row took, never the Unknown sentinel). Used by
+  `ygoprodeck/`; `hearthstonejson/` and `tcgjson/` still carry their
+  own copies (`TODO.md`).
 - `card_lookup.py` — `CardLookup`, described above, plus
   `uuid_for_name_or_front_face()`.
 - `visible_card_lookup.py` — `VisibleCardLookup`, a `CardLookup` that
@@ -303,15 +309,16 @@ collision policy):
 
 | Directory | Stage | Game | Identity key |
 |---|---|---|---|
-| `scryfall/` | `ScryfallCardIngestionStage` | MTG | Scryfall `oracle_id` (+ Arena/MTGO/multiverse aliases) |
+| `scryfall/` | `ScryfallCardIngestionStage` | MTG | Scryfall `oracle_id` (+ Arena/MTGO/multiverse aliases, and every printing's Scryfall id from the default-cards dump as a `SCRYFALL_PRINTING` alias) |
 | `pokemon_tcg/` | `PokemonTcgCardIngestionStage` | Pokemon | heuristic: (name, set code) |
 | `gwent_one/` | `GwentOneCardIngestionStage` | Gwent | gwent.one `data-id` |
 | `spire_codex/` | `SpireCodexCardIngestionStage` | Slay the Spire 2 | spire-codex card `id` |
 | `cardvault_fabtcg/` | `CardVaultFabtcgCardIngestionStage` | Flesh and Blood | cardvault `card_id` (+ `print_id` aliases) |
 | `dominiontabs/` | `DominionTabsCardIngestionStage` | Dominion | dominiontabs `card_tag` |
 | `hearthstonejson/` | `HearthstoneJsonCardIngestionStage` | Hearthstone | content-derived: lean content minus set/rarity, so reprints collapse (+ every `dbfId` as an alias); the binder mirrors one build |
-| `ygoprodeck/` | `YgoprodeckPasscodeAliasStage` | Yu-Gi-Oh | creates no card: registers each YGOPRODeck passcode (and alternate-artwork passcode) as a `YGOPRODECK` alias of the tcgjson card its name names |
-| `tcgjson/` | one subclass of `TcgjsonCardIngestionStage` per game: `Lorcana…`, `Yugioh…`, `Digimon…`, `OnePiece…`, `StarWarsUnlimited…`, `UnionArena…`, `RiftboundTcgjsonCardIngestionStage` | Lorcana, Yu-Gi-Oh, Digimon, One Piece, Star Wars: Unlimited, Union Arena, Riftbound | base name (the TCGplayer product name without its trailing `(...)`/`[...]` printing tags), or the card number for Digimon, One Piece and Union Arena (+ each card number, the identity and every full printed form, as a `PRINTED_NUMBER` alias, the ids their deck lists use); + every `productId` as an alias; the binder mirrors one catalog |
+| `ygoprodeck/` | `YgoprodeckCardIngestionStage` | Yu-Gi-Oh | YGOPRODeck `id`, the passcode (+ alternate-artwork passcodes as `YGOPRODECK` aliases); the binder mirrors one card table |
+| `tcgjson/` | one subclass of `TcgjsonCardIngestionStage` per game: `Lorcana…`, `Digimon…`, `OnePiece…`, `StarWarsUnlimited…`, `UnionArena…`, `RiftboundTcgjsonCardIngestionStage` | Lorcana, Digimon, One Piece, Star Wars: Unlimited, Union Arena, Riftbound | base name (the TCGplayer product name without its trailing `(...)`/`[...]` printing tags), or the card number for Digimon, One Piece and Union Arena (+ each card number, the identity and every full printed form, as a `PRINTED_NUMBER` alias, the ids their deck lists use); + every `productId` as an alias; the binder mirrors one catalog |
+| `tcgcsv/` | one subclass of `TcgjsonCardIngestionStage` per game: `Gundam…`, `DragonBallFusionWorld…`, `DragonBallMasters…`, `BattleSpiritsSagaTcgcsvCardIngestionStage` | Gundam, Dragon Ball Super Fusion World, Dragon Ball Super Masters, Battle Spirits Saga | the tcgjson pipeline over tcgcsv's catalogs: the card number (+ `PRINTED_NUMBER` aliases), a Gundam Resource its name; + every `productId` as a `TCGCSV` alias; the binder mirrors one catalog |
 
 ### `tcgjson/`: one pipeline, one spec per game
 
@@ -325,13 +332,21 @@ the attribute holding the type, a card-number pattern that makes the
 number the card's identity, and a name suffix to strip), and
 `ingestion_stage.py` one two-line subclass per game setting `SPEC`
 (`__init_subclass__` derives `SOURCE_GAME` from it, since the Protocol
-needs a ClassVar). MTG and Pokemon are tcgjson games too but have
-better sources here (Scryfall, pokemon-tcg-data).
+needs a ClassVar). MTG, Pokemon and Yu-Gi-Oh are tcgjson games too but
+have better sources here (Scryfall, pokemon-tcg-data, YGOPRODeck).
+
+The pipeline runs on TCGplayer's catalog, whichever site republishes
+it: a spec's `catalog_format` (`catalog.CatalogFormat`: file suffix,
+reader, `DataSource`) says which. tcgjson's specs use `TCGJSON_FORMAT`;
+`tcgcsv/` adds `TCGCSV_FORMAT` (below). A spec can also exclude
+products by card number (`excluded_numbers`: tokens) and keep untyped
+products that have a card number (`untyped_cards`). The shared parts
+still carry the `Tcgjson` name; moving them to a source-neutral
+package is a follow-up.
 
 | Game | Cards (weekly-20260831) | Identity | Notes |
 |---|---|---|---|
 | Lorcana | 2,475 | name | Illumineer's Quest (co-op) sets excluded |
-| Yu-Gi-Oh | 14,228 | name | type is `cardTypeB` ("Xyz/Effect Monster"); `cardTypes` is coarse and missing on most Pendulum printings; the Tokens set excluded |
 | Digimon | 4,386 | card number ("BT5-086", rarity suffix dropped) | text only in `description`; inherited and security effects are RULES fields |
 | One Piece | 2,818 | card number ("OP01-024") | DON!! cards excluded |
 | Star Wars: Unlimited | 2,200 | name (it carries the subtitle) | a base's token back (" // Shield") stripped; `epic_action` a RULES field |
@@ -364,27 +379,49 @@ Locations have no rules text in any printing; Bucky - Squirrel Squeak
 Tutor's errata printing omits Ward. A card with the same name and text
 as another under a new number stays two cards (Union Arena: 1 pair).
 
-### `ygoprodeck/`: passcodes onto tcgjson's Yu-Gi-Oh cards
+### `tcgcsv/`: four Bandai games from tcgcsv.com
 
-TCGplayer has no passcodes, and every Yu-Gi-Oh deck source names cards
-by one, so this stage teaches the Yu-Gi-Oh binder its cards' passcodes
-from feregrino's `yugioh-cards` dataset (`cards.csv`,
-`cards_variants.csv`). It creates and changes no card (`ingest()`
-returns `[]`) and adds nothing to the binder's version.
+tcgcsv mirrors the same TCGplayer catalog daily, in TCGplayer's own
+shape (an `extendedData` list per product), for every category,
+including games tcgjson doesn't publish. `catalog.py` reads it into a
+`TcgjsonCatalog` (`read_tcgcsv_catalog`, `TCGCSV_FORMAT`); `game_spec.py`
+holds the four specs, keyed by extendedData names ("Attack Points");
+`ingestion_stage.py` one subclass per game. Every card is its card
+number: names repeat ("Giblet" is a Battle card and a Leader).
 
-- A `cards.csv` name names one card when exactly one card has that
-  exact name, else when exactly one name is equal ignoring case; no or
-  several candidates give no alias. Measured 2026-11-06: 13,876 of
-  14,653 names; the misses are OCG-only and not-yet-TCG cards, tokens
-  and skill cards, which deck stages read as Unknown.
-- The alias id is `passcode.py`'s `passcode_id()` (digits without
-  leading zeros), which the deck stage also uses.
-- It must run after `tcgjson_yugioh`, against the same binder: the
-  script's `FOLLOW_UP_STAGES` runs it straight after that stage when
-  the cards mirror is on disk. Every run re-registers every match, so
-  a card tcgjson re-mints gets its passcodes back. The alias ledger has
-  no unregister: a passcode that stops matching keeps its earlier alias
-  (to a deleted card it reads as no match).
+Only cards in a deck at the start of a game are cards: tokens made
+mid-game, and the pieces every player gets at setup whatever their deck
+(Gundam's EX Base and EX Resource, Dragon Ball's Energy Markers), are
+left out.
+
+| Game | Cards (2026-11-06) | Identity | Notes |
+|---|---|---|---|
+| Gundam | 1,087 | card number ("GD01-001"); a Resource its name | every Resource prints the same text under its own number per artwork, so they are one card; tokens (`T-` numbers), EX Base and EX Resource excluded; AP/HP are text (a Pilot prints "+1") |
+| Dragon Ball Super Fusion World | 1,883 | card number ("FB01-001") | Energy Markers (untyped) excluded; Cost ("2(Y)") and Power ("15000/20000") are text |
+| Dragon Ball Super Masters | 6,480 | card number, a pre-release `_PR` suffix dropped | untyped numbered products kept (12 real cards lack CardType on every printing); Energy Markers, merit cards and Token cards excluded |
+| Battle Spirits Saga | 1,100 | card number ("BSS01-001") | cost and BP per level kept |
+
+### `ygoprodeck/`: Yu-Gi-Oh from YGOPRODeck's card table
+
+The Yu-Gi-Oh binder is built from feregrino's `yugioh-cards` dataset
+(`cards.csv`, `cards_variants.csv`; YGOPRODeck's API, rebuilt weekly,
+CC-BY-SA-3.0). Its id is the passcode, the id every Yu-Gi-Oh deck
+source names cards by, so decks link with no name matching.
+
+- One card per `cards.csv` row (the table already holds one row per
+  card), minus Tokens and Speed Duel Skill Cards. TCG, OCG-only and
+  undated cards are all kept. 14,423 cards (data of 2026-11-02).
+- Aliases: the passcode as `passcode.py`'s `passcode_id()` (digits
+  without leading zeros, which the deck stage also uses), and each
+  alternate-artwork passcode to its original's card. A variant that is
+  also a row's own id, or whose original is not a card, is skipped.
+- Content: name, type, attribute, `monster_type` or (Spell/Trap)
+  `property`, `level` or (Xyz) `rank`, Link rating and arrows (no
+  level), scale, ATK/DEF (`"?"` for -1), text. Archetype, set, rarity,
+  ban lists, formats, dates and popularity are left out. Median 118
+  tokens, p99 228; no two cards serialize identically.
+- The binder mirrors the table through `pool_mirror.py`'s
+  `store_mirrored_card` and `delete_cards_except`.
 
 ## How it works
 

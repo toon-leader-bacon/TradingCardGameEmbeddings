@@ -2,8 +2,9 @@
 one subclass per game names its TcgjsonGameSpec.
 
 See src/data_refinement/card_binder/ingestion.py for the shared
-CardIngestionStage interface. The pipeline is generic: read_catalog
-(catalog.py) -> group_printings -> build_card_content per group
+CardIngestionStage interface. The pipeline is generic: the spec's
+catalog_format reads the catalog (catalog.py; tcgjson's, or tcgcsv's from
+card_binder/tcgcsv/) -> group_printings -> build_card_content per group
 (printing_groups.py) -> store. What differs per game is data, in its
 spec (game_spec.py).
 
@@ -13,8 +14,9 @@ __init_subclass__ sets SOURCE_GAME from SPEC.game, so a subclass states
 its game once. The bare base has no SPEC and is never registered.
 
 Identity: one card per PrintingGroup (base name or card number; see
-printing_groups.py). Every product id of the group is registered as a
-DataSource.TCGJSON alias (TCGplayer's productId), on every branch, and
+printing_groups.py). Every product id of the group is registered as an
+alias under the catalog format's DataSource (TCGJSON or TCGCSV; either
+way TCGplayer's productId), on every branch, and
 for a game whose cards are their card numbers, each of the group's
 card_numbers as a DataSource.PRINTED_NUMBER alias, the ids its deck
 lists use ("OP01-024"); Provenance.source_id is the representative
@@ -33,8 +35,7 @@ A catalog with no card groups raises instead of emptying the binder.
 Collision policy: merge_strategies.keep_incoming_if_content_differs - the
 catalog passed in is authoritative.
 
-Runtime (in memory, weekly-20260831): under 2 s per game, except
-Yu-Gi-Oh (46k products) at about 5 s.
+Runtime (in memory, weekly-20260831): under 2 s per game.
 """
 
 from datetime import datetime, timezone
@@ -46,10 +47,7 @@ from tqdm import tqdm
 
 from src.data_refinement.card_binder import merge_strategies
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.card_binder.tcgjson.catalog import (
-    TcgjsonCatalog,
-    read_catalog,
-)
+from src.data_refinement.card_binder.tcgjson.catalog import TcgjsonCatalog
 from src.data_refinement.card_binder.tcgjson.game_spec import (
     DIGIMON_SPEC,
     LORCANA_SPEC,
@@ -57,7 +55,6 @@ from src.data_refinement.card_binder.tcgjson.game_spec import (
     RIFTBOUND_SPEC,
     STAR_WARS_UNLIMITED_SPEC,
     UNION_ARENA_SPEC,
-    YUGIOH_SPEC,
     TcgjsonGameSpec,
 )
 from src.data_refinement.card_binder.tcgjson.printing_groups import (
@@ -69,8 +66,6 @@ from src.data_refinement.card_binder.tcgjson.printing_groups import (
 from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
-
-_FULL_CATALOG_SUFFIX = ".full.json.gz"
 
 
 class TcgjsonCardIngestionStage:
@@ -102,8 +97,9 @@ class TcgjsonCardIngestionStage:
         it: one card per printing group.
 
         Inputs:
-            raw_path: a <slug>.full.json.gz, or a release directory
-                holding <SPEC.slug>.full.json.gz.
+            raw_path: one catalog file, or a release/snapshot
+                directory holding <SPEC.slug><file suffix> (the spec's
+                catalog_format).
             binder: the CardBinder to write into (as SOURCE_GAME).
         Output: nocab_uuid of every card created or content-changed
             (deleted cards are not listed).
@@ -112,7 +108,7 @@ class TcgjsonCardIngestionStage:
             aliases on binder;
             prints a tqdm progress bar.
         Exceptions: FileNotFoundError if the catalog is missing; whatever
-            read_catalog raises; ValueError if the catalog has no card
+            the format's reader raises; ValueError if the catalog has no card
             groups (rather than deleting every stored card).
 
         Example:
@@ -120,14 +116,18 @@ class TcgjsonCardIngestionStage:
             ...     Path("data/raw/tcgjson/20260831T174333Z"), CardBinder.load([]))
         """
         result: list[UUID] = []
-        catalog = read_catalog(self._catalog_path(raw_path))
+        catalog = self.SPEC.catalog_format.read(self._catalog_path(raw_path))
         groups = group_printings(catalog, self.SPEC)
         if not groups:
             raise ValueError(f"{raw_path} has no {self.SPEC.slug} card products")
 
         # Store every group, each on a card no earlier group has taken
         taken: set[UUID] = set()
-        for group in tqdm(groups, desc=f"tcgjson {self.SPEC.slug}", unit="card"):
+        for group in tqdm(
+            groups,
+            desc=f"{self.SPEC.catalog_format.data_source.value} {self.SPEC.slug}",
+            unit="card",
+        ):
             stored_uuid, changed = self._store_group(group, catalog, binder, taken)
             taken.add(stored_uuid)
             if changed:
@@ -138,12 +138,12 @@ class TcgjsonCardIngestionStage:
         return result
 
     def _catalog_path(self, raw_path: Path) -> Path:
-        """raw_path itself, or <raw_path>/<SPEC.slug>.full.json.gz if it
-        is a directory.
+        """raw_path itself, or <raw_path>/<SPEC.slug><file suffix> (the
+        spec's catalog_format) if it is a directory.
         Inputs: raw_path. Output: Path. Side effects: stats raw_path.
-        Exceptions: none (a missing file fails in read_catalog)."""
+        Exceptions: none (a missing file fails in the reader)."""
         if raw_path.is_dir():
-            return raw_path / f"{self.SPEC.slug}{_FULL_CATALOG_SUFFIX}"
+            return raw_path / f"{self.SPEC.slug}{self.SPEC.catalog_format.file_suffix}"
         return raw_path
 
     def _store_group(
@@ -180,7 +180,7 @@ class TcgjsonCardIngestionStage:
         for product in group.products:
             binder.register_alias(
                 self.SOURCE_GAME,
-                DataSource.TCGJSON,
+                self.SPEC.catalog_format.data_source,
                 str(product.product_id),
                 stored_uuid,
             )
@@ -199,7 +199,9 @@ class TcgjsonCardIngestionStage:
         Side effects: none. Exceptions: none."""
         for product in group.products:
             card = binder.get_by_alias(
-                self.SOURCE_GAME, DataSource.TCGJSON, str(product.product_id)
+                self.SOURCE_GAME,
+                self.SPEC.catalog_format.data_source,
+                str(product.product_id),
             )
             if card is not None and card.nocab_uuid not in taken:
                 return card
@@ -218,7 +220,7 @@ class TcgjsonCardIngestionStage:
             name=group.name,
             raw_content=build_card_content(group, catalog, self.SPEC),
             provenance=Provenance(
-                data_source=DataSource.TCGJSON,
+                data_source=self.SPEC.catalog_format.data_source,
                 source_id=str(representative.product_id),
                 fetched_at=datetime.now(timezone.utc),
             ),
@@ -242,12 +244,6 @@ class LorcanaTcgjsonCardIngestionStage(TcgjsonCardIngestionStage):
     """Disney Lorcana's cards from its tcgjson catalog (LORCANA_SPEC)."""
 
     SPEC = LORCANA_SPEC
-
-
-class YugiohTcgjsonCardIngestionStage(TcgjsonCardIngestionStage):
-    """Yu-Gi-Oh!'s cards from its tcgjson catalog (YUGIOH_SPEC)."""
-
-    SPEC = YUGIOH_SPEC
 
 
 class DigimonTcgjsonCardIngestionStage(TcgjsonCardIngestionStage):

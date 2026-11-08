@@ -118,6 +118,23 @@ class DataSource(str, Enum):
     # source_id is a TCGplayer productId (one printing) (see
     # src/data_retrieval/tcgjson/downloader.py and
     # src/data_refinement/card_binder/tcgjson/ingestion_stage.py).
+    TCGCSV = "tcgcsv"  # tcgcsv.com's daily TCGplayer catalog mirror;
+    # source_id is a TCGplayer productId (one printing), as for TCGJSON
+    # (see src/data_retrieval/tcgcsv/downloader.py and
+    # src/data_refinement/card_binder/tcgcsv/ingestion_stage.py).
+    SCRYFALL_PRINTING = "scryfall_printing"  # a Scryfall printing id (the
+    # default-cards dump's "id"; one per printing), registered by
+    # src/data_refinement/card_binder/scryfall/ingestion_stage.py as an
+    # alias of its oracle card — distinct from SCRYFALL (the oracle id).
+    ARCHIDEKT = "archidekt"  # archidekt.com decks; source_id is the deck id
+    # (see src/data_retrieval/archidekt/ and
+    # src/data_refinement/deck_box/archidekt_decks/).
+    MOXFIELD = "moxfield"  # moxfield.com decks; source_id is the deck's
+    # publicId (see src/data_retrieval/moxfield/ and
+    # src/data_refinement/deck_box/moxfield_decks/).
+    DECKSTATS = "deckstats"  # deckstats.net decks; source_id is idsdeck
+    # (see src/data_retrieval/deckstats/ and
+    # src/data_refinement/deck_box/deckstats_decks/).
     SYSTEM = "system"  # minted internally by CardBinder itself for
     # synthetic sentinel cards (e.g. the "Unknown" fallback card — see
     # CardBinder.ensure_unknown_card()), never fetched from an external

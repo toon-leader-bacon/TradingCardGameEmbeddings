@@ -47,3 +47,11 @@ class GameId(str, Enum):
     STAR_WARS_UNLIMITED = "star_wars_unlimited"
     UNION_ARENA = "union_arena"
     RIFTBOUND = "riftbound"
+    # The tcgcsv games, cards from src/data_refinement/card_binder/tcgcsv/
+    # (TCGplayer's catalog via tcgcsv.com; src/data_retrieval/tcgcsv/).
+    GUNDAM = "gundam"  # the Gundam Card Game (Bandai, 2025)
+    DRAGON_BALL_FUSION_WORLD = "dragon_ball_fusion_world"  # Dragon Ball
+    # Super Card Game Fusion World
+    DRAGON_BALL_MASTERS = "dragon_ball_masters"  # Dragon Ball Super Card
+    # Game, called Masters since Fusion World launched
+    BATTLE_SPIRITS_SAGA = "battle_spirits_saga"

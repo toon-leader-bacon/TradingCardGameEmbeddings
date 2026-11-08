@@ -4,6 +4,7 @@ from typing import Any
 import pytest
 
 from src.data_refinement.card_binder.card_binder import CardBinder
+from src.data_refinement.card_binder.tcgjson.catalog import TCGJSON_FORMAT
 from src.data_refinement.card_binder.tcgjson.game_spec import ALL_SPECS, LORCANA_SPEC
 from src.data_refinement.card_binder.tcgjson.ingestion_stage import (
     LorcanaTcgjsonCardIngestionStage,
@@ -38,9 +39,13 @@ def test_source_game_comes_from_the_spec() -> None:
 
 
 def test_every_game_has_one_stage_and_its_own_game() -> None:
-    stages = TcgjsonCardIngestionStage.__subclasses__()
+    stages = [
+        stage
+        for stage in TcgjsonCardIngestionStage.__subclasses__()
+        if stage.SPEC.catalog_format is TCGJSON_FORMAT
+    ]
     games = [stage.SOURCE_GAME for stage in stages]
-    assert len(stages) == 7
+    assert len(stages) == 6
     assert len(set(games)) == len(games)
     assert all(stage.SOURCE_GAME is stage.SPEC.game for stage in stages)
     assert {stage.SPEC for stage in stages} == set(ALL_SPECS)

@@ -10,6 +10,11 @@ A product's customAttributes stay a read-only mapping
 each game's TcgjsonGameSpec, except two every game shares: description
 (read here, as the rules text where rulesText is missing) and number
 (read by printing_groups.py, for a game whose cards are their numbers).
+
+TcgjsonCatalog is the TCGplayer catalog shape the whole tcgjson pipeline
+runs on, whichever site republishes it: CatalogFormat names a source's
+file suffix, reader and DataSource, and each TcgjsonGameSpec names its
+format (TCGJSON_FORMAT here; card_binder/tcgcsv/ adds TCGCSV_FORMAT).
 """
 
 import gzip
@@ -17,12 +22,16 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Mapping
+from typing import Callable, Mapping
 
+from src.schema.data_source import DataSource
 from src.schema.json_types import JsonValue
+from src.schema.json_checks import require_int, require_nonempty_str
 
 # The customAttributes copy of rulesText
 _DESCRIPTION_ATTRIBUTE = "description"
+# The attributes key of a printing's card number, for every source
+NUMBER_ATTRIBUTE = "number"
 
 
 @dataclass(frozen=True)
@@ -43,11 +52,16 @@ class TcgjsonSet:
 class TcgjsonProduct:
     """One TCGplayer product: one printing of a card, or a non-card.
 
-    card_types: metadata.cardTypes (empty for a non-card such as a
-        puzzle insert). rules_text: metadata.rulesText, raw HTML, else
-        the description attribute (the same text, the only copy in
-        Digimon's catalog), else None. attributes:
-        metadata.customAttributes, read-only.
+    card_types: the product's types (empty for a non-card such as a
+        puzzle insert or a booster box). rules_text: its rules text, raw
+        HTML, or None. attributes: its game-specific fields by the
+        source's own names, read-only; the card number, if any, under
+        NUMBER_ATTRIBUTE.
+
+    How each source fills them: tcgjson from metadata.cardTypes,
+    metadata.rulesText (else the description attribute, the only copy in
+    Digimon's catalog) and metadata.customAttributes (read_catalog);
+    tcgcsv from its extendedData list (card_binder/tcgcsv/catalog.py).
     """
 
     product_id: int
@@ -85,25 +99,62 @@ def read_catalog(path: Path) -> TcgjsonCatalog:
         >>> len(catalog.products)
         3393
     """
-    payload = _load_json(path)
+    raw_sets, raw_products = load_catalog_lists(path, "sets", "products")
+    sets = [_parse_set(raw) for raw in raw_sets]
+    products = [_parse_product(raw) for raw in raw_products]
+    return assemble_catalog(sets, products)
+
+
+def load_catalog_lists(
+    path: Path, sets_key: str, products_key: str
+) -> tuple[list[JsonValue], list[JsonValue]]:
+    """A catalog file's raw set and product lists: the JSON object at
+    path (gunzipped if .gz), its sets_key and products_key lists.
+
+    Inputs: path, sets_key, products_key (the source's names for them).
+    Output: (raw sets, raw products), unparsed.
+    Side effects: reads path.
+    Exceptions: FileNotFoundError if path is missing; ValueError if it
+        is not a JSON object or either key is not a list.
+
+    Example:
+        >>> raw_sets, raw_products = load_catalog_lists(path, "sets", "products")
+    """
+    payload = load_json(path)
     if not isinstance(payload, dict):
         raise ValueError(f"{path} is not a JSON object")
-    raw_sets, raw_products = payload.get("sets"), payload.get("products")
+    raw_sets, raw_products = payload.get(sets_key), payload.get(products_key)
     if not isinstance(raw_sets, list) or not isinstance(raw_products, list):
-        raise ValueError(f"{path} lacks sets/products lists")
+        raise ValueError(f"{path} lacks {sets_key}/{products_key} lists")
+    return raw_sets, raw_products
 
-    # Parse sets, then products against them
-    sets = {item.set_id: item for item in (_parse_set(raw) for raw in raw_sets)}
-    products = tuple(_parse_product(raw) for raw in raw_products)
+
+def assemble_catalog(
+    sets: list[TcgjsonSet], products: list[TcgjsonProduct]
+) -> TcgjsonCatalog:
+    """A TcgjsonCatalog of parsed sets and products, every product's
+    set checked to be among sets.
+
+    Inputs: sets, products (in file order).
+    Output: TcgjsonCatalog (sets by set_id; a repeated set_id keeps the
+        last).
+    Side effects: none.
+    Exceptions: KeyError if a product names a set not in sets.
+
+    Example:
+        >>> assemble_catalog([TcgjsonSet(1, "Set", None)], []).sets[1].name
+        'Set'
+    """
+    by_id = {item.set_id: item for item in sets}
     for product in products:
-        if product.set_id not in sets:
+        if product.set_id not in by_id:
             raise KeyError(
                 f"product {product.product_id} names unknown set {product.set_id}"
             )
-    return TcgjsonCatalog(MappingProxyType(sets), products)
+    return TcgjsonCatalog(MappingProxyType(by_id), tuple(products))
 
 
-def _load_json(path: Path) -> JsonValue:
+def load_json(path: Path) -> JsonValue:
     """path's JSON, gunzipped if its name ends in .gz.
     Inputs: path. Output: the JSON value. Side effects: reads path.
     Exceptions: FileNotFoundError; ValueError if not JSON (json's
@@ -124,8 +175,8 @@ def _parse_set(raw: JsonValue) -> TcgjsonSet:
         raise TypeError(f"catalog set is not an object: {raw!r}")
     release_date = raw.get("releaseDate")
     return TcgjsonSet(
-        set_id=_require_int(raw["setId"]),
-        name=_require_str(raw["name"]),
+        set_id=require_int(raw["setId"]),
+        name=require_nonempty_str(raw["name"]),
         release_date=release_date if isinstance(release_date, str) else None,
     )
 
@@ -148,9 +199,9 @@ def _parse_product(raw: JsonValue) -> TcgjsonProduct:
         rules_text = attributes.get(_DESCRIPTION_ATTRIBUTE)
     rarity = raw.get("rarity")
     return TcgjsonProduct(
-        product_id=_require_int(raw["productId"]),
-        name=_require_str(raw["name"]),
-        set_id=_require_int(raw["setId"]),
+        product_id=require_int(raw["productId"]),
+        name=require_nonempty_str(raw["name"]),
+        set_id=require_int(raw["setId"]),
         rarity=rarity if isinstance(rarity, str) else "",
         card_types=(
             tuple(item for item in card_types or () if isinstance(item, str) and item)
@@ -164,19 +215,20 @@ def _parse_product(raw: JsonValue) -> TcgjsonProduct:
     )
 
 
-def _require_int(value: JsonValue) -> int:
-    """value if it is an int (not a bool).
-    Inputs: value. Output: int. Side effects: none.
-    Exceptions: TypeError otherwise."""
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(f"expected an int, got {value!r}")
-    return value
+@dataclass(frozen=True)
+class CatalogFormat:
+    """Where one source's catalogs come from and how they are read.
+
+    data_source: the DataSource its product-id aliases and provenance
+        are registered under (a TCGplayer productId either way).
+    file_suffix: a landed catalog's file name is <slug><file_suffix>.
+    read: reads one catalog file into a TcgjsonCatalog.
+    """
+
+    data_source: DataSource
+    file_suffix: str
+    read: Callable[[Path], TcgjsonCatalog]
 
 
-def _require_str(value: JsonValue) -> str:
-    """value if it is a non-empty str.
-    Inputs: value. Output: str. Side effects: none.
-    Exceptions: TypeError otherwise."""
-    if not isinstance(value, str) or not value:
-        raise TypeError(f"expected a non-empty str, got {value!r}")
-    return value
+# tcgjson's weekly GitHub release (src/data_retrieval/tcgjson/)
+TCGJSON_FORMAT = CatalogFormat(DataSource.TCGJSON, ".full.json.gz", read_catalog)

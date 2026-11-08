@@ -43,6 +43,7 @@ from src.data_retrieval.download_utils import (
     sha256_of,
     download_to_file,
     download_to_string,
+    latest_complete_dir,
 )
 from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.rate_limiter import RateLimiter
@@ -62,7 +63,6 @@ _SHA256_HEX = re.compile(r"[0-9a-f]{64}")
 # The games this project downloads; add a slug when its card stage is built
 CATALOG_SLUGS: tuple[str, ...] = (
     "lorcana",
-    "yugioh",
     "digimon-card-game",
     "one-piece",
     "star-wars-unlimited",
@@ -148,17 +148,7 @@ class TcgjsonCatalogDownloader(Downloader):
             PosixPath('data/raw/tcgjson/20260831T174333Z')
         """
         root = cls.DEFAULT_RAW_DATA_DIR if raw_data_dir is None else raw_data_dir
-        result: list[Path] = []
-        if root.is_dir():
-            result = sorted(
-                path
-                for path in root.iterdir()
-                if _RELEASE_NAME.fullmatch(path.name)
-                and (path / _MANIFEST_NAME).is_file()
-            )
-        if not result:
-            raise FileNotFoundError(f"no complete tcgjson release under {root}")
-        return result[-1]
+        return latest_complete_dir(root, _RELEASE_NAME, _MANIFEST_NAME)
 
     def _run_phase_1(self) -> Path:
         """Land each slug's full catalog, then the manifest.

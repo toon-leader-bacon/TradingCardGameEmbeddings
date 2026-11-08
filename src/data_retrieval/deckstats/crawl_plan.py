@@ -11,7 +11,7 @@ paced redirect).
 
 import re
 
-from src.data_retrieval.download_utils import require_str
+from src.schema.json_checks import require_str
 from src.data_retrieval.resumable_crawl import PlanItems
 
 PLAN_NAME = "crawl_plan.json"

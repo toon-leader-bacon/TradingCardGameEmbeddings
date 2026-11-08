@@ -1,66 +1,80 @@
-"""Registers YGOPRODeck passcodes as aliases of the Yu-Gi-Oh binder's cards.
+"""Translates YGOPRODeck's card table (feregrino/yugioh-cards) into the
+Yu-Gi-Oh binder: the Yu-Gi-Oh card source.
 
 See src/data_refinement/card_binder/ingestion.py for the shared
-CardIngestionStage interface. This stage creates and changes no card:
-the Yu-Gi-Oh cards come from tcgjson (card_binder/tcgjson/), and this
-only teaches the binder each card's passcodes, the id every Yu-Gi-Oh
-deck source names cards by (YGOPRODeck decks, EDOPro/YGOPro .ydk files,
-Master Duel Meta). The data: src/data_retrieval/huggingface_datasets/
-ygoprodeck_repos.py (feregrino/yugioh-cards, CC-BY-SA-3.0).
+CardIngestionStage interface, and card_binder/pool_mirror.py for the
+mirror-the-whole-pool steps. The data:
+src/data_retrieval/huggingface_datasets/ygoprodeck_repos.py
+(feregrino/yugioh-cards, rebuilt weekly from YGOPRODeck's API,
+CC-BY-SA-3.0).
 
 RAW SHAPE: raw_path is the yugioh-cards mirror directory, complete
 (HuggingFaceDatasetDownloader.is_complete_mirror), holding:
-    cards.csv: one row per YGOPRODeck card; only "id" (the passcode, or
-        an id YGOPRODeck minted for a card without one) and "name" are
-        read.
+    cards.csv: one row per card, keyed by "id" (the passcode, or an id
+        YGOPRODeck minted for a card without one, > 99,999,999). Numbers
+        are written as floats ("2500.0"); an ATK/DEF of "?" is "-1.0";
+        linkmarkers is a Python list literal ("['Top', 'Bottom-Left']").
     cards_variants.csv: original,variant: alternate-artwork passcodes,
         which decks use but cards.csv doesn't list.
 
-MATCHING (CardNameIndex): a cards.csv name is compared with the binder's
-names under three keys in turn (_NAME_KEYS): the exact name, the
-casefolded name, then its ASCII letters and digits only (after
-decomposing accents), since TCGplayer drops the symbols YGOPRODeck
-keeps ("Maliss <P> Chessy Cat" / "Maliss P Chessy Cat", "Cupsy☆Yummy" /
-"CupsyYummy", "Mädchen" / "Madchen"). The first key with any candidate
-decides: exactly one card is a match, several are no match (never a
-looser key's guess). The Unknown sentinel is never a candidate.
-Measured 2026-11-06: 13,932 of 14,653 names match (46 by casefold, 56
-by letters and digits); the misses are OCG-only and not-yet-TCG cards,
-tokens, skill cards and some TCG cards TCGplayer's catalog lacks.
+WHICH ROWS ARE CARDS: every row but a Token (made mid-game) or a Skill
+Card (Speed Duel; it sits outside the deck): user, 2026-11-07. TCG,
+OCG-only and the few undated rows are all kept.
 
-ALIASES: register_alias(YUGIOH, YGOPRODECK, passcode_id(id), uuid) for
-each matched row, and for each variant whose original matched, the
-variant's id to the same card.
+IDENTITY: the row. cards.csv already holds one row per card (14,653
+rows, 14,653 ids, 14,653 names on 2026-11-02), so nothing is grouped.
+The passcode is the card's DataSource.YGOPRODECK alias, spelled by
+passcode.py's passcode_id() (the deck stage, deck_box/ygoprodeck_decks/,
+spells it the same way). Each alternate-artwork variant is aliased to
+its original's card, except: a variant whose original is not a kept row
+(a Token's, or one cards.csv lacks) is unused, and a variant that is
+also some row's own id is skipped, so a row's own passcode always names
+that row's card.
 
-STALENESS: AliasLedger is last-write-wins with no unregister, and a
-tcgjson re-run can mint a new uuid for a card. Every run therefore
-re-registers every matched passcode, repointing it at the card's
-current uuid. A passcode that matched before and has no single
-candidate now keeps its old alias: to a deleted card it reads as no
-match (get_by_alias -> None, indistinguishable from never aliased); to
-a live card it stays that card. The run logs how many unmatched
-passcodes keep a live earlier alias.
+The table is the whole card pool, so the binder mirrors it: a row
+reuses the stored card its passcode names (unless an earlier row of
+this ingest took it), and after every row is stored, Yu-Gi-Oh cards no
+row took are deleted (never the Unknown sentinel). A table with no card
+rows raises instead.
 
-RUN ORDER: after tcgjson_yugioh, against the same binder file;
-scripts/run_card_binder_ingestion.py runs this straight after it.
+The Yu-Gi-Oh binder is built fresh from this source (re-ingest, don't
+migrate): run it on an empty binder, not on one tcgjson built, whose
+cards carry tcgjson aliases and name-matched passcodes.
 
-RETURN VALUE: [] (no card is created or content-changed; an alias is
-not a content change, per CardIngestionStage.ingest()).
+Collision policy: merge_strategies.keep_incoming_if_content_differs.
 
-PRECONDITION: binder holds Yu-Gi-Oh cards; raises ValueError otherwise.
+LEAN CONTENT (_lean_card_content), keys in this order:
+    name, type ("XYZ Monster", "Spell Card": YGOPRODeck's frame type),
+    attribute, monster_type (a monster's race, "Warrior"), property (a
+    Spell/Trap's race, "Quick-Play"), level, rank (an Xyz monster's
+    level column), link_rating (linkval), link_arrows (linkmarkers, as a
+    list), scale, atk, def, text (desc; a Pendulum's "[ Pendulum Effect
+    ]"/"[ Monster Effect ]" sections kept).
+A row is a monster when its type contains "Monster". Numbers become
+ints; ATK/DEF -1 becomes "?". A Link monster's level (always 0) is
+dropped: it has none. Dropped: archetype (a YGOPRODeck tag, not
+printed: user, 2026-11-07), set and rarity (per printing, in
+cards_cardsets.csv; a metric's job), treated_as (restates the text),
+has_effect (restates type), image URLs, ban lists, formats, staple,
+views/votes, release dates, konami_id.
 """
 
+import ast
 import csv
-import logging
-import unicodedata
-from collections import Counter, defaultdict
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, ClassVar, Iterator
-from uuid import UUID
+from typing import ClassVar, Iterator
+from uuid import UUID, uuid4
+
+from tqdm import tqdm
 
 from src.data_refinement.card_binder.card_binder import CardBinder
-from src.data_refinement.card_binder.card_lookup import CardLookup
+from src.data_refinement.card_binder.lean_content import order_keys, strip_noise
+from src.data_refinement.card_binder.pool_mirror import (
+    delete_cards_except,
+    store_mirrored_card,
+)
 from src.data_refinement.card_binder.ygoprodeck.passcode import passcode_id
 from src.data_retrieval.huggingface_datasets.downloader import (
     HuggingFaceDatasetDownloader,
@@ -68,115 +82,62 @@ from src.data_retrieval.huggingface_datasets.downloader import (
 from src.data_retrieval.huggingface_datasets.ygoprodeck_repos import (
     YGOPRODECK_CARDS_REPO_ID,
 )
+from src.schema.card import GenericCard, Provenance
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
-
-_logger = logging.getLogger(__name__)
+from src.schema.json_types import JsonObject, JsonValue
 
 _CARDS_FILENAME = "cards.csv"
 _VARIANTS_FILENAME = "cards_variants.csv"
-_UNMATCHED_LOG_LIMIT = 30
+
+# The cards.csv columns read
+_CARD_COLUMNS = (
+    "id", "name", "type", "desc", "atk", "def", "level", "race",
+    "attribute", "scale", "linkval", "linkmarkers",
+)  # fmt: skip
+_VARIANT_COLUMNS = ("original", "variant")
+
+# cards.csv "type" values that are not deck cards (see the module docstring)
+_EXCLUDED_TYPES = frozenset({"Token", "Skill Card"})
+_MONSTER_MARKER = "Monster"
+_XYZ_MARKER = "XYZ"
+_LINK_MARKER = "Link"
+
+# Kept keys, in serialization order (text is appended last)
+_LEADING_KEYS = (
+    "name",
+    "type",
+    "attribute",
+    "monster_type",
+    "property",
+    "level",
+    "rank",
+    "link_rating",
+    "link_arrows",
+    "scale",
+    "atk",
+    "def",
+)
+_TEXT_KEY = "text"
+
+# How cards.csv writes an ATK/DEF of "?"
+_UNKNOWN_STAT = -1
+_UNKNOWN_STAT_TEXT = "?"
 
 
 @dataclass(frozen=True)
-class YgoprodeckCardRow:
-    """One cards.csv row, as far as this stage reads it: the alias id
-    (passcode_id of "id") and the card's name."""
+class YgoprodeckCard:
+    """One card row of cards.csv, parsed: its passcode (an alias id),
+    its name, and its lean raw_content."""
 
     passcode: str
     name: str
+    content: JsonObject
 
 
-@dataclass(frozen=True)
-class PasscodeVariant:
-    """One cards_variants.csv row: an alternate-artwork passcode and the
-    original passcode it prints, both as alias ids."""
-
-    original: str
-    variant: str
-
-
-class CardNameIndex:
-    """Yu-Gi-Oh card name -> the one binder card it names, if exactly
-    one (see the module docstring's MATCHING), built once from the
-    binder.
-
-    Single-consumer to YgoprodeckPasscodeAliasStage.
-    """
-
-    def __init__(self, card_lookup: CardLookup) -> None:
-        """
-        Inputs: card_lookup (the Yu-Gi-Oh binder).
-        Output: none (constructor).
-        Side effects: reads every Yu-Gi-Oh card once (one index per
-            _NAME_KEYS key, and card_count).
-        Exceptions: none.
-        """
-        unknown_uuid = CardBinder.unknown_card_uuid(GameId.YUGIOH)
-        self._uuids_by_key: list[dict[str, list[UUID]]] = [
-            defaultdict(list) for _ in _NAME_KEYS
-        ]
-        self._card_count = 0
-        for card in card_lookup.all_cards(GameId.YUGIOH):
-            if card.nocab_uuid == unknown_uuid:
-                continue
-            self._card_count += 1
-            for name_key, index in zip(_NAME_KEYS, self._uuids_by_key):
-                key = name_key(card.name)
-                if key:  # a name of symbols only has no letters-and-digits key
-                    index[key].append(card.nocab_uuid)
-
-    @property
-    def card_count(self) -> int:
-        """How many Yu-Gi-Oh cards the index holds, the Unknown sentinel
-        excluded (0 means tcgjson_yugioh hasn't run).
-
-        Inputs: none. Output: int. Side effects: none. Exceptions: none.
-        """
-        return self._card_count
-
-    def card_uuid(self, name: str) -> UUID | None:
-        """The uuid of the one card name names, or None for no or
-        several candidates.
-
-        Inputs: name. Output: UUID | None. Side effects: none.
-        Exceptions: none.
-
-        Example:
-            >>> CardNameIndex(binder).card_uuid("Dark Magician")
-            UUID('...')
-        """
-        # The first key with any candidate decides
-        for name_key, index in zip(_NAME_KEYS, self._uuids_by_key):
-            key = name_key(name)
-            candidates = index.get(key, []) if key else []
-            if candidates:
-                return candidates[0] if len(candidates) == 1 else None
-        return None
-
-
-def _letters_and_digits(name: str) -> str:
-    """name casefolded, accents decomposed, keeping ASCII letters and
-    digits only ("Maliss <P> Chessy Cat" -> "malisspchessycat").
-
-    Inputs: name. Output: str (may be "" for a name of symbols only).
-    Side effects: none. Exceptions: none.
-    """
-    decomposed = unicodedata.normalize("NFKD", name.casefold())
-    return "".join(ch for ch in decomposed if ch.isascii() and ch.isalnum())
-
-
-# CardNameIndex's keys, strictest first (see the module docstring)
-_NAME_KEYS: tuple[Callable[[str], str], ...] = (
-    lambda name: name,
-    str.casefold,
-    _letters_and_digits,
-)
-
-
-class YgoprodeckPasscodeAliasStage:
-    """YGOPRODeck's cards.csv -> DataSource.YGOPRODECK aliases on the
-    Yu-Gi-Oh binder's existing cards.
+class YgoprodeckCardIngestionStage:
+    """YGOPRODeck's cards.csv -> the Yu-Gi-Oh binder, mirrored: one card
+    per row, passcodes (and their alternate artworks) as aliases.
 
     Single-consumer to src/data_refinement/card_binder/.
     """
@@ -187,173 +148,337 @@ class YgoprodeckPasscodeAliasStage:
     )
 
     def ingest(self, raw_path: Path, binder: CardBinder) -> list[UUID]:
-        """Register every matched passcode (and its variants) as an
-        alias of its binder card.
+        """Make binder's Yu-Gi-Oh cards mirror cards.csv's deck cards.
 
-        Inputs: raw_path (the yugioh-cards mirror directory), binder
-            (the Yu-Gi-Oh binder, already holding tcgjson's cards).
-        Output: [] (no card created or changed).
-        Side effects: reads cards.csv and cards_variants.csv; registers
-            aliases on binder; logs a summary (matched, unmatched,
-            variants, stale aliases) and the most common unmatched
-            names.
+        Inputs: raw_path (Path, the yugioh-cards mirror directory),
+            binder (CardBinder, written as self.SOURCE_GAME).
+        Output: nocab_uuid of every card created or content-changed
+            (deleted cards are not listed).
+        Side effects: reads cards.csv and cards_variants.csv; creates,
+            replaces and deletes Yu-Gi-Oh cards; registers passcode
+            aliases; prints a tqdm progress bar.
         Exceptions: FileNotFoundError if raw_path isn't a complete
-            mirror or a file is missing; ValueError if binder holds no
-            Yu-Gi-Oh card or a row's id isn't a passcode.
+            mirror or a file is missing; ValueError if a header lacks a
+            needed column, an id isn't a passcode, a cell isn't the
+            expected shape, or no row is a card.
 
         Example:
-            >>> YgoprodeckPasscodeAliasStage().ingest(
-            ...     YgoprodeckPasscodeAliasStage.DEFAULT_RAW_PATH, binder)
-            []
+            >>> YgoprodeckCardIngestionStage().ingest(
+            ...     YgoprodeckCardIngestionStage.DEFAULT_RAW_PATH,
+            ...     CardBinder.load([]))[:1]
+            [UUID('...')]
         """
         result: list[UUID] = []
 
-        # Validate inputs
+        # Validate inputs and read the deck cards and their variants
         HuggingFaceDatasetDownloader.require_complete_mirror(raw_path)
-        names = CardNameIndex(binder)
-        if names.card_count == 0:
-            raise ValueError(
-                "the Yu-Gi-Oh binder holds no cards: run tcgjson_yugioh first"
-            )
-
-        # Alias each passcode whose name names one card
-        uuid_by_passcode: dict[str, UUID] = {}
-        unmatched_names: Counter[str] = Counter()
-        kept_alias_count = 0
-        for row in self._read_cards(raw_path / _CARDS_FILENAME):
-            card_uuid = names.card_uuid(row.name)
-            if card_uuid is None:
-                unmatched_names[row.name] += 1
-                if self._has_live_alias(row.passcode, binder):
-                    kept_alias_count += 1
-                continue
-            uuid_by_passcode[row.passcode] = card_uuid
-            binder.register_alias(
-                self.SOURCE_GAME, DataSource.YGOPRODECK, row.passcode, card_uuid
-            )
-
-        # Alias each alternate artwork to its original's card
-        variant_count = self._register_variants(
-            self._read_variants(raw_path / _VARIANTS_FILENAME),
-            uuid_by_passcode,
-            binder,
+        cards = list(_read_cards(raw_path / _CARDS_FILENAME))
+        if not cards:
+            raise ValueError(f"{raw_path / _CARDS_FILENAME} has no deck cards")
+        variants = _variants_by_original(
+            raw_path / _VARIANTS_FILENAME, {card.passcode for card in cards}
         )
 
-        self._log_summary(
-            len(uuid_by_passcode), variant_count, unmatched_names, kept_alias_count
-        )
+        # Store every card, each on a stored card no earlier row took
+        taken: set[UUID] = set()
+        for card in tqdm(cards, desc="ygoprodeck yugioh", unit="card"):
+            stored_uuid, changed = self._store_card(
+                card, variants.get(card.passcode, ()), binder, taken
+            )
+            taken.add(stored_uuid)
+            if changed:
+                result.append(stored_uuid)
+
+        # Drop the cards the table no longer has
+        delete_cards_except(binder, self.SOURCE_GAME, taken)
         return result
 
-    def _read_cards(self, cards_path: Path) -> Iterator[YgoprodeckCardRow]:
-        """Every cards.csv row, parsed.
-
-        Inputs: cards_path. Output: rows, in file order.
-        Side effects: reads the file lazily.
-        Exceptions: FileNotFoundError; ValueError if a row's id isn't a
-            passcode or the header lacks id or name.
-        """
-        for row in _csv_rows(cards_path, ("id", "name")):
-            yield YgoprodeckCardRow(
-                passcode=passcode_id(row["id"]), name=row["name"].strip()
-            )
-
-    def _read_variants(self, variants_path: Path) -> list[PasscodeVariant]:
-        """Every cards_variants.csv row, parsed.
-
-        Inputs: variants_path. Output: the variants, in file order.
-        Side effects: reads the file.
-        Exceptions: FileNotFoundError; ValueError if an id isn't a
-            passcode or the header lacks original or variant.
-        """
-        return [
-            PasscodeVariant(
-                original=passcode_id(row["original"]),
-                variant=passcode_id(row["variant"]),
-            )
-            for row in _csv_rows(variants_path, ("original", "variant"))
-        ]
-
-    def _register_variants(
+    def _store_card(
         self,
-        variants: list[PasscodeVariant],
-        uuid_by_passcode: dict[str, UUID],
+        card: YgoprodeckCard,
+        variant_passcodes: tuple[str, ...],
         binder: CardBinder,
-    ) -> int:
-        """Alias each variant whose original matched to the original's
-        card.
+        taken: set[UUID],
+    ) -> tuple[UUID, bool]:
+        """Create-or-merge one card (store_mirrored_card); register its
+        passcode and variant_passcodes as YGOPRODECK aliases of it.
 
-        Inputs: variants, uuid_by_passcode (this run's matches),
-            binder. Output: how many variants were aliased.
-        Side effects: registers aliases on binder.
-        Exceptions: none.
+        Inputs: card (YgoprodeckCard), variant_passcodes (tuple[str,
+            ...], its alternate artworks' alias ids), binder
+            (CardBinder), taken (set[UUID], uuids earlier rows stored
+            into; read only).
+        Output: (stored nocab_uuid, whether this call created or changed
+            the card).
+        Side effects: creates or replaces one card; registers aliases.
+        Exceptions: none beyond CardBinder's own.
         """
-        result = 0
-        for variant in variants:
-            card_uuid = uuid_by_passcode.get(variant.original)
-            if card_uuid is None:
-                continue
+        existing = self._existing_card(card, binder, taken)
+        stored_uuid, changed = store_mirrored_card(
+            binder, existing, self._build_card(card)
+        )
+        for passcode in (card.passcode, *variant_passcodes):
             binder.register_alias(
-                self.SOURCE_GAME, DataSource.YGOPRODECK, variant.variant, card_uuid
+                self.SOURCE_GAME, DataSource.YGOPRODECK, passcode, stored_uuid
             )
-            result += 1
-        return result
+        return stored_uuid, changed
 
-    def _has_live_alias(self, passcode: str, binder: CardBinder) -> bool:
-        """Whether passcode already aliases a live card (an earlier
-        run's match this run can't repeat).
+    def _existing_card(
+        self, card: YgoprodeckCard, binder: CardBinder, taken: set[UUID]
+    ) -> GenericCard | None:
+        """The stored card whose own passcode is card's, unless an
+        earlier row of this ingest took it. A passcode that aliases a
+        card only as its alternate artwork (its provenance source_id is
+        another passcode) names no card here, so a former variant listed
+        as its own row never takes its old original's uuid.
 
-        Inputs: passcode (alias id), binder. Output: bool.
+        Inputs: card (YgoprodeckCard), binder (CardBinder), taken
+            (set[UUID]).
+        Output: GenericCard | None (None: create a new card).
         Side effects: none. Exceptions: none.
         """
-        existing = binder.get_by_alias(
-            self.SOURCE_GAME, DataSource.YGOPRODECK, passcode
+        stored = binder.get_by_alias(
+            self.SOURCE_GAME, DataSource.YGOPRODECK, card.passcode
         )
-        return existing is not None
+        if stored is None or stored.nocab_uuid in taken:
+            return None
+        if stored.provenance.source_id != card.passcode:
+            return None
+        return stored
 
-    def _log_summary(
-        self,
-        matched_count: int,
-        variant_count: int,
-        unmatched_names: Counter[str],
-        kept_alias_count: int,
-    ) -> None:
-        """Log the counts at INFO and the most common unmatched names at
-        WARNING. kept_alias_count covers cards.csv passcodes only: a
-        variant of an unmatched original isn't checked.
+    def _build_card(self, card: YgoprodeckCard) -> GenericCard:
+        """A fresh GenericCard for card: a new nocab_uuid, provenance
+        DataSource.YGOPRODECK with source_id the passcode.
 
-        Inputs: the counts and unmatched_names. Output: none.
-        Side effects: log lines. Exceptions: none.
+        Inputs: card (YgoprodeckCard). Output: GenericCard.
+        Side effects: none. Exceptions: none.
         """
-        _logger.info(
-            "YGOPRODeck passcodes: %d aliased, %d variants aliased, %d names "
-            "unmatched (%d of them keep an earlier run's alias)",
-            matched_count,
-            variant_count,
-            sum(unmatched_names.values()),
-            kept_alias_count,
+        return GenericCard(
+            nocab_uuid=uuid4(),
+            source_game=self.SOURCE_GAME,
+            name=card.name,
+            raw_content=card.content,
+            provenance=Provenance(
+                data_source=DataSource.YGOPRODECK,
+                source_id=card.passcode,
+                fetched_at=datetime.now(timezone.utc),
+            ),
         )
-        if unmatched_names:
-            _logger.warning(
-                "YGOPRODeck names with no single binder card: %s",
-                unmatched_names.most_common(_UNMATCHED_LOG_LIMIT),
-            )
+
+
+def _read_cards(cards_path: Path) -> Iterator[YgoprodeckCard]:
+    """Every deck-card row of cards.csv (type not in _EXCLUDED_TYPES),
+    parsed, in file order.
+
+    Inputs: cards_path (Path).
+    Output: YgoprodeckCard per deck-card row, lazily.
+    Side effects: reads cards_path.
+    Exceptions: FileNotFoundError; ValueError if the header lacks a
+        _CARD_COLUMNS column, an id isn't a passcode, or a cell isn't
+        the expected shape.
+
+    Example:
+        >>> next(_read_cards(Path(".../cards.csv"))).passcode
+        '80181649'
+    """
+    for row in _csv_rows(cards_path, _CARD_COLUMNS):
+        if row["type"].strip() in _EXCLUDED_TYPES:
+            continue
+        try:
+            content = _lean_card_content(row)
+            passcode = passcode_id(row["id"])
+        except ValueError as error:
+            raise ValueError(f"{cards_path.name} id {row['id']!r}: {error}") from error
+        yield YgoprodeckCard(
+            passcode=passcode, name=str(content["name"]), content=content
+        )
+
+
+def _variants_by_original(
+    variants_path: Path, card_passcodes: set[str]
+) -> dict[str, tuple[str, ...]]:
+    """cards_variants.csv as original passcode -> its variant passcodes
+    (alias ids, file order), for originals in card_passcodes only,
+    leaving out any variant in card_passcodes (a row's own id; see the
+    module docstring's IDENTITY). A variant listed under two originals
+    stays with the first.
+
+    Inputs: variants_path (Path), card_passcodes (set[str], every kept
+        row's alias id).
+    Output: dict[str, tuple[str, ...]]. Side effects: reads the file.
+    Exceptions: FileNotFoundError; ValueError if an id isn't a passcode
+        or the header lacks original or variant.
+
+    Example:
+        >>> _variants_by_original(Path(".../cards_variants.csv"), {"1546123"})
+        {'1546123': ('1546124',)}
+    """
+    result: dict[str, tuple[str, ...]] = {}
+    assigned: set[str] = set()
+    for row in _csv_rows(variants_path, _VARIANT_COLUMNS):
+        original, variant = passcode_id(row["original"]), passcode_id(row["variant"])
+        if original not in card_passcodes or variant in card_passcodes:
+            continue
+        if variant in assigned:
+            continue
+        assigned.add(variant)
+        result[original] = (*result.get(original, ()), variant)
+    return result
 
 
 def _csv_rows(
     path: Path, required_columns: tuple[str, ...]
 ) -> Iterator[dict[str, str]]:
-    """path's rows as dicts, after checking its header has
-    required_columns; a short row's missing cells read as "".
+    """path's rows as {column: cell} for required_columns, after
+    checking the header has them; a short row's missing cells read as "".
 
-    Inputs: path, required_columns. Output: rows, lazily.
-    Side effects: reads path.
+    Inputs: path (Path), required_columns (tuple[str, ...]).
+    Output: rows, lazily. Side effects: reads path.
     Exceptions: FileNotFoundError if path is missing; ValueError if the
         header lacks a required column.
     """
     with open(path, encoding="utf-8", newline="") as csv_file:
         reader = csv.DictReader(csv_file)
-        missing = [c for c in required_columns if c not in (reader.fieldnames or [])]
+        header = reader.fieldnames or []
+        missing = [column for column in required_columns if column not in header]
         if missing:
             raise ValueError(f"{path.name}: no {', '.join(missing)} column")
         for row in reader:
             yield {column: row.get(column) or "" for column in required_columns}
+
+
+def _lean_card_content(row: dict[str, str]) -> JsonObject:
+    """One cards.csv row reduced to the card as a game object (see the
+    module docstring's LEAN CONTENT).
+
+    Inputs: row (dict[str, str], column -> cell text).
+    Output: a new JsonObject, keys in _LEADING_KEYS order then text,
+        empty values removed.
+    Side effects: none.
+    Exceptions: ValueError if a numeric cell isn't a number or
+        linkmarkers isn't a list literal of strings.
+
+    Example:
+        >>> _lean_card_content({"name": "Decode Talker",
+        ...     "type": "Link Monster", "race": "Cyberse",
+        ...     "attribute": "DARK", "level": "0.0", "linkval": "3.0",
+        ...     "linkmarkers": "['Top', 'Bottom-Left']", "atk": "2300.0",
+        ...     "def": "", "scale": "", "desc": "2+ Effect Monsters"})
+        {'name': 'Decode Talker', 'type': 'Link Monster',
+         'attribute': 'DARK', 'monster_type': 'Cyberse', 'link_rating': 3,
+         'link_arrows': ['Top', 'Bottom-Left'], 'atk': 2300,
+         'text': '2+ Effect Monsters'}
+    """
+    card_type = row["type"].strip()
+    content: JsonObject = {
+        "name": row["name"].strip(),
+        "type": card_type,
+        "attribute": row["attribute"].strip(),
+        **_race_field(card_type, row["race"].strip()),
+        **_level_and_link_fields(card_type, row),
+        "atk": _stat(row["atk"]),
+        "def": _stat(row["def"]),
+        _TEXT_KEY: _clean_text(row["desc"]),
+    }
+    return order_keys(strip_noise(content), _LEADING_KEYS, (_TEXT_KEY,))
+
+
+def _race_field(card_type: str, race: str) -> JsonObject:
+    """race under its key for card_type: {"monster_type": race} for a
+    monster, {"property": race} for a Spell or Trap.
+
+    Inputs: card_type (str, cards.csv type), race (str).
+    Output: a one-key JsonObject. Side effects: none. Exceptions: none.
+
+    Example:
+        >>> _race_field("Spell Card", "Quick-Play")
+        {'property': 'Quick-Play'}
+    """
+    if _MONSTER_MARKER in card_type:
+        return {"monster_type": race}
+    return {"property": race}
+
+
+def _level_and_link_fields(card_type: str, row: dict[str, str]) -> JsonObject:
+    """The level column under its key for card_type: "rank" for an Xyz
+    monster, nothing for a Link monster (its link_rating and
+    link_arrows instead), else "level"; scale for any card with one.
+
+    Inputs: card_type (str), row (dict[str, str]).
+    Output: JsonObject (only keys with a value).
+    Side effects: none.
+    Exceptions: ValueError if a numeric cell isn't a whole number or
+        linkmarkers isn't a list literal of strings.
+
+    Example:
+        >>> _level_and_link_fields("XYZ Monster", {"level": "4.0", "scale": "",
+        ...     "linkval": "", "linkmarkers": ""})
+        {'rank': 4}
+    """
+    result: JsonObject = {}
+    level = _whole_number(row["level"])
+    if _LINK_MARKER in card_type:
+        result["link_rating"] = _whole_number(row["linkval"])
+        arrows: list[JsonValue] = [*_link_arrows(row["linkmarkers"])]
+        result["link_arrows"] = arrows
+    elif _XYZ_MARKER in card_type:
+        result["rank"] = level
+    else:
+        result["level"] = level
+    result["scale"] = _whole_number(row["scale"])
+    return {key: value for key, value in result.items() if value not in (None, [])}
+
+
+def _stat(cell: str) -> int | str | None:
+    """An ATK/DEF cell as an int, "?" for _UNKNOWN_STAT, None if empty.
+
+    Inputs: cell (str). Output: int | str | None. Side effects: none.
+    Exceptions: ValueError if cell isn't a whole number.
+    """
+    number = _whole_number(cell)
+    if number == _UNKNOWN_STAT:
+        return _UNKNOWN_STAT_TEXT
+    return number
+
+
+def _whole_number(cell: str) -> int | None:
+    """A float-written count ("4.0") as an int, None if empty.
+
+    Inputs: cell (str). Output: int | None. Side effects: none.
+    Exceptions: ValueError if cell isn't a whole number.
+    """
+    text = cell.strip()
+    if not text:
+        return None
+    number = float(text)
+    if not number.is_integer():
+        raise ValueError(f"not a whole number: {cell!r}")
+    return int(number)
+
+
+def _link_arrows(cell: str) -> list[str]:
+    """linkmarkers ("['Top', 'Bottom-Left']") as a list, [] if empty;
+    parsed with ast.literal_eval (a literal, never code).
+
+    Inputs: cell (str). Output: list[str]. Side effects: none.
+    Exceptions: ValueError if cell isn't a list literal of strings.
+    """
+    text = cell.strip()
+    if not text:
+        return []
+    try:
+        parsed = ast.literal_eval(text)
+    except (SyntaxError, ValueError) as error:
+        raise ValueError(f"linkmarkers is not a list literal: {cell!r}") from error
+    if not isinstance(parsed, list) or not all(isinstance(a, str) for a in parsed):
+        raise ValueError(f"linkmarkers is not a list of strings: {cell!r}")
+    return parsed
+
+
+def _clean_text(desc: str) -> str:
+    """desc with Windows line endings made "\\n" and outer whitespace
+    stripped; section markers and inner line breaks kept.
+
+    Inputs: desc (str). Output: str. Side effects: none.
+    Exceptions: none.
+    """
+    return desc.replace("\r\n", "\n").replace("\r", "\n").strip()

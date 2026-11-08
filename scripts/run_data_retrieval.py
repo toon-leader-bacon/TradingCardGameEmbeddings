@@ -110,6 +110,7 @@ from src.data_retrieval.seventeenlands.downloader import SeventeenLandsDownloade
 from src.data_retrieval.spire_codex.card_downloader import SpireCodexCardDownloader
 from src.data_retrieval.spire_codex.run_downloader import SpireCodexRunDownloader
 from src.data_retrieval.sts_gg.run_downloader import STSGGRunDownloader
+from src.data_retrieval.tcgcsv.downloader import TcgcsvCatalogDownloader
 from src.data_retrieval.tcgjson.downloader import TcgjsonCatalogDownloader
 from src.data_retrieval.zenodo_hearthstone_decks.downloader import (
     ZenodoHearthstoneDecksDownloader,
@@ -349,9 +350,13 @@ def run_tcgjson() -> None:
     _run_standard(TcgjsonCatalogDownloader())
 
 
+def run_tcgcsv() -> None:
+    _run_standard(TcgcsvCatalogDownloader())
+
+
 def run_huggingface_yugioh() -> None:
-    """Mirror feregrino's yugioh-cards, then yugioh-decks (the cards'
-    passcode aliases come before the decks that use them).
+    """Mirror feregrino's yugioh-cards, then yugioh-decks (the cards
+    come before the decks that use them).
     Inputs: none. Output: none. Side effects: each mirror's requests
     and files. Exceptions: whatever the downloader raises."""
     for repo_id in (YGOPRODECK_CARDS_REPO_ID, YGOPRODECK_DECKS_REPO_ID):
@@ -386,6 +391,7 @@ DOWNLOADERS: dict[str, Callable[[], None]] = {
     "spire_codex_runs": run_spire_codex_runs,
     "sts_gg": run_sts_gg,
     "tcgjson": run_tcgjson,
+    "tcgcsv": run_tcgcsv,
     "zenodo_hearthstone_decks": run_zenodo_hearthstone_decks,
 }
 

@@ -7,6 +7,8 @@ and the cursor, plus the durable line-append helpers they share.
     on: RejectLog;
   - cursor.json, {"position", "failures", "plan"}: CursorFile.
 
+read_shard_rows() reads the shards back, read-only (for data_refinement).
+
 Every append is fsynced, so a cursor written after it never runs ahead
 of the data on a power loss.
 """
@@ -21,8 +23,10 @@ import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterator
 
-from src.data_retrieval.download_utils import require_int
+from src.schema.json_checks import require_int, require_object
+from src.schema.json_types import JsonObject
 
 _logger = logging.getLogger(__name__)
 
@@ -209,11 +213,7 @@ class JsonlShards:
         directory.mkdir(parents=True, exist_ok=True)
         self._directory = directory
         self._rows_per_shard = rows_per_shard
-        shard_numbers = {
-            int(match.group(1))
-            for path in directory.iterdir()
-            if (match := _SHARD_PATTERN.match(path.name))
-        }
+        shard_numbers = _shard_numbers(directory)
         self._shard_number = max(shard_numbers, default=0)
 
         # Finish any compression a crash interrupted
@@ -260,7 +260,7 @@ class JsonlShards:
     def _plain_path(self, number: int) -> Path:
         """Shard number's plain path.
         Inputs: number. Output: Path. Side effects: none."""
-        return self._directory / f"decks-{number:05d}.jsonl"
+        return _plain_shard_path(self._directory, number)
 
 
 def cut_torn_last_line(path: Path) -> int:
@@ -365,3 +365,86 @@ def _sha256_of_gzip_content(path: Path) -> str:
     Exceptions: OSError, gzip.BadGzipFile, EOFError for a truncated file."""
     with gzip.open(path, "rb") as file:
         return hashlib.file_digest(file, "sha256").hexdigest()
+
+
+def read_shard_rows(directory: Path) -> Iterator[JsonObject]:
+    """Every complete row of a JsonlShards directory, read-only.
+
+    Shards are read in shard-number order. A number held both as .jsonl
+    and .jsonl.gz (a crash between gzipping and deleting) is read from
+    the .gz only. A last line with no newline (torn by a crash) is
+    skipped. Files are never modified, unlike JsonlShards() and
+    cut_torn_last_line.
+
+    Each shard is read whole and closed before its rows are yielded, so
+    a file is open for milliseconds, not while the caller works through
+    its rows. A plain shard gzipped (and deleted) between listing and
+    opening is read from its .gz. Even so, prefer the crawl stopped: a
+    rotation that lands in those milliseconds fails on Windows (a file
+    open elsewhere can't be deleted) and stops the crawl.
+
+    Inputs: directory (a crawl's raw dir, e.g. data/raw/moxfield).
+    Output: a lazy iterator of parsed rows.
+    Side effects: reads the shard files.
+    Exceptions: FileNotFoundError if directory is missing;
+        json.JSONDecodeError on a complete but malformed line;
+        TypeError if a line is not a JSON object.
+
+    Example:
+        >>> for row in read_shard_rows(Path("data/raw/moxfield")):
+        ...     row["publicId"]
+    """
+    for shard_path in _shard_paths_in_order(directory):
+        yield from _complete_rows(shard_path)
+
+
+def _shard_paths_in_order(directory: Path) -> list[Path]:
+    """One path per shard number, ascending: the .gz when both exist.
+    Inputs: directory. Output: list of paths. Side effects: lists it.
+    Exceptions: FileNotFoundError if directory is missing."""
+    result: list[Path] = []
+    for number in sorted(_shard_numbers(directory)):
+        plain_path = _plain_shard_path(directory, number)
+        gzip_path = plain_path.with_suffix(".jsonl.gz")
+        result.append(gzip_path if gzip_path.is_file() else plain_path)
+    return result
+
+
+def _shard_numbers(directory: Path) -> set[int]:
+    """Every shard number in directory, plain or gzipped.
+    Inputs: directory. Output: set of ints. Side effects: lists it.
+    Exceptions: FileNotFoundError if directory is missing."""
+    return {
+        int(match.group(1))
+        for path in directory.iterdir()
+        if (match := _SHARD_PATTERN.match(path.name))
+    }
+
+
+def _plain_shard_path(directory: Path, number: int) -> Path:
+    """Shard number's plain path (its gzip adds ".gz").
+    Inputs: directory, number. Output: Path. Side effects: none.
+    Exceptions: none."""
+    return directory / f"decks-{number:05d}.jsonl"
+
+
+def _complete_rows(shard_path: Path) -> list[JsonObject]:
+    """The newline-terminated rows of one shard (.jsonl or .jsonl.gz),
+    read whole; a plain shard gone by now is read from its .gz.
+    Inputs: shard_path. Output: list of rows (at most SHARD_ROWS).
+    Side effects: reads the file, closing it before returning.
+    Exceptions: FileNotFoundError if neither form exists;
+        json.JSONDecodeError; TypeError if a row is not an object."""
+    result: list[JsonObject] = []
+    if shard_path.suffix != ".gz" and not shard_path.is_file():
+        shard_path = shard_path.with_suffix(".jsonl.gz")
+    opener = gzip.open if shard_path.suffix == ".gz" else open
+    with opener(shard_path, "rt", encoding="utf-8", newline="") as shard_file:
+        lines = shard_file.readlines()
+    for line in lines:
+        # No newline: torn by a crash, or the open shard's last write
+        if not line.endswith("\n"):
+            break
+        if line.strip():
+            result.append(require_object(json.loads(line)))
+    return result

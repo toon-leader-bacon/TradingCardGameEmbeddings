@@ -45,12 +45,11 @@ from typing import Any, ClassVar
 
 from tqdm import tqdm
 
+from src.schema.json_checks import require_int, require_str
 from src.data_retrieval.download_utils import (
     RESEARCH_USER_AGENT,
     download_to_file,
     paced_get,
-    require_int,
-    require_str,
     sha256_of,
 )
 from src.data_retrieval.downloader import Downloader
@@ -396,7 +395,7 @@ def _hub_file_from_entry(entry: Any) -> HubFile | None:
         _SKIPPED_SILENTLY.
     Exceptions: TypeError if the entry isn't an object, or a file
         entry's path, size or oid (or its lfs oid) isn't the expected
-        type (download_utils' require_str / require_int).
+        type (json_checks' require_str / require_int).
     """
     if not isinstance(entry, dict):
         raise TypeError(f"expected a listing entry object, got {entry!r}")
