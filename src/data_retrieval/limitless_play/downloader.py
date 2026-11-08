@@ -38,11 +38,33 @@ no key (docs.limitlesstcg.com/developer). CONFIRMED LIVE 2026-10-28:
 RATE LIMIT: without a key the server allows 50 requests per 5 minutes
 (its RateLimit-Policy header: "50-in-5min"; q=50; w=300). This
 source's default pacing is therefore 9 requests/min, below that, not
-the container's usual 60. Phase 2 takes about 30 hours for Pokemon and
-about 7 for One Piece or Digimon. The limit is the server's, not one
-per game: run games one after another, not side by side. A 429 is still
-handled: the downloader waits out the window the RateLimit header
-reports and retries the same request.
+the container's usual 60. The limit is the server's, not one per game:
+run games one after another, not side by side. A 429 is still handled:
+the downloader waits out the window the RateLimit header reports and
+retries the same request.
+
+MEASURED SIZES (full downloads, 2026-11-08). Phase 2 is one request per
+tournament, so its time is tournaments / 9 per minute; phase 1 is a
+page per 500 tournaments, a few minutes at most. To estimate a re-run,
+scale the tournament count by however much Limitless has grown.
+
+    game     tournaments   players   standings.jsonl   time at 9/min
+    PTCG          17,157   835,097          1,584 MB          ~32 h
+    VGC            7,553   280,983            332 MB          ~14 h
+    POCKET         4,370   470,606            494 MB           ~8 h
+    DCG            3,749    54,329             61 MB           ~7 h
+    OP             2,957    85,698             88 MB         ~5.5 h
+    GUNDAM           221     3,453              4 MB          ~25 min
+    FW               200     3,601              4 MB          ~22 min
+    SWU              143     3,593              5 MB          ~16 min
+    LORCANA           72     1,410              2 MB           ~8 min
+    BSS               56       999              2 MB           ~6 min
+    DBS               14       526              2 MB           ~2 min
+    RB                10       117            0.02 MB           ~1 min
+
+A resumed run only fetches tournaments not yet in
+standings_manifest.txt, so topping up an existing download takes time
+in proportion to the new tournaments only.
 
 TODO: Check in on the status of the API key application:
 https://play.limitlesstcg.com/account/settings/api
