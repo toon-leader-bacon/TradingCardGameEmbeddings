@@ -1,5 +1,5 @@
 """Typed decks from the MTG deck-site crawls (Archidekt, Moxfield,
-Deckstats): what each site's parser emits and the shared loop reads.
+Deckstats, MTGTop8): what each site's parser emits and the shared loop reads.
 
 An entry carries every card id its site gives, so the matcher can try
 the strongest first (mtg_card_matcher.py).

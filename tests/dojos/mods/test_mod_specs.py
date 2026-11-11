@@ -116,6 +116,16 @@ class TestDefaults:
             GameId.MTG,
             GameId.POKEMON,
             GameId.DOMINION,
+            GameId.HEARTHSTONE,
+            GameId.YUGIOH,
+            GameId.ONE_PIECE,
+            GameId.DIGIMON,
+            GameId.GUNDAM,
+            GameId.DRAGON_BALL_FUSION_WORLD,
+            GameId.DRAGON_BALL_MASTERS,
+            GameId.BATTLE_SPIRITS_SAGA,
+            GameId.STAR_WARS_UNLIMITED,
+            GameId.LORCANA,
         } <= set(DEFAULT_AUGMENTATIONS)
 
     def test_gwent_defaults(self) -> None:
@@ -128,7 +138,8 @@ class TestDefaults:
         ]
 
     def test_a_game_without_defaults_gets_none(self) -> None:
-        assert default_augmentations_for(GameId.YUGIOH) == ()
+        # Riftbound has a binder but no deck box, so no contrastive dojo
+        assert default_augmentations_for(GameId.RIFTBOUND) == ()
 
 
 class TestPipelineTallies:

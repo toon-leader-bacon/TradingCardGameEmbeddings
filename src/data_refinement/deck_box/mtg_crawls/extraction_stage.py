@@ -1,5 +1,5 @@
 """The loop every MTG deck-site crawl shares (Archidekt, Moxfield,
-Deckstats): crawl shards -> the MTG DeckBox.
+Deckstats, MTGTop8): crawl shards -> the MTG DeckBox.
 
 See src/data_refinement/deck_box/extraction.py for the shared
 DeckExtractionStage interface. Each site's stage (its own package,
@@ -7,8 +7,9 @@ e.g. archidekt_decks/) subclasses CrawledMtgDeckExtractionStage,
 setting DATA_SOURCE and DEFAULT_RAW_PATH and handing in its parser.
 
 RAW SHAPE: a crawl's raw dir of JsonlShards (decks-NNNNN.jsonl[.gz]),
-read with read_shard_rows(); one row per deck, in the site's own schema,
-which only the site's parser reads.
+read with read_shard_rows() (MTGTop8: a root of one such dir per
+format, through the shard_rows hook); one row per deck, in the site's
+own schema, which only the site's parser reads.
 
 PER ROW: parser.parse(row) gives a CrawledDeck (only the cards that
 count as the deck) or a DeckSkip. A CrawledDeck outside DECK_SIZES is
@@ -32,7 +33,7 @@ import logging
 from collections import Counter
 from enum import StrEnum
 from pathlib import Path
-from typing import ClassVar, Protocol
+from typing import ClassVar, Iterator, Protocol
 from uuid import UUID
 
 from tqdm import tqdm
@@ -82,7 +83,9 @@ class CrawledMtgDeckExtractionStage:
     """Crawl shards -> GenericDecks (MTG), for one site.
 
     A site's subclass sets DATA_SOURCE and DEFAULT_RAW_PATH and hands its
-    parser (a Strategy) to __init__; it overrides no steps.
+    parser (a Strategy) to __init__. The one step it may override is
+    shard_rows (Template Method hook), for a raw layout other than one
+    shard directory.
     """
 
     SOURCE_GAME: ClassVar[GameId] = GameId.MTG
@@ -128,7 +131,7 @@ class CrawledMtgDeckExtractionStage:
         skip_reasons: Counter[DeckSkipReason] = Counter()
 
         # Store each full deck once
-        rows = read_shard_rows(shards_dir)
+        rows = self.shard_rows(shards_dir)
         for row in tqdm(rows, desc=f"{self.DATA_SOURCE.value} decks", unit="deck"):
             parsed = self._parser.parse(row)
             if isinstance(parsed, DeckSkip):
@@ -154,6 +157,22 @@ class CrawledMtgDeckExtractionStage:
 
         self._log_summary(outcomes, skip_reasons, matcher)
         return result
+
+    def shard_rows(self, shards_dir: Path) -> Iterator[JsonObject]:
+        """Template Method hook: the crawl's raw rows. Default: the one
+        JsonlShards directory (read_shard_rows); MTGTop8, which keeps
+        one directory per format, overrides it.
+
+        Inputs: shards_dir (an existing directory).
+        Output: a lazy iterator of rows.
+        Side effects: reads the shard files.
+        Exceptions: as read_shard_rows.
+
+        Example:
+            >>> next(MoxfieldDeckExtractionStage().shard_rows(Path("data/raw/moxfield")))
+            {'publicId': ..., ...}
+        """
+        return read_shard_rows(shards_dir)
 
     def _log_summary(
         self,

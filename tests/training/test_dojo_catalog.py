@@ -463,6 +463,27 @@ class TestCardShelf:
         assert loads == [[path]]
 
 
+# Every game with a final deck box: one contrastive key per style each
+_DECK_BOX_GAMES = {
+    "gwent",
+    "flesh_and_blood",
+    "slay_the_spire_2",
+    "mtg",
+    "pokemon",
+    "dominion",
+    "hearthstone",
+    "yugioh",
+    "one_piece",
+    "digimon",
+    "gundam",
+    "dragon_ball_fusion_world",
+    "dragon_ball_masters",
+    "battle_spirits_saga",
+    "star_wars_unlimited",
+    "lorcana",
+}
+
+
 class TestContrastiveEntries:
     def test_one_per_style_and_game_with_a_deck_box(self) -> None:
         contrastive = {
@@ -470,14 +491,7 @@ class TestContrastiveEntries:
             for key, recipe in DOJO_CATALOG.items()
             if isinstance(recipe, ContrastiveDojoRecipe)
         }
-        games = {
-            "gwent",
-            "flesh_and_blood",
-            "slay_the_spire_2",
-            "mtg",
-            "pokemon",
-            "dominion",
-        }
+        games = _DECK_BOX_GAMES
         prefixes = {
             "contrastive": SingleCardStyle,
             "contrastive_missing_card": MissingCardStyle,
@@ -500,14 +514,7 @@ class TestContrastiveEntries:
             for key, recipe in DOJO_CATALOG.items()
             if isinstance(recipe, TeacherContrastiveDojoRecipe)
         }
-        games = {
-            "gwent",
-            "flesh_and_blood",
-            "slay_the_spire_2",
-            "mtg",
-            "pokemon",
-            "dominion",
-        }
+        games = _DECK_BOX_GAMES
         assert set(teacher_sourced) == {f"teacher_contrastive.{game}" for game in games}
         for key, recipe in teacher_sourced.items():
             assert key == f"teacher_contrastive.{recipe.game.value}"
@@ -815,7 +822,7 @@ class TestMetricDojoAugmentations:
 
     def test_a_game_without_defaults_adds_nothing(self) -> None:
         dojo = _stub_dojo("x.y")
-        append_augmentations(dojo, "x.y", GameId.YUGIOH, self._context())
+        append_augmentations(dojo, "x.y", GameId.RIFTBOUND, self._context())
         assert dojo.data_mod_pipeline.mods == []
 
 

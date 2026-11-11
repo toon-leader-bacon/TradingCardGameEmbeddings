@@ -58,6 +58,9 @@ from src.data_refinement.deck_box.isotropic.extraction_stage import (
 from src.data_refinement.deck_box.limitless_play.extraction_stage import (
     LimitlessPlayDeckExtractionStage,
 )
+from src.data_refinement.deck_box.mtgtop8_decks.extraction_stage import (
+    MtgTop8DeckExtractionStage,
+)
 from src.data_refinement.deck_box.limitless_play.tcg_extraction_stages import (
     ALL_TCG_STAGES,
 )
@@ -167,6 +170,10 @@ _STAGES: dict[str, tuple[DeckExtractionStage, Callable[[], Path]]] = {
     "deckstats_decks": (
         DeckstatsDeckExtractionStage(),
         lambda: DeckstatsDeckExtractionStage.DEFAULT_RAW_PATH,
+    ),
+    "mtgtop8_decks": (
+        MtgTop8DeckExtractionStage(),
+        lambda: MtgTop8DeckExtractionStage.DEFAULT_RAW_PATH,
     ),
     # Limitless's other card games: limitless_one_piece, limitless_lorcana, ...
     **{

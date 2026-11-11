@@ -50,11 +50,21 @@ server's rate limit is shared by all of them.
     PYTHONPATH=. python3 scripts/run_data_retrieval.py --source limitless_play --game OP --game DCG
     PYTHONPATH=. python3 scripts/run_data_retrieval.py --source limitless_play --game all
 
+--mtgtop8-format applies only to mtgtop8: an MTGTop8 format code (VI,
+LE, PAU, PREM, EDH, MO, ...; repeat it for several), or `all` (the
+default) for every MtgTop8Format in its declaration order, eternal
+formats first. Formats run in series, in one process, sharing one rate
+limiter; the first format that fails stops the rest (a block by the
+site would fail them all).
+
+    PYTHONPATH=. python3 scripts/run_data_retrieval.py --source mtgtop8 --mtgtop8-format VI --mtgtop8-format LE
+
 --rpm and --max-items apply only to the resumable deck crawls
-(CRAWL_DOWNLOADERS: archidekt, moxfield, deckstats) and only with
---source: --rpm sets the session's request rate (default 60/min),
+(CRAWL_DOWNLOADERS: archidekt, moxfield, deckstats; and mtgtop8) and
+only with --source: --rpm sets the session's request rate (default
+60/min; mtgtop8's default is 12/min, robots.txt's Crawl-delay),
 --max-items caps how many plan items the session fetches (default: walk
-to the end of the plan). A capped session saves its cursor, so the next
+to the end of the plan; for mtgtop8, per format). A capped session saves its cursor, so the next
 run picks up where it stopped.
 """
 
@@ -101,6 +111,11 @@ from src.data_retrieval.limitless_play.downloader import (
 )
 from src.data_retrieval.moxfield.downloader import MoxfieldDeckDownloader
 from src.data_retrieval.mtgjson_decks.downloader import MtgjsonDeckFilesDownloader
+from src.data_retrieval.mtgtop8.downloader import (
+    DEFAULT_REQUESTS_PER_MINUTE as MTGTOP8_DEFAULT_RPM,
+    MtgTop8DeckDownloader,
+)
+from src.data_retrieval.mtgtop8.formats import MtgTop8Format
 from src.data_retrieval.pitchstack.downloader import PitchstackDeckDownloader
 from src.data_retrieval.play_gwent.downloader import PlayGwentDownloader
 from src.data_retrieval.pokemon_tcg.downloader import PokemonTcgDataDownloader
@@ -127,7 +142,7 @@ _logger = script_logger(__file__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# --game's value for every LimitlessGame
+# --game's (and --mtgtop8-format's) value for every member
 _ALL_GAMES = "all"
 
 # Stable, non-dated source URLs these two downloaders require but don't
@@ -180,8 +195,9 @@ class CrawlSessionOptions:
     """One crawl session's limits, from --rpm and --max-items.
 
     requests_per_minute: the RateLimiter's rate; None keeps the
-        Downloader default (60/min).
-    max_items: plan items one session fetches; None walks to the end.
+        Downloader default (60/min; mtgtop8's MTGTOP8_DEFAULT_RPM).
+    max_items: plan items one session fetches; None walks to the end
+        (for mtgtop8, per format).
     """
 
     requests_per_minute: float | None = None
@@ -195,6 +211,11 @@ CRAWL_DOWNLOADERS: dict[str, Callable[..., Downloader]] = {
     "moxfield": MoxfieldDeckDownloader,
     "deckstats": DeckstatsDeckDownloader,
 }
+
+
+# The sources --rpm and --max-items reach: the crawls above, plus mtgtop8
+# (its own runner: one downloader per format)
+_SESSION_OPTION_SOURCES = (*CRAWL_DOWNLOADERS, "mtgtop8")
 
 
 def run_crawl(name: str, options: CrawlSessionOptions) -> None:
@@ -318,6 +339,59 @@ def limitless_games_from(values: list[str] | None) -> tuple[LimitlessGame, ...]:
     return tuple(result)
 
 
+def run_mtgtop8(
+    formats: tuple[MtgTop8Format, ...] = tuple(MtgTop8Format),
+    options: CrawlSessionOptions = CrawlSessionOptions(),
+) -> None:
+    """Crawl each MTGTop8 format, one after another, all paced by one
+    RateLimiter (options' rate, else MTGTop8's default).
+    Inputs: formats (from --mtgtop8-format; every format by default),
+        options (--rpm; --max-items caps each format's session).
+    Output: none. Side effects: each format's requests and files.
+    Exceptions: whatever a format's downloader raises; the formats
+        after it don't run."""
+    rate_limiter = RateLimiter(
+        requests_per_minute=options.requests_per_minute or MTGTOP8_DEFAULT_RPM
+    )
+    _logger.info(
+        "mtgtop8 session: %s/min, up to %s items per format, formats %s",
+        rate_limiter.requests_per_minute,
+        options.max_items or "all",
+        ", ".join(deck_format.value for deck_format in formats),
+    )
+    for deck_format in formats:
+        _logger.info("MTGTop8 format %s", deck_format.value)
+        _run_standard(
+            MtgTop8DeckDownloader(
+                deck_format,
+                rate_limiter=rate_limiter,
+                max_decks_per_session=options.max_items,
+            )
+        )
+
+
+def mtgtop8_formats_from(values: list[str] | None) -> tuple[MtgTop8Format, ...]:
+    """The formats --mtgtop8-format names, in order and without repeats;
+    `all`, or no flag, is every MtgTop8Format in declaration order.
+    Inputs: values (args.mtgtop8_format; None when not given).
+    Output: tuple of formats, never empty.
+    Side effects: none. Exceptions: none (argparse checked the choices).
+
+    Example:
+        >>> mtgtop8_formats_from(["LE", "VI", "LE"])
+        (<MtgTop8Format.LEGACY: 'LE'>, <MtgTop8Format.VINTAGE: 'VI'>)
+    """
+    result: list[MtgTop8Format] = []
+    for value in values or [_ALL_GAMES]:
+        formats = (
+            list(MtgTop8Format) if value == _ALL_GAMES else [MtgTop8Format(value)]
+        )
+        result.extend(
+            deck_format for deck_format in formats if deck_format not in result
+        )
+    return tuple(result)
+
+
 def run_play_gwent() -> None:
     _run_standard(PlayGwentDownloader())
 
@@ -382,6 +456,7 @@ DOWNLOADERS: dict[str, Callable[[], None]] = {
     "isotropic": run_isotropic,
     "limitless_play": run_limitless_play,
     "mtgjson_decks": run_mtgjson_decks,
+    "mtgtop8": run_mtgtop8,
     "pitchstack": run_pitchstack,
     "play_gwent": run_play_gwent,
     "pokemon_tcg": run_pokemon_tcg,
@@ -469,11 +544,14 @@ def run_one(
     pause_on_exit: bool,
     crawl_options: CrawlSessionOptions | None = None,
     limitless_games: tuple[LimitlessGame, ...] = (),
+    mtgtop8_formats: tuple[MtgTop8Format, ...] = (),
 ) -> None:
     _logger.info("=== %s ===", name)
     exit_code = 0
     try:
-        if crawl_options is not None:
+        if mtgtop8_formats:
+            run_mtgtop8(mtgtop8_formats, crawl_options or CrawlSessionOptions())
+        elif crawl_options is not None:
             run_crawl(name, crawl_options)
         elif limitless_games:
             run_limitless_play(limitless_games)
@@ -517,7 +595,8 @@ def parse_args() -> argparse.Namespace:
         "--rpm",
         type=float,
         help="Requests per minute for this session (crawls only: "
-        f"{', '.join(CRAWL_DOWNLOADERS)}). Default 60.",
+        f"{', '.join(_SESSION_OPTION_SOURCES)}). Default 60; mtgtop8 "
+        f"{MTGTOP8_DEFAULT_RPM:g} (robots.txt).",
     )
     parser.add_argument(
         "--max-items",
@@ -532,15 +611,24 @@ def parse_args() -> argparse.Namespace:
         help="A Limitless game id, or 'all' (limitless_play only; repeatable; "
         "games run in series). Default PTCG.",
     )
+    parser.add_argument(
+        "--mtgtop8-format",
+        action="append",
+        choices=[deck_format.value for deck_format in MtgTop8Format] + [_ALL_GAMES],
+        help="An MTGTop8 format code, or 'all' (mtgtop8 only; repeatable; "
+        "formats run in series). Default all.",
+    )
     add_logging_arguments(parser)
     args = parser.parse_args()
     if args.game and args.source != "limitless_play":
         parser.error("--game needs --source limitless_play")
+    if args.mtgtop8_format and args.source != "mtgtop8":
+        parser.error("--mtgtop8-format needs --source mtgtop8")
     if args.rpm is not None or args.max_items is not None:
-        if args.source not in CRAWL_DOWNLOADERS:
+        if args.source not in _SESSION_OPTION_SOURCES:
             parser.error(
                 "--rpm and --max-items need --source with one of: "
-                + ", ".join(CRAWL_DOWNLOADERS)
+                + ", ".join(_SESSION_OPTION_SOURCES)
             )
         if args.rpm is not None and args.rpm <= 0:
             parser.error(f"--rpm must be > 0, got {args.rpm}")
@@ -567,14 +655,20 @@ def main() -> None:
 
     if args.source:
         crawl_options = None
-        if args.source in CRAWL_DOWNLOADERS:
+        if args.source in _SESSION_OPTION_SOURCES:
             crawl_options = CrawlSessionOptions(args.rpm, args.max_items)
         limitless_games = limitless_games_from(args.game)
+        mtgtop8_formats = (
+            mtgtop8_formats_from(args.mtgtop8_format)
+            if args.source == "mtgtop8"
+            else ()
+        )
         run_one(
             args.source,
             pause_on_exit=args.pause_on_exit,
             crawl_options=crawl_options,
             limitless_games=limitless_games,
+            mtgtop8_formats=mtgtop8_formats,
         )
         return
 

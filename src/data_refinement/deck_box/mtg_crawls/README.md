@@ -1,6 +1,6 @@
 # `mtg_crawls/`: MTG decks from deck-site crawls
 
-Three deck sites' crawls go into the MTG deck box (`data/final/decks/mtg.db`),
+Four deck sites' crawls go into the MTG deck box (`data/final/decks/mtg.db`),
 next to the mtgjson and 17lands decks. Each site has its own package:
 
 | Site | Package | `--source` | Raw dir (`src/data_retrieval/<site>/`) | Card ids it gives |
@@ -8,6 +8,7 @@ next to the mtgjson and 17lands decks. Each site has its own package:
 | Archidekt | `archidekt_decks/` | `archidekt_decks` | `data/raw/archidekt/` | Scryfall oracle id |
 | Moxfield | `moxfield_decks/` | `moxfield_decks` | `data/raw/moxfield/` | Scryfall printing id |
 | Deckstats | `deckstats_decks/` | `deckstats_decks` | `data/raw/deckstats/` (public decks; `private/` is not read) | Scryfall printing id (absent on 0.2% of entries) |
+| MTGTop8 | `mtgtop8_decks/` | `mtgtop8_decks` | `data/raw/mtgtop8/<format>/` (every format directory) | none: names only, from the MTGO text export |
 
 **Run these only after the MTG binder carries `SCRYFALL_PRINTING` aliases**
 (the Scryfall card stage registers them; a binder built before 2026-11-08 has
@@ -32,7 +33,7 @@ run won't reproduce.
 
   It extends `CachedCardMatcher` (`../card_matching.py`), so each distinct
   card is looked up once and every match is counted.
-- `extraction_stage.py`: `CrawledMtgDeckExtractionStage` is the loop the three
+- `extraction_stage.py`: `CrawledMtgDeckExtractionStage` is the loop the four
   sites share:
   - it reads the shards with `read_shard_rows`
     (`src/data_retrieval/resumable_crawl/crawl_files.py`); run it with the
@@ -44,7 +45,8 @@ run won't reproduce.
     unmatched card names.
 
   A site's stage subclasses it, setting `DATA_SOURCE`, `DEFAULT_RAW_PATH` and
-  the parser.
+  the parser. A site whose raw dir is not one shard directory overrides
+  `shard_rows` (MTGTop8 reads one per format).
 
 Each site's `deck_parser.py` is the only code that knows that site's schema.
 
@@ -62,6 +64,13 @@ The parsers decide by what a section does, not what it is called:
 - **Deckstats:** zones `main` and `commander`, plus entries flagged
   `is_commander` or `is_companion` (Deckstats files companions under
   `sideboard`). Token cards never count.
+- **MTGTop8:** the export's main section, plus its "Sideboard" section by
+  format: all of it in the Commander formats (EDH, cEDH, EDHM, EDHP), where
+  MTGTop8 files the commander(s); one copy of each of the ten companions in
+  other constructed formats; nothing in Limited, where it is the unplayed
+  pool. MTGO's `Fire/Ice` is read as `Fire // Ice`. MTGO drops accents, so a
+  name like `Lim-Dul's Vault` does not match the binder's `Lim-Dûl's Vault`
+  and falls to Unknown.
 
 Dropped everywhere: between-games sideboards, maybeboards, tokens,
 attractions, stickers, contraptions, schemes, planes.
@@ -82,5 +91,5 @@ attractions, stickers, contraptions, schemes, planes.
 
 A deck's uuid is its copy-count multiset hash, so a list posted twice, or on
 two sites, is stored once, under the first row's name (its site id when
-unnamed) and provenance (`DataSource.ARCHIDEKT` / `MOXFIELD` / `DECKSTATS` plus
+unnamed) and provenance (`DataSource.ARCHIDEKT` / `MOXFIELD` / `DECKSTATS` / `MTGTOP8` plus
 the site's deck id).

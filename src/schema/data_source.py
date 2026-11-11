@@ -135,6 +135,9 @@ class DataSource(str, Enum):
     DECKSTATS = "deckstats"  # deckstats.net decks; source_id is idsdeck
     # (see src/data_retrieval/deckstats/ and
     # src/data_refinement/deck_box/deckstats_decks/).
+    MTGTOP8 = "mtgtop8"  # mtgtop8.com tournament decks; source_id is the
+    # deck id (d=) (see src/data_retrieval/mtgtop8/ and
+    # src/data_refinement/deck_box/mtgtop8_decks/).
     SYSTEM = "system"  # minted internally by CardBinder itself for
     # synthetic sentinel cards (e.g. the "Unknown" fallback card — see
     # CardBinder.ensure_unknown_card()), never fetched from an external

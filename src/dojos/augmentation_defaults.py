@@ -127,14 +127,124 @@ _DOMINION_MASKS: DropTable[FieldMask] = DropTable.of(
 # hearthstonejson (card_binder/hearthstonejson/ingestion_stage.py). A deck
 # is one class plus neutrals, so cardClass is the deck-defining field;
 # classes (multiclass cards) and runeCost (Death Knight only) name it too.
-# No Hearthstone deck box exists yet, so these weights are by analogy with
-# Gwent's faction, not measured.
+# Set by analogy with Gwent before Hearthstone had decks; measured
+# 2026-11-11 and kept: cardClass 57% vs 19%, set 24% vs 14%.
 _HEARTHSTONE_MASKS: DropTable[FieldMask] = DropTable.of(
     [
         (25, FieldMask()),
         (50, FieldMask.of_keys("cardClass", "classes", "runeCost")),
         (15, FieldMask.of_keys("name")),
         (10, FieldMask.of_keys("set")),
+    ]
+)
+
+# The games below were measured on 2026-11-11 over each deck box (up to
+# 20k sampled decks): share of same-deck card pairs with equal values vs
+# pairs from two random decks. Fields at about 1x (type, rarity, cost,
+# stats) are left to the random key mask.
+
+# One Piece (tcgjson binder, Limitless decks). A deck is one leader's one
+# or two colors: color 80% vs 16%; types (crew) 15% vs 3%.
+_ONE_PIECE_MASKS: DropTable[FieldMask] = DropTable.of(
+    [
+        (25, FieldMask()),
+        (50, FieldMask.of_keys("color")),
+        (15, FieldMask.of_keys("types")),
+        (10, FieldMask.of_keys("name")),
+    ]
+)
+
+# Digimon (tcgjson binder, Limitless decks). color 48% vs 10%, and the
+# digivolve colors repeat it (24% vs 7%); set 15% vs 2%; digimon_type and
+# attribute 6% vs 1% and 21% vs 10%.
+_DIGIMON_MASKS: DropTable[FieldMask] = DropTable.of(
+    [
+        (25, FieldMask()),
+        (
+            45,
+            FieldMask.of_keys("color", "digivolve_1_color", "digivolve_2_color"),
+        ),
+        (15, FieldMask.of_keys("set")),
+        (15, FieldMask.of_keys("digimon_type", "attribute")),
+    ]
+)
+
+# Gundam (tcgcsv binder, Limitless decks). color 52% vs 23%; traits 10%
+# vs 3%, and link_condition names a trait's pilots (3x).
+_GUNDAM_MASKS: DropTable[FieldMask] = DropTable.of(
+    [
+        (30, FieldMask()),
+        (45, FieldMask.of_keys("color")),
+        (15, FieldMask.of_keys("traits", "link_condition")),
+        (10, FieldMask.of_keys("name")),
+    ]
+)
+
+# Dragon Ball Super Fusion World (tcgcsv binder, Limitless decks). Decks
+# are one color: 100% vs 25%. cost spells the color out ("2(R)"), so it is
+# masked with it (11% vs 3%); traits 17% vs 6%.
+_DB_FUSION_WORLD_MASKS: DropTable[FieldMask] = DropTable.of(
+    [
+        (25, FieldMask()),
+        (50, FieldMask.of_keys("color", "cost")),
+        (15, FieldMask.of_keys("traits")),
+        (10, FieldMask.of_keys("name")),
+    ]
+)
+
+# Dragon Ball Super Masters (tcgcsv binder, Limitless decks; only 367
+# decks). color 74% vs 17%; energy_cost spells the color out ("2(YY)"),
+# so it is masked with it; special_traits and character 1.7x and 5.3x.
+_DB_MASTERS_MASKS: DropTable[FieldMask] = DropTable.of(
+    [
+        (25, FieldMask()),
+        (50, FieldMask.of_keys("color", "energy_cost")),
+        (15, FieldMask.of_keys("special_traits", "character")),
+        (10, FieldMask.of_keys("name")),
+    ]
+)
+
+# Battle Spirits Saga (tcgcsv binder, Limitless decks). color 57% vs 19%;
+# family 6% vs 1%.
+_BATTLE_SPIRITS_SAGA_MASKS: DropTable[FieldMask] = DropTable.of(
+    [
+        (30, FieldMask()),
+        (45, FieldMask.of_keys("color")),
+        (15, FieldMask.of_keys("family")),
+        (10, FieldMask.of_keys("name")),
+    ]
+)
+
+# Star Wars: Unlimited (tcgjson binder, Limitless decks). aspects 26% vs
+# 7%; set is 64% vs 55% (few sets yet), not deck-naming; traits 1.6x.
+_STAR_WARS_UNLIMITED_MASKS: DropTable[FieldMask] = DropTable.of(
+    [
+        (35, FieldMask()),
+        (40, FieldMask.of_keys("aspects")),
+        (15, FieldMask.of_keys("traits")),
+        (10, FieldMask.of_keys("name")),
+    ]
+)
+
+# Lorcana (tcgjson binder, Limitless decks). A deck is two inks: ink 49%
+# vs 16%. Nothing else is above 1.3x.
+_LORCANA_MASKS: DropTable[FieldMask] = DropTable.of(
+    [
+        (30, FieldMask()),
+        (50, FieldMask.of_keys("ink")),
+        (10, FieldMask.of_keys("classifications")),
+        (10, FieldMask.of_keys("name")),
+    ]
+)
+
+# Yu-Gi-Oh (YGOPRODeck binder and decks). No field nearly names a deck:
+# archetypes live in the name and text, not a field. monster_type 14% vs
+# 3%, attribute 17% vs 10%; the name carries the archetype.
+_YUGIOH_MASKS: DropTable[FieldMask] = DropTable.of(
+    [
+        (50, FieldMask()),
+        (30, FieldMask.of_keys("monster_type", "attribute")),
+        (20, FieldMask.of_keys("name")),
     ]
 )
 
@@ -162,6 +272,15 @@ DEFAULT_AUGMENTATIONS: Mapping[GameId, tuple[ModSpec, ...]] = {
     GameId.POKEMON: _standard_augmentations(_POKEMON_MASKS),
     GameId.DOMINION: _standard_augmentations(_DOMINION_MASKS),
     GameId.HEARTHSTONE: _standard_augmentations(_HEARTHSTONE_MASKS),
+    GameId.ONE_PIECE: _standard_augmentations(_ONE_PIECE_MASKS),
+    GameId.DIGIMON: _standard_augmentations(_DIGIMON_MASKS),
+    GameId.GUNDAM: _standard_augmentations(_GUNDAM_MASKS),
+    GameId.DRAGON_BALL_FUSION_WORLD: _standard_augmentations(_DB_FUSION_WORLD_MASKS),
+    GameId.DRAGON_BALL_MASTERS: _standard_augmentations(_DB_MASTERS_MASKS),
+    GameId.BATTLE_SPIRITS_SAGA: _standard_augmentations(_BATTLE_SPIRITS_SAGA_MASKS),
+    GameId.STAR_WARS_UNLIMITED: _standard_augmentations(_STAR_WARS_UNLIMITED_MASKS),
+    GameId.LORCANA: _standard_augmentations(_LORCANA_MASKS),
+    GameId.YUGIOH: _standard_augmentations(_YUGIOH_MASKS),
 }
 
 
