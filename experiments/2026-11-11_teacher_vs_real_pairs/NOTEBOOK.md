@@ -1,6 +1,6 @@
 # Teacher-neighbour pairs against real-deck pairs for contrastive pre-training
 
-**Status:** proposed
+**Status:** running
 **Dates:** 2026-11-11 -
 **Parent:** [2026-10-11_model_by_diet_r2](../2026-10-11_model_by_diet_r2/NOTEBOOK.md) (contrastive as the pre-training direction); teacher smoke test in `plans/teacher_student_training.md` · **Branch:** `feature/teacher-cooccurrence`
 
@@ -439,6 +439,20 @@ Decided:
   including per-round TEST.
 - The pilot eval rows stay in `results/` under `pilot*` labels. The
   controls (`frozen_mean`, `untrained`) are final and are not re-run.
+
+### 2026-11-11 17:44 · Main queue launched early (PI)
+
+- The human halted the MTG crawls at 17:38 to free the machine. They
+  had been at about 1 deck/min since 09:36: IPv6 is dropped on this
+  network, fixed with `run_data_retrieval.py --ipv4` (92c6d97). So the
+  main runs start now instead of after 21:30. The machine is idle for
+  both arms: no crawl load in either, which removes one wall-clock
+  difference between them.
+- Handed to `lab_technician`: main_R, then main_T, at commit 92c6d97
+  (clean tree). Pre-flight: 21.7 GB RAM free, 17.0 GB VRAM free, 910 GB
+  disk; `--check` passed for both main configs. Queue:
+  `data/runs/2026-11-11_teacher_vs_real_pairs/queue.csv`. Estimated
+  ~3.4 h + ~4.1 h, so done around 01:30.
 
 ## Open questions
 
