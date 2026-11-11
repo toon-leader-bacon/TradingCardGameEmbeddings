@@ -375,6 +375,71 @@ Deferred to later experiments:
 - thawing ModernBERT (series 3);
 - metric fine-tuning (experiment B).
 
+### 2026-11-11 14:15 · LR pilot and evaluation dry run (PI)
+
+What:
+- Ran the six-run LR pilot (`analysis/run_pilot.sh`, 11:51-13:30, all
+  exit 0), 3 × 1,000 steps per run.
+- Applied the pick rule (`analysis/pick_lr.py` → `results/lr_pilot.csv`).
+- Dry-ran `analysis/evaluate.py` and the new `analysis/compare.py` on
+  the two 3e-4 pilot checkpoints and the two controls, to test the
+  evaluation code before the main runs.
+
+Seen, pick rule: median own-task normalized TEST loss over the 7 big
+games, last round (other arm's task in brackets).
+
+| encoder_lr | R | T | ms/step R / T |
+|---|---|---|---|
+| 1e-4 | 0.882 (0.851) | 0.753 (0.965) | 159 / 185 |
+| **3e-4** | **0.855** (0.832) | **0.690** (0.964) | 151 / 185 |
+| 1e-3 | 0.892 (0.875) | 0.731 (0.984) | 151 / 183 |
+
+- Both arms pick **3e-4**. It is the clear minimum in both, so the
+  tie rule did not apply.
+- Cross-task losses are asymmetric: R training lowers T's loss (0.83),
+  but T training barely lowers R's (0.96).
+
+Seen, evaluation dry run (`results/eval_summary.csv`; pilot checkpoints
+after only 3k steps, so not a result):
+
+| encoder | weighted deck AUC | Gwent | linear-cls | eff. rank | mean cos |
+|---|---|---|---|---|---|
+| frozen whitened mean | 0.687 | 0.633 | 0.927 | 272 | 0.02 |
+| untrained head | 0.640 | 0.586 | 0.739 | 119 | 0.52 |
+| R pilot 3e-4 | 0.796 | 0.600 | 0.727 | 82 | 0.54 |
+| T pilot 3e-4 | 0.821 | 0.609 | 0.759 | 66 | 0.39 |
+
+- `compare.py` gives T − R = +0.025 [+0.023, +0.026] weighted deck
+  AUC, and +0.032 linear-cls. By game: T leads on Dominion (+0.16),
+  Pokémon (+0.09), MTG (+0.06) and Hearthstone (+0.05). R leads on
+  SWU (−0.04), Lorcana (−0.03), Digimon (−0.02) and FaB (−0.02).
+- The evaluation works end to end. The cached head path matches the
+  real model (min cosine 0.9998). Each encoder takes about 4 min after
+  a one-off ~35 min frozen-feature pass over 102,479 cards.
+
+Interpretation, provisional:
+- The deck-AUC ranking runs opposite to the cross-task losses. R's pairs
+  are what the deck AUC asks about, yet T scores higher there. Training
+  losses on the other arm's pairs are not the measure for the Aim; the
+  deck AUC is.
+- **The bootstrap CI covers deck sampling only.** With one seed it is
+  much narrower than the run-to-run spread would be. That is the
+  declared one-seed confound. A Δ near the ±0.02 margin should be read
+  with it in mind. Ask the human whether a second seed of the final
+  checkpoints is worth it if the main Δ lands close.
+- The frozen whitened mean keeps far more field information
+  (linear-cls 0.93) than any head (0.73-0.76), with 3-4× the effective
+  rank. That supports TODO experiment A, a head that keeps the frozen
+  features. Out of scope here.
+
+Decided:
+- Main configs: `analysis/make_configs.py main --lr-r 3e-4 --lr-t 3e-4
+  --max-rounds 8`. That is 8 × 10k steps, warmup 2,000, cosine. At the
+  pilot's ms/step it comes to about 3.4 h for R and 4.1 h for T,
+  including per-round TEST.
+- The pilot eval rows stay in `results/` under `pilot*` labels. The
+  controls (`frozen_mean`, `untrained`) are final and are not re-run.
+
 ## Open questions
 
 - **Which part of the bundle matters**, if T and R differ:
