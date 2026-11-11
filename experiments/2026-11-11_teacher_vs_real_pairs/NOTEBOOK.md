@@ -333,6 +333,43 @@ Minor points:
 - `staple_subsampling` was added to Open questions;
 - the pilot's first runs are excluded from step-time sizing.
 
+### 2026-11-11 12:00 · Prep: whitening, teachers, MTG field sharing (PI)
+
+What:
+- Committed the readiness work and this design (a07c936, deb6939).
+- Refitted token whitening over the 15 games' TRAIN tier (13,873
+  cards, 768 → 768; `data/runs/2026-11-11_teacher_vs_real_pairs/fit_whitening.log`).
+- Rebuilt every teacher with `deck_size_rule: inverse_size` (both
+  views; confident TRAIN anchors unchanged, since deck counts come from
+  presence; `build_teachers.log`).
+- Measured MTG field sharing in both arms' pair distributions, to check
+  the MTG masks after the crawl merge (plan steps 2.6-2.7).
+
+Seen: share of pairs with equal values (lift over random pairs).
+
+| field | R: same real deck | T `uniform` teacher | T `inverse_size` teacher |
+|---|---|---|---|
+| set | 60% (17.8×) | 36% (64×) | 36% (59×) |
+| color_identity | 31% (2.4×) | 48% (4.4×) | 50% (4.5×) |
+| colors | 22% (2.5×) | 44% (4.2×) | 46% (4.4×) |
+| legalities | 14% (2.7×) | 13% (6.8×) | 14% (6.9×) |
+| keywords | 1% (4.5×) | 5% (11×) | 4% (9×) |
+
+- R: 19,975 random decks (scratch `field_sharing.py`).
+- T: one uniform neighbour per confident TRAIN anchor, 4 draws each
+  (`analysis/neighbour_field_sharing.py`).
+
+Decided:
+- `inverse_size` barely moves the neighbours. PPMI already discounts
+  the Commander pair mass. It is kept, so both arms weigh MTG per deck.
+- **The MTG masks stay unchanged.** They are identical in both arms, so
+  they are not an arm confound. `set` is the artefact (17lands draft
+  pools) and is masked half the time. Colour sharing is higher for T,
+  but colour is a real reason cards go together, not an artefact.
+  Recorded here because T's colour lift (4.5×) means T may lean on
+  colour more than R does. The intrinsic suite's colour-label agreement
+  will show it.
+
 Deferred to later experiments:
 - head architecture (TODO experiment A: keep the frozen features);
 - thawing ModernBERT (series 3);
