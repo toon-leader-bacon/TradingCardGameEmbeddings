@@ -86,7 +86,7 @@ from src.data_retrieval.cardvault_fabtcg.card_downloader import (
 )
 from src.data_retrieval.deckstats.downloader import DeckstatsDeckDownloader
 from src.data_retrieval.dominiontabs.downloader import DominionTabsCardDownloader
-from src.data_retrieval.download_utils import download_to_string
+from src.data_retrieval.download_utils import download_to_string, use_ipv4_only
 from src.data_retrieval.downloader import Downloader
 from src.data_retrieval.fabtcg_decklists.downloader import FabtcgDecklistDownloader
 from src.data_retrieval.fabtcgmeta_online_decks.downloader import (
@@ -618,6 +618,12 @@ def parse_args() -> argparse.Namespace:
         help="An MTGTop8 format code, or 'all' (mtgtop8 only; repeatable; "
         "formats run in series). Default all.",
     )
+    parser.add_argument(
+        "--ipv4",
+        action="store_true",
+        help="Connect over IPv4 only (for a network that drops IPv6 silently: "
+        "each AAAA address otherwise costs a full connect timeout).",
+    )
     add_logging_arguments(parser)
     args = parser.parse_args()
     if args.game and args.source != "limitless_play":
@@ -652,6 +658,8 @@ def main() -> None:
             f"{default_log_file.stem}_{args.source}"
         )
     configure_logging(logging_settings_from(args, default_log_file))
+    if args.ipv4:
+        use_ipv4_only()
 
     if args.source:
         crawl_options = None

@@ -78,6 +78,27 @@ _AttemptResult = TypeVar("_AttemptResult")
 RESEARCH_USER_AGENT = "TradingCardGameEmbeddings-research/0.1 (non-commercial)"
 
 
+def use_ipv4_only() -> None:
+    """Make every requests/urllib3 connection in this process resolve
+    IPv4 addresses only.
+
+    For a host whose network drops IPv6 silently: urllib3 tries a site's
+    addresses in order, without Happy Eyeballs, so each unreachable AAAA
+    address costs a full connect timeout before IPv4 is tried. Seen
+    2026-11-11 on Moxfield and Deckstats (Cloudflare, AAAA first): about
+    60 s per request, with no error logged because IPv4 then succeeded.
+
+    Inputs: none. Output: none.
+    Side effects: patches urllib3.util.connection.allowed_gai_family for
+        the whole process. Exceptions: none.
+    """
+    import socket
+
+    import urllib3.util.connection
+
+    urllib3.util.connection.allowed_gai_family = lambda: socket.AF_INET
+
+
 def call_with_retries(
     attempt: Callable[[], _AttemptResult], *, max_attempts: int
 ) -> _AttemptResult:
