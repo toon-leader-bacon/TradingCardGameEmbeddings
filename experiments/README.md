@@ -42,6 +42,7 @@ session, without `lab_technician`.
 | [2026-10-11_model_by_diet_r2](2026-10-11_model_by_diet_r2/NOTEBOOK.md) | 10-11 - 10-14 | Problem + hypotheses: which model × diet trains the best embedding, now that it is stable (whitening, mean pooling, `encoder_lr` 1e-4)? | concluded | bar not met (every cell loses >0.03 linear-cls; contrastive gives +0.14-0.20 deck AUC); H1 model-dependent (refuted for single-card, narrowly not for multi-card), and metric-only collapses; H2 unresolved; one seed | model_by_diet |
 | [2026-10-21_cache_shakeout](2026-10-21_cache_shakeout/NOTEBOOK.md) | 10-21 - 10-22 | Problem + hypotheses: where does a full-diet run spend its time with the frozen feature cache (mods, TEST, deep copies, cached vs uncached)? | awaiting review | - | model_by_diet_r2 |
 | [2026-10-29_throughput_shakeout](2026-10-29_throughput_shakeout/NOTEBOOK.md) | 10-29 - | Problem: steady-state throughput, bottleneck and memory of a contrastive-only run over MTG, FaB and Dominion with snapshots and a baked key shuffle; projection for one pass over every TRAIN deck | awaiting review | - | scale_profile |
+| [2026-11-11_teacher_vs_real_pairs](2026-11-11_teacher_vs_real_pairs/NOTEBOOK.md) | 11-11 - | Hypothesis: teacher-neighbour pairs train a better and faster single-card contrastive encoder than real-deck pairs, at equal steps | proposed | - | model_by_diet_r2 |
 
 ### Migrated experiments
 

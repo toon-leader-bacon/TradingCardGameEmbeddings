@@ -1,0 +1,151 @@
+run_directory: data/runs/2026-11-11_teacher_vs_real_pairs/pilot_R_lr1e-03
+device: cuda
+seed: 0
+model:
+  embedding_head: residual_mlp
+  checkpoint: answerdotai/ModernBERT-base
+  card_embedding_size: 256
+  mlp_hidden_dim: 512
+  mlp_num_blocks: 3
+  pooling:
+    kind: mean
+  enrichment:
+    kind: whitening
+    stats_path: data/runs/2026-11-11_teacher_vs_real_pairs/whitening_stats.pt
+  feature_cache:
+    storage_dtype: fp16
+    vram:
+      capacity_mib: 3072
+      policy: lfu
+    ram:
+      capacity_mib: 4096
+      policy: lru
+      admission: first_offer
+    disk:
+      path: data/feature_cache/2026-11-11_teacher_vs_real_pairs.sqlite
+      capacity_mib: 20480
+      write: warm_only
+dojos:
+- contrastive.mtg
+- contrastive.yugioh
+- contrastive.pokemon
+- contrastive.hearthstone
+- contrastive.flesh_and_blood
+- contrastive.digimon
+- contrastive.one_piece
+- contrastive.slay_the_spire_2
+- contrastive.star_wars_unlimited
+- contrastive.dragon_ball_masters
+- contrastive.gundam
+- contrastive.dragon_ball_fusion_world
+- contrastive.lorcana
+- contrastive.battle_spirits_saga
+- contrastive.dominion
+held_out_dojos:
+- teacher_contrastive.mtg
+- teacher_contrastive.yugioh
+- teacher_contrastive.pokemon
+- teacher_contrastive.hearthstone
+- teacher_contrastive.flesh_and_blood
+- teacher_contrastive.digimon
+- teacher_contrastive.one_piece
+- teacher_contrastive.slay_the_spire_2
+- teacher_contrastive.star_wars_unlimited
+- teacher_contrastive.dragon_ball_masters
+- teacher_contrastive.gundam
+- teacher_contrastive.dragon_ball_fusion_world
+- teacher_contrastive.lorcana
+- teacher_contrastive.battle_spirits_saga
+- teacher_contrastive.dominion
+holdout:
+  seed: 0
+  tier_ratios:
+  - 8
+  - 1
+  - 1
+  held_out_games:
+  - gwent
+teacher:
+  games: &id001
+  - mtg
+  - yugioh
+  - pokemon
+  - hearthstone
+  - flesh_and_blood
+  - digimon
+  - one_piece
+  - slay_the_spire_2
+  - star_wars_unlimited
+  - dragon_ball_masters
+  - gundam
+  - dragon_ball_fusion_world
+  - lorcana
+  - battle_spirits_saga
+  - dominion
+  method:
+    kind: ppmi_svd
+    dim: 128
+  neighbours:
+    kind: top_k
+    k: 32
+  cooccurrence:
+    deck_size_rule: inverse_size
+regression_loss: huber
+hardware:
+  max_batch_cost: 512
+  precision: fp16
+  prefetch_depth: 4
+  torch_cpu_threads: 1
+eval_examples_per_dojo: 128
+default_augmentation:
+  variants: 4
+warm_feature_cache: *id001
+phases:
+- name: train
+  diet:
+    rule: table
+    table:
+    - weight: 160
+      dojo: contrastive.mtg
+    - weight: 106
+      dojo: contrastive.yugioh
+    - weight: 78
+      dojo: contrastive.pokemon
+    - weight: 66
+      dojo: contrastive.hearthstone
+    - weight: 62
+      dojo: contrastive.flesh_and_blood
+    - weight: 54
+      dojo: contrastive.digimon
+    - weight: 40
+      dojo: contrastive.one_piece
+    - weight: 21
+      dojo: contrastive.slay_the_spire_2
+    - weight: 20
+      dojo: contrastive.star_wars_unlimited
+    - weight: 19
+      dojo: contrastive.dragon_ball_masters
+    - weight: 19
+      dojo: contrastive.gundam
+    - weight: 18
+      dojo: contrastive.dragon_ball_fusion_world
+    - weight: 16
+      dojo: contrastive.lorcana
+    - weight: 16
+      dojo: contrastive.battle_spirits_saga
+    - weight: 12
+      dojo: contrastive.dominion
+  encoder_trainable: true
+  encoder_lr: 0.001
+  head_lr: 0.001
+  lr_schedule:
+    warmup_steps: 500
+    decay: cosine
+    min_lr_fraction: 0.1
+  steps_per_round: 1000
+  max_rounds: 3
+  saturation:
+    epsilon: 0.001
+    patience_rounds: 1000
+    reactivation_delta: 0.05
+    target_saturated_fraction: 1.0
