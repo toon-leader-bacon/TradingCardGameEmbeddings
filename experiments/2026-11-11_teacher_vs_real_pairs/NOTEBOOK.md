@@ -1,7 +1,7 @@
 # Teacher-neighbour pairs against real-deck pairs for contrastive pre-training
 
-**Status:** awaiting review
-**Dates:** 2026-11-11 -
+**Status:** concluded
+**Dates:** 2026-11-11 - 2026-11-12
 **Parent:** [2026-10-11_model_by_diet_r2](../2026-10-11_model_by_diet_r2/NOTEBOOK.md) (contrastive as the pre-training direction); teacher smoke test in `plans/teacher_student_training.md` · **Branch:** `feature/teacher-cooccurrence`
 
 > At an equal step budget, does a single-card encoder trained contrastively
@@ -286,11 +286,20 @@ root, `PYTHONPATH=.`.
 3. Whitening: `scripts/fit_whitening.py --holdout-from <a pilot config> --games <the 15> --out data/runs/2026-11-11_teacher_vs_real_pairs/whitening_stats.pt`.
 4. Teachers: `scripts/build_teachers.py --config <a pilot config>`.
 5. Each run: `scripts/run_training.py <config>`; check first with `--check`.
-6. Evaluation: an `analysis/` script around `src/evaluation` (to be
-   written before step 3; `scripts/run_evaluation.py` is a hard-coded
-   prototype).
+6. Evaluation: `analysis/evaluate.py` (every round encoder plus the
+   controls; ~35 min frozen-feature pass once, then ~5 min per encoder),
+   then `analysis/round_curves.py` for `results/round_compare.csv` and
+   the figure. `analysis/compare.py <A> <B>` gives one paired comparison.
+7. Probes A, B, C (added after the main runs): `analysis/teacher_probes.py`,
+   ~45 min on the GPU.
+8. Probes C2 and E (offline distillation on cached features):
+   `analysis/distill_probes.py [--only c2|e] [--arms …]`, seconds to
+   ~10 min per arm.
+9. Real-trainer ablations: `configs/ablation_T_{noaug,noclip}.yaml` with
+   step 5, stopped once `round0000/` is written, then step 6.
 
-Outputs: `data/runs/2026-11-11_teacher_vs_real_pairs/<run>/`.
+Outputs: `data/runs/2026-11-11_teacher_vs_real_pairs/<run>/`; evaluations
+and probe logs under `data/evaluations/2026-11-11_teacher_vs_real_pairs/`.
 
 ## Log
 
@@ -890,6 +899,222 @@ candidate text inputs offline first, with the probe harness
 score for text inputs), then take the winners into one real-trainer
 run.
 
+### 2026-11-12 · Closing (PI, with the human)
+
+The human asked to record the next-step ideas (under Open questions)
+and close the experiment; further work becomes a new experiment.
+
+**One more correction to the 15:10 entry:** item 1 says augmentation
+"took about as much away from both arms". Only T was ablated. R without
+augmentation was never run, so how much masking costs R is unmeasured,
+and whether T beats R with neither arm masked is open.
+
+**Corrections from the conclusion-mode review (experiment-critic):**
+- The 13:00 entry says a per-game head of width 512 "memorises the
+  teacher (cosine 0.99), and width adds nothing". That holds for the
+  mean over games, not for MTG, the largest: fit cosine 0.960 at width
+  512 and 0.994 at 2048, deck AUC 0.966 → 0.973
+  (`results/probe_c2_capacity.csv`). Width matters per game where a game
+  has many cards.
+- The 09:10 entry reads R_r7's below-chance Dominion score (0.430) as
+  "R's training made Dominion worse". Unrelated encoders are below
+  chance on Dominion too: text_ridge 0.346, E_kl_wide 0.334, and C2's
+  in-sample fit 0.24 at fit cosine 0.996, while the teacher itself
+  scores 0.817 (`results/probe_deck_auc.csv`, `probe_e_covered.csv`,
+  `probe_c2_capacity.csv`). Only 144 of Dominion's 654 teacher cards are
+  confident, so most of its scored cards are predicted, not fitted. The
+  cause is unchecked; Dominion's deck AUC is treated as suspect.
+
+**Planned evaluation items not done** (Method, step 3 and Controls):
+- Gwent kNN and fresh heads on Gwent's dojos (step 3.3): never
+  implemented in `analysis/evaluate.py`. Transfer is judged on zero-shot
+  deck AUC alone.
+- r2's `single_contrastive` checkpoint as a historical point: not
+  evaluated. It was a non-controlled reference, and the untrained head
+  and frozen mean already bracket the arms.
+- Cold start (step 3.4) and mean pairwise cosine (step 3.5) were
+  computed but not reported until Results below.
+
+**Ablation provenance:** the two ablations were short inline runs by
+the PI, recorded in the 15:10 Log entry rather than in bench notes.
+Their queue script is now `analysis/run_ablations.sh` (copied from the
+session scratchpad; the one line that waited on a session job is
+replaced by a comment).
+
+## Results
+
+All deck AUCs are the diet-weighted same-deck retrieval AUC on fixed
+VALIDATION decks (500 per game, fewer for small games; 0.5 = chance),
+one seed. Training is deterministic at a fixed seed here
+(`main_R_attempt1` against `main_R` round 7: Δ = 0.0000), so the
+bootstrap CIs cover deck sampling only; seed-to-seed spread is
+unmeasured.
+
+**Main comparison** (`results/round_compare.csv`,
+`results/deck_auc_by_round.png`; wrap-up
+[bench note](bench_notes/2026-11-12_0125_wrap_up.md)):
+
+| round (steps) | R | T | Δ T − R [95% CI] | R linear-cls | T linear-cls |
+|---|---|---|---|---|---|
+| 0 (10k) | 0.828 | 0.842 | +0.014 [+0.012, +0.015] | 0.712 | 0.713 |
+| 1 (20k) | 0.846 | 0.860 | +0.015 [+0.013, +0.016] | 0.701 | 0.676 |
+| 2 (30k) | 0.853 | 0.863 | +0.010 [+0.008, +0.011] | 0.703 | 0.655 |
+| 3 (40k) | 0.860 | 0.866 | +0.006 [+0.005, +0.008] | 0.705 | 0.629 |
+| 7 (80k) | 0.867 | 0.864 | −0.003 [−0.004, −0.002] | 0.700 | 0.591 |
+
+Controls (`results/eval_summary.csv`): untrained head 0.640 deck AUC,
+0.739 linear-cls; frozen whitened mean (no head) 0.687, 0.927. Gwent
+(unseen game) at 80k: R 0.584, T 0.545; untrained head 0.586, frozen
+mean 0.633. Effective rank at 80k: R 88, T 33.
+
+Also in `results/eval_summary.csv`:
+
+| encoder | cold start: deck AUC on VALIDATION-tier anchors | mean pairwise cosine |
+|---|---|---|
+| untrained head | 0.617 | 0.52 |
+| frozen whitened mean | 0.657 | 0.02 |
+| R_r0 / R_r7 | 0.742 / 0.755 | 0.53 / 0.40 |
+| T_r0 / T_r7 | 0.766 / 0.751 | 0.37 / 0.11 |
+| E_kl_wide, 80k (offline) | 0.793 | 0.03 |
+
+Neither arm collapses to one direction (mean cosine falls during
+training); T's loss is in effective rank, not spread.
+
+Training-time cross-task losses (bench notes; 1.00 = untrained, 128
+TEST examples per dojo, noisy): R's median on T's held-out teacher
+dojos ends at 0.819; T's median on R's held-out real-deck dojos rises
+from 0.91 to 1.03, above the untrained baseline.
+
+**Probes** (details and predictions in the Log, 09:10 to 15:10):
+
+| question | result | file |
+|---|---|---|
+| A. Teacher's own deck AUC (teacher cards only) | 0.944, against R_r7 0.892, T_r7 0.887 | `results/probe_deck_auc.csv` |
+| B. Over-fitting to TRAIN decks | TRAIN − VALIDATION gaps of −0.001 to +0.006 for every encoder | `results/probe_deck_auc.csv` |
+| C. Pooled text → teacher, unseen cards | 0.833 (ridge), 0.832 (MLP) | `results/probe_text_to_teacher.csv` |
+| C2. Per-game head fit, seen cards | mean cosine 0.99 at widths 512-2048 (MTG 0.960 → 0.994); deck AUC 0.919-0.921 | `results/probe_c2_capacity.csv` |
+| E. Training signal offline, 80k steps | see below | `results/probe_e_curves.csv`, `results/probe_e_covered.csv` |
+| Ablations, 10k steps in the real trainer | no augmentation 0.867, no clipping 0.844, main_T 0.842 | `results/eval_summary.csv`, `results/deck_auc_by_game.csv` |
+
+Probe E at 80k steps, all cards (teacher cards in brackets):
+
+| | width 512 (student) | width 2048 |
+|---|---|---|
+| yes/no top-32 target | 0.871 (0.897) | 0.874 (0.893); peaked at 0.885 at 40k |
+| teacher-similarity KL target | 0.874 (0.900) | **0.897 (0.914)**, still rising |
+| main_T's exact batch shape (replica) | 0.869 (0.891) | - |
+
+## Conclusions
+
+**Speed hypothesis: no clear difference** (by the Aim's rule). T led R
+in every first-half round, with CIs excluding 0, but by +0.006 to
++0.015, never reaching +0.02 (`results/round_compare.csv`). One seed.
+
+**Quality hypothesis: refuted** (by the Aim's rule). The final deck-AUC
+difference, −0.003 [−0.004, −0.002], is inside the ±0.02 margin, but
+T's linear-cls is 0.108 below R's (0.591 against 0.700), against an
+allowed 0.02. On deck AUC alone the arms end level. One seed.
+
+**Against the predictions in Method:**
+- Both arms beat the untrained head by far more than 0.02 (0.867 and
+  0.864 against 0.640): as predicted.
+- T rises faster early: as predicted in direction, under the bar in
+  size.
+- Field probe: both lose against the frozen mean, as predicted, but T
+  loses more, not less (0.591 against 0.700).
+- Gwent: neither arm is near chance (R 0.584, T 0.545, chance 0.5), but
+  neither beats the untrained head (0.586) or the frozen mean (0.633).
+  On zero-shot deck AUC (the only transfer measure run; kNN and fresh
+  heads were not), training on the 15 games does not yet transfer to
+  the unseen one.
+- R's TEST loss on T's held-out teacher dojos ends at 0.819 (median;
+  1.00 = untrained), so real-deck training does learn part of the
+  teacher's neighbourhoods, as predicted (main_R
+  [bench note](bench_notes/2026-11-11_2150_run_main_R_done.md); the
+  per-round values are too noisy to show a trend). The mirror was not
+  predicted: T's loss on R's real-deck dojos rises from 0.91 to 1.03,
+  ending above untrained (main_T
+  [bench note](bench_notes/2026-11-11_2345_run_main_T_done.md)), while
+  T's deck AUC stays near R's. Training-time TEST is 128 examples per
+  dojo, so this is weak evidence.
+- The staple-concentration correlation was only to be checked if T won
+  on quality, so it was not computed.
+
+**Further findings**, each one seed, frozen ModernBERT-base with mean
+pooling and whitening, 15 games:
+
+1. **The student absorbs only part of what the teacher knows.** The
+   teacher scores 0.944 on its own cards against 0.892 for R and 0.887
+   for T (probe A). No encoder over-fits its training decks (probe B,
+   gaps ≤ 0.006), so the gap is not memorisation.
+2. **A yes/no top-32 target on a 512-wide head plateaus at about
+   0.87, and neither change alone lifts it.** Trained offline on cached
+   features, it levels off by 20k steps with main_T's batch shape
+   (replica 0.869 at 80k) and with richer batches (0.871). A 4× wider
+   head lifts the yes/no target only mid-run (0.885 at 40k) and it falls
+   back to 0.874 by 80k; the graded target at width 512 ends at 0.874.
+   The replica also reproduces T's loss of field information and rank
+   (linear-cls 0.515, rank 30). So T's end point and its collapse come
+   from the signal and head together, not from the training pipeline.
+3. **A graded similarity target on a wider head does better, but only
+   both together.** KL distillation of the teacher's within-game
+   similarities with a 2048-wide head reaches 0.897 (all cards) and
+   0.914 (teacher cards), still rising at 80k, and closes about 40% of
+   the gap to the teacher. Either change alone adds about 0.003. Scope:
+   offline, on cached features, without augmentation; not yet run in
+   the real trainer.
+4. **Head size is mostly not the limit within one game.** A per-game
+   head the student's size fits the teacher's vectors to a mean cosine
+   of 0.99 over games, and widening barely moves the deck AUC (0.919 to
+   0.921; probe C2). The exception is MTG, the largest game: cosine
+   0.960 at width 512 and 0.994 at 2048 (deck AUC 0.966 to 0.973). For
+   the one shared head, width mattered with a graded target
+   (finding 3).
+5. **Pooled text is a weak predictor of the teacher for unseen
+   cards.** Out-of-fold predictions score 0.83 (probe C), below the
+   students' 0.89 on seen cards. Whether the limit is the pooling or the
+   text model is not separated.
+6. **Augmentation explains T's early lag behind the offline replica**
+   (T still led R). Without the default field masking, T reaches 0.867
+   at 10k steps, against 0.842 with it, matching the replica (0.867).
+   Clipping explains none of it (0.844). The masking hides fields that
+   nearly name a deck (MTG +0.056, Lorcana +0.051 without it), and
+   removing it hurt the unseen game, Gwent (0.595 → 0.575): suggestive,
+   one seed (Dominion also fell, by 0.015, but its metric is suspect;
+   see the closing Log entry). Its wall-clock cost is about 4× in
+   round 0 and about 1.5× once the cache holds the masked variants
+   (`data/runs/2026-11-11_teacher_vs_real_pairs/<run>/rounds.csv`). R
+   was not ablated.
+7. **Throughput.** The offline loop runs 10k steps in 25-70 s; the real
+   trainer took about 7 min (no augmentation) to 30 min (round 0 with
+   augmentation) for the same. An engineering question, outside this
+   aim.
+8. **Dominion's deck AUC looks unreliable.** Several unrelated
+   encoders score below chance on it, including a near-exact in-sample
+   fit of the teacher (0.24) while the teacher scores 0.817 (closing Log
+   entry). The cause is unchecked. Its diet weight is small, so it
+   barely moves the weighted score, but per-game claims about Dominion
+   should wait for a look at the metric.
+9. **Cold start:** on VALIDATION-tier anchors, cards neither arm
+   trained on, the arms end level (R 0.755, T 0.751), above the frozen
+   mean (0.657); the offline E_kl_wide reaches 0.793.
+
+**Decisions taken from this experiment (the human):** keep the masking
+augmentation; treat linear-cls as an evaluation metric, not a goal;
+focus the next experiment on the teacher-to-student signal, the text
+input and a richer student.
+
+**Promoted to:**
+- `experiments/TODO.md`, Teacher-student: the next experiment (signal,
+  text input and head comparison, offline first), R without
+  augmentation, seeds, warmup-stable-decay, and the throughput gap for
+  an `architect` session.
+- `experiments/README.md`: index row, and the measured run times under
+  Typical environment.
+- `keep_round_encoders` (the round-checkpoint fix, incident
+  [bench note](bench_notes/2026-11-11_1950_incident_round_checkpoints_pruned.md))
+  is already in `src/training/`.
+
 ## Open questions
 
 - **Which part of the bundle matters**, if T and R differ:
@@ -903,3 +1128,81 @@ run.
 - Neighbour count k (8 / 32 / 128) and multi-neighbour pseudo-decks
   (`student.max_neighbours_per_deck`).
 - Seeds of the winning arm.
+- **R without augmentation**, to tell whether T beats R when neither
+  arm is masked (only T was ablated).
+- Probe D (deferred): deck AUC split by staples and by cards with
+  near-identical text.
+- **Why Dominion's deck AUC is below chance** for unrelated encoders
+  (finding 8): check the metric (shared base cards, low confident
+  coverage) before trusting per-game Dominion numbers.
+- Gwent kNN and fresh heads on Gwent's dojos, the transfer measures
+  planned here but never built.
+
+### Ideas for the next experiment (2026-11-12, PI with the human)
+
+The human's direction: a better teacher-to-student signal, a better
+text input than one pooled vector, and a richer student (deeper,
+somewhat wider). Masking stays on. The PI's proposal: rank the options
+offline first, on the probe harness (`analysis/distill_probes.py`,
+minutes per arm, and probe C's held-out-card score for text inputs),
+then take the winners into one real-trainer run against R.
+
+**Teaching signals** (the current best is finding 3: in-batch KL on the
+teacher's within-game cosine softmax, temperature 0.05):
+1. **Per-game adapter regression** (FitNets, Romero et al. 2014,
+   arXiv:1412.6550): the student vector passes through a learned linear
+   map per game and is regressed onto that card's teacher vector. The
+   densest signal (a full vector per card, not relations within one
+   batch); the map absorbs the rotation between game spaces. C2 shows a
+   per-game fit of cosine 0.99 is possible. Risk: the adapters do too
+   much of the work.
+2. **A queue of anchors instead of one batch** (SEED, Fang et al. 2021,
+   arXiv:2101.04731; CompRess, Abbasi Koohpayegani et al. 2020,
+   arXiv:2010.14713): KL over similarities to thousands of stored
+   same-game teacher vectors, so each step carries more graded
+   information.
+3. **Ranking distillation** (DarkRank, Chen et al. 2018,
+   arXiv:1707.01220; RankDistil, Reddi et al. 2021): learn the order of
+   the teacher's nearest neighbours rather than their exact
+   similarities. Deck AUC is itself a ranking metric.
+4. **Contrastive representation distillation** (CRD, Tian et al. 2019,
+   arXiv:1910.10699): a student card and its own teacher vector as a
+   positive pair against other cards; close to 1 with negatives.
+5. **Whole-batch structure matching** (CKA, Kornblith et al. 2019,
+   arXiv:1905.00414): match the batch's similarity matrix, invariant to
+   rotation and scale. Cheap, likely weaker than KL.
+6. **Past the teacher:** fit the PPMI co-occurrence directly, GloVe-style
+   (Pennington et al. 2014), since the truncated SVD throws information
+   away. Later.
+Also: the KL temperature, and combinations (adapter regression + KL).
+
+**Text input** (today: ModernBERT-base, a masked-language model not
+trained for sentence embeddings, mean-pooled and whitened):
+- **Token embeddings** with learned attention pooling or a small
+  transformer: most information; storage roughly 20 GB per text variant
+  (a rough figure, ~100k cards × ~128 tokens × 768 dims × 2 bytes),
+  about 100 GB with the 4 masking variants; slower steps.
+- **One vector per card field** (name, type line, rules text, stats …),
+  with the student attending over the set: ~10 vectors per card instead
+  of ~128, and masking becomes dropping field vectors in training, so it
+  needs no re-encoding and no cache. The encoder loses context between
+  fields. The PI's pick, alongside token embeddings.
+- **A frozen embedding model** (for example an embedding-tuned
+  ModernBERT; to verify which exist and their licences): the cheapest
+  test, a re-encode and probe C.
+- **A mix of several hidden layers** (ELMo-style, Peters et al. 2018,
+  arXiv:1802.05365): cheap; likely a small gain.
+- **Partial fine-tuning** (cache a lower layer's output, train the top
+  layers or LoRA, Hu et al. 2021, arXiv:2106.09685): most expressive
+  while keeping some caching; heavy engineering. Full fine-tuning
+  later.
+Probe C (predict teacher vectors for cards held out of the fit) can
+rank the inputs before any training.
+
+**Student:** width (1024 / 2048 / 4096) against depth (3 / 6 / 9
+blocks), offline. If the input becomes a set of token or field
+vectors, the head changes shape (attention over the set), so the input
+is chosen first and the head sized after.
+
+**Schedule:** warmup-stable-decay (MiniCPM, Hu et al. 2024,
+arXiv:2404.06395), so a plateau can be told apart from the decay.

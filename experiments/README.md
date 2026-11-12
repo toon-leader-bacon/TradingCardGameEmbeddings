@@ -42,7 +42,7 @@ session, without `lab_technician`.
 | [2026-10-11_model_by_diet_r2](2026-10-11_model_by_diet_r2/NOTEBOOK.md) | 10-11 - 10-14 | Problem + hypotheses: which model × diet trains the best embedding, now that it is stable (whitening, mean pooling, `encoder_lr` 1e-4)? | concluded | bar not met (every cell loses >0.03 linear-cls; contrastive gives +0.14-0.20 deck AUC); H1 model-dependent (refuted for single-card, narrowly not for multi-card), and metric-only collapses; H2 unresolved; one seed | model_by_diet |
 | [2026-10-21_cache_shakeout](2026-10-21_cache_shakeout/NOTEBOOK.md) | 10-21 - 10-22 | Problem + hypotheses: where does a full-diet run spend its time with the frozen feature cache (mods, TEST, deep copies, cached vs uncached)? | awaiting review | - | model_by_diet_r2 |
 | [2026-10-29_throughput_shakeout](2026-10-29_throughput_shakeout/NOTEBOOK.md) | 10-29 - | Problem: steady-state throughput, bottleneck and memory of a contrastive-only run over MTG, FaB and Dominion with snapshots and a baked key shuffle; projection for one pass over every TRAIN deck | awaiting review | - | scale_profile |
-| [2026-11-11_teacher_vs_real_pairs](2026-11-11_teacher_vs_real_pairs/NOTEBOOK.md) | 11-11 - | Hypothesis: teacher-neighbour pairs train a better and faster single-card contrastive encoder than real-deck pairs, at equal steps | awaiting review | - | model_by_diet_r2 |
+| [2026-11-11_teacher_vs_real_pairs](2026-11-11_teacher_vs_real_pairs/NOTEBOOK.md) | 11-11 - 11-12 | Hypothesis: teacher-neighbour pairs train a better and faster single-card contrastive encoder than real-deck pairs, at equal steps | concluded | speed: no clear difference (T +0.006-0.015 early, under the 0.02 bar); quality: refuted (deck AUC -0.003, linear-cls -0.108); probes: the yes/no top-32 target saturates at ~0.87, while KL similarity distillation with a 2048-wide head reaches 0.897 offline; one seed | model_by_diet_r2 |
 
 ### Migrated experiments
 
@@ -89,6 +89,19 @@ measured run times.
     (calibration and preflight) takes about 28 min.
 
   At the reduced-diet figure, the ~24 h gate allows about 20 runs.
+- **Time per run** (single-card model, frozen ModernBERT, contrastive
+  only, 15 games, batch 512; measured 2026-11-11 in
+  `2026-11-11_teacher_vs_real_pairs`):
+  - 8 rounds × 10k steps: about 115-120 min;
+  - round 0, including the feature-cache warm-up: 24-30 min with the
+    default masking augmentation, about 7 min without it;
+  - later rounds: about 10-15 min, falling as the masked variants fill
+    the cache;
+  - offline evaluation: about 35 min once for the frozen features, then
+    about 5 min per encoder;
+  - peak VRAM 4.6-4.9 GiB allocated, 7.7-9.9 GiB reserved.
+- **Offline distillation on cached features** (that experiment's
+  `analysis/distill_probes.py`): 10k steps in 25-70 s.
 - **Disk per run:** about 2.4 GB. Checkpoints include the frozen
   ModernBERT.
 - **Pre-flight thresholds (provisional, to be replaced by measured

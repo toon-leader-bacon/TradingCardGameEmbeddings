@@ -327,6 +327,32 @@ LayerNorm + `encoder_lr` pilot ([2026-10-10_lr_pilot](2026-10-10_lr_pilot/NOTEBO
   card, TRAIN-only and TRAIN + TEST, with TEST cards' rows as held-out
   student targets.
 
+- **Next: teacher-to-student signal, text input and head** (from
+  [2026-11-11_teacher_vs_real_pairs](2026-11-11_teacher_vs_real_pairs/NOTEBOOK.md),
+  Conclusions and Open questions, where the options and references are
+  listed). Rank offline first on cached features: signals (in-batch KL,
+  the current best at 0.897 with a 2048-wide head; per-game adapter
+  regression; a queue of anchors; ranking distillation; CRD), then text
+  inputs by probe C (token embeddings, one vector per card field, an
+  embedding-tuned frozen model, mixed layers), then head width and depth
+  on the chosen input. Then one real-trainer run of the winner, masking
+  on, against R. Code: a distillation dojo or loss (design-recipe).
+- **R without augmentation** (config-only): does T beat R when neither
+  arm is masked? Only T was ablated.
+- **Seeds** (config-only) for whichever arm wins next; the 0.02 margin
+  has never been measured against seed spread.
+- **Warmup-stable-decay schedule** (code, small:
+  `src/training/learning_rate_schedule.py`; MiniCPM, arXiv:2404.06395),
+  so a plateau can be told apart from the decay.
+- **Dominion's deck AUC** (analysis): several unrelated encoders score
+  below chance on it, including a near-exact fit of the teacher; check
+  the metric before trusting per-game Dominion numbers.
+- **Gwent kNN and fresh heads** (code, `src/evaluation`): the transfer
+  measures planned in teacher_vs_real_pairs but never built.
+- **Throughput gap** (engineering, an `architect` session): the real
+  trainer runs 10k steps in 7-30 min where an offline loop on the same
+  cached features takes 25-70 s.
+
 ### Measuring training
 
 - **Cheaper, less noisy TEST** (config-only). Use fewer, longer rounds
