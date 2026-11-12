@@ -456,6 +456,8 @@ Decided:
 
 - 2026-11-11 19:50 · lab: incident, main_R kept only its best checkpoint; added `keep_round_encoders`, retrying main_R ([bench note](bench_notes/2026-11-11_1950_incident_round_checkpoints_pruned.md))
 
+- 2026-11-11 21:50 · lab: main_R done, 118 min, all 8 round encoders kept; main_T launched ([bench note](bench_notes/2026-11-11_2150_run_main_R_done.md))
+
 ## Open questions
 
 - **Which part of the bundle matters**, if T and R differ:
