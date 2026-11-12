@@ -618,6 +618,84 @@ reach about 0.94, pooled text plus a head of this size can hold the
 teacher's knowledge, and the limit is the training signal (hypothesis
 1). If they stop near 0.89, the input or the head size is the limit.
 
+### 2026-11-12 · Discussion: rotation, learning rate, schedule; probes C2 and E (PI, with the human)
+
+**Why pseudo-decks, and would direct distillation break?** The human's
+reason for pseudo-decks: each game's teacher space is fixed only up to
+a rotation, and the spaces of different games have no relation to one
+another. Their analogy is per-language word vectors: "cat" and "chat"
+have no shared coordinates, but similar neighbourhoods. The PI's
+answer: regressing one shared student onto every game's *coordinates*
+would be a problem. It would spend capacity on arbitrary rotations and
+block cross-game sharing. A *rotation-invariant* signal does not have
+that problem, and neither does a per-game linear adapter. Examples of a
+rotation-invariant signal: matching the teacher's within-game
+similarities, as in relational knowledge distillation (Park et al.
+2019, arXiv:1904.05068) and similarity-preserving distillation (Tung &
+Mori 2019, arXiv:1907.09682). On languages: Mikolov et al. 2013
+(arXiv:1309.4168) and Conneau et al. 2018 (MUSE, arXiv:1710.04087)
+found that separately trained word spaces differ by a near-orthogonal
+map. Pseudo-decks are also rotation-invariant, but they reduce the
+teacher to a yes/no top-32 signal.
+
+**Learning rate and length.** The LR pilot found 1e-3 worse than 3e-4
+in both arms, so a higher rate is unlikely to help. The schedule is
+warm-up then cosine to a 0.1 floor at step 80k; the PI's earlier "near
+zero" was wrong. Decaying is standard and usually helps. The problem is
+that the schedule is tied to the planned length, so late flattening
+cannot be told apart from the decay. Proposal for later experiments:
+warmup-stable-decay (Hu et al. 2024, MiniCPM, arXiv:2404.06395), which
+needs a small addition to `src/training/learning_rate_schedule.py`.
+Probe B shows no over-fitting, so longer training is safe, but likely
+worth about +0.01 next to the teacher's 0.05 lead. Each arm took about
+2 h of a 12 h budget.
+
+**The human asked to keep probing.** Two probes, both offline on the
+cached frozen features (no augmentation, no text encoder); script
+`analysis/distill_probes.py`:
+
+- **C2. In-sample capacity, per game.** For each game, fit
+  `ResidualMlpEmbeddingHead` (the student's head class) to the unit
+  teacher vectors (1 - cosine) on all confident cards, for a fixed 4,000
+  steps with no held-out data. Widths 512 (the student's), 1024 and
+  2048, with 3 blocks each. Score the predictions on the probe A deck
+  AUC (VALIDATION decks, teacher cards).
+  - Width 512 already at 0.93 or more: the head and the pooled input
+    can hold the teacher's knowledge of seen cards, so size is not the
+    limit.
+  - Rising with width: size matters.
+  - Every width at 0.90 or less: the pooled input is the limit, even
+    for seen cards.
+- **E. The training signal, isolated.** One shared head across the 15
+  games, as in the student: `ResidualMlpEmbeddingHead(768, 256)`. Same
+  optimiser and schedule as the main runs: AdamW at 3e-4, 2,000 warm-up
+  steps, cosine to 0.1 at 80k steps. Same batches too. Each step picks a
+  game by the diet weights, then 64 confident anchors and 7 of each
+  anchor's top-32 teacher neighbours, 512 cards in all. Only the target
+  differs:
+  - **E_pairs** (the current signal): for each card, a uniform target
+    over the batch cards in its teacher top-32.
+  - **E_kl** (similarity distillation): a softmax over the teacher's
+    cosines to the batch cards. Both use temperature 0.05, the
+    student's softmax over its own cosines, a KL loss, and self and
+    same-card pairs masked out.
+  - **E_kl_wide:** E_kl with hidden width 2048.
+
+  Each is scored with evaluate.py's full evaluation (all cards, so
+  directly comparable to `results/round_compare.csv`) at 10k, 20k, 40k
+  and 80k steps.
+  - E_pairs within about 0.01 of T at matched steps: the offline
+    replica is faithful enough to stand in for T. If not, the replica's
+    differences (no augmentation, other batches) matter, and E is read
+    only within itself.
+  - E_kl at least 0.02 above E_pairs at 80k, and above R_r7's 0.867:
+    the yes/no signal is what held T back, and similarity distillation
+    is the next arm to test properly.
+  - E_kl_wide at least 0.01 above E_kl: head size matters for the
+    shared student.
+  - Watch linear-cls: does a graded target keep more card-field
+    information than a yes/no one?
+
 ## Open questions
 
 - **Which part of the bundle matters**, if T and R differ:
