@@ -12,7 +12,7 @@ model:
     kind: mean
   enrichment:
     kind: whitening
-    stats_path: data/runs/2026-11-11_teacher_vs_real_pairs/whitening_stats.pt
+    stats_path: data/runs/2026-11-11_teacher_vs_real_pairs/main_T/whitening_stats.pt
   feature_cache:
     storage_dtype: fp16
     vram:
@@ -42,6 +42,21 @@ dojos:
 - teacher_contrastive.lorcana
 - teacher_contrastive.battle_spirits_saga
 - teacher_contrastive.dominion
+- contrastive.mtg
+- contrastive.yugioh
+- contrastive.pokemon
+- contrastive.hearthstone
+- contrastive.flesh_and_blood
+- contrastive.digimon
+- contrastive.one_piece
+- contrastive.slay_the_spire_2
+- contrastive.star_wars_unlimited
+- contrastive.dragon_ball_masters
+- contrastive.gundam
+- contrastive.dragon_ball_fusion_world
+- contrastive.lorcana
+- contrastive.battle_spirits_saga
+- contrastive.dominion
 held_out_dojos:
 - contrastive.mtg
 - contrastive.yugioh

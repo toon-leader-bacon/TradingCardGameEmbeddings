@@ -458,6 +458,8 @@ Decided:
 
 - 2026-11-11 21:50 · lab: main_R done, 118 min, all 8 round encoders kept; main_T launched ([bench note](bench_notes/2026-11-11_2150_run_main_R_done.md))
 
+- 2026-11-11 23:45 · lab: main_T done, 114 min, all 8 round encoders kept; evaluation of all round encoders started ([bench note](bench_notes/2026-11-11_2345_run_main_T_done.md))
+
 ## Open questions
 
 - **Which part of the bundle matters**, if T and R differ:
