@@ -454,6 +454,8 @@ Decided:
   `data/runs/2026-11-11_teacher_vs_real_pairs/queue.csv`. Estimated
   ~3.4 h + ~4.1 h, so done around 01:30.
 
+- 2026-11-11 19:50 · lab: incident, main_R kept only its best checkpoint; added `keep_round_encoders`, retrying main_R ([bench note](bench_notes/2026-11-11_1950_incident_round_checkpoints_pruned.md))
+
 ## Open questions
 
 - **Which part of the bundle matters**, if T and R differ:

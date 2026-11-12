@@ -718,7 +718,9 @@ def train(
         dojos=dojos,
         plan=config.plan,
         limits=config.limits,
-        checkpointer=DirectoryCheckpointer(run_directory),
+        checkpointer=DirectoryCheckpointer(
+            run_directory, keep_round_encoders=config.keep_round_encoders
+        ),
         listeners=listeners,
         cost_of=card_cost,
         batch_warmer=batch_warmer_for(model, config.limits),

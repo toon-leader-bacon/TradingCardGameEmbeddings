@@ -61,10 +61,14 @@ def diet_table(arm: str) -> dict:
 
 
 def run_config(
-    name: str, arm: str, encoder_lr: float, steps_per_round: int, max_rounds: int, warmup: int
+    name: str, arm: str, encoder_lr: float, steps_per_round: int, max_rounds: int, warmup: int,
+    keep_round_encoders: bool = False,
 ) -> dict:
-    """One run's config: the shared model, data and budget, the arm's dojos."""
+    """One run's config: the shared model, data and budget, the arm's dojos.
+    keep_round_encoders: keep every round's encoder (main runs, for the
+    matched-step speed comparison); the pilot keeps only the best."""
     return {
+        **({"keep_round_encoders": True} if keep_round_encoders else {}),
         "run_directory": f"data/runs/{EXPERIMENT}/{name}",
         "device": "cuda",
         "seed": 0,
@@ -147,7 +151,8 @@ def main() -> None:
         parser.error("main needs --lr-r, --lr-t and --max-rounds")
     for arm, lr in (("R", args.lr_r), ("T", args.lr_t)):
         name = f"main_{arm}"
-        write(name, run_config(name, arm, lr, steps_per_round=10_000, max_rounds=args.max_rounds, warmup=2000))
+        write(name, run_config(name, arm, lr, steps_per_round=10_000, max_rounds=args.max_rounds, warmup=2000,
+                                     keep_round_encoders=True))
 
 
 if __name__ == "__main__":

@@ -109,6 +109,9 @@ class RunConfig:
     student: how teacher-sourced dojos deal pseudo-decks (top-level
         `student:`, see config_parsing/student_parsing.py); defaults
         when absent.
+    keep_round_encoders: also keep every round's encoder weights
+        (top-level `keep_round_encoders: true`; see DirectoryCheckpointer),
+        for evaluating a run at each round. False by default.
     """
 
     run_directory: Path
@@ -125,6 +128,7 @@ class RunConfig:
     binder_mods: BinderModsSpec | None = None
     teacher: TeacherViews | None = None
     student: StudentSettings = StudentSettings()
+    keep_round_encoders: bool = False
 
     def __post_init__(self) -> None:
         # No duplicate dojos (the Trainer keys dojos by name and would
@@ -236,7 +240,8 @@ def parse_run_config(
     see _parse_regression_loss), binder_mods (optional: see
     mod_parsing.parse_binder_mods), teacher (optional: see
     config_parsing/teacher_parsing.py) and student (optional: see
-    config_parsing/student_parsing.py).
+    config_parsing/student_parsing.py), keep_round_encoders (optional
+    bool, default false).
     A phase without a "dojos" key trains every run dojo that is not held out.
 
     Inputs: document (ConfigDocument), catalog_names (every dojo name a
@@ -317,6 +322,7 @@ def parse_run_config(
         parse_teacher(top.required_section("teacher")) if top.has("teacher") else None
     )
     student = _parse_student_beside(top, teacher)
+    keep_round_encoders = top.optional("keep_round_encoders", bool, False)
     top.reject_unread_keys()
     result = construct_at(
         "config",
@@ -335,6 +341,7 @@ def parse_run_config(
             binder_mods=binder_mods,
             teacher=teacher,
             student=student,
+            keep_round_encoders=keep_round_encoders,
         ),
     )
     return result

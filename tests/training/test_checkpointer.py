@@ -144,6 +144,29 @@ def test_latest_is_replaced_every_round_and_bests_are_untouched(
     assert manifest["round_index"] == 2
 
 
+def test_keep_round_encoders_keeps_every_rounds_encoder_without_state(
+    tmp_path: Path,
+) -> None:
+    checkpointer = DirectoryCheckpointer(tmp_path, keep_round_encoders=True)
+    model = FakeModel()
+    optimizer = torch.optim.AdamW(model.parameters())
+    plan = make_plan((make_phase(("a",)),))
+    for round_index in (0, 1):
+        checkpointer.save_latest(model, [FakeDojo("a")], optimizer, plan, _report("p", round_index))  # type: ignore[list-item,arg-type]  # noqa: E501
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "latest",
+        "round0000",
+        "round0001",
+    ]
+    assert sorted(p.name for p in (tmp_path / "round0001").iterdir()) == [
+        "encoder.pt",
+        "holdout.json",
+        "manifest.json",
+    ]
+    manifest = json.loads((tmp_path / "round0001" / "manifest.json").read_text())
+    assert manifest["round_index"] == 1
+
+
 def test_the_holdout_round_trips_through_the_checkpoint(tmp_path: Path) -> None:
     directory, _ = _save(tmp_path)
     assert load_checkpoint_holdout(directory) == HoldoutSpec.no_holdout()

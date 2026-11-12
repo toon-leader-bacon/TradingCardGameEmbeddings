@@ -1,3 +1,4 @@
+keep_round_encoders: true
 run_directory: data/runs/2026-11-11_teacher_vs_real_pairs/main_T
 device: cuda
 seed: 0
