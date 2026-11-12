@@ -696,6 +696,165 @@ cached frozen features (no augmentation, no text encoder); script
   - Watch linear-cls: does a graded target keep more card-field
     information than a yes/no one?
 
+### 2026-11-12 13:00 · Probes C2 and E results; replica and width control added (PI)
+
+`analysis/distill_probes.py`; logs `data/evaluations/2026-11-11_teacher_vs_real_pairs/probes/distill*.log`.
+Tables: `results/probe_c2_capacity.csv`, `results/probe_e_curves.csv`,
+E rows (`E_*_s<k>k`) in `results/eval_summary.csv`, and
+`results/probe_e_covered.csv` for the teacher-card view.
+
+**C2** (per game, in-sample, VALIDATION decks, teacher cards):
+
+| width | parameters per game head | in-sample cosine | deck AUC |
+|---|---|---|---|
+| 512 | 1.25M | 0.992 | 0.9191 |
+| 1024 | 4.07M | 0.993 | 0.9195 |
+| 2048 | 14.4M | 0.996 | 0.9207 |
+
+Against the prediction: width 512 already memorises the teacher on the
+cards it fits (cosine 0.99), and width adds nothing, so a per-game head
+of the student's size is large enough. The deck AUC stops at 0.92, not
+0.944. A likely reason, not checked: the cards the teacher holds but
+marks as not confident (seen in fewer than 5 decks) were not fitted, so
+their predictions are generalisation, as in C.
+
+**E** (one shared head across the 15 games; all cards, so comparable
+to `results/round_compare.csv`). Diet-weighted deck AUC, with seconds of
+training time to reach each step count:
+
+| arm | 10k | 20k | 40k | 80k | linear-cls at 80k | rank at 80k |
+|---|---|---|---|---|---|---|
+| main_T (real run) | 0.842 | 0.860 | 0.866 | 0.864 | 0.591 | 33 |
+| main_R (real run) | 0.828 | 0.846 | 0.860 | 0.867 | 0.700 | 88 |
+| E_t_replica (main_T's batch shape) | 0.867 (25 s) | 0.870 | 0.870 | 0.869 (192 s) | 0.515 | 30 |
+| E_pairs | 0.873 (63 s) | 0.875 | 0.871 | 0.871 (500 s) | 0.557 | 41 |
+| E_kl | 0.868 (24 s) | 0.865 | 0.873 | 0.874 (189 s) | 0.588 | 40 |
+| E_kl_wide (width 2048) | 0.879 (68 s) | 0.887 | 0.892 | **0.897** (543 s) | 0.604 | 85 |
+
+Against the predictions:
+- **Replica faithfulness.** E_pairs did not stay within 0.01 of T: it
+  was 0.031 ahead at 10k. So **E_t_replica** was added: main_T's batch
+  shape exactly (256 random anchor-neighbour pairs, one positive each,
+  other neighbours as negatives, temperature 0.07).
+  - It matches T's end point: 0.869 against 0.864 (teacher cards: 0.891
+    against 0.887).
+  - It reproduces T's collapse: linear-cls 0.515, rank 30.
+  - It is faster early: 0.867 against 0.842 at 10k.
+
+  So the offline setup reproduces T where it ends. The real pipeline
+  costs early speed, not the end point. (The PI's first remark to the
+  human, "something in the real pipeline is holding training back",
+  was too strong for the end point.)
+- **KL against pairs at width 512:** 0.874 against 0.871 at 80k, under
+  the 0.02 line. At the student's size the graded target is not better
+  on deck AUC. It keeps a little more field information (linear-cls
+  0.588 against 0.557).
+- **Width:** E_kl_wide is 0.023 above E_kl and still rising at 80k, and
+  its rank stays at 85. It is the first encoder in this experiment
+  above R's 0.867 by a clear margin. The width control **E_pairs_wide**
+  (pairs target, width 2048) is queued, to tell whether this is width
+  alone or width with the KL target.
+- **Collapse comes from the signal, not the pipeline.** The replica, fed
+  only teacher pairs, loses field information and rank just as T did.
+  At width 512, every teacher-signal arm ends with linear-cls of
+  0.51-0.59.
+- **Throughput:** offline, 10k steps take 25-70 s. The real runs took
+  about 10-25 min per 10k steps, at about 99% feature-cache hits. That
+  is an engineering question, not part of this experiment's aim (see
+  the hardware-utilisation memory: throughput work goes through
+  architect).
+
+**Ablations in the real trainer, queued** (configs
+`configs/ablation_T_{noaug,noclip}.yaml`, commit 5c5cb39). Each is
+main_T with one change, run until its round-0 encoder (10k steps) is
+written and then stopped. The 80k cosine plan is kept, so the learning
+rate at 10k matches main_T's round 0. Scored with evaluate.py.
+- `ablation_T_noaug`: `default_augmentation.probability: 0.0`. The
+  default masks the field that nearly names the deck (set, class,
+  faction) about half the time. The offline features are never masked.
+- `ablation_T_noclip`: `max_grad_norm: 1e6`. main_T clipped 15-35% of
+  steps (`run.log` clip tallies). The replica never clips.
+
+Predictions, against main_T round 0 (0.842) and the replica (0.867):
+- An ablation at 0.86 or more explains most of the early lag.
+- Both near 0.842: the lag is elsewhere: fp16 autocast, the per-dojo
+  loss weighting, or the pseudo-deck dealer.
+- A caveat on augmentation, written now: masking the set or class field
+  removes a shortcut that deck AUC rewards (two cards of one MTG deck
+  share a set 62% of the time). A faster no-augmentation run would show
+  the cost of the masking, not that the masking is wrong. Whether that
+  shortcut is wanted is the human's call, and it depends on the
+  transfer goal for unseen games.
+
+### 2026-11-12 15:10 · Width control and real-trainer ablations: results (PI)
+
+**Width control, E_pairs_wide** (pairs target, width 2048): 0.879,
+0.883, 0.885 and 0.874 at 10k, 20k, 40k and 80k (all cards). It peaks
+mid-run and falls, as main_T did. Teacher cards at 80k: 0.893.
+
+| at 80k, all cards (teacher cards) | width 512 | width 2048 |
+|---|---|---|
+| pairs target | 0.871 (0.897) | 0.874 (0.893) |
+| KL target | 0.874 (0.900) | **0.897 (0.914)** |
+
+Neither width nor the graded target helps alone (about +0.003 each);
+together they give +0.026, and E_kl_wide is still rising at 80k. A
+reading, not tested: a yes/no target has little to fit, so a big head
+over-fits it, while a graded target has enough structure to use the
+extra capacity. On teacher cards, E_kl_wide at 0.914 closes about 40%
+of the gap between R_r7 (0.892) and the teacher (0.944), with C2's
+per-game in-sample fit at 0.92 as a reference.
+
+**Real-trainer ablations** (inline: about 8 and 31 min of training;
+queue script in the session scratchpad; console logs
+`data/runs/2026-11-11_teacher_vs_real_pairs/logs/ablation_T_*.log`;
+evaluation log `data/evaluations/2026-11-11_teacher_vs_real_pairs/ablation_eval.log`,
+cache checks 0.99968 and 0.99981; rows `abl_T_*_r0` in
+`results/eval_summary.csv`):
+
+| round 0 (10k steps) | deck AUC | linear-cls | rank | clipped steps | wall-clock |
+|---|---|---|---|---|---|
+| main_T | 0.8417 | 0.713 | 53 | 2,111 | ~30 min |
+| ablation_T_noclip | 0.8442 | 0.723 | 53 | 0 | ~31 min |
+| ablation_T_noaug | **0.8666** | 0.680 | 47 | 535 | **~7.5 min** |
+| E_t_replica, 10k (offline) | 0.8672 | 0.672 | 47 | none | 25 s |
+
+Against the predictions: **augmentation explains all of the early lag**
+(0.867, matching the replica to 0.001). Clipping explains none of it
+(+0.003). The real trainer without augmentation is the replica. The
+4x wall-clock comes from the same cause: augmented card text misses the
+feature cache and must go through ModernBERT (main_T encoded about 300k
+new texts in round 0, `samples.csv`).
+
+Per game (`results/deck_auc_by_game.csv`), turning augmentation off
+helps most where a masked field nearly names the deck: MTG +0.056 (set),
+Lorcana +0.051, Hearthstone +0.032, Gundam +0.031. It **hurts the
+unseen game**, Gwent, by 0.020 (0.595 with augmentation, 0.575 without),
+and Dominion by 0.015. That fits the masking's purpose
+(`src/dojos/augmentation_defaults.py`): denying the model the field
+that nearly names the deck, which a new game will not share. So the
+early "slowness" is mostly the price of that masking, measured on an
+evaluation that rewards the shortcut. At 80k the cost on trained games
+is small (replica 0.869 against main_T 0.864). One seed each, so a
+difference of 0.02 on one game is suggestive, not established.
+
+**Where the investigation stands** (for the human; not Conclusions yet):
+1. "Why wasn't T faster?" On trained games, T *was* about 0.025 faster
+   at 10k (0.842 against R's 0.828), and augmentation took about as
+   much away from both arms. T plateaus at about 0.87 because a yes/no
+   top-32 target on a 1.3M head saturates by about 20k steps, offline
+   and in the real trainer alike, and over-fits after.
+2. The teacher holds much more: 0.944 against 0.89 on its own cards.
+   A graded similarity target with a wider head recovers about 40% of
+   that gap (0.914), and is still rising.
+3. Field information and rank collapse come from the teacher-pair
+   signal (the replica reproduces both). A graded target and a wide
+   head keep more rank (85 against 30), but linear-cls still falls to
+   about 0.60. The human's mixed-diet or field post-training idea is
+   still the candidate remedy.
+4. Pooled text generalises the teacher poorly to unseen cards (C: 0.83),
+   which backs the move to token embeddings or a better text side.
+
 ## Open questions
 
 - **Which part of the bundle matters**, if T and R differ:
