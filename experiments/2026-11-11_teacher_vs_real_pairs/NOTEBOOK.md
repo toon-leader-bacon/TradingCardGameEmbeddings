@@ -855,6 +855,41 @@ difference of 0.02 on one game is suggestive, not established.
 4. Pooled text generalises the teacher poorly to unseen cards (C: 0.83),
    which backs the move to token embeddings or a better text side.
 
+### 2026-11-12 · Reading checked with the human; direction for the next experiment (PI, with the human)
+
+**Two corrections to the 15:10 entry:**
+- Item 1 says T was "about 0.025 faster at 10k (0.842 against R's
+  0.828)". The paired delta is +0.014 [+0.012, …]
+  (`results/round_compare.csv`, round 0). The 0.025 is the LR pilot's
+  number (above, 14:15 entry).
+- The "4× wall-clock" from augmentation holds for round 0 only.
+  Augmentation draws at most `variants: 4` texts per card and mod, and
+  they persist in the on-disk feature cache, so the cost amortises.
+  Round times from `rounds.csv`:
+  - main_T: 1,826 s (round 0), 953 s (round 1), then falling to 596 s
+    (round 7);
+  - main_R: 1,436 s, 915 s, then falling to 728 s;
+  - ablation_T_noaug: 407 s for round 0.
+  The steady-state cost is about 1.5×, not 4×.
+
+**The human's decisions:**
+- Keep the masking augmentation. Transfer to unseen games is valued, and
+  the one-seed Gwent and Dominion drops without it are reason enough
+  for now.
+- The field-information fade is not a problem to solve yet. linear-cls
+  stays as an evaluation metric; recovering fields is nice-to-have
+  (matches the project's embedding-quality goal).
+- Less interested in pooled text features. Token embeddings are the
+  obvious candidate, but the options are to be weighed first.
+- Focus of the next experiment: a better teacher-to-student signal, and
+  a richer student (deeper, somewhat wider).
+
+**PI's proposal, under discussion:** rank the candidate signals and
+candidate text inputs offline first, with the probe harness
+(`analysis/distill_probes.py`, minutes per arm; probe C's held-out-card
+score for text inputs), then take the winners into one real-trainer
+run.
+
 ## Open questions
 
 - **Which part of the bundle matters**, if T and R differ:
