@@ -1,6 +1,6 @@
 # Teacher-neighbour pairs against real-deck pairs for contrastive pre-training
 
-**Status:** running
+**Status:** awaiting review
 **Dates:** 2026-11-11 -
 **Parent:** [2026-10-11_model_by_diet_r2](../2026-10-11_model_by_diet_r2/NOTEBOOK.md) (contrastive as the pre-training direction); teacher smoke test in `plans/teacher_student_training.md` · **Branch:** `feature/teacher-cooccurrence`
 
@@ -459,6 +459,8 @@ Decided:
 - 2026-11-11 21:50 · lab: main_R done, 118 min, all 8 round encoders kept; main_T launched ([bench note](bench_notes/2026-11-11_2150_run_main_R_done.md))
 
 - 2026-11-11 23:45 · lab: main_T done, 114 min, all 8 round encoders kept; evaluation of all round encoders started ([bench note](bench_notes/2026-11-11_2345_run_main_T_done.md))
+
+- 2026-11-12 01:25 · lab: wrap-up; queue done, all round encoders evaluated, awaiting review ([bench note](bench_notes/2026-11-12_0125_wrap_up.md))
 
 ## Open questions
 
