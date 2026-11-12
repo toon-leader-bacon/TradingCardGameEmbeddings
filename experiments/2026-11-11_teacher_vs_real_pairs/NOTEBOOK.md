@@ -462,6 +462,162 @@ Decided:
 
 - 2026-11-12 01:25 · lab: wrap-up; queue done, all round encoders evaluated, awaiting review ([bench note](bench_notes/2026-11-12_0125_wrap_up.md))
 
+### 2026-11-12 · First reading of the results, with the human (PI)
+
+Results as the Aim's rules give them (`results/round_compare.csv`,
+`results/deck_auc_by_round.png`): speed "no clear difference" (T ahead
+by +0.010 to +0.015 in every first-half round, under the +0.02 bar);
+quality "refuted" (final deck AUC delta -0.003 [-0.004, -0.002], inside
+the margin, but T's linear-cls is 0.108 below R's against an allowed
+0.02). Conclusions are not written yet: the probes below come first.
+
+**The human's reading** (recorded as said, not yet tested):
+- *Training removes field information.* Frozen whitened mean 0.927
+  linear-cls, untrained head 0.739, R about 0.70 throughout, T falling
+  from 0.713 to 0.591. Two causes are possible, and both may hold:
+  1. the input is a "muddled" mean-pooled text vector, so little field
+     detail reaches the head in a usable form (although the untrained
+     head still keeps 0.739);
+  2. the contrastive-only diet. Even with token embeddings as input, a
+     diet that only asks "are these cards deck partners" would likely
+     lose field detail too. That suggests the exact keywords, cost and
+     other fields matter little for deck partnership.
+- *Two remedies for the second cause:* a mixed diet from the start, or
+  post-training on these embeddings to bring attention back to the card
+  fields (the original plan's "contrastive pre-training, metric
+  fine-tuning").
+- *Collapse may be a feature.* One reading is that training compresses
+  card-field information efficiently and keeps only what neighbour
+  matching needs, which may be useful in general. Open until a
+  downstream task says otherwise.
+- *Next direction for the encoder:* stop treating the text side as
+  fixed. Fine-tune the underlying BERT, try other text embedding models,
+  and drop pooling and whitening in favour of the raw token embeddings.
+- *Keep in mind* (from the PI's list, the human's pick as most
+  important): R trains on real decks and is scored on real decks. T
+  also learns from real decks, but indirectly: through co-occurrence
+  counts, PPMI-SVD vectors and top-k neighbours. R has the home
+  advantage, and given enough steps it should be expected to win.
+
+**PI hypotheses for why T was not faster** (for the probes to test):
+1. The student never sees the teacher's vectors, only top-32 neighbour
+   pairs. Distances and everything past rank 32 are thrown away.
+2. The input bottleneck: no head over one pooled text vector can
+   separate cards whose text is near-identical but whose deck roles
+   differ.
+3. T overfits a fixed target: its own TEST loss bottoms at round 3 and
+   then rises, and its effective rank falls from 53 to 33.
+4. R's home advantage, as above.
+
+The current logs cannot tell under-fitting from over-fitting: the
+trainer records TEST loss per round, not train loss.
+
+**Probes chosen** (the human: A, B, C, in that order; D, AUC split by
+staples and near-identical text, deferred). None of them trains
+anything: they use the frozen features, the round encoders and the
+teacher tables already on disk. Script:
+`analysis/teacher_probes.py`; output `results/probe_*.csv`.
+
+- **A. The teacher's ceiling.** Score each game's teacher table (the
+  TRAIN-tier table main_T trained on, fitted on TRAIN decks only, so
+  the VALIDATION decks are clean) with the same deck AUC, decks and diet
+  weights. A teacher table covers only cards seen in TRAIN decks, so
+  every encoder in this probe is re-scored on the teacher's cards only:
+  teacher, R_r7, T_r7, R_r1, T_r1 and the frozen mean. Gwent has no
+  teacher and is left out.
+  - Teacher at 0.92 or more: the teacher knows much more than the
+    student learned, which points at hypotheses 1 and 2.
+  - Teacher at 0.88 or less: the teacher is near the student's level
+    and is a ceiling for teacher-pair training.
+  - In between: both are partly true.
+- **B. TRAIN against VALIDATION decks.** The same encoders scored on
+  500 TRAIN decks per game, sampled the same way. TRAIN minus VALIDATION
+  is the generalisation gap.
+  - Gap under 0.01 for R_r7: R is not over-fitting its decks. The limit
+    is capacity or the input, and more steps or more data of the same
+    kind will not help much.
+  - Gap over 0.03: over-fitting. Regularisation or more decks would
+    help, not a bigger model.
+  - The teacher's own gap shows how much of its score comes from having
+    counted those exact decks.
+- **C. Can pooled text predict the teacher?** For each game, regress
+  the teacher vectors on the frozen whitened mean features with ridge
+  and with a small MLP the size of the student head. Five folds by
+  card, so every card gets a prediction from a model that never saw it.
+  Report held-out R² and cosine, and score the out-of-fold predictions
+  with the A deck AUC.
+  - Deck AUC of the predictions close to the teacher's: pooled text
+    carries what the teacher knows, so the training signal (hypothesis
+    1) is the bottleneck, not the input.
+  - Close to R_r7 or below: pooled text cannot reach the teacher,
+    whatever the head (hypothesis 2). That supports moving to token
+    embeddings or a different text encoder.
+  - Ridge against MLP shows whether head capacity matters at all.
+
+### 2026-11-12 09:10 · Probes A, B, C results (PI)
+
+`analysis/teacher_probes.py`, 45 min on the GPU; log at
+`data/evaluations/2026-11-11_teacher_vs_real_pairs/probes/probes.log`.
+Tables: `results/probe_deck_auc.csv`, `results/probe_text_to_teacher.csv`.
+Every encoder is scored on the teacher's cards only: 81,068 of 101,219
+cards in the 15 games, 23,586 deck cards skipped per split. So R_r7
+scores 0.892 here, not the 0.867 of the full-card evaluation.
+
+Two fixes before the run that counted, neither changing a number: the
+cache check used a different 64-card sample and missed the 0.999 bar
+(0.9979, fp16 noise), so it now uses evaluate.py's own sample (0.99968).
+The MLP's R² was computed on raw outputs, which is meaningless for a
+model trained on cosine, so R² is now on unit-length predictions.
+
+Diet-weighted deck AUC, teacher cards only:
+
+| encoder | VALIDATION decks (5,339) | TRAIN decks (7,287) | TRAIN - VALIDATION |
+|---|---|---|---|
+| teacher | 0.9444 | 0.9506 | +0.006 |
+| R_r7 | 0.8924 | 0.8942 | +0.002 |
+| T_r7 | 0.8866 | 0.8875 | +0.001 |
+| T_r1 | 0.8750 | 0.8762 | +0.001 |
+| R_r1 | 0.8664 | 0.8660 | -0.000 |
+| text_ridge (out of fold) | 0.8326 | 0.8318 | -0.001 |
+| text_mlp (out of fold) | 0.8317 | 0.8312 | -0.001 |
+| frozen_mean | 0.6868 | 0.6861 | -0.001 |
+
+Against the predictions written above:
+- **A:** the teacher is at 0.944, above the 0.92 line. The teacher knows
+  much more than either student learned: 0.052 above R_r7. That points
+  at hypotheses 1 and 2. The gap is widest on Star Wars Unlimited
+  (0.933 against 0.827), Pokemon, MTG, Lorcana and Gundam, and nearly
+  zero on Slay the Spire 2 and Dragon Ball Masters.
+- **B:** R_r7's gap is +0.002, under the 0.01 line. No student
+  over-fits its decks, at any round. So hypothesis 3, as worded about
+  decks, is not supported: T's rising TEST loss is on its own
+  pseudo-pairs and does not show up as a deck-level gap. The teacher's
+  own gap is +0.006, so its 0.944 is not from having counted those
+  exact decks.
+- **C:** text predictions for cards the regressor never saw reach 0.832,
+  below R_r7 (0.892) and far below the teacher (0.944). Ridge and MLP
+  are equal on deck AUC (0.833 against 0.832), although the MLP's
+  held-out cosine is higher on the big games (MTG 0.71 against 0.53).
+  Held-out cosine falls to 0.3-0.45 on the small games. By the rule
+  written above this reads as "pooled text cannot reach the teacher".
+  **Caveat, found when reading:** C asks for unseen cards, while the
+  students are scored on cards they trained on (TRAIN-tier cards), so
+  C is a harder test than A's student rows. C shows that pooled text
+  generalises the teacher's geometry to new cards poorly. It does not
+  yet show whether a head over pooled text can *fit* the teacher on
+  cards it trains on. That is the capacity question, and it needs an
+  in-sample fit (proposed as C2 below).
+- **Not predicted:** R_r7 scores 0.430 on Dominion, below chance and
+  below the frozen mean (0.613). T_r7 scores 0.645. R's training made
+  Dominion worse than no training. Its small diet weight (12) means this
+  barely moves the weighted score.
+
+**Proposed next probe, C2 (not run):** fit the same MLP and a wider one
+on all confident cards and score the in-sample predictions. If they
+reach about 0.94, pooled text plus a head of this size can hold the
+teacher's knowledge, and the limit is the training signal (hypothesis
+1). If they stop near 0.89, the input or the head size is the limit.
+
 ## Open questions
 
 - **Which part of the bundle matters**, if T and R differ:
