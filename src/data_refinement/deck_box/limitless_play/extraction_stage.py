@@ -1,22 +1,26 @@
-"""Translates Limitless tournament decklists into the Pokemon DeckBox.
+"""Translates Limitless tournament decklists into DeckBoxes.
 
 See src/data_refinement/deck_box/extraction.py for the shared
 DeckExtractionStage interface.
 
-RAW SHAPE: data/raw/limitless_play/standings.jsonl, written by
+LimitlessDeckExtractionStage is the loop every Limitless game shares;
+a subclass supplies the game, raw path, deck sizes and a card matcher.
+LimitlessPlayDeckExtractionStage (below) is Pokemon's;
+tcg_extraction_stages.py holds the other games'.
+
+RAW SHAPE: data/raw/limitless_play/<game>/standings.jsonl, written by
 src/data_retrieval/limitless_play/downloader.py: one line per
 tournament, {"tournament_id", "standings": [row, ...]}; each row's
-decklist is parsed by limitless_decklist.py. A crash-then-resume can
-repeat a tournament's line; identity (below) makes that harmless.
+decklist is parsed by limitless_decklist.py (which drops side decks).
+A crash-then-resume can repeat a tournament's line; identity (below)
+makes that harmless.
 
-CARD MATCHING: card_index.py (printing, then name, then the Unknown
-sentinel). It needs pokemon-tcg-data's sets/en.json (extracted by
-src/data_retrieval/pokemon_tcg/downloader.py). The stage logs how many
-entries each match step took at the end of a run.
+CARD MATCHING: the subclass's CachedCardMatcher (deck_box/card_matching.py).
+The stage logs how many entries each match step took at the end of a
+run.
 
-FULL DECKS ONLY: a decklist whose copies don't total 60 (every
-Limitless PTCG format, retro ones included, plays 60) is skipped and
-counted, never stored.
+FULL DECKS ONLY: a decklist whose copies don't fit the subclass's
+DECK_SIZES is skipped and counted, never stored.
 
 IDENTITY: deck uuid = deck_uuid_from_cards() over the full copy-count
 multiset (src/data_refinement/deck_ids.py), stored once with
@@ -29,12 +33,13 @@ RETURN VALUE: only decks this call newly created, unlike
 seventeenlands_game_data's stage (which also lists decks it saw that
 were already stored). A re-run over the same file returns [].
 
-PRECONDITION: card_lookup holds Pokemon's Unknown sentinel
+PRECONDITION: card_lookup holds the game's Unknown sentinel
 (CardBinder.ensure_unknown_card()); raises RuntimeError otherwise.
 """
 
 import json
 import logging
+from abc import ABC, abstractmethod
 from collections import Counter
 from enum import Enum
 from pathlib import Path
@@ -48,20 +53,28 @@ from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.deck_box.limitless_play.card_index import (
     LimitlessCardIndex,
 )
+from src.data_refinement.deck_box.card_matching import (
+    CachedCardMatcher,
+    card_uuids_per_copy,
+)
+from src.data_refinement.deck_box.deck_sizes import DeckSizes
 from src.data_refinement.deck_box.limitless_play.limitless_decklist import (
+    LimitlessCardRef,
     LimitlessDecklist,
     parse_standings_row,
 )
 from src.data_refinement.deck_box.multiset_deck import store_multiset_deck
 from src.data_refinement.deck_box.unknown_card import require_unknown_card_uuid
-from src.data_retrieval.limitless_play.downloader import LimitlessPlayDownloader
+from src.data_retrieval.limitless_play.downloader import (
+    LimitlessGame,
+    LimitlessPlayDownloader,
+)
 from src.data_retrieval.pokemon_tcg.downloader import PokemonTcgDataDownloader
 from src.schema.data_source import DataSource
 from src.schema.game_id import GameId
 
 _logger = logging.getLogger(__name__)
 
-_DECK_SIZE = 60
 _UNMATCHED_LOG_LIMIT = 30
 
 
@@ -70,32 +83,19 @@ class DecklistOutcome(str, Enum):
 
     CREATED = "created"
     ALREADY_STORED = "already_stored"
-    SKIPPED_NOT_60 = "skipped_not_60"
+    SKIPPED_WRONG_SIZE = "skipped_wrong_size"
 
 
-class LimitlessPlayDeckExtractionStage:
-    """Limitless play tournament decklists -> GenericDecks (Pokemon).
+class LimitlessDeckExtractionStage(ABC):
+    """Template Method: Limitless decklists -> GenericDecks for one game.
 
-    Single-consumer to src/data_refinement/deck_box/.
+    A subclass sets SOURCE_GAME, DEFAULT_RAW_PATH and DECK_SIZES and
+    builds the card matcher in _build_card_matcher.
     """
 
-    SOURCE_GAME: ClassVar[GameId] = GameId.POKEMON
-    DEFAULT_RAW_PATH: ClassVar[Path] = (
-        LimitlessPlayDownloader.DEFAULT_RAW_DATA_DIR
-        / LimitlessPlayDownloader.STANDINGS_FILENAME
-    )
-    DEFAULT_SETS_PATH: ClassVar[Path] = (
-        PokemonTcgDataDownloader.DEFAULT_RAW_DATA_DIR / "sets" / "en.json"
-    )
-
-    def __init__(self, sets_path: Path | None = None) -> None:
-        """
-        Inputs: sets_path (pokemon-tcg-data's sets/en.json;
-            DEFAULT_SETS_PATH when None).
-        Output: none (constructor).
-        Side effects: none. Exceptions: none.
-        """
-        self.sets_path = sets_path or self.DEFAULT_SETS_PATH
+    SOURCE_GAME: ClassVar[GameId]
+    DEFAULT_RAW_PATH: ClassVar[Path]
+    DECK_SIZES: ClassVar[DeckSizes]
 
     def extract(
         self, raw_path: Path | None, box: DeckBox, card_lookup: CardLookup
@@ -103,16 +103,17 @@ class LimitlessPlayDeckExtractionStage:
         """Store every full, distinct decklist in raw_path.
 
         Inputs: raw_path (standings.jsonl; DEFAULT_RAW_PATH when None),
-            box (written to), card_lookup (Pokemon binder holding the
-            Unknown sentinel).
+            box (written to), card_lookup (SOURCE_GAME's binder holding
+            the Unknown sentinel).
         Output: nocab_uuid of every deck newly created this call.
-        Side effects: reads raw_path and self.sets_path; creates decks
-            on box; shows a tqdm bar; logs a summary (decklist outcomes,
-            card match counts).
-        Exceptions: FileNotFoundError if raw_path or sets_path is
-            missing; json.JSONDecodeError / KeyError / TypeError /
-            ValueError on a malformed line or decklist entry;
-            RuntimeError if the Unknown sentinel is missing.
+        Side effects: reads raw_path (and whatever _build_card_matcher
+            reads); creates decks on box; shows a tqdm bar; logs a
+            summary (decklist outcomes, card match counts).
+        Exceptions: FileNotFoundError if raw_path is missing;
+            json.JSONDecodeError / KeyError / TypeError / ValueError on
+            a malformed line or decklist entry; RuntimeError if the
+            Unknown sentinel is missing; whatever _build_card_matcher
+            raises.
 
         Example:
             >>> LimitlessPlayDeckExtractionStage().extract(None, box, binder)
@@ -122,16 +123,16 @@ class LimitlessPlayDeckExtractionStage:
         if not standings_path.is_file():
             raise FileNotFoundError(f"no Limitless standings at {standings_path}")
         unknown_uuid = require_unknown_card_uuid(card_lookup, self.SOURCE_GAME)
-        card_index = LimitlessCardIndex.from_sets_file(self.sets_path, card_lookup)
+        card_matcher = self._build_card_matcher(card_lookup)
         outcomes: Counter[DecklistOutcome] = Counter()
 
         # Store each full decklist once
         for decklist in self._read_decklists(standings_path):
-            if decklist.card_count != _DECK_SIZE:
-                outcomes[DecklistOutcome.SKIPPED_NOT_60] += 1
+            if not self.DECK_SIZES.fits(decklist.card_count):
+                outcomes[DecklistOutcome.SKIPPED_WRONG_SIZE] += 1
                 continue
-            card_nocab_uuids = self._match_card_nocab_uuids(
-                decklist, card_index, unknown_uuid
+            card_nocab_uuids = card_uuids_per_copy(
+                decklist.entries, card_matcher, unknown_uuid
             )
             created = store_multiset_deck(
                 box,
@@ -147,8 +148,20 @@ class LimitlessPlayDeckExtractionStage:
                 outcomes[DecklistOutcome.CREATED] += 1
                 result.append(created)
 
-        self._log_summary(outcomes, card_index)
+        self._log_summary(outcomes, card_matcher)
         return result
+
+    @abstractmethod
+    def _build_card_matcher(
+        self, card_lookup: CardLookup
+    ) -> CachedCardMatcher[LimitlessCardRef]:
+        """The matcher for this game's entries.
+
+        Inputs: card_lookup (SOURCE_GAME's binder, read-only).
+        Output: a CachedCardMatcher[LimitlessCardRef].
+        Side effects: as the subclass documents (e.g. reads a file).
+        Exceptions: as the subclass documents.
+        """
 
     def _read_decklists(self, standings_path: Path) -> Iterator[LimitlessDecklist]:
         """Every decklist in standings.jsonl, in file order.
@@ -160,7 +173,11 @@ class LimitlessPlayDeckExtractionStage:
             ValueError on a malformed line or decklist entry.
         """
         with open(standings_path, encoding="utf-8") as standings_file:
-            for line in tqdm(standings_file, desc="Limitless tournaments", unit="t"):
+            for line in tqdm(
+                standings_file,
+                desc=f"Limitless {self.SOURCE_GAME.value} tournaments",
+                unit="t",
+            ):
                 if not line.strip():
                     continue
                 tournament = json.loads(line)
@@ -168,42 +185,66 @@ class LimitlessPlayDeckExtractionStage:
                 for row_index, row in enumerate(tournament["standings"]):
                     yield from parse_standings_row(tournament_id, row_index, row)
 
-    def _match_card_nocab_uuids(
-        self,
-        decklist: LimitlessDecklist,
-        card_index: LimitlessCardIndex,
-        unknown_uuid: UUID,
-    ) -> list[UUID]:
-        """The decklist's copy-count multiset as binder uuids, the
-        Unknown sentinel standing in for an unmatched entry.
-
-        Inputs: decklist, card_index, unknown_uuid.
-        Output: one uuid per copy (len == decklist.card_count).
-        Side effects: as card_index.match_card_uuid.
-        Exceptions: none.
-        """
-        result: list[UUID] = []
-        for entry in decklist.entries:
-            card_uuid = card_index.match_card_uuid(entry)
-            result.extend([card_uuid or unknown_uuid] * entry.count)
-        return result
-
     def _log_summary(
-        self, outcomes: Counter[DecklistOutcome], card_index: LimitlessCardIndex
+        self,
+        outcomes: Counter[DecklistOutcome],
+        card_matcher: CachedCardMatcher[LimitlessCardRef],
     ) -> None:
         """Log decklist outcomes and card match counts at INFO, and the
         most common unmatched entries at WARNING.
 
-        Inputs: outcomes, card_index. Output: none.
+        Inputs: outcomes, card_matcher. Output: none.
         Side effects: up to two log lines. Exceptions: none.
         """
         _logger.info(
-            "Limitless decklists: %s; card entries matched by: %s",
+            "Limitless %s decklists: %s; card entries matched by: %s",
+            self.SOURCE_GAME.value,
             {outcome.value: count for outcome, count in outcomes.items()},
-            {kind.value: count for kind, count in card_index.match_counts.items()},
+            {kind.value: count for kind, count in card_matcher.match_counts.items()},
         )
-        if card_index.unmatched_counts:
+        if card_matcher.unmatched_counts:
             _logger.warning(
-                "Limitless entries matched to Unknown, most common first: %s",
-                card_index.unmatched_counts.most_common(_UNMATCHED_LOG_LIMIT),
+                "Limitless %s entries matched to Unknown, most common first: %s",
+                self.SOURCE_GAME.value,
+                card_matcher.unmatched_counts.most_common(_UNMATCHED_LOG_LIMIT),
             )
+
+
+class LimitlessPlayDeckExtractionStage(LimitlessDeckExtractionStage):
+    """Limitless play tournament decklists -> GenericDecks (Pokemon).
+
+    Every Limitless PTCG format, retro ones included, plays 60 cards.
+    Cards are matched by card_index.py, which needs pokemon-tcg-data's
+    sets/en.json (extracted by src/data_retrieval/pokemon_tcg/).
+    """
+
+    SOURCE_GAME: ClassVar[GameId] = GameId.POKEMON
+    DEFAULT_RAW_PATH: ClassVar[Path] = (
+        LimitlessPlayDownloader.raw_data_dir_for(LimitlessGame.POKEMON_TCG)
+        / LimitlessPlayDownloader.STANDINGS_FILENAME
+    )
+    DECK_SIZES: ClassVar[DeckSizes] = DeckSizes(60, 60)
+    DEFAULT_SETS_PATH: ClassVar[Path] = (
+        PokemonTcgDataDownloader.DEFAULT_RAW_DATA_DIR / "sets" / "en.json"
+    )
+
+    def __init__(self, sets_path: Path | None = None) -> None:
+        """
+        Inputs: sets_path (pokemon-tcg-data's sets/en.json;
+            DEFAULT_SETS_PATH when None).
+        Output: none (constructor).
+        Side effects: none. Exceptions: none.
+        """
+        self.sets_path = sets_path or self.DEFAULT_SETS_PATH
+
+    def _build_card_matcher(
+        self, card_lookup: CardLookup
+    ) -> CachedCardMatcher[LimitlessCardRef]:
+        """LimitlessCardIndex over self.sets_path.
+
+        Inputs: card_lookup. Output: LimitlessCardIndex.
+        Side effects: reads self.sets_path.
+        Exceptions: FileNotFoundError, json.JSONDecodeError, KeyError /
+            ValueError on a malformed set row.
+        """
+        return LimitlessCardIndex.from_sets_file(self.sets_path, card_lookup)

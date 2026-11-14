@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from src.data_retrieval.download_utils import require_int
+from src.schema.json_checks import require_int
 
 _GOLDEN_RATIO = (1 + math.sqrt(5)) / 2
 

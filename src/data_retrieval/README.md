@@ -22,10 +22,12 @@ Shared by every source:
   `sha256_of` and `check_sha256` (deletes the file on a mismatch).
 - `rate_limiter.py`: `RateLimiter`, request pacing.
 - `resumable_crawl/`: the one-item-at-a-time crawl the long deck crawls
-  (`archidekt/`, `moxfield/`, `deckstats/`) share. `crawl_files.py` holds the on-disk
+  (`archidekt/`, `moxfield/`, `deckstats/`, `mtgtop8/`) share. `crawl_files.py` holds the on-disk
   state: `decks-<nnnnn>.jsonl` shards gzipped once full (`JsonlShards`),
   `rejects.jsonl` (`RejectLog`) and `cursor.json` (`CursorFile`), every
-  append fsynced. `fetch.py` holds `crawl_get` (paced, a plain
+  append fsynced. `read_shard_rows` reads the shards back for
+  data_refinement, read-only, skipping a torn last line; each shard is
+  read whole and closed at once, but run it with the crawl stopped. `fetch.py` holds `crawl_get` (paced, a plain
   User-Agent) and `read_outcome`, which reads one answer as
   `ItemFound`, `ItemNotFound` (404) or `ItemRejected` (another 4xx
   but 429, or an unreadable body). `walk.py` holds
@@ -51,18 +53,21 @@ One subdirectory per source:
 | `hearthstonejson/` | Hearthstone | one `cards.json` per Hearthstone build |
 | `hearthstonetopdecks/` | Hearthstone | hearthstonetopdecks.com deck page URLs (the deck listing pages) and each page's title, deck code and details block |
 | `zenodo_hearthstone_decks/` | Hearthstone | Zenodo record 10198504's `decks.csv` and `cards.csv` (852k decks, 2013-2020, CC BY 4.0), MD5-checked |
+| `huggingface_datasets/` | Yu-Gi-Oh (any Hugging Face dataset repo) | `HuggingFaceDatasetDownloader(repo_id)` mirrors one repo's top-level files at a pinned commit into `data/raw/huggingface/<owner>__<name>/`, in place: unchanged files (by the listing's git blob SHA-1, or SHA-256 for LFS) are skipped, unlisted ones deleted, and `revision.json` written last marks a complete mirror (`require_complete_mirror()`). `huggingface_yugioh` mirrors feregrino's `yugioh-cards` and `yugioh-decks` (`ygoprodeck_repos.py`: every public YGOPRODeck deck, CC-BY-SA-3.0, so a published deck box derived from it credits YGOPRODeck and keeps that licence) |
 | `isotropic/` | Dominion | Wayback-archived isotropic.org game logs |
 | `moxfield/` | MTG | Moxfield decks via api2.moxfield.com's `v3/decks/all/<publicId>`, one deck at a time (`resumable_crawl/`): every deck the sitemap's 1,965 deck sitemaps list (~5.7M), in a fixed seeded shuffle (`crawl_plan.py`, `crawl_plan.tsv`); pruned rows (`pruning.py`), owners dropped. api2's robots.txt disallows all crawlers; the user chose to build it for personal, noncommercial research (see the module docstring). 20 rejects in a row stop a session |
+| `mtgtop8/` | MTG | MTGTop8 tournament decks, one format per run and per directory (`data/raw/mtgtop8/<code>/`, `formats.py`'s 20 codes, eternal formats first): the format's search pages, 25 decks each, landed in `listing/` until a short page and merged into a seeded-shuffle `crawl_plan.jsonl` (`listing.py`, `crawl_plan.py`), then each deck's MTGO text export (`resumable_crawl/`), landed as its listing row (event, rank, date, deck name; no player names) plus the text (`deck_export.py` checks it). Default pace 12/min, robots.txt's `Crawl-delay: 5` (a faster `--rpm` only warns); ~634k decks, ~37 days at that pace. `--mtgtop8-format` picks formats |
 | `mtgjson_decks/` | MTG | MTGJSON's AllDeckFiles: every Wizards-printed precon as one JSON file, one directory per daily build, SHA-256-checked (source survey: `plans/mtg_deck_sources.md`) |
 | `pitchstack/` | Flesh and Blood | pitchstack.gg deck ids and card lists (`pitchstack.md`: unimplemented endpoints) |
-| `limitless_play/` | Pokemon | play.limitlesstcg.com API: PTCG tournament list and each tournament's standings with decklists (paced at 9/min, the server's keyless limit) |
+| `limitless_play/` | Pokemon (+ any `LimitlessGame`: One Piece, Digimon, Lorcana, Star Wars: Unlimited, Riftbound, ...) | play.limitlesstcg.com API: one game's tournament list and each tournament's standings with decklists, into `limitless_play/<game id>/` (`--game`, repeatable or `all`, run in series; default PTCG; paced at 9/min, the server's keyless limit, shared by all games) |
 | `play_gwent/` | Gwent | playgwent.com deck guides |
 | `pokemon_tcg/` | Pokemon | the pokemon-tcg-data repo's card and deck JSON, and `sets/en.json` (set codes) |
 | `scryfall/` | MTG | Scryfall oracle-cards and default-cards (every printing) bulk files |
 | `seventeenlands/` | MTG | 17lands per-set/per-format draft, game and replay CSVs (own [README](seventeenlands/README.md)) |
 | `spire_codex/` | Slay the Spire 2 | spire-codex `cards.json` and its paginated run export |
 | `sts_gg/` | Slay the Spire 2 | sts.gg run ids and run detail JSON |
-| `tcgjson/` | Lorcana, Yu-Gi-Oh, Digimon, One Piece, Star Wars: Unlimited, Union Arena, Riftbound | tcgjson's weekly TCGplayer catalog release on GitHub: `bulk-data.json`, then each `CATALOG_SLUGS` game's `<slug>.full.json.gz`, size- and SHA-256-checked, into `data/raw/tcgjson/<generated_at>/`; the manifest is written last, so a directory holding it is complete (`latest_release_dir()`) |
+| `tcgjson/` | Lorcana, Digimon, One Piece, Star Wars: Unlimited, Union Arena, Riftbound | tcgjson's weekly TCGplayer catalog release on GitHub: `bulk-data.json`, then each `CATALOG_SLUGS` game's `<slug>.full.json.gz`, size- and SHA-256-checked, into `data/raw/tcgjson/<generated_at>/`; the manifest is written last, so a directory holding it is complete (`latest_release_dir()`) |
+| `tcgcsv/` | Gundam, Dragon Ball Super Fusion World, Dragon Ball Super Masters, Battle Spirits Saga | tcgcsv.com's daily TCGplayer catalog mirror: per `CATEGORY_IDS` game, its groups and each group's products, landed unchanged as `<slug>.json.gz` in `data/raw/tcgcsv/<last-updated stamp>/`; the stamp file is written last, so a directory holding it is complete (`latest_snapshot_dir()`). About 210 requests |
 | `dominion/` | Dominion | not a downloader: research leads (`todo.md`) and a prototype replay scraper |
 
 ## How it works

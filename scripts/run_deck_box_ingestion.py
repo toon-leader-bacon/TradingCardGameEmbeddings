@@ -37,6 +37,12 @@ from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.deck_box.build import build_or_update_deck_box
 from src.data_refinement.deck_box.deck_box import DeckBox
 from src.data_refinement.deck_box.extraction import DeckExtractionStage
+from src.data_refinement.deck_box.archidekt_decks.extraction_stage import (
+    ArchidektDeckExtractionStage,
+)
+from src.data_refinement.deck_box.deckstats_decks.extraction_stage import (
+    DeckstatsDeckExtractionStage,
+)
 from src.data_refinement.deck_box.fabtcg_decklists.extraction_stage import (
     FabtcgDecklistsExtractionStage,
 )
@@ -46,8 +52,20 @@ from src.data_refinement.deck_box.fabtcgmeta_online_decks.extraction_stage impor
 from src.data_refinement.deck_box.hearthstonetopdecks.extraction_stage import (
     HearthstoneTopDecksDeckExtractionStage,
 )
+from src.data_refinement.deck_box.isotropic.extraction_stage import (
+    IsotropicDeckExtractionStage,
+)
 from src.data_refinement.deck_box.limitless_play.extraction_stage import (
     LimitlessPlayDeckExtractionStage,
+)
+from src.data_refinement.deck_box.mtgtop8_decks.extraction_stage import (
+    MtgTop8DeckExtractionStage,
+)
+from src.data_refinement.deck_box.limitless_play.tcg_extraction_stages import (
+    ALL_TCG_STAGES,
+)
+from src.data_refinement.deck_box.moxfield_decks.extraction_stage import (
+    MoxfieldDeckExtractionStage,
 )
 from src.data_refinement.deck_box.mtgjson_decks.extraction_stage import (
     MtgjsonDeckExtractionStage,
@@ -55,20 +73,20 @@ from src.data_refinement.deck_box.mtgjson_decks.extraction_stage import (
 from src.data_refinement.deck_box.play_gwent.extraction_stage import (
     PlayGwentDeckExtractionStage,
 )
-from src.data_refinement.deck_box.isotropic.extraction_stage import (
-    IsotropicDeckExtractionStage,
-)
 from src.data_refinement.deck_box.pokemon_tcg.extraction_stage import (
     PokemonTcgDeckExtractionStage,
-)
-from src.data_refinement.deck_box.spire_codex_runs.extraction_stage import (
-    SpireCodexRunsDeckExtractionStage,
 )
 from src.data_refinement.deck_box.seventeenlands_game_data.extraction_stage import (
     SeventeenLandsGameDataDeckExtractionStage,
 )
+from src.data_refinement.deck_box.spire_codex_runs.extraction_stage import (
+    SpireCodexRunsDeckExtractionStage,
+)
 from src.data_refinement.deck_box.sts_gg.extraction_stage import (
     StsGgDeckExtractionStage,
+)
+from src.data_refinement.deck_box.ygoprodeck_decks.extraction_stage import (
+    YgoprodeckDecksExtractionStage,
 )
 from src.data_refinement.deck_box.zenodo_hearthstone_decks.extraction_stage import (
     ZenodoHearthstoneDecksExtractionStage,
@@ -119,6 +137,10 @@ _STAGES: dict[str, tuple[DeckExtractionStage, Callable[[], Path]]] = {
         LimitlessPlayDeckExtractionStage(),
         lambda: LimitlessPlayDeckExtractionStage.DEFAULT_RAW_PATH,
     ),
+    "ygoprodeck_decks": (
+        YgoprodeckDecksExtractionStage(),
+        lambda: YgoprodeckDecksExtractionStage.DEFAULT_RAW_PATH,
+    ),
     "pokemon_tcg": (
         PokemonTcgDeckExtractionStage(),
         lambda: PokemonTcgDeckExtractionStage.DEFAULT_RAW_PATH,
@@ -136,6 +158,31 @@ _STAGES: dict[str, tuple[DeckExtractionStage, Callable[[], Path]]] = {
         SeventeenLandsGameDataDeckExtractionStage(),
         lambda: SeventeenLandsGameDataDeckExtractionStage.DEFAULT_RAW_PATH,
     ),
+    # MTG deck-site crawls (Archidekt unlisted decks excluded by default)
+    "archidekt_decks": (
+        ArchidektDeckExtractionStage(),
+        lambda: ArchidektDeckExtractionStage.DEFAULT_RAW_PATH,
+    ),
+    "moxfield_decks": (
+        MoxfieldDeckExtractionStage(),
+        lambda: MoxfieldDeckExtractionStage.DEFAULT_RAW_PATH,
+    ),
+    "deckstats_decks": (
+        DeckstatsDeckExtractionStage(),
+        lambda: DeckstatsDeckExtractionStage.DEFAULT_RAW_PATH,
+    ),
+    "mtgtop8_decks": (
+        MtgTop8DeckExtractionStage(),
+        lambda: MtgTop8DeckExtractionStage.DEFAULT_RAW_PATH,
+    ),
+    # Limitless's other card games: limitless_one_piece, limitless_lorcana, ...
+    **{
+        f"limitless_{stage_class.SOURCE_GAME.value}": (
+            stage_class(),
+            (lambda path=stage_class.DEFAULT_RAW_PATH: path),
+        )
+        for stage_class in ALL_TCG_STAGES
+    },
 }
 
 

@@ -24,22 +24,23 @@ MATCH ORDER (first hit wins), measured on three sampled tournaments
        files under sets pokemon-tcg-data lacks (e.g. "MEE").
     3. UNMATCHED: None; the caller substitutes the Unknown sentinel.
 
-Matches are cached by (set code, number, name): a run sees the same
-few thousand printings across hundreds of thousands of decks.
+Caching and match counts: CachedCardMatcher (deck_box/card_matching.py).
 """
 
 import json
-from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime
-from enum import Enum
 from pathlib import Path
 from typing import ClassVar
 from uuid import UUID
 
 from src.data_refinement.card_binder.card_lookup import CardLookup
+from src.data_refinement.deck_box.card_matching import (
+    CachedCardMatcher,
+    CardMatchKind,
+)
 from src.data_refinement.deck_box.limitless_play.limitless_decklist import (
-    LimitlessCardEntry,
+    LimitlessCardRef,
 )
 from src.schema.card import GenericCard
 from src.schema.data_source import DataSource
@@ -61,14 +62,6 @@ _LIMITLESS_SET_CODES: dict[str, str] = {
 }
 
 
-class CardMatchKind(str, Enum):
-    """Which match step found a card (for the stage's summary log)."""
-
-    PRINTING = "printing"
-    NAME = "name"
-    UNMATCHED = "unmatched"
-
-
 @dataclass(frozen=True)
 class PokemonSet:
     """One sets/en.json row, as far as matching needs it."""
@@ -78,10 +71,11 @@ class PokemonSet:
     release_date: date
 
 
-class LimitlessCardIndex:
+class LimitlessCardIndex(CachedCardMatcher[LimitlessCardRef]):
     """Limitless (set code, number, name) -> binder nocab_uuid, cached.
 
-    Single-consumer to LimitlessPlayDeckExtractionStage.
+    Single-consumer to
+    LimitlessPlayDeckExtractionStage.
     """
 
     _GAME: ClassVar[GameId] = GameId.POKEMON
@@ -93,15 +87,10 @@ class LimitlessCardIndex:
         Output: none (constructor).
         Side effects: none. Exceptions: none.
         """
+        super().__init__()
         self._card_lookup = card_lookup
         self._set_ids_by_code = _index_set_ids_by_code(sets)
         self._release_date_by_set_id = {s.set_id: s.release_date for s in sets}
-        self._match_cache: dict[
-            tuple[str, str, str], tuple[UUID | None, CardMatchKind]
-        ] = {}
-        self.match_counts: Counter[CardMatchKind] = Counter()
-        # (set code, number, name) of each unmatched entry, per entry
-        self.unmatched_counts: Counter[tuple[str, str, str]] = Counter()
 
     @classmethod
     def from_sets_file(
@@ -123,52 +112,31 @@ class LimitlessCardIndex:
         raw_sets = json.loads(sets_path.read_text(encoding="utf-8"))
         return cls([_parse_set(raw_set) for raw_set in raw_sets], card_lookup)
 
-    def match_card_uuid(self, entry: LimitlessCardEntry) -> UUID | None:
-        """The binder card an entry names, or None if no step matches.
-
-        Inputs: entry. Output: nocab_uuid or None.
-        Side effects: fills the cache; counts each lookup's match kind
-            in match_counts, and each unmatched key in unmatched_counts
-            (cache hits included, so the counts are per decklist entry).
-        Exceptions: none.
-
-        Example:
-            >>> index.match_card_uuid(LimitlessCardEntry(4, "PAR", "57", "..."))
-        """
-        key = (entry.set_code, entry.number, entry.name)
-        if key not in self._match_cache:
-            self._match_cache[key] = self._match(entry)
-        result, match_kind = self._match_cache[key]
-        self.match_counts[match_kind] += 1
-        if match_kind is CardMatchKind.UNMATCHED:
-            self.unmatched_counts[key] += 1
-        return result
-
-    def _match(self, entry: LimitlessCardEntry) -> tuple[UUID | None, CardMatchKind]:
+    def _match(self, key: LimitlessCardRef) -> tuple[UUID | None, CardMatchKind]:
         """Steps 1 then 2 of the module docstring's MATCH ORDER.
 
-        Inputs: entry. Output: (nocab_uuid or None, the step that hit).
+        Inputs: key. Output: (nocab_uuid or None, the step that hit).
         Side effects: none (card_lookup reads only).
         Exceptions: none.
         """
-        card = self._card_by_printing(entry)
+        card = self._card_by_printing(key)
         if card is not None:
             return card.nocab_uuid, CardMatchKind.PRINTING
-        card = self._newest_card_named(entry.name)
+        card = self._newest_card_named(key.name)
         if card is not None:
             return card.nocab_uuid, CardMatchKind.NAME
         return None, CardMatchKind.UNMATCHED
 
-    def _card_by_printing(self, entry: LimitlessCardEntry) -> GenericCard | None:
-        """Step 1: the first set id for entry.set_code whose
+    def _card_by_printing(self, key: LimitlessCardRef) -> GenericCard | None:
+        """Step 1: the first set id for key.set_code whose
         "<set id>-<number>" is a POKEMON_TCG alias.
 
-        Inputs: entry. Output: GenericCard or None.
+        Inputs: key. Output: GenericCard or None.
         Side effects: none. Exceptions: none.
         """
-        for set_id in self._set_ids_by_code.get(entry.set_code, ()):
+        for set_id in self._set_ids_by_code.get(key.set_code, ()):
             card = self._card_lookup.get_by_alias(
-                self._GAME, DataSource.POKEMON_TCG, f"{set_id}-{entry.number}"
+                self._GAME, DataSource.POKEMON_TCG, f"{set_id}-{key.number}"
             )
             if card is not None:
                 return card

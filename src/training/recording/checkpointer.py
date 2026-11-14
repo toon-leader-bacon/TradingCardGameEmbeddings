@@ -79,11 +79,17 @@ class DirectoryCheckpointer:
     evaluation can label cards by the tiers the run trained with), plus
     the plan/report manifest.
 
-    Inputs (constructor): run_directory (Path).
+    With keep_round_encoders, save_latest also writes the round's
+    encoder-only files (`encoder.pt`, manifest, holdout; no `state.pt`)
+    to `round<NNNN>/`, never pruned: for evaluating a run at every round.
+
+    Inputs (constructor): run_directory (Path), keep_round_encoders
+        (bool, default False).
     """
 
-    def __init__(self, run_directory: Path) -> None:
+    def __init__(self, run_directory: Path, keep_round_encoders: bool = False) -> None:
         self._run_directory = run_directory
+        self._keep_round_encoders = keep_round_encoders
         # Phase name -> the directory of its current best checkpoint
         self._best_by_phase: dict[str, Path] = {}
 
@@ -131,14 +137,42 @@ class DirectoryCheckpointer:
         """Write run_directory/latest/, replacing the previous latest.
 
         Inputs, output, exceptions: as save.
-        Side effects: replaces run_directory/latest/.
+        Side effects: replaces run_directory/latest/; with
+            keep_round_encoders, also writes run_directory/round<NNNN>/.
 
         Example:
             >>> checkpointer.save_latest(m, ds, opt, plan, rep).path.parent.name
             'latest'
         """
         directory = self._run_directory / _LATEST_DIRECTORY
-        return self._write_checkpoint(directory, model, dojos, optimizer, plan, report)
+        record = self._write_checkpoint(
+            directory, model, dojos, optimizer, plan, report
+        )
+        if self._keep_round_encoders:
+            self._write_round_encoder(model, plan, report)
+        return record
+
+    def _write_round_encoder(
+        self, model: TrainableEncoder, plan: TrainingPlan, report: RoundReport
+    ) -> None:
+        """Write round<NNNN>/ (encoder, manifest, holdout) via a staging
+        directory, as _write_checkpoint does.
+        Inputs: model, plan, report. Output: none.
+        Side effects: replaces run_directory/round<NNNN>/.
+        Exceptions: OSError on write failure."""
+        directory = self._run_directory / f"round{report.round_index:04d}"
+        staging = directory.with_name(directory.name + ".tmp")
+        shutil.rmtree(staging, ignore_errors=True)
+        staging.mkdir(parents=True)
+        try:
+            self._write_encoder(staging, model)
+            self._write_manifest(staging, plan, report)
+            self._write_holdout(staging, plan.holdout)
+            shutil.rmtree(directory, ignore_errors=True)
+            staging.rename(directory)
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
 
     def _write_checkpoint(
         self,

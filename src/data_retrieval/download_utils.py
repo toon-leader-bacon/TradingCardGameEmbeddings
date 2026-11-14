@@ -49,6 +49,7 @@ existed.
 
 import hashlib
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any, Callable, TypeVar
@@ -70,6 +71,32 @@ _DEFAULT_RATE_LIMITED_WAIT_SECONDS = 60.0  # a 429 without Retry-After
 _MAX_RATE_LIMITED_WAIT_SECONDS = 900.0  # caps a huge Retry-After
 
 _AttemptResult = TypeVar("_AttemptResult")
+
+
+# The User-Agent this project's own downloaders send: honest, no contact
+# address (the user's email never goes to an external service)
+RESEARCH_USER_AGENT = "TradingCardGameEmbeddings-research/0.1 (non-commercial)"
+
+
+def use_ipv4_only() -> None:
+    """Make every requests/urllib3 connection in this process resolve
+    IPv4 addresses only.
+
+    For a host whose network drops IPv6 silently: urllib3 tries a site's
+    addresses in order, without Happy Eyeballs, so each unreachable AAAA
+    address costs a full connect timeout before IPv4 is tried. Seen
+    2026-11-11 on Moxfield and Deckstats (Cloudflare, AAAA first): about
+    60 s per request, with no error logged because IPv4 then succeeded.
+
+    Inputs: none. Output: none.
+    Side effects: patches urllib3.util.connection.allowed_gai_family for
+        the whole process. Exceptions: none.
+    """
+    import socket
+
+    import urllib3.util.connection
+
+    urllib3.util.connection.allowed_gai_family = lambda: socket.AF_INET
 
 
 def call_with_retries(
@@ -448,38 +475,6 @@ def pick_keys(source: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
     return {key: source[key] for key in keys if key in source}
 
 
-def require_int(value: Any) -> int:
-    """value if it is an int (not a bool): the check for an int read back
-    from JSON a downloader wrote (a cursor, a plan).
-
-    Inputs: value (a parsed JSON value). Output: int. Side effects: none.
-    Exceptions: TypeError otherwise.
-
-    Example:
-        >>> require_int(3)
-        3
-    """
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(f"expected an int, got {value!r}")
-    return value
-
-
-def require_str(value: Any) -> str:
-    """value if it is a str: the check for a string read back from JSON a
-    downloader wrote (a plan's deck paths).
-
-    Inputs: value (a parsed JSON value). Output: str. Side effects: none.
-    Exceptions: TypeError otherwise.
-
-    Example:
-        >>> require_str("325-Burn")
-        '325-Burn'
-    """
-    if not isinstance(value, str):
-        raise TypeError(f"expected a str, got {value!r}")
-    return value
-
-
 def check_sha256(path: Path, expected_sha256: str) -> None:
     """Delete path and raise if its SHA-256 isn't expected_sha256 (for a
     source that publishes a digest per file: MTGJSON, tcgjson).
@@ -511,3 +506,31 @@ def sha256_of(path: Path) -> str:
     """
     with open(path, "rb") as file:
         return hashlib.file_digest(file, "sha256").hexdigest()
+
+
+def latest_complete_dir(root: Path, name_pattern: re.Pattern[str], marker: str) -> Path:
+    """The newest complete snapshot directory under root: one whose name
+    fully matches name_pattern and that holds marker (the file a
+    downloader writes last). For a name format that sorts by date as a
+    string ("20261106T200528Z"); the greatest name wins.
+
+    Inputs: root, name_pattern, marker (a file name).
+    Output: <root>/<newest complete name>.
+    Side effects: lists root.
+    Exceptions: FileNotFoundError if root holds no complete directory.
+
+    Example:
+        >>> latest_complete_dir(Path("data/raw/tcgcsv"),
+        ...                     re.compile("[0-9]{8}T[0-9]{6}Z"), "last-updated.txt")
+        PosixPath('data/raw/tcgcsv/20261106T200528Z')
+    """
+    result: list[Path] = []
+    if root.is_dir():
+        result = sorted(
+            path
+            for path in root.iterdir()
+            if name_pattern.fullmatch(path.name) and (path / marker).is_file()
+        )
+    if not result:
+        raise FileNotFoundError(f"no complete snapshot directory under {root}")
+    return result[-1]

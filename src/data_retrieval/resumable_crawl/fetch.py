@@ -13,14 +13,13 @@ from typing import Any, Callable
 
 import requests
 
-from src.data_retrieval.download_utils import paced_get
+from src.data_retrieval.download_utils import RESEARCH_USER_AGENT, paced_get
 from src.data_retrieval.rate_limiter import RateLimiter
 
 # Every 4xx is a permanent answer for one id, except 429 (waited out)
 PERMANENT_STATUSES = frozenset(range(400, 500)) - {429}
 # The redirects a no-follow GET hands back to its caller
 REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
-_CRAWL_USER_AGENT = "TradingCardGameEmbeddings-research/0.1 (non-commercial)"
 _REQUEST_TIMEOUT_SECONDS = 60
 _BODY_PREVIEW_CHARS = 200
 
@@ -72,7 +71,7 @@ def crawl_get(
     return paced_get(
         url,
         rate_limiter=rate_limiter,
-        headers={"User-Agent": _CRAWL_USER_AGENT},
+        headers={"User-Agent": RESEARCH_USER_AGENT},
         timeout_seconds=_REQUEST_TIMEOUT_SECONDS,
         tolerated_statuses=tolerated_statuses,
         follow_redirects=follow_redirects,

@@ -140,7 +140,9 @@ from src.training.dojo_recipes.multi_game_card_dojo_recipe import (
     MultiGameCardDojoRecipe,
 )
 
-# Games with a final deck box, so each can have contrastive dojos
+# Games with a final deck box, so each can have contrastive dojos. Kept by
+# hand, not read from data/final/decks/, so the catalog never depends on
+# what is on disk (Riftbound and Union Arena have binders but no decks)
 _CONTRASTIVE_GAMES = (
     GameId.GWENT,
     GameId.FLESH_AND_BLOOD,
@@ -148,6 +150,17 @@ _CONTRASTIVE_GAMES = (
     GameId.MTG,
     GameId.POKEMON,
     GameId.DOMINION,
+    GameId.HEARTHSTONE,
+    GameId.YUGIOH,
+    # Limitless play tournament decks (deck_box/limitless_play/)
+    GameId.ONE_PIECE,
+    GameId.DIGIMON,
+    GameId.GUNDAM,
+    GameId.DRAGON_BALL_FUSION_WORLD,
+    GameId.DRAGON_BALL_MASTERS,
+    GameId.BATTLE_SPIRITS_SAGA,
+    GameId.STAR_WARS_UNLIMITED,
+    GameId.LORCANA,
 )
 
 # Each contrastive style's catalog key prefix (see src/dojos/README.md)

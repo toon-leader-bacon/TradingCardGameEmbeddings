@@ -171,10 +171,14 @@ class _PrintingScan:
     lowest_rarities: oracle_id -> lowest rarity over the card's printings.
     oracle_id_by_printed_name: printed name -> oracle_id, for names that
         differ from the card's name and belong to exactly one card.
+    oracle_id_by_printing_id: Scryfall printing id ("id") -> oracle_id,
+        for every printing of a playable layout (reversible cards, which
+        have no top-level oracle_id, through their first face's).
     """
 
     lowest_rarities: dict[str, str]
     oracle_id_by_printed_name: dict[str, str]
+    oracle_id_by_printing_id: dict[str, str]
 
 
 # From least to most restrictive. A rarity not listed (a future one) ranks
@@ -303,22 +307,28 @@ class ScryfallCardIngestionStage:
                 if result is not None:
                     changed_uuids.append(result)
         self._register_name_aliases(scan, binder)
+        self._register_printing_aliases(scan, binder)
         return changed_uuids
 
     def _scan_printings(self) -> _PrintingScan:
-        """Read the default-cards file once for lowest rarities and printed names.
+        """Read the default-cards file once for lowest rarities, printed
+        names and printing ids.
 
         Inputs: none (uses the configured find_printings_path).
-        Output: a _PrintingScan; both dicts are empty if no default-cards
-            file is configured. Rows without a top-level oracle_id (a few
-            multi-face printings) are skipped.
+        Output: a _PrintingScan; all three dicts are empty if no
+            default-cards file is configured. Rows of an excluded layout
+            are skipped. Rows without a top-level oracle_id (83
+            reversible-card printings in 2026-10) still map their printing
+            id, through the first face's oracle id, but add no rarity or
+            printed name.
         Side effects: reads the default-cards file once, with a progress bar.
         Exceptions: whatever find_printings_path or reading the file raises.
         """
         if self._find_printings_path is None:
-            return _PrintingScan({}, {})
+            return _PrintingScan({}, {}, {})
         rarities_by_card: dict[str, str] = {}
         oracle_ids_by_printed_name: dict[str, set[str]] = {}
+        oracle_id_by_printing_id: dict[str, str] = {}
         printings_path = self._find_printings_path()
         with open(printings_path, "r", encoding="utf-8") as printings_file, tqdm(
             total=printings_path.stat().st_size,
@@ -329,8 +339,16 @@ class ScryfallCardIngestionStage:
             for line in printings_file:
                 progress.update(len(line.encode("utf-8")))
                 row = json.loads(line)
+                if row.get("layout") in _EXCLUDED_LAYOUTS:
+                    continue
+                printing_id = row.get("id")
+                printing_oracle_id = _printing_oracle_id(row)
+                if isinstance(printing_id, str) and printing_oracle_id is not None:
+                    oracle_id_by_printing_id[printing_id] = printing_oracle_id
+                # Rarities and printed names keep using only the top-level
+                # oracle_id, as before the printing map existed
                 oracle_id = row.get("oracle_id")
-                if oracle_id is None or row.get("layout") in _EXCLUDED_LAYOUTS:
+                if oracle_id is None:
                     continue
                 known = rarities_by_card.get(oracle_id)
                 rarities_by_card[oracle_id] = _least_restrictive(
@@ -350,7 +368,32 @@ class ScryfallCardIngestionStage:
             for printed_name, oracle_ids in oracle_ids_by_printed_name.items()
             if len(oracle_ids) == 1
         }
-        return _PrintingScan(rarities_by_card, unambiguous)
+        return _PrintingScan(rarities_by_card, unambiguous, oracle_id_by_printing_id)
+
+    def _register_printing_aliases(
+        self, scan: _PrintingScan, binder: CardBinder
+    ) -> None:
+        """Register every printing id as a SCRYFALL_PRINTING alias of its
+        oracle card, so deck sources that name printings (Moxfield,
+        Deckstats) match by alias.
+
+        Inputs: scan (this ingest's printing scan), binder (holding the
+            cards just ingested).
+        Output: none.
+        Side effects: registers (SCRYFALL_PRINTING, printing id) aliases
+            on binder; a printing whose oracle card is not in the binder
+            is skipped.
+        Exceptions: none.
+        """
+        for printing_id, oracle_id in scan.oracle_id_by_printing_id.items():
+            card = binder.get_by_alias(self.SOURCE_GAME, DataSource.SCRYFALL, oracle_id)
+            if card is not None:
+                binder.register_alias(
+                    self.SOURCE_GAME,
+                    DataSource.SCRYFALL_PRINTING,
+                    printing_id,
+                    card.nocab_uuid,
+                )
 
     def _register_name_aliases(self, scan: _PrintingScan, binder: CardBinder) -> None:
         """Register every printed-name and manual name alias on its card.
@@ -578,3 +621,22 @@ def _legal_formats_by_status(legalities: dict) -> JsonObject:
         if status != _NOT_LEGAL:
             formats_by_status.setdefault(status, []).append(format_name)
     return {status: list(formats) for status, formats in formats_by_status.items()}
+
+
+def _printing_oracle_id(row: dict) -> str | None:
+    """A default-cards row's oracle id: its own "oracle_id", else its
+    first face's (reversible cards carry it only per face).
+
+    Inputs: row (one default-cards row). Output: str or None when
+        neither is present.
+    Side effects: none. Exceptions: none.
+    """
+    oracle_id = row.get("oracle_id")
+    if isinstance(oracle_id, str):
+        return oracle_id
+    faces = row.get("card_faces")
+    if isinstance(faces, list) and faces and isinstance(faces[0], dict):
+        face_oracle_id = faces[0].get("oracle_id")
+        if isinstance(face_oracle_id, str):
+            return face_oracle_id
+    return None

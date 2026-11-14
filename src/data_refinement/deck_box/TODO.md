@@ -60,6 +60,18 @@ not decks).
 
 ## Enhancements
 
+- **How many times each deck was submitted (low priority).** Multiset
+  stages (limitless_play, ygoprodeck_decks, hearthstonetopdecks, ...)
+  store a repeated card list once and keep no count of its repeats.
+  On 2026-11-08, One Piece alone had 15,435 repeats behind 46,176
+  stored decks. The count shows only in the run's summary log.
+  `deck_box_dealer.py` therefore samples every stored deck uniformly.
+  Per the one-entry-per-multiset rule, the count belongs in a metric
+  keyed by deck uuid, not a deck box field. The metric would re-hash
+  each raw decklist with `deck_uuid_from_cards()` and count the hits;
+  Limitless rows also give placings and records. A deck sampler could
+  later take it as an optional weight, so popular decks are drawn more
+  often.
 - **Abandoned StS2 runs.** Every StS2 deck source keeps them today
   (sts_gg, spire_codex_runs; the last has a
   `keep_abandoned` toggle, default on). The project favors quantity, but a

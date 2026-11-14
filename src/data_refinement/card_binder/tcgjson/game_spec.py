@@ -1,12 +1,14 @@
-"""What differs between tcgjson games, as data: which customAttributes
-become which raw_content keys, of what kind; the rarity ladder; which sets
+"""What differs between TCGplayer-catalog games, as data: which
+attributes become which raw_content keys, of what kind; the rarity ladder; which sets
 and card types are not deck cards; where the type is read from; whether a
 card is its name or its card number; and what printing detail a name
-carries. One TcgjsonGameSpec constant per game, here.
+carries; which source's catalog it reads. One TcgjsonGameSpec constant
+per tcgjson game here; the tcgcsv games' are in card_binder/tcgcsv/.
 
-Every tcgjson game shares the catalog layout (catalog.py); only the
-customAttributes keys differ (checked across all nine games' schema
-profiles, release weekly-20260831). A game whose fields need a transform
+Every game shares the catalog layout (catalog.py); only the attribute
+keys differ (tcgjson's customAttributes keys checked across all nine
+games' schema profiles, release weekly-20260831; a tcgcsv spec names
+TCGplayer's extendedData names instead). A game whose fields need a transform
 no FieldKind expresses gets a new FieldKind (and its case in
 FieldKind.normalize), not per-game code.
 """
@@ -15,6 +17,10 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 
+from src.data_refinement.card_binder.tcgjson.catalog import (
+    TCGJSON_FORMAT,
+    CatalogFormat,
+)
 from src.data_refinement.card_binder.tcgjson.rules_text import clean_rules_text
 from src.schema.game_id import GameId
 from src.schema.json_types import JsonValue
@@ -87,7 +93,9 @@ class FieldKind(Enum):
 class CatalogField:
     """One kept field.
 
-    attribute: the customAttributes key ("costInk").
+    attribute: the attribute's name in the spec's catalog: a tcgjson
+        customAttributes key ("costInk"), a tcgcsv extendedData name
+        ("Attack Points").
     card_key: the raw_content key, in the game's own terms ("cost").
     kind: how the value is normalized.
     """
@@ -111,9 +119,9 @@ class CatalogField:
 
 @dataclass(frozen=True)
 class TcgjsonGameSpec:
-    """One game's reading of its tcgjson catalog.
+    """One game's reading of its catalog (from catalog_format's source).
 
-    slug: tcgjson's name for the game, the catalog file's stem.
+    slug: the source's name for the game, the catalog file's stem.
     game: the GameId its cards are stored under.
     fields: the kept fields, in raw_content order (after name and type;
         rarity, set and text follow them).
@@ -126,7 +134,7 @@ class TcgjsonGameSpec:
         outside the deck, no text, one product per artwork).
     type_attribute: the customAttributes key holding the card's type,
         for a game whose metadata.cardTypes is coarse or often missing
-        (Yu-Gi-Oh's cardTypeB, "Effect Monster"); None: cardTypes.
+        (no current spec uses it); None: cardTypes.
     card_number: for a game where many cards share a name (One Piece
         has dozens of "Monkey.D.Luffy"), a card is its card number: the
         first match of this pattern in the product's "number" attribute
@@ -135,6 +143,14 @@ class TcgjsonGameSpec:
     name_suffix: printing detail stripped from the end of a name after
         its parenthetical tags (Star Wars: Unlimited's token backs,
         "Capital City // Shield"); None: nothing more.
+    excluded_numbers: a product whose "number" attribute this pattern
+        matches (search) is not a deck card (Gundam's tokens, "T-030");
+        None: no product is excluded by number.
+    untyped_cards: whether a product with no type is still a card when
+        it has a card number (Dragon Ball Masters leaves CardType off
+        some real cards); False: a product needs a type.
+    catalog_format: which source's catalog the attribute keys above
+        are read from (catalog.CatalogFormat).
     """
 
     slug: str
@@ -146,6 +162,18 @@ class TcgjsonGameSpec:
     type_attribute: str | None = None
     card_number: re.Pattern[str] | None = None
     name_suffix: re.Pattern[str] | None = None
+    excluded_numbers: re.Pattern[str] | None = None
+    untyped_cards: bool = False
+    catalog_format: CatalogFormat = TCGJSON_FORMAT
+
+    def __post_init__(self) -> None:
+        """Reject a spec whose untyped_cards could never apply.
+        Inputs: none. Output: none. Side effects: none.
+        Exceptions: ValueError if untyped_cards is set without
+            card_number (an untyped product is kept only by its number).
+        """
+        if self.untyped_cards and self.card_number is None:
+            raise ValueError(f"{self.slug}: untyped_cards needs card_number")
 
 
 def _normalize_list(value: JsonValue) -> JsonValue:
@@ -197,30 +225,6 @@ LORCANA_SPEC = TcgjsonGameSpec(
 # itself where rulesText is missing; catalog.py reads it), cardType
 # (= cardTypes), number, releaseDate, rarityDbName, detailNote,
 # disclaimer, flavorText.
-
-# Yu-Gi-Oh: cardTypes is only Main/Extra Deck Monster, Spell or Trap, and
-# missing on most Pendulum printings; cardTypeB ("Xyz/Effect Monster",
-# "Quick-Play Spell") is the card's type. The "Yu-Gi-Oh! Tokens" set holds
-# tokens, not deck cards.
-YUGIOH_SPEC = TcgjsonGameSpec(
-    slug="yugioh",
-    game=GameId.YUGIOH,
-    fields=(
-        CatalogField("attribute", "attribute", FieldKind.LIST),
-        CatalogField("monsterType", "monster_type", FieldKind.LIST),
-        CatalogField("level", "level", FieldKind.INT),
-        CatalogField("linkRating", "link_rating", FieldKind.INT),
-        CatalogField("linkArrows", "link_arrows", FieldKind.LIST),
-        CatalogField("attack", "atk", FieldKind.INT),
-        CatalogField("defense", "def", FieldKind.INT),
-    ),
-    rarity_ladder=(
-        "Common / Short Print", "Rare", "Super Rare", "Ultra Rare",
-        "Secret Rare", "Ultimate Rare",
-    ),  # fmt: skip
-    excluded_set_prefixes=("Yu-Gi-Oh! Tokens",),
-    type_attribute="cardTypeB",
-)
 
 # Digimon: the card number is the card (dozens of distinct "Agumon"); the
 # number carries a rarity suffix ("BT5-086 SR"), and a few names repeat
@@ -340,7 +344,6 @@ RIFTBOUND_SPEC = TcgjsonGameSpec(
 # Every game this project takes from tcgjson
 ALL_SPECS = (
     LORCANA_SPEC,
-    YUGIOH_SPEC,
     DIGIMON_SPEC,
     ONE_PIECE_SPEC,
     STAR_WARS_UNLIMITED_SPEC,

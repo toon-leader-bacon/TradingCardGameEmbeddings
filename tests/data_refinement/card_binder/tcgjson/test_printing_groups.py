@@ -385,3 +385,40 @@ class TestIdentity:
             ],
         )
         assert [g.name for g in group_printings(catalog, spec)] == ["Nami"]
+
+    def test_excluded_numbers_are_not_cards_whatever_their_type(
+        self, tmp_path: Path
+    ) -> None:
+        spec = replace(ONE_PIECE_SPEC, excluded_numbers=re.compile(r"^T-"))
+        catalog = _catalog(
+            tmp_path,
+            [
+                product(1, "Token", number="T-001"),
+                product(2, "Nami", number="OP01-016"),
+                product(3, "No Number"),
+            ],
+        )
+        assert [g.name for g in group_printings(catalog, spec)] == ["Nami", "No Number"]
+
+    def test_untyped_products_are_cards_only_with_a_card_number(
+        self, tmp_path: Path
+    ) -> None:
+        catalog = _catalog(
+            tmp_path,
+            [
+                product(1, "Untyped Leader", card_types=[], number="OP01-001"),
+                product(2, "Booster Box", card_types=[]),
+            ],
+        )
+        typed_only = [g.name for g in group_printings(catalog, ONE_PIECE_SPEC)]
+        spec = replace(ONE_PIECE_SPEC, untyped_cards=True)
+        untyped = group_printings(catalog, spec)
+
+        assert typed_only == []
+        assert [g.name for g in untyped] == ["Untyped Leader"]
+        assert "type" not in build_card_content(untyped[0], catalog, spec)
+
+
+def test_untyped_cards_without_a_card_number_is_refused() -> None:
+    with pytest.raises(ValueError, match="card_number"):
+        replace(LORCANA_SPEC, untyped_cards=True)

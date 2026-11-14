@@ -16,7 +16,7 @@ from src.data_retrieval.tcgjson.downloader import (
 _MODULE = "src.data_retrieval.tcgjson.downloader"
 _RELEASE = "https://r.test"
 _RELEASE_NAME = "20260831T174333Z"
-_CATALOG = gzip.compress(b'{"meta": {}, "sets": [], "products": []}')
+_CATALOG = gzip.compress(b'{"meta": {}, "sets": [], "products": []}', mtime=0)
 
 
 def _entry(kind: str, file_name: str, body: bytes) -> dict[str, Any]:

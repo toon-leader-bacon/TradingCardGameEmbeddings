@@ -7,11 +7,13 @@ import pytest
 from src.data_retrieval.resumable_crawl.crawl_files import (
     Cursor,
     CursorFile,
+    _complete_rows,
     JsonlShards,
     RejectLog,
     append_line,
     cut_torn_last_line,
     gzip_and_remove,
+    read_shard_rows,
     refuse_orphan_cursor,
     write_text_atomically,
 )
@@ -186,3 +188,51 @@ class TestAppendLine:
         append_line(path, "a")
         append_line(path, "b")
         assert path.read_bytes() == b"a\nb\n"
+
+
+class TestReadShardRows:
+    def _gzip(self, path: Path, lines: str) -> None:
+        with gzip.open(path, "wt", encoding="utf-8", newline="") as file:
+            file.write(lines)
+
+    def test_reads_gzipped_then_plain_shards_in_number_order(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "decks-00002.jsonl").write_text('{"n": 3}\n', encoding="utf-8")
+        self._gzip(tmp_path / "decks-00001.jsonl.gz", '{"n": 2}\n')
+        self._gzip(tmp_path / "decks-00000.jsonl.gz", '{"n": 0}\n{"n": 1}\n')
+        (tmp_path / "cursor.json").write_text("{}", encoding="utf-8")
+
+        assert [row["n"] for row in read_shard_rows(tmp_path)] == [0, 1, 2, 3]
+
+    def test_a_torn_last_line_is_skipped_and_left_on_disk(self, tmp_path: Path) -> None:
+        path = tmp_path / "decks-00000.jsonl"
+        path.write_text('{"n": 0}\n{"n": 1', encoding="utf-8")
+
+        assert list(read_shard_rows(tmp_path)) == [{"n": 0}]
+        assert path.read_text(encoding="utf-8") == '{"n": 0}\n{"n": 1'
+
+    def test_a_shard_held_both_ways_is_read_once_from_the_gzip(
+        self, tmp_path: Path
+    ) -> None:
+        self._gzip(tmp_path / "decks-00000.jsonl.gz", '{"n": "gz"}\n')
+        (tmp_path / "decks-00000.jsonl").write_text(
+            '{"n": "plain"}\n', encoding="utf-8"
+        )
+
+        assert list(read_shard_rows(tmp_path)) == [{"n": "gz"}]
+
+    def test_an_empty_directory_has_no_rows(self, tmp_path: Path) -> None:
+        assert list(read_shard_rows(tmp_path)) == []
+
+    def test_a_non_object_row_raises(self, tmp_path: Path) -> None:
+        (tmp_path / "decks-00000.jsonl").write_text("[1]\n", encoding="utf-8")
+        with pytest.raises(TypeError):
+            list(read_shard_rows(tmp_path))
+
+    def test_a_plain_shard_gzipped_after_listing_is_read_from_its_gzip(
+        self, tmp_path: Path
+    ) -> None:
+        self._gzip(tmp_path / "decks-00000.jsonl.gz", '{"n": 0}\n')
+
+        assert _complete_rows(tmp_path / "decks-00000.jsonl") == [{"n": 0}]

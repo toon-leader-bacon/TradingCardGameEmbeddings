@@ -64,7 +64,9 @@ game's deck box, metrics and splits. The refresh order is in the plan.
 | `dominiontabs` | Dominion | ✅ `DominionTabsCardIngestionStage` | n/a (cards only) | 🟩 all 3 viable ideas (cost regression, set, type) | 3 |
 | `isotropic` | Dominion | (dominiontabs) | ✅ `isotropic` → `dominion.db`, 531,675 final decks (resigned players skipped) | 🟩 24 (13 summary, 11 games), re-run 2026-10-01. 23 with keys (`copies_bought_distribution` is a copy-count classifier); `multiplayer_placement` has no dojo. Resignation metrics not built | 23 |
 | `dominion/` | Dominion | Not a downloader (research notes and a prototype scraper) | n/a | n/a | n/a |
-| none | Yu-Gi-Oh | ❌ `GameId.YUGIOH` exists, but there is no retrieval source | n/a | n/a | n/a |
+| `archidekt`, `moxfield`, `deckstats` | MTG | (scryfall; needs `SCRYFALL_PRINTING` aliases from the next re-ingest) | 🟨 `archidekt_decks`, `moxfield_decks`, `deckstats_decks` → `mtg.db` built 2026-11-08, not yet run: waits for the planned re-ingestion (67,852 / 114,532 / 78,041 raw decks) | 🟥 none yet | 0 |
+| `limitless_play` | One Piece, Digimon, Gundam, DB Fusion World, DB Masters, Battle Spirits Saga, SWU, Lorcana | (tcgjson / tcgcsv) | ✅ `limitless_<game>` (2026-11-08): 46,176 / 28,881 / 2,450 / 2,135 / 367 / 707 / 1,839 / 703 tournament decks; Unknown under 0.4% of card copies in every game | 🟥 none yet | 0 |
+| `huggingface_datasets` | Yu-Gi-Oh | ✅ `YgoprodeckCardIngestionStage` (14,423 cards) | ✅ `ygoprodeck_decks` → `yugioh.db`, 187,614 decks | 🟥 none yet | 0 |
 
 Cross-source:
 
@@ -116,5 +118,5 @@ The detail is in `plans/pre_training_data.md`. In short:
 5. **Final gate:** regenerate the inventory, delete stale splits, and
    preflight every key.
 
-Blocked or parked: pitchstack (needs `/cards`), Yu-Gi-Oh (no source),
+Blocked or parked: pitchstack (needs `/cards`),
 older Hearthstone builds.

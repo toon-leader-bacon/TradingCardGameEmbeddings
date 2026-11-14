@@ -5,7 +5,7 @@ resumable_crawl.SitemapThenSpreadPlan of int deck ids, persisted as
 crawl_plan.json ({"sitemap_ids": [...], "spread": {...}}).
 """
 
-from src.data_retrieval.download_utils import require_int
+from src.schema.json_checks import require_int
 from src.data_retrieval.resumable_crawl import PlanItems
 
 PLAN_NAME = "crawl_plan.json"

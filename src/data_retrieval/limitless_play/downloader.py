@@ -1,5 +1,14 @@
-"""Downloads Pokemon TCG tournament standings, with decklists, from the
+"""Downloads one game's tournament standings, with decklists, from the
 Limitless play API (play.limitlesstcg.com/api), in two phases.
+
+Limitless hosts tournaments for every game in LimitlessGame (the API's
+GET /games list, 2026-11-06); the game is a constructor argument, and
+each game lands in its own directory, data/raw/limitless_play/<game id,
+lower-cased>/ (raw_data_dir_for). The flow below is the same for every
+game; only the decklist's sections differ (Pokemon: "pokemon",
+"trainer", "energy"; One Piece: "leader", "character", "event",
+"stage"; Digimon: "digimon", "tamer", "option", "egg"), each section a
+list of {"count", "name", "set", "number"}.
 
 See src/data_retrieval/README.md for this container's scope: fetch and
 land raw files on disk, no parsing or filtering. Each API response is
@@ -10,24 +19,52 @@ Limitless runs online grassroots tournaments, mostly on Pokemon TCG
 Live, where each player submits a decklist. The API is public and needs
 no key (docs.limitlesstcg.com/developer). CONFIRMED LIVE 2026-10-28:
 
-    1. phase_1() pages GET /tournaments?game=PTCG&limit=500&page=N
+    1. phase_1() pages GET /tournaments?game=<game>&limit=500&page=N
        (1-based) until an empty page, writing every tournament summary
        ({"id", "name", "date", "format", "players", "organizerId",
-       "game"}) to tournaments.jsonl. About 17,000 tournaments, 34 pages.
+       "game"}) to tournaments.jsonl. Pokemon: about 17,000
+       tournaments, 34 pages; One Piece about 3,500 and Digimon about
+       3,750 (2026-11-06); Lorcana, Star Wars: Unlimited and Riftbound
+       a few hundred or fewer.
     2. phase_2() fetches GET /tournaments/{id}/standings for every
        tournament id not yet in standings_manifest.txt, appending
        {"tournament_id": id, "standings": [...]} to standings.jsonl.
        Each standings row carries "decklist": {"pokemon", "trainer",
        "energy": [{"count", "set", "number", "name"}]} (or null), plus
        "placing", "record", "deck" (the archetype), "player", "name",
-       "country".
+       "country". One request returns every player's decklist in the
+       tournament (One Piece averages about 20 players, Digimon 13).
 
 RATE LIMIT: without a key the server allows 50 requests per 5 minutes
 (its RateLimit-Policy header: "50-in-5min"; q=50; w=300). This
 source's default pacing is therefore 9 requests/min, below that, not
-the container's usual 60. Phase 2 takes about 30 hours. A 429 is still
-handled: the downloader waits out the window the RateLimit header
-reports and retries the same request.
+the container's usual 60. The limit is the server's, not one per game:
+run games one after another, not side by side. A 429 is still handled:
+the downloader waits out the window the RateLimit header reports and
+retries the same request.
+
+MEASURED SIZES (full downloads, 2026-11-08). Phase 2 is one request per
+tournament, so its time is tournaments / 9 per minute; phase 1 is a
+page per 500 tournaments, a few minutes at most. To estimate a re-run,
+scale the tournament count by however much Limitless has grown.
+
+    game     tournaments   players   standings.jsonl   time at 9/min
+    PTCG          17,157   835,097          1,584 MB          ~32 h
+    VGC            7,553   280,983            332 MB          ~14 h
+    POCKET         4,370   470,606            494 MB           ~8 h
+    DCG            3,749    54,329             61 MB           ~7 h
+    OP             2,957    85,698             88 MB         ~5.5 h
+    GUNDAM           221     3,453              4 MB          ~25 min
+    FW               200     3,601              4 MB          ~22 min
+    SWU              143     3,593              5 MB          ~16 min
+    LORCANA           72     1,410              2 MB           ~8 min
+    BSS               56       999              2 MB           ~6 min
+    DBS               14       526              2 MB           ~2 min
+    RB                10       117            0.02 MB           ~1 min
+
+A resumed run only fetches tournaments not yet in
+standings_manifest.txt, so topping up an existing download takes time
+in proportion to the new tournaments only.
 
 TODO: Check in on the status of the API key application:
 https://play.limitlesstcg.com/account/settings/api
@@ -37,6 +74,7 @@ import json
 import logging
 import re
 import time
+from enum import StrEnum
 from pathlib import Path
 from typing import ClassVar
 
@@ -59,18 +97,41 @@ _MAX_RATE_LIMITED_WAITS = 5  # 429s tolerated for one request before failing
 _DEFAULT_RATE_LIMITED_WAIT_SECONDS = 300  # the server's window, if unstated
 _REQUESTS_PER_MINUTE = 9  # server allows 50 per 5 min; see module docstring
 _PAGE_SIZE = 500
-_GAME_ID = "PTCG"
 # The RateLimit header's seconds until the window resets: '"50-in-5min"; r=0; t=212'
 _RATE_LIMIT_RESET_PATTERN = re.compile(r"\bt=(\d+)")
 
 
+class LimitlessGame(StrEnum):
+    """A game Limitless hosts tournaments for; the value is the API's
+    game id (GET /games). VGC and Pokemon GO tournaments list teams,
+    not card decks.
+
+    Declaration order is the order `--game all` downloads them in: the
+    games the card binder ingests first, then the rest."""
+
+    ONE_PIECE = "OP"
+    DIGIMON = "DCG"
+    LORCANA = "LORCANA"
+    STAR_WARS_UNLIMITED = "SWU"
+    RIFTBOUND = "RB"
+    POKEMON_TCG = "PTCG"
+    POKEMON_TCG_POCKET = "POCKET"
+    GUNDAM = "GUNDAM"
+    DRAGON_BALL_FUSION_WORLD = "FW"
+    DRAGON_BALL_MASTERS = "DBS"
+    BATTLE_SPIRITS_SAGA = "BSS"
+    POKEMON_VGC = "VGC"
+    POKEMON_GO = "PGO"
+
+
 class LimitlessPlayDownloader(Downloader):
-    """Downloads Pokemon TCG tournament summaries and standings
+    """Downloads one game's tournament summaries and standings
     (decklists included) from the Limitless play API.
 
     Single-consumer to src/data_retrieval/limitless_play/.
     """
 
+    # The root of every game's directory (see raw_data_dir_for)
     DEFAULT_RAW_DATA_DIR: ClassVar[Path] = Path("data/raw/limitless_play")
     DEFAULT_API_URL: ClassVar[str] = "https://play.limitlesstcg.com/api"
     STANDINGS_FILENAME: ClassVar[str] = "standings.jsonl"
@@ -80,23 +141,40 @@ class LimitlessPlayDownloader(Downloader):
         rate_limiter: RateLimiter | None = None,
         raw_data_dir: Path | None = None,
         api_url: str | None = None,
+        game: LimitlessGame = LimitlessGame.POKEMON_TCG,
     ) -> None:
         """
         Inputs:
             rate_limiter: see Downloader.__init__. Defaults to
                 RateLimiter(_REQUESTS_PER_MINUTE), not the base class's
                 60/min, because of the server's own limit.
-            raw_data_dir: see Downloader.__init__.
+            raw_data_dir: see Downloader.__init__. Defaults to
+                raw_data_dir_for(game).
             api_url: the API's base URL. Defaults to DEFAULT_API_URL.
+            game: the game whose tournaments to download.
         Output: none (constructor).
         Side effects: none; no I/O until phase_1()/phase_2().
         Exceptions: none.
+
+        Example:
+            >>> LimitlessPlayDownloader(game=LimitlessGame.ONE_PIECE).raw_data_dir.name
+            'op'
         """
         super().__init__(
             rate_limiter or RateLimiter(requests_per_minute=_REQUESTS_PER_MINUTE),
-            raw_data_dir,
+            raw_data_dir if raw_data_dir is not None else self.raw_data_dir_for(game),
         )
         self.api_url = api_url or self.DEFAULT_API_URL
+        self.game = game
+
+    @classmethod
+    def raw_data_dir_for(cls, game: LimitlessGame) -> Path:
+        """DEFAULT_RAW_DATA_DIR/<game id, lower-cased>, the directory a
+        game's files land in by default ("data/raw/limitless_play/ptcg").
+
+        Inputs: game. Output: Path. Side effects: none. Exceptions: none.
+        """
+        return cls.DEFAULT_RAW_DATA_DIR / game.value.lower()
 
     @property
     def tournaments_path(self) -> Path:
@@ -109,7 +187,7 @@ class LimitlessPlayDownloader(Downloader):
         return self.raw_data_dir / self.STANDINGS_FILENAME
 
     def _run_phase_1(self) -> Path:
-        """Page the PTCG tournament list and write every tournament
+        """Page self.game's tournament list and write every tournament
         summary to tournaments.jsonl.
 
         Inputs: none (uses self.api_url, self.raw_data_dir).
@@ -127,7 +205,9 @@ class LimitlessPlayDownloader(Downloader):
 
         # Page until the API returns an empty page
         page = 1
-        with tqdm(desc="Limitless tournament pages", unit="page") as progress:
+        with tqdm(
+            desc=f"Limitless {self.game.value} tournament pages", unit="page"
+        ) as progress:
             while True:
                 page_tournaments = self._fetch_tournament_page(page)
                 if not page_tournaments:
@@ -137,7 +217,9 @@ class LimitlessPlayDownloader(Downloader):
                 page += 1
 
         if not tournaments:
-            raise ValueError(f"no {_GAME_ID} tournaments listed at {self.api_url}")
+            raise ValueError(
+                f"no {self.game.value} tournaments listed at {self.api_url}"
+            )
 
         # Dedup by id, keeping the first sighting and walk order (newest
         # first): a tournament created mid-walk shifts later pages by one
@@ -174,7 +256,9 @@ class LimitlessPlayDownloader(Downloader):
 
         # Fetch each new tournament's standings
         for tournament_id in tqdm(
-            tournament_ids, desc="Limitless standings", unit="tournament"
+            tournament_ids,
+            desc=f"Limitless {self.game.value} standings",
+            unit="tournament",
         ):
             if tournament_id in already_downloaded:
                 continue
@@ -195,7 +279,7 @@ class LimitlessPlayDownloader(Downloader):
         return self.standings_path
 
     def _fetch_tournament_page(self, page: int) -> list[dict]:
-        """One page of the PTCG tournament list (1-based page).
+        """One page of self.game's tournament list (1-based page).
 
         Inputs: page (int). Output: the page's tournament summaries.
         Side effects: paced request(s), see _get_json.
@@ -203,7 +287,7 @@ class LimitlessPlayDownloader(Downloader):
         """
         return self._get_json(
             f"{self.api_url}/tournaments",
-            {"game": _GAME_ID, "limit": _PAGE_SIZE, "page": page},
+            {"game": self.game.value, "limit": _PAGE_SIZE, "page": page},
         )
 
     def _fetch_standings(self, tournament_id: str) -> list[dict]:

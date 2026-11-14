@@ -33,6 +33,7 @@ from typing import Sequence
 
 from src.data_refinement.card_binder.lean_content import order_keys, strip_noise
 from src.data_refinement.card_binder.tcgjson.catalog import (
+    NUMBER_ATTRIBUTE,
     TcgjsonCatalog,
     TcgjsonProduct,
 )
@@ -48,8 +49,6 @@ _PRINTING_TAGS = re.compile(r"(\s*(\([^()]*\)|\[[^\[\]]*\]))+\s*$")
 # A subtitle separator, ", " or " - ", for the name key
 _SUBTITLE_SEPARATOR = re.compile(r"\s*(,|\s-)\s+")
 _WHITESPACE_RUN = re.compile(r"\s+")
-# The customAttributes key of a printing's card number
-_NUMBER_ATTRIBUTE = "number"
 # _identity_key's two kinds of key
 _NUMBER_KEY, _NAME_KEY_KIND = "number", "name"
 _ERRATA_TAG = "(Errata Version)"
@@ -86,9 +85,11 @@ def group_printings(
     """Group the catalog's card products into one PrintingGroup per card
     (its base name, or card number; see the module docstring).
 
-    A product is a card if it has a type (card_types, or
-    spec.type_attribute) none of which is in spec.excluded_types, and its
-    set's name starts with none of spec.excluded_set_prefixes.
+    A product is a card if its set's name starts with none of
+    spec.excluded_set_prefixes, its number does not match
+    spec.excluded_numbers, and it has a type (card_types, or
+    spec.type_attribute) none of which is in spec.excluded_types; or, for
+    a spec with untyped_cards, no type but a card number.
 
     Inputs: catalog, spec.
     Output: groups in order of their lowest product_id; each group's
@@ -212,11 +213,9 @@ def _identity_key(product: TcgjsonProduct, spec: TcgjsonGameSpec) -> tuple[str, 
     name casefolded, ", " read as " - ").
     Inputs: product, spec. Output: the key.
     Side effects: none. Exceptions: none."""
-    number = product.attributes.get(_NUMBER_ATTRIBUTE)
-    if spec.card_number is not None and isinstance(number, str):
-        match = spec.card_number.search(number)
-        if match:
-            return _NUMBER_KEY, match.group(0)
+    number = _card_number(product, spec)
+    if number is not None:
+        return _NUMBER_KEY, number
     name = base_name(product.name, spec.name_suffix).casefold()
     return _NAME_KEY_KIND, _SUBTITLE_SEPARATOR.sub(" - ", name)
 
@@ -229,7 +228,7 @@ def _card_numbers(number: str, products: list[TcgjsonProduct]) -> tuple[str, ...
     Side effects: none. Exceptions: none."""
     result = [number]
     for product in products:
-        printed = product.attributes.get(_NUMBER_ATTRIBUTE)
+        printed = product.attributes.get(NUMBER_ATTRIBUTE)
         tokens = printed.split() if isinstance(printed, str) else []
         if tokens and tokens[0] not in result:
             result.append(tokens[0])
@@ -242,13 +241,41 @@ def _is_card(
     """Whether product is a deck card (see group_printings).
     Inputs: product, catalog, spec. Output: bool.
     Side effects: none. Exceptions: none."""
+    # Excluded by set or number, whatever its type
+    if catalog.sets[product.set_id].name.startswith(spec.excluded_set_prefixes):
+        return False
+    if _has_excluded_number(product, spec):
+        return False
+
+    # Typed: a card unless a type is excluded; untyped: as the spec says
     card_type = _card_type(product, spec)
     if card_type is None:
-        return False
+        return spec.untyped_cards and _card_number(product, spec) is not None
     types = card_type if isinstance(card_type, list) else [card_type]
-    if any(t in spec.excluded_types for t in types):
+    return not any(t in spec.excluded_types for t in types)
+
+
+def _card_number(product: TcgjsonProduct, spec: TcgjsonGameSpec) -> str | None:
+    """The card number product prints, for a spec whose cards are their
+    numbers: the first match of spec.card_number in its number attribute.
+    Inputs: product, spec. Output: str, or None if the spec has no
+        card_number, the product no number, or the pattern no match.
+    Side effects: none. Exceptions: none."""
+    number = product.attributes.get(NUMBER_ATTRIBUTE)
+    if spec.card_number is None or not isinstance(number, str):
+        return None
+    match = spec.card_number.search(number)
+    return match.group(0) if match else None
+
+
+def _has_excluded_number(product: TcgjsonProduct, spec: TcgjsonGameSpec) -> bool:
+    """Whether product's number attribute matches spec.excluded_numbers.
+    Inputs: product, spec. Output: bool (False if either is missing).
+    Side effects: none. Exceptions: none."""
+    number = product.attributes.get(NUMBER_ATTRIBUTE)
+    if spec.excluded_numbers is None or not isinstance(number, str):
         return False
-    return not catalog.sets[product.set_id].name.startswith(spec.excluded_set_prefixes)
+    return spec.excluded_numbers.search(number) is not None
 
 
 def _voting_printings(group: PrintingGroup) -> tuple[TcgjsonProduct, ...]:

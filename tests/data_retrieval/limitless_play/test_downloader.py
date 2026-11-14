@@ -7,6 +7,7 @@ import requests
 
 from src.data_retrieval.limitless_play.downloader import (
     _MAX_RATE_LIMITED_WAITS,
+    LimitlessGame,
     LimitlessPlayDownloader,
 )
 from src.data_retrieval.rate_limiter import RateLimiter
@@ -16,10 +17,15 @@ _GET = "src.data_retrieval.limitless_play.downloader.requests.get"
 _SLEEP = "src.data_retrieval.limitless_play.downloader.time.sleep"
 
 
-def _make_downloader(raw_data_dir: Path) -> LimitlessPlayDownloader:
+def _make_downloader(
+    raw_data_dir: Path, game: LimitlessGame = LimitlessGame.POKEMON_TCG
+) -> LimitlessPlayDownloader:
     # Effectively unlimited, so wait() never sleeps in tests
     return LimitlessPlayDownloader(
-        RateLimiter(requests_per_minute=1_000_000_000), raw_data_dir, _API_URL
+        RateLimiter(requests_per_minute=1_000_000_000),
+        raw_data_dir,
+        _API_URL,
+        game=game,
     )
 
 
@@ -74,6 +80,15 @@ class TestPhase1:
             3,
         ]
         assert get.call_args_list[0].kwargs["params"]["game"] == "PTCG"
+
+    def test_requests_the_configured_game(self, tmp_path: Path) -> None:
+        downloader = _make_downloader(tmp_path, LimitlessGame.ONE_PIECE)
+        pages = [[_tournament("a")], []]
+
+        with patch(_GET, side_effect=[_response(page) for page in pages]) as get:
+            downloader.phase_1()
+
+        assert {call.kwargs["params"]["game"] for call in get.call_args_list} == {"OP"}
 
     def test_raises_when_no_tournaments_listed(self, tmp_path: Path) -> None:
         downloader = _make_downloader(tmp_path)
@@ -193,3 +208,26 @@ class TestRateLimiting:
             assert downloader._fetch_standings("t1") == [{"placing": 1}]
 
         sleep.assert_not_called()
+
+
+class TestRawDataDir:
+    @pytest.mark.parametrize(
+        ("game", "directory"),
+        [
+            (LimitlessGame.POKEMON_TCG, "ptcg"),
+            (LimitlessGame.ONE_PIECE, "op"),
+            (LimitlessGame.DIGIMON, "dcg"),
+        ],
+    )
+    def test_each_game_defaults_to_its_own_directory(
+        self, game: LimitlessGame, directory: str
+    ) -> None:
+        downloader = LimitlessPlayDownloader(game=game)
+        assert downloader.raw_data_dir == Path("data/raw/limitless_play") / directory
+        assert downloader.raw_data_dir == LimitlessPlayDownloader.raw_data_dir_for(game)
+
+    def test_an_explicit_directory_wins(self, tmp_path: Path) -> None:
+        downloader = LimitlessPlayDownloader(
+            raw_data_dir=tmp_path, game=LimitlessGame.LORCANA
+        )
+        assert downloader.raw_data_dir == tmp_path

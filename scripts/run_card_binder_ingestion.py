@@ -32,10 +32,10 @@ from pathlib import Path
 from typing import Callable
 
 from src.data_refinement.card_binder.build import build_or_update_card_binder
+from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.cardvault_fabtcg.ingestion_stage import (
     CardVaultFabtcgCardIngestionStage,
 )
-from src.data_refinement.card_binder.card_binder import CardBinder
 from src.data_refinement.card_binder.dominiontabs.ingestion_stage import (
     DominionTabsCardIngestionStage,
 )
@@ -55,6 +55,12 @@ from src.data_refinement.card_binder.scryfall.ingestion_stage import (
 from src.data_refinement.card_binder.spire_codex.ingestion_stage import (
     SpireCodexCardIngestionStage,
 )
+from src.data_refinement.card_binder.tcgcsv.ingestion_stage import (
+    BattleSpiritsSagaTcgcsvCardIngestionStage,
+    DragonBallFusionWorldTcgcsvCardIngestionStage,
+    DragonBallMastersTcgcsvCardIngestionStage,
+    GundamTcgcsvCardIngestionStage,
+)
 from src.data_refinement.card_binder.tcgjson.ingestion_stage import (
     DigimonTcgjsonCardIngestionStage,
     LorcanaTcgjsonCardIngestionStage,
@@ -62,7 +68,9 @@ from src.data_refinement.card_binder.tcgjson.ingestion_stage import (
     RiftboundTcgjsonCardIngestionStage,
     StarWarsUnlimitedTcgjsonCardIngestionStage,
     UnionArenaTcgjsonCardIngestionStage,
-    YugiohTcgjsonCardIngestionStage,
+)
+from src.data_refinement.card_binder.ygoprodeck.ingestion_stage import (
+    YgoprodeckCardIngestionStage,
 )
 from src.data_retrieval.cardvault_fabtcg.card_downloader import (
     CardVaultFabtcgCardDownloader,
@@ -73,6 +81,7 @@ from src.data_retrieval.hearthstonejson.downloader import HearthstoneJsonDownloa
 from src.data_retrieval.pokemon_tcg.downloader import PokemonTcgDataDownloader
 from src.data_retrieval.scryfall.downloader import ScryfallOracleDownloader
 from src.data_retrieval.spire_codex.card_downloader import SpireCodexCardDownloader
+from src.data_retrieval.tcgcsv.downloader import TcgcsvCatalogDownloader
 from src.data_retrieval.tcgjson.downloader import TcgjsonCatalogDownloader
 from src.run_logging import (
     add_logging_arguments,
@@ -185,10 +194,6 @@ STAGES: dict[str, tuple[CardIngestionStage, Callable[[], Path]]] = {
         LorcanaTcgjsonCardIngestionStage(),
         TcgjsonCatalogDownloader.latest_release_dir,
     ),
-    "tcgjson_yugioh": (
-        YugiohTcgjsonCardIngestionStage(),
-        TcgjsonCatalogDownloader.latest_release_dir,
-    ),
     "tcgjson_digimon": (
         DigimonTcgjsonCardIngestionStage(),
         TcgjsonCatalogDownloader.latest_release_dir,
@@ -208,6 +213,29 @@ STAGES: dict[str, tuple[CardIngestionStage, Callable[[], Path]]] = {
     "tcgjson_riftbound": (
         RiftboundTcgjsonCardIngestionStage(),
         TcgjsonCatalogDownloader.latest_release_dir,
+    ),
+    # One stage per tcgcsv game; each reads its catalog from the newest
+    # complete snapshot directory.
+    "tcgcsv_gundam": (
+        GundamTcgcsvCardIngestionStage(),
+        TcgcsvCatalogDownloader.latest_snapshot_dir,
+    ),
+    "tcgcsv_dragon_ball_fusion_world": (
+        DragonBallFusionWorldTcgcsvCardIngestionStage(),
+        TcgcsvCatalogDownloader.latest_snapshot_dir,
+    ),
+    "tcgcsv_dragon_ball_masters": (
+        DragonBallMastersTcgcsvCardIngestionStage(),
+        TcgcsvCatalogDownloader.latest_snapshot_dir,
+    ),
+    "tcgcsv_battle_spirits_saga": (
+        BattleSpiritsSagaTcgcsvCardIngestionStage(),
+        TcgcsvCatalogDownloader.latest_snapshot_dir,
+    ),
+    # Yu-Gi-Oh: YGOPRODeck's card table, the feregrino/yugioh-cards mirror
+    "ygoprodeck_yugioh": (
+        YgoprodeckCardIngestionStage(),
+        lambda: YgoprodeckCardIngestionStage.DEFAULT_RAW_PATH,
     ),
 }
 
